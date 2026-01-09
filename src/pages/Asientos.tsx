@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
 import { createEntry, getTodayISO, createEmptyLine } from '../storage/entries'
@@ -6,7 +6,30 @@ import { getPostableAccounts } from '../storage/accounts'
 import { validateEntry, sumDebits, sumCredits } from '../core/validation'
 import type { JournalEntry, EntryLine } from '../core/models'
 import { HelpPanel } from '../ui/HelpPanel'
-import AccountSearchSelect from '../ui/AccountSearchSelect'
+import AccountSearchSelect, { AccountSearchSelectRef } from '../ui/AccountSearchSelect'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Number formatting utilities for Argentine format (miles con punto)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Parse a string with Argentine format (dots as thousands) to a number */
+const parseARNumber = (value: string): number => {
+    // Remove thousand separators (dots) and convert comma to decimal point
+    const cleaned = value.replace(/\./g, '').replace(',', '.')
+    const num = parseFloat(cleaned)
+    return isNaN(num) ? 0 : Math.max(0, num)
+}
+
+/** Format a number to Argentine format with thousand separators */
+const formatARNumber = (n: number): string => {
+    if (n === 0) return ''
+    return n.toLocaleString('es-AR', { maximumFractionDigits: 2 })
+}
+
+/** Format amount for display (including zero values in totals) */
+const formatAmount = (n: number): string => {
+    return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 export default function Asientos() {
     const accounts = useLiveQuery(() => getPostableAccounts())
@@ -18,6 +41,16 @@ export default function Asientos() {
     const [lines, setLines] = useState<EntryLine[]>([createEmptyLine(), createEmptyLine()])
     const [saveError, setSaveError] = useState('')
     const [saveSuccess, setSaveSuccess] = useState(false)
+
+    // Validation UX state
+    const [hasAttemptedSave, setHasAttemptedSave] = useState(false)
+
+    // Delete confirmation state
+    const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+    const [deleteSuccess, setDeleteSuccess] = useState(false)
+
+    // Refs for account search inputs (for focus management)
+    const accountRefs = useRef<(AccountSearchSelectRef | null)[]>([])
 
     // Validation
     const draftEntry: JournalEntry = {
@@ -37,9 +70,43 @@ export default function Asientos() {
     const totalDebit = sumDebits(draftEntry)
     const totalCredit = sumCredits(draftEntry)
 
+    // Detect if the entry is "pristine" (no real user interaction yet)
+    const isPristine = useMemo(() => {
+        return !memo && lines.every(l =>
+            !l.accountId &&
+            l.debit === 0 &&
+            l.credit === 0 &&
+            !l.description
+        )
+    }, [memo, lines])
+
+    // Only show errors if user attempted to save OR the entry is no longer pristine
+    const showErrors = hasAttemptedSave || !isPristine
+
+    // Autofocus on first account search when page loads
+    useEffect(() => {
+        if (accounts && accounts.length > 0) {
+            // Small delay to ensure DOM is ready
+            const timer = setTimeout(() => {
+                accountRefs.current[0]?.focus()
+            }, 100)
+            return () => clearTimeout(timer)
+        }
+    }, [accounts])
+
     const updateLine = (index: number, updates: Partial<EntryLine>) => {
         const newLines = [...lines]
-        newLines[index] = { ...newLines[index], ...updates }
+        const line = { ...newLines[index], ...updates }
+
+        // Debe/Haber mutual exclusion: if one has value > 0, clear the other
+        if (updates.debit !== undefined && updates.debit > 0) {
+            line.credit = 0
+        }
+        if (updates.credit !== undefined && updates.credit > 0) {
+            line.debit = 0
+        }
+
+        newLines[index] = line
         setLines(newLines)
     }
 
@@ -59,11 +126,17 @@ export default function Asientos() {
         setLines([createEmptyLine(), createEmptyLine()])
         setSaveError('')
         setSaveSuccess(false)
+        setHasAttemptedSave(false)
     }
 
     const handleSave = async () => {
+        setHasAttemptedSave(true)
         setSaveError('')
         setSaveSuccess(false)
+
+        if (!validation.ok) {
+            return // Errors will now be displayed
+        }
 
         try {
             await createEntry({
@@ -79,12 +152,21 @@ export default function Asientos() {
         }
     }
 
+    // Handler for when an account is selected - focus next line's account input
+    const handleAccountSelected = (index: number) => {
+        const nextIndex = index + 1
+        // If next line exists and doesn't have an account yet, focus it
+        if (nextIndex < lines.length && !lines[nextIndex].accountId) {
+            setTimeout(() => {
+                accountRefs.current[nextIndex]?.focus()
+            }, 50)
+        }
+    }
+
     const getAccountName = (accountId: string) => {
         const acc = accounts?.find((a) => a.id === accountId)
         return acc ? `${acc.code} - ${acc.name}` : ''
     }
-
-    const formatAmount = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2 })
 
     const formatDate = (dateStr: string) => {
         return new Date(dateStr).toLocaleDateString('es-AR', {
@@ -92,6 +174,54 @@ export default function Asientos() {
             month: '2-digit',
             year: 'numeric',
         })
+    }
+
+    // Delete entry handler
+    const handleDeleteEntry = async (id: string) => {
+        try {
+            await db.entries.delete(id)
+            setDeleteConfirmId(null)
+            setDeleteSuccess(true)
+            setTimeout(() => setDeleteSuccess(false), 3000)
+        } catch (err) {
+            console.error('Error deleting entry:', err)
+        }
+    }
+
+    // Download CSV handler
+    const handleDownloadCSV = () => {
+        if (!entries || entries.length === 0) return
+
+        const headers = ['Nro', 'Fecha', 'Concepto', 'Cuenta', 'Debe', 'Haber', 'Detalle']
+        const rows: string[][] = []
+
+        entries.forEach((entry, entryIndex) => {
+            entry.lines.forEach((line) => {
+                rows.push([
+                    String(entryIndex + 1),
+                    formatDate(entry.date),
+                    entry.memo || '',
+                    getAccountName(line.accountId),
+                    line.debit > 0 ? formatAmount(line.debit) : '',
+                    line.credit > 0 ? formatAmount(line.credit) : '',
+                    line.description || ''
+                ])
+            })
+        })
+
+        const csvContent = [
+            headers.join(';'),
+            ...rows.map(row => row.map(cell => `"${cell}"`).join(';'))
+        ].join('\n')
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        const today = new Date().toISOString().split('T')[0]
+        link.href = url
+        link.download = `libro-diario_${today}.csv`
+        link.click()
+        URL.revokeObjectURL(url)
     }
 
     return (
@@ -143,6 +273,7 @@ export default function Asientos() {
                             className="form-input"
                             value={date}
                             onChange={(e) => setDate(e.target.value)}
+                            tabIndex={-1}
                         />
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
@@ -156,6 +287,7 @@ export default function Asientos() {
                             value={memo}
                             onChange={(e) => setMemo(e.target.value)}
                             placeholder="Ej: Compra de mercaderías según factura A-0001"
+                            tabIndex={-1}
                         />
                     </div>
                 </div>
@@ -172,40 +304,32 @@ export default function Asientos() {
                     {lines.map((line, index) => (
                         <div key={index} className="entry-line">
                             <AccountSearchSelect
+                                ref={(el) => { accountRefs.current[index] = el }}
                                 accounts={accounts || []}
                                 value={line.accountId}
                                 onChange={(accountId) => updateLine(index, { accountId })}
                                 placeholder="Buscar cuenta..."
+                                onAccountSelected={() => handleAccountSelected(index)}
                             />
 
                             <input
-                                type="number"
-                                className="form-input form-input-number"
-                                value={line.debit || ''}
-                                onChange={(e) =>
-                                    updateLine(index, {
-                                        debit: parseFloat(e.target.value) || 0,
-                                        credit: 0,
-                                    })
-                                }
-                                placeholder="0.00"
-                                min="0"
-                                step="0.01"
+                                type="text"
+                                inputMode="numeric"
+                                className={`form-input form-input-number ${line.credit > 0 ? 'input-disabled' : ''}`}
+                                value={line.debit > 0 ? formatARNumber(line.debit) : ''}
+                                onChange={(e) => updateLine(index, { debit: parseARNumber(e.target.value) })}
+                                disabled={line.credit > 0}
+                                placeholder="0"
                             />
 
                             <input
-                                type="number"
-                                className="form-input form-input-number"
-                                value={line.credit || ''}
-                                onChange={(e) =>
-                                    updateLine(index, {
-                                        credit: parseFloat(e.target.value) || 0,
-                                        debit: 0,
-                                    })
-                                }
-                                placeholder="0.00"
-                                min="0"
-                                step="0.01"
+                                type="text"
+                                inputMode="numeric"
+                                className={`form-input form-input-number ${line.debit > 0 ? 'input-disabled' : ''}`}
+                                value={line.credit > 0 ? formatARNumber(line.credit) : ''}
+                                onChange={(e) => updateLine(index, { credit: parseARNumber(e.target.value) })}
+                                disabled={line.debit > 0}
+                                placeholder="0"
                             />
 
                             <input
@@ -247,7 +371,7 @@ export default function Asientos() {
                     </div>
                 </div>
 
-                {!validation.ok && validation.errors.length > 0 && (
+                {showErrors && !validation.ok && validation.errors.length > 0 && (
                     <div className="alert alert-warning" style={{ marginBottom: 'var(--space-md)' }}>
                         <div>
                             <strong>El asiento tiene errores:</strong>
@@ -262,11 +386,11 @@ export default function Asientos() {
 
                 <div className="entry-actions">
                     <button type="button" className="btn btn-secondary" onClick={resetForm}>
-                        Limpiar
+                        🗑️ Limpiar
                     </button>
                     <button
                         type="button"
-                        className="btn btn-success"
+                        className="btn btn-primary"
                         onClick={handleSave}
                         disabled={!validation.ok}
                     >
@@ -275,10 +399,26 @@ export default function Asientos() {
                 </div>
             </div>
 
+            {/* Delete success toast */}
+            {deleteSuccess && (
+                <div className="alert alert-success" style={{ marginBottom: 'var(--space-md)' }}>
+                    ✓ Asiento eliminado correctamente
+                </div>
+            )}
+
             {/* Entry History */}
             <div className="card">
                 <div className="card-header">
-                    <h3 className="card-title">Asientos guardados</h3>
+                    <h3 className="card-title">Asientos registrados</h3>
+                    {entries && entries.length > 0 && (
+                        <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={handleDownloadCSV}
+                        >
+                            📥 Descargar libro diario
+                        </button>
+                    )}
                 </div>
 
                 {entries?.length === 0 ? (
@@ -288,13 +428,14 @@ export default function Asientos() {
                     </div>
                 ) : (
                     <div className="table-container">
-                        <table className="table">
+                        <table className="table entries-table">
                             <thead>
                                 <tr>
                                     <th>Fecha</th>
                                     <th>Concepto</th>
                                     <th className="text-right">Debe</th>
                                     <th className="text-right">Haber</th>
+                                    <th className="text-center">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -303,7 +444,7 @@ export default function Asientos() {
                                         <td>{formatDate(entry.date)}</td>
                                         <td>
                                             <strong>{entry.memo || '(sin concepto)'}</strong>
-                                            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                                            <div className="entry-lines-detail">
                                                 {entry.lines.map((l, i) => (
                                                     <div key={i}>
                                                         {getAccountName(l.accountId)}: {l.debit > 0 ? `D $${formatAmount(l.debit)}` : `H $${formatAmount(l.credit)}`}
@@ -313,6 +454,16 @@ export default function Asientos() {
                                         </td>
                                         <td className="table-number">${formatAmount(sumDebits(entry))}</td>
                                         <td className="table-number">${formatAmount(sumCredits(entry))}</td>
+                                        <td className="text-center">
+                                            <button
+                                                type="button"
+                                                className="btn btn-danger-soft btn-sm"
+                                                onClick={() => setDeleteConfirmId(entry.id)}
+                                                title="Eliminar asiento"
+                                            >
+                                                🗑️
+                                            </button>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -320,6 +471,43 @@ export default function Asientos() {
                     </div>
                 )}
             </div>
+
+            {/* Delete Confirmation Modal */}
+            {deleteConfirmId && (
+                <div className="modal-overlay" onClick={() => setDeleteConfirmId(null)}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3 className="modal-title">⚠️ Confirmar eliminación</h3>
+                            <button
+                                type="button"
+                                className="btn btn-icon btn-secondary"
+                                onClick={() => setDeleteConfirmId(null)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <p>¿Eliminar este asiento? Esta acción no se puede deshacer.</p>
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={() => setDeleteConfirmId(null)}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                className="btn btn-danger"
+                                onClick={() => handleDeleteEntry(deleteConfirmId)}
+                            >
+                                🗑️ Eliminar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

@@ -29,10 +29,15 @@ export async function getAccountByCode(code: string): Promise<Account | undefine
 export async function generateNextCode(parentId: string | null): Promise<string> {
     if (!parentId) {
         // Root level - find max root code
+        // We look for accounts with no parent AND simple integer codes to be safe?
+        // Actually, let's just look at top-level accounts.
         const roots = await db.accounts.filter(a => a.parentId === null).toArray()
+
+        // Extract numeric part of code if possible
         const maxCode = roots
             .map(a => parseInt(a.code) || 0)
             .reduce((max, n) => Math.max(max, n), 0)
+
         return String(maxCode + 1)
     }
 
@@ -41,23 +46,47 @@ export async function generateNextCode(parentId: string | null): Promise<string>
         throw new Error('Cuenta padre no encontrada')
     }
 
-    // Find siblings (children of same parent)
-    const siblings = await db.accounts.where('parentId').equals(parentId).toArray()
+    // Robust strategy: Find ALL accounts that start with "parentCode."
+    // This covers children even if parentId is wrong (though that shouldn't happen),
+    // but mainly it's the standard way to find occupied slots in the hierarchy.
+    const prefix = `${parent.code}.`
+    const descendants = await db.accounts
+        .filter(a => a.code.startsWith(prefix))
+        .toArray()
 
-    if (siblings.length === 0) {
-        return `${parent.code}.01`
+    // Filter only direct children (one segment more than parent)
+    const parentSegments = parent.code.split('.').length
+    const children = descendants.filter(a => a.code.split('.').length === parentSegments + 1)
+
+    if (children.length === 0) {
+        return `${prefix}01`
     }
 
-    // Find max sibling suffix
-    const maxSuffix = siblings
-        .map(s => {
-            const parts = s.code.split('.')
-            return parseInt(parts[parts.length - 1]) || 0
-        })
-        .reduce((max, n) => Math.max(max, n), 0)
+    // Parse suffixes
+    const usedSuffixes = new Set<number>()
+    let maxSuffix = 0
 
-    const nextSuffix = String(maxSuffix + 1).padStart(2, '0')
-    return `${parent.code}.${nextSuffix}`
+    for (const child of children) {
+        const parts = child.code.split('.')
+        const lastPart = parts[parts.length - 1]
+        const num = parseInt(lastPart)
+        if (!isNaN(num)) {
+            usedSuffixes.add(num)
+            if (num > maxSuffix) maxSuffix = num
+        }
+    }
+
+    // specific logic: User wants to fill gaps? 
+    // "Si hay huecos: usar el primero libre"
+    let nextSuffix = 1
+    while (usedSuffixes.has(nextSuffix)) {
+        nextSuffix++
+    }
+
+    // Format with 2 digits usually, unless existing children use more?
+    // Let's assume 2 digits as standard unless we see chaos.
+    // user example: "1.2.01.91" -> implies 2 digits.
+    return `${prefix}${String(nextSuffix).padStart(2, '0')}`
 }
 
 /**

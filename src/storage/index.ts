@@ -33,3 +33,11 @@ export {
     createEmptyLine,
     getTodayISO,
 } from './entries'
+
+// Amortizaciones
+export {
+    loadAmortizationState,
+    saveAmortizationState,
+    clearAmortizationState,
+} from './amortizaciones'
+

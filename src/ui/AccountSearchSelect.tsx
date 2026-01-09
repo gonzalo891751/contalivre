@@ -3,10 +3,11 @@
  * Features:
  * - Search by code and name
  * - Shows account path in dropdown
- * - Keyboard navigation (arrows, Enter, Escape)
+ * - Keyboard navigation (arrows, Enter, Escape, Tab)
  * - Filters out non-imputable accounts (headers)
+ * - Exposes focus() via ref for external control
  */
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react'
 import type { Account } from '../core/models'
 
 interface AccountSearchSelectProps {
@@ -14,19 +15,32 @@ interface AccountSearchSelectProps {
     value: string // accountId
     onChange: (accountId: string) => void
     placeholder?: string
+    filter?: (account: Account) => boolean
+    onAccountSelected?: () => void // Callback after account is confirmed (Enter/click)
 }
 
-export default function AccountSearchSelect({
+export interface AccountSearchSelectRef {
+    focus: () => void
+}
+
+const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSelectProps>(({
     accounts,
     value,
     onChange,
-    placeholder = 'Buscar cuenta...'
-}: AccountSearchSelectProps) {
+    placeholder = 'Buscar cuenta...',
+    filter,
+    onAccountSelected,
+}, ref) => {
     const [isOpen, setIsOpen] = useState(false)
     const [search, setSearch] = useState('')
     const [highlightedIndex, setHighlightedIndex] = useState(0)
     const inputRef = useRef<HTMLInputElement>(null)
     const listRef = useRef<HTMLDivElement>(null)
+
+    // Expose focus method via ref
+    useImperativeHandle(ref, () => ({
+        focus: () => inputRef.current?.focus()
+    }))
 
     // Build account path map for display
     const accountPaths = useMemo(() => {
@@ -49,11 +63,11 @@ export default function AccountSearchSelect({
         return paths
     }, [accounts])
 
-    // Filter accounts based on search (only imputable accounts)
+    // Filter accounts based on search (only imputable accounts by default)
     const filteredAccounts = useMemo(() => {
         const q = search.toLowerCase()
         return accounts
-            .filter(acc => !acc.isHeader) // Only imputable accounts
+            .filter(acc => filter ? filter(acc) : !acc.isHeader) // Use custom filter or default to !isHeader
             .filter(acc => {
                 if (!q) return true
                 return acc.code.toLowerCase().includes(q) ||
@@ -61,7 +75,7 @@ export default function AccountSearchSelect({
                     (accountPaths.get(acc.id) || '').toLowerCase().includes(q)
             })
             .slice(0, 20) // Limit results for performance
-    }, [accounts, search, accountPaths])
+    }, [accounts, search, accountPaths, filter])
 
     // Selected account display
     const selectedAccount = accounts.find(a => a.id === value)
@@ -72,6 +86,11 @@ export default function AccountSearchSelect({
     // Handle keyboard navigation
     const handleKeyDown = (e: React.KeyboardEvent) => {
         switch (e.key) {
+            case 'Tab':
+                // Allow native Tab navigation - just close dropdown
+                setIsOpen(false)
+                setSearch('')
+                break
             case 'ArrowDown':
                 e.preventDefault()
                 setHighlightedIndex(prev =>
@@ -99,6 +118,8 @@ export default function AccountSearchSelect({
         onChange(acc.id)
         setIsOpen(false)
         setSearch('')
+        // Notify parent that an account was selected (for focus chaining)
+        onAccountSelected?.()
     }
 
     // Scroll highlighted item into view
@@ -171,4 +192,6 @@ export default function AccountSearchSelect({
             )}
         </div>
     )
-}
+})
+
+export default AccountSearchSelect

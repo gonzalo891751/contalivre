@@ -14,11 +14,14 @@ export interface Settings {
  * Base de datos IndexedDB usando Dexie
  * 
  * Version 2: Added unique constraint on account code, new account fields
+ * Version 3: Added amortizationState for depreciation calculator
  */
 class ContableDatabase extends Dexie {
     accounts!: EntityTable<Account, 'id'>
     entries!: EntityTable<JournalEntry, 'id'>
     settings!: EntityTable<Settings, 'id'>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    amortizationState!: EntityTable<any, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -62,6 +65,14 @@ class ContableDatabase extends Dexie {
                 if (account.group === undefined) account.group = ''
                 if (account.statementGroup === undefined) account.statementGroup = null
             })
+        })
+
+        // Version 3: Added amortization state for depreciation calculator
+        this.version(3).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo',
+            settings: 'id',
+            amortizationState: 'id',
         })
     }
 }

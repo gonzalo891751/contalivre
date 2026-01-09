@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import MainLayout from './ui/Layout/MainLayout'
 import Dashboard from './pages/Dashboard'
 import Cuentas from './pages/Cuentas'
@@ -6,7 +6,7 @@ import Asientos from './pages/Asientos'
 import Mayor from './pages/Mayor'
 import Balance from './pages/Balance'
 import Estados from './pages/Estados'
-import Practica from './pages/Practica'
+import AmortizacionesPage from './pages/Planillas/AmortizacionesPage'
 
 function App() {
     return (
@@ -18,10 +18,12 @@ function App() {
                 <Route path="/mayor" element={<Mayor />} />
                 <Route path="/balance" element={<Balance />} />
                 <Route path="/estados" element={<Estados />} />
-                <Route path="/practica" element={<Practica />} />
+                <Route path="/practica" element={<Navigate to="/" replace />} />
+                <Route path="/planillas/amortizaciones" element={<AmortizacionesPage />} />
             </Routes>
         </MainLayout>
     )
 }
 
 export default App
+

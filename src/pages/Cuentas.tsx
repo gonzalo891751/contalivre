@@ -10,6 +10,7 @@ import {
 } from '../storage/accounts'
 import type { Account, AccountKind, AccountSection, StatementGroup } from '../core/models'
 import { SECTION_LABELS, getDefaultNormalSide } from '../core/models'
+import AccountSearchSelect from '../ui/AccountSearchSelect'
 
 const KIND_OPTIONS: { value: AccountKind; label: string }[] = [
     { value: 'ASSET', label: 'Activo' },
@@ -99,44 +100,88 @@ function AccountRow({
     const hasKids = node.children.length > 0
     const indent = level * 20
 
+    // Detect if this is a "Mother" account (has children OR is explicitly marked as a Rubro/Header)
+    const isParentAccount = hasKids || node.isHeader
+
+    // Styling constants
+    const rowStyle = isParentAccount
+        ? {
+            background: 'linear-gradient(to right, rgba(0,0,0,0.02), transparent)', // Subtle highlight for parents
+            color: 'var(--color-text-primary)',
+        }
+        : {
+            color: 'var(--color-text-secondary)', // Slightly lighter for leaves
+        }
+
+    const codeStyle = isParentAccount
+        ? {
+            fontWeight: 700,
+            fontSize: '1em',
+            color: 'var(--color-heading)'
+        }
+        : {
+            fontWeight: 400,
+            fontSize: '0.95em'
+        }
+
+    const nameStyle = isParentAccount
+        ? {
+            fontWeight: 600,
+            fontSize: '1.05em', // Slightly larger
+            color: 'var(--color-heading)'
+        }
+        : {
+            fontWeight: 400,
+            color: 'var(--color-text-secondary)'
+        }
+
     return (
         <>
-            <tr className={node.isHeader ? 'font-bold' : ''}>
-                <td style={{ paddingLeft: `${indent + 8}px` }}>
+            <tr style={rowStyle}>
+                <td style={{ paddingLeft: `${indent + 8}px`, paddingTop: '10px', paddingBottom: '10px' }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        {hasKids && (
+                        {hasKids ? (
                             <button
                                 className="btn btn-icon btn-sm"
-                                style={{ width: '24px', height: '24px', padding: 0 }}
+                                style={{
+                                    width: '24px',
+                                    height: '24px',
+                                    padding: 0,
+                                    cursor: 'pointer',
+                                    color: 'var(--color-primary)'
+                                }}
                                 onClick={() => toggleExpand(node.id)}
                             >
                                 {isExpanded ? '▼' : '▶'}
                             </button>
+                        ) : (
+                            // Determine spacing based on whether it is a leaf or a parent without kids but is a header
+                            <span style={{ width: '24px', display: 'inline-block' }} />
                         )}
-                        {!hasKids && <span style={{ width: '24px', display: 'inline-block' }} />}
-                        <span className="font-mono">{node.code}</span>
+                        <span className="font-mono" style={codeStyle}>{node.code}</span>
                     </span>
                 </td>
-                <td>
-                    {node.name}
+                <td style={{ paddingTop: '10px', paddingBottom: '10px' }}>
+                    <span style={nameStyle}>{node.name}</span>
+
                     {node.isContra && (
-                        <span className="badge" style={{ marginLeft: '8px', background: '#fce4ec', color: '#c62828', fontSize: '10px' }}>
+                        <span className="badge" style={{ marginLeft: '8px', background: '#fce4ec', color: '#c62828', fontSize: '10px', fontWeight: 600 }}>
                             Contra
                         </span>
                     )}
                     {node.isHeader && (
-                        <span className="badge" style={{ marginLeft: '8px', background: '#e3f2fd', color: '#1565c0', fontSize: '10px' }}>
+                        <span className="badge" style={{ marginLeft: '8px', background: '#e3f2fd', color: '#1565c0', fontSize: '10px', fontWeight: 600 }}>
                             Rubro
                         </span>
                     )}
                 </td>
-                <td>
-                    <span className={`badge ${KIND_BADGES[node.kind]}`}>
+                <td style={{ paddingTop: '10px', paddingBottom: '10px' }}>
+                    <span className={`badge ${KIND_BADGES[node.kind]}`} style={{ opacity: isParentAccount ? 1 : 0.85 }}>
                         {node.section === 'CURRENT' ? 'Cte' : node.section === 'NON_CURRENT' ? 'NoCte' : SECTION_LABELS[node.section]}
                     </span>
                 </td>
-                <td>
-                    <div className="account-row-actions">
+                <td style={{ paddingTop: '10px', paddingBottom: '10px' }}>
+                    <div className="account-row-actions" style={{ opacity: isParentAccount ? 1 : 0.6 }}>
                         <button className="btn btn-secondary btn-sm" onClick={() => onEdit(node)}>
                             Editar
                         </button>
@@ -365,7 +410,7 @@ export default function Cuentas() {
         }
     }
 
-    const parentOptions = allAccounts?.filter((a) => a.id !== editingAccount?.id) || []
+
 
     return (
         <div>
@@ -476,20 +521,37 @@ export default function Cuentas() {
                                     </div>
                                 )}
 
+
+
                                 <div className="form-group">
-                                    <label className="form-label">Cuenta padre (opcional)</label>
-                                    <select
-                                        className="form-select"
-                                        value={formParentId || ''}
-                                        onChange={(e) => handleParentChange(e.target.value || null)}
-                                    >
-                                        <option value="">— Sin padre (cuenta raíz) —</option>
-                                        {parentOptions.map((a) => (
-                                            <option key={a.id} value={a.id}>
-                                                {a.code} - {a.name}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    <label className="form-label">Cuenta madre (opcional)</label>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <div style={{ flex: 1 }}>
+                                            <AccountSearchSelect
+                                                accounts={allAccounts || []}
+                                                value={formParentId || ''}
+                                                onChange={(id) => handleParentChange(id || null)}
+                                                placeholder="Buscar cuenta madre..."
+                                                filter={(a) => a.isHeader && a.id !== editingAccount?.id}
+                                            />
+                                        </div>
+                                        {formParentId && (
+                                            <button
+                                                type="button"
+                                                className="btn btn-secondary"
+                                                onClick={() => handleParentChange(null)}
+                                                title="Quitar madre (volver a raíz)"
+                                            >
+                                                ✕
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="form-help-text">
+                                        {formParentId ?
+                                            'Se asignará como subcuenta de la seleccionada.' :
+                                            'Se creará como una cuenta raíz (sin madre).'
+                                        }
+                                    </div>
                                 </div>
 
                                 <div className="form-group">
