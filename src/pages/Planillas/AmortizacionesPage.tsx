@@ -210,11 +210,7 @@ export default function AmortizacionesPage() {
 
     return (
         <div className="amort-page">
-            {/* Header */}
-            <div className="page-header">
-                <h1 className="page-title">Planillas complementarias</h1>
-                <p className="page-subtitle">Herramientas de cálculo</p>
-            </div>
+            {/* Header removed - Rendered in PlanillasLayout */}
 
             {/* Tabs */}
             <div className="tabs-pills">

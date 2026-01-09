@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { Account, JournalEntry } from '../core/models'
+import type { InventoryProduct, InventoryMovement, InventoryClosing, InventoryConfig } from '../core/inventario/types'
 
 /**
  * Configuración de la aplicación
@@ -15,6 +16,7 @@ export interface Settings {
  * 
  * Version 2: Added unique constraint on account code, new account fields
  * Version 3: Added amortizationState for depreciation calculator
+ * Version 4: Added inventory module tables (products, movements, closings, config)
  */
 class ContableDatabase extends Dexie {
     accounts!: EntityTable<Account, 'id'>
@@ -22,6 +24,11 @@ class ContableDatabase extends Dexie {
     settings!: EntityTable<Settings, 'id'>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     amortizationState!: EntityTable<any, 'id'>
+    // Inventory module tables
+    inventoryProducts!: EntityTable<InventoryProduct, 'id'>
+    inventoryMovements!: EntityTable<InventoryMovement, 'id'>
+    inventoryClosings!: EntityTable<InventoryClosing, 'id'>
+    inventoryConfig!: EntityTable<InventoryConfig, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -73,6 +80,18 @@ class ContableDatabase extends Dexie {
             entries: 'id, date, memo',
             settings: 'id',
             amortizationState: 'id',
+        })
+
+        // Version 4: Inventory module tables
+        this.version(4).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
         })
     }
 }

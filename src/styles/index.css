@@ -1754,3 +1754,413 @@ tr:hover .account-row-actions {
   color: var(--color-error);
   border: 1px solid var(--color-error);
 }
+
+/* ===========================================
+   INVENTARIO MODULE STYLES
+   =========================================== */
+
+/* Page layout */
+.inv-page {
+  max-width: var(--max-content-width);
+}
+
+.inv-toolbar {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+/* Stock summary cards */
+.inv-summary-card {
+  margin-bottom: var(--space-lg);
+}
+
+.inv-stock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-md);
+}
+
+.inv-stock-card {
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.inv-stock-card:hover {
+  border-color: var(--brand-blue);
+  box-shadow: var(--shadow-sm);
+}
+
+.inv-stock-card.inv-stock-selected {
+  border-color: var(--brand-blue);
+  background: rgba(64, 148, 218, 0.08);
+}
+
+.inv-stock-card.inv-stock-alert {
+  border-color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.inv-stock-sku {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  margin-bottom: var(--space-xs);
+}
+
+.inv-stock-desc {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  margin-bottom: var(--space-sm);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inv-stock-qty {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  font-family: var(--font-mono);
+  color: var(--brand-blue);
+}
+
+.inv-stock-alert-badge {
+  position: absolute;
+  top: var(--space-xs);
+  right: var(--space-xs);
+  font-size: var(--font-size-xs);
+}
+
+/* Table card */
+.inv-table-card {
+  margin-bottom: var(--space-lg);
+}
+
+/* Movement type chips */
+.chip-entrada {
+  background: rgba(61, 158, 112, 0.12);
+  color: var(--color-success);
+}
+
+.chip-salida {
+  background: rgba(217, 63, 63, 0.12);
+  color: var(--color-error);
+}
+
+.chip-ajuste {
+  background: rgba(64, 148, 218, 0.12);
+  color: var(--brand-blue);
+}
+
+.chip-posted {
+  background: rgba(61, 158, 112, 0.12);
+  color: var(--color-success);
+}
+
+/* Period selection */
+.inv-period-card {
+  margin-bottom: var(--space-lg);
+}
+
+.inv-period-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-md);
+  align-items: end;
+}
+
+/* Existencias boxes */
+.inv-existencias-card {
+  margin-bottom: var(--space-lg);
+}
+
+.inv-existencias-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xl);
+}
+
+.inv-existencia-box {
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+}
+
+.inv-existencia-ef {
+  background: rgba(64, 148, 218, 0.08);
+  border: 1px solid var(--brand-blue);
+}
+
+.inv-existencia-box .form-input-lg {
+  font-size: var(--font-size-xl);
+  font-family: var(--font-mono);
+  text-align: right;
+  padding: var(--space-md);
+}
+
+/* Detail rows (compras netas, resultado bruto) */
+.inv-compras-card,
+.inv-resultado-card,
+.inv-iva-card {
+  margin-bottom: var(--space-lg);
+}
+
+.inv-detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.inv-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+}
+
+.inv-detail-row.inv-detail-negative span:first-child {
+  color: var(--color-text-muted);
+}
+
+.inv-detail-row.inv-detail-total {
+  background: linear-gradient(135deg, rgba(64, 148, 218, 0.1) 0%, rgba(92, 166, 144, 0.1) 100%);
+  font-weight: var(--font-weight-bold);
+  border: 1px solid var(--color-border);
+}
+
+.inv-detail-row.inv-detail-total.inv-positive {
+  background: var(--color-success-bg);
+  border-color: var(--color-success);
+}
+
+.inv-detail-row.inv-detail-total.inv-negative {
+  background: var(--color-error-bg);
+  border-color: var(--color-error);
+}
+
+.inv-detail-value {
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* CMV Formula display */
+.inv-cmv-card {
+  margin-bottom: var(--space-lg);
+}
+
+.inv-formula {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  padding: var(--space-xl);
+  background: linear-gradient(135deg, var(--brand-navy) 0%, #1a3a6e 100%);
+  border-radius: var(--radius-lg);
+}
+
+.inv-formula-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-md);
+  min-width: 120px;
+}
+
+.inv-formula-label {
+  font-size: var(--font-size-sm);
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: var(--space-xs);
+}
+
+.inv-formula-value {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  font-family: var(--font-mono);
+  color: white;
+}
+
+.inv-formula-operator {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.inv-formula-row.inv-formula-result {
+  background: linear-gradient(135deg, var(--brand-blue) 0%, var(--brand-green) 100%);
+  box-shadow: 0 4px 12px rgba(64, 148, 218, 0.3);
+}
+
+.inv-formula-result .inv-formula-label {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.inv-formula-result .inv-formula-value {
+  font-size: var(--font-size-xl);
+}
+
+/* Actions section */
+.inv-actions {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+
+.btn-lg {
+  padding: var(--space-md) var(--space-xl);
+  font-size: var(--font-size-base);
+}
+
+/* Previous closings */
+.inv-history-card {
+  margin-top: var(--space-xl);
+}
+
+/* Configuration */
+.inv-config-card {
+  margin-bottom: var(--space-lg);
+}
+
+.inv-config-section {
+  padding: var(--space-sm) 0;
+}
+
+.inv-radio-option,
+.inv-toggle-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.inv-radio-option:hover,
+.inv-toggle-option:hover {
+  background: var(--color-bg);
+}
+
+.inv-radio-option.inv-radio-selected {
+  border-color: var(--brand-blue);
+  background: rgba(64, 148, 218, 0.05);
+}
+
+.inv-radio-option.inv-radio-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.inv-radio-option input[type="radio"],
+.inv-toggle-option .toggle {
+  margin-top: 2px;
+}
+
+.inv-radio-option p,
+.inv-toggle-option p {
+  margin: 0;
+  margin-top: var(--space-xs);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* Account mapping list */
+.inv-account-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.inv-account-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+}
+
+.inv-account-key {
+  text-transform: capitalize;
+  font-size: var(--font-size-sm);
+}
+
+.inv-account-code {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--brand-blue);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Tab icon */
+.tab-icon {
+  margin-right: var(--space-xs);
+}
+
+/* Empty state mini */
+.empty-state-mini {
+  padding: var(--space-xl);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+/* Form helper text */
+.form-help {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-xs);
+}
+
+/* Utility classes */
+.text-right {
+  text-align: right;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.font-semibold {
+  font-weight: var(--font-weight-semibold);
+}
+
+/* ---- Account Tree Hierarchy ---- */
+.account-row-level-0 {
+  background-color: #dbe4ec;
+  border-bottom: 2px solid #cbd5e0;
+}
+
+.account-row-level-0 td {
+  font-weight: 800;
+  color: var(--color-text);
+  font-size: 1.05rem;
+}
+
+.account-row-level-1 {
+  background-color: #f1f6fa;
+  border-bottom: 1px solid #dae5ef;
+}
+
+.account-row-level-1 td {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.account-row-leaf {
+  background-color: var(--color-surface);
+}

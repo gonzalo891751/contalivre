@@ -9,7 +9,7 @@ import {
     hasChildren,
 } from '../storage/accounts'
 import type { Account, AccountKind, AccountSection, StatementGroup } from '../core/models'
-import { SECTION_LABELS, getDefaultNormalSide } from '../core/models'
+import { getDefaultNormalSide } from '../core/models'
 import AccountSearchSelect from '../ui/AccountSearchSelect'
 
 const KIND_OPTIONS: { value: AccountKind; label: string }[] = [
@@ -100,44 +100,33 @@ function AccountRow({
     const hasKids = node.children.length > 0
     const indent = level * 20
 
-    // Detect if this is a "Mother" account (has children OR is explicitly marked as a Rubro/Header)
+    // Detect if this is a "Mother" account
     const isParentAccount = hasKids || node.isHeader
 
-    // Styling constants
-    const rowStyle = isParentAccount
-        ? {
-            background: 'linear-gradient(to right, rgba(0,0,0,0.02), transparent)', // Subtle highlight for parents
-            color: 'var(--color-text-primary)',
-        }
-        : {
-            color: 'var(--color-text-secondary)', // Slightly lighter for leaves
-        }
+    // Determine row class based on level
+    const rowClass = level === 0
+        ? 'account-row-level-0'
+        : level === 1
+            ? 'account-row-level-1'
+            : 'account-row-leaf'
 
-    const codeStyle = isParentAccount
-        ? {
-            fontWeight: 700,
-            fontSize: '1em',
-            color: 'var(--color-heading)'
-        }
-        : {
-            fontWeight: 400,
-            fontSize: '0.95em'
-        }
+    // Display Type Logic
+    const getDisplayType = () => {
+        // Hide for root rubros and Equity/Results
+        if (level === 0 || ['EQUITY', 'INCOME', 'EXPENSE'].includes(node.kind)) return null
 
-    const nameStyle = isParentAccount
-        ? {
-            fontWeight: 600,
-            fontSize: '1.05em', // Slightly larger
-            color: 'var(--color-heading)'
-        }
-        : {
-            fontWeight: 400,
-            color: 'var(--color-text-secondary)'
-        }
+        // Show for Asset/Liability based on code prefix
+        if (node.code.startsWith('1.1') || node.code.startsWith('2.1')) return 'Corriente'
+        if (node.code.startsWith('1.2') || node.code.startsWith('2.2')) return 'No Corriente'
+
+        return null
+    }
+
+    const displayType = getDisplayType()
 
     return (
         <>
-            <tr style={rowStyle}>
+            <tr className={rowClass}>
                 <td style={{ paddingLeft: `${indent + 8}px`, paddingTop: '10px', paddingBottom: '10px' }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                         {hasKids ? (
@@ -155,30 +144,33 @@ function AccountRow({
                                 {isExpanded ? '▼' : '▶'}
                             </button>
                         ) : (
-                            // Determine spacing based on whether it is a leaf or a parent without kids but is a header
                             <span style={{ width: '24px', display: 'inline-block' }} />
                         )}
-                        <span className="font-mono" style={codeStyle}>{node.code}</span>
+                        <span className="font-mono" style={{ fontWeight: level <= 1 ? 'bold' : 'normal' }}>
+                            {node.code}
+                        </span>
                     </span>
                 </td>
                 <td style={{ paddingTop: '10px', paddingBottom: '10px' }}>
-                    <span style={nameStyle}>{node.name}</span>
+                    <span>{node.name}</span>
 
                     {node.isContra && (
                         <span className="badge" style={{ marginLeft: '8px', background: '#fce4ec', color: '#c62828', fontSize: '10px', fontWeight: 600 }}>
                             Contra
                         </span>
                     )}
-                    {node.isHeader && (
+                    {node.isHeader && level > 1 && (
                         <span className="badge" style={{ marginLeft: '8px', background: '#e3f2fd', color: '#1565c0', fontSize: '10px', fontWeight: 600 }}>
                             Rubro
                         </span>
                     )}
                 </td>
                 <td style={{ paddingTop: '10px', paddingBottom: '10px' }}>
-                    <span className={`badge ${KIND_BADGES[node.kind]}`} style={{ opacity: isParentAccount ? 1 : 0.85 }}>
-                        {node.section === 'CURRENT' ? 'Cte' : node.section === 'NON_CURRENT' ? 'NoCte' : SECTION_LABELS[node.section]}
-                    </span>
+                    {displayType && (
+                        <span className={`badge ${KIND_BADGES[node.kind]}`} style={{ opacity: isParentAccount ? 1 : 0.85 }}>
+                            {displayType}
+                        </span>
+                    )}
                 </td>
                 <td style={{ paddingTop: '10px', paddingBottom: '10px' }}>
                     <div className="account-row-actions" style={{ opacity: isParentAccount ? 1 : 0.6 }}>

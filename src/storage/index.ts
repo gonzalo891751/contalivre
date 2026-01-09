@@ -41,3 +41,30 @@ export {
     clearAmortizationState,
 } from './amortizaciones'
 
+// Inventario
+export {
+    loadInventoryConfig,
+    saveInventoryConfig,
+    getAllProducts,
+    getProductById,
+    getProductBySku,
+    createProduct,
+    updateProduct,
+    deleteProduct,
+    getAllMovements,
+    getMovementsByProduct,
+    getMovementsByDateRange,
+    createMovement,
+    updateMovement,
+    deleteMovement,
+    getAllClosings,
+    getClosingById,
+    getClosingsByStatus,
+    getLatestPostedClosing,
+    createClosing,
+    updateClosing,
+    deleteClosing,
+    getAccountBalanceByCode,
+    getAccountIdByCode,
+    clearAllInventoryData,
+} from './inventario'

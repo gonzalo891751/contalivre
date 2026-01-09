@@ -112,11 +112,22 @@ function computeBalanceSheet(
         balanceCredit: r.balanceCredit,
     }))
 
-    const groups = groupByStatementGroup(rows)
+    // Split rows by section to allow same StatementGroup in different sections
+    // (e.g. INVESTMENTS or LOANS can be Current or Non-Current)
+    const currentRows = rows.filter(r => r.account.section === 'CURRENT')
+    const nonCurrentRows = rows.filter(r => r.account.section === 'NON_CURRENT')
+
+    const currentGroups = groupByStatementGroup(currentRows)
+    const nonCurrentGroups = groupByStatementGroup(nonCurrentRows)
+    // Equity is usually marked as CURRENT in seed, but we can look in all groups or just current
+    // To be safe and since Equity is unique, we can use a merged group or just pull from current if we enforce it.
+    // Let's use a global group for Equity to be safe against seed variations
+    const allGroups = groupByStatementGroup(rows)
 
     // Activo Corriente
-    const currentAssets = createSection('currentAssets', 'Activo Corriente', groups, [
+    const currentAssets = createSection('currentAssets', 'Activo Corriente', currentGroups, [
         'CASH_AND_BANKS',
+        'INVESTMENTS', // Added
         'TRADE_RECEIVABLES',
         'OTHER_RECEIVABLES',
         'TAX_CREDITS',
@@ -124,17 +135,19 @@ function computeBalanceSheet(
     ])
 
     // Activo No Corriente
-    const nonCurrentAssets = createSection('nonCurrentAssets', 'Activo No Corriente', groups, [
+    const nonCurrentAssets = createSection('nonCurrentAssets', 'Activo No Corriente', nonCurrentGroups, [
         'PPE',
         'INTANGIBLES',
         'INVESTMENTS',
+        'OTHER_RECEIVABLES', // Added support for Non-Current Other Receivables
     ])
 
     const totalAssets = Math.round((currentAssets.netTotal + nonCurrentAssets.netTotal) * 100) / 100
 
     // Pasivo Corriente
-    const currentLiabilities = createSection('currentLiabilities', 'Pasivo Corriente', groups, [
+    const currentLiabilities = createSection('currentLiabilities', 'Pasivo Corriente', currentGroups, [
         'TRADE_PAYABLES',
+        'LOANS', // Added
         'TAX_LIABILITIES',
         'PAYROLL_LIABILITIES',
         'OTHER_PAYABLES',
@@ -142,14 +155,15 @@ function computeBalanceSheet(
     ])
 
     // Pasivo No Corriente
-    const nonCurrentLiabilities = createSection('nonCurrentLiabilities', 'Pasivo No Corriente', groups, [
+    const nonCurrentLiabilities = createSection('nonCurrentLiabilities', 'Pasivo No Corriente', nonCurrentGroups, [
         'LOANS',
+        'OTHER_PAYABLES', // Added support
     ])
 
     const totalLiabilities = Math.round((currentLiabilities.netTotal + nonCurrentLiabilities.netTotal) * 100) / 100
 
     // Patrimonio Neto
-    const equity = createSection('equity', 'Patrimonio Neto', groups, [
+    const equity = createSection('equity', 'Patrimonio Neto', allGroups, [
         'CAPITAL',
         'RESERVES',
         'RETAINED_EARNINGS',

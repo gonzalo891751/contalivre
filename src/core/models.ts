@@ -84,6 +84,7 @@ export interface Account {
     // Behavior
     normalSide: NormalSide    // Lado natural del saldo
     isContra: boolean         // Cuenta regularizadora/contra
+    allowOppositeBalance?: boolean // Permitir saldo contrario (ej: RECPAM, Dif Cambio)
     isHeader: boolean         // Cuenta cabecera (no se puede imputar)
 
     // Legacy compatibility

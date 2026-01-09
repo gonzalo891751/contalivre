@@ -2,7 +2,7 @@ import { db, generateId, cleanupDuplicateAccounts } from './db'
 import type { Account, AccountKind, AccountSection, StatementGroup, NormalSide } from '../core/models'
 
 // Current seed version - increment when seed structure changes
-const SEED_VERSION = 2
+const SEED_VERSION = 9
 
 /**
  * Definición de cuenta para el seed
@@ -18,6 +18,7 @@ interface SeedAccount {
     normalSide?: NormalSide
     isContra?: boolean
     isHeader?: boolean
+    allowOppositeBalance?: boolean
 }
 
 /**
@@ -40,22 +41,56 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '1.1.01.02', name: 'Bancos cuenta corriente', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
     { code: '1.1.01.03', name: 'Moneda extranjera', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
     { code: '1.1.01.04', name: 'Valores a depositar', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
+    { code: '1.1.01.05', name: 'Valores a depositar diferidos', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
+    { code: '1.1.01.06', name: 'Fondo fijo', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
+    // Regularizadoras de Caja y Bancos
+    { code: '1.1.01.90', name: 'Valores a depositar endosados', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01', isContra: true, normalSide: 'CREDIT' },
+    { code: '1.1.01.91', name: 'Valores a depositar dif. endosados', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01', isContra: true, normalSide: 'CREDIT' },
 
     // 1.1.02 - Créditos por ventas
     { code: '1.1.02', name: 'Créditos por ventas', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1', isHeader: true },
     { code: '1.1.02.01', name: 'Deudores por ventas', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02' },
     { code: '1.1.02.02', name: 'Documentos a cobrar', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02' },
+    { code: '1.1.02.03', name: 'Deudores con tarjeta de crédito', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02' },
+    { code: '1.1.02.04', name: 'Deudores morosos', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02' },
+    { code: '1.1.02.05', name: 'Deudores en gestión de cobro', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02' },
+    { code: '1.1.02.06', name: 'Documentos atrasados', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02' },
+    { code: '1.1.02.07', name: 'Documentos en gestión de cobro', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02' },
+    { code: '1.1.02.08', name: 'Valores rechazados', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02' },
+    { code: '1.1.02.09', name: 'Valores diferidos rechazados', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02' },
+    // Regularizadoras de Créditos
+    { code: '1.1.02.80', name: 'Documentos a cobrar endosados', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02', isContra: true, normalSide: 'CREDIT' },
+    { code: '1.1.02.81', name: 'Intereses a devengar (pos)', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02', isContra: true, normalSide: 'CREDIT' },
     { code: '1.1.02.90', name: 'Previsión para incobrables', kind: 'ASSET', section: 'CURRENT', group: 'Créditos por ventas', statementGroup: 'TRADE_RECEIVABLES', parentCode: '1.1.02', isContra: true, normalSide: 'CREDIT' },
 
     // 1.1.03 - Otros créditos
     { code: '1.1.03', name: 'Otros créditos', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1', isHeader: true },
     { code: '1.1.03.01', name: 'IVA Crédito Fiscal', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'TAX_CREDITS', parentCode: '1.1.03' },
     { code: '1.1.03.02', name: 'Anticipos de impuestos', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'TAX_CREDITS', parentCode: '1.1.03' },
-    { code: '1.1.03.03', name: 'Anticipos a proveedores', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03' },
+    { code: '1.1.03.03', name: 'Anticipos a acreedores varios', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03' },
+    { code: '1.1.03.04', name: 'Comisiones a cobrar', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03' },
+    { code: '1.1.03.05', name: 'Indemnizaciones a cobrar', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03' },
+    // 1.1.03.10 - Créditos con socios, accionistas y personal
+    { code: '1.1.03.10', name: 'Créditos con socios y personal', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03', isHeader: true },
+    { code: '1.1.03.11', name: 'Anticipos de personal', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.10' },
+    { code: '1.1.03.12', name: 'Créditos a socios (CP)', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.10' },
+    { code: '1.1.03.13', name: 'Aportes a integrar', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.10' },
+    // 1.1.03.20 - Prepagos
+    { code: '1.1.03.20', name: 'Prepagos', kind: 'ASSET', section: 'CURRENT', group: 'Prepagos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03', isHeader: true },
+    { code: '1.1.03.21', name: 'Alquileres pagados por adelantado', kind: 'ASSET', section: 'CURRENT', group: 'Prepagos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.20' },
+    { code: '1.1.03.22', name: 'Seguros pagados por adelantado', kind: 'ASSET', section: 'CURRENT', group: 'Prepagos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.20' },
+    { code: '1.1.03.23', name: 'Intereses pagados por adelantado', kind: 'ASSET', section: 'CURRENT', group: 'Prepagos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.20' },
 
     // 1.1.04 - Bienes de cambio
     { code: '1.1.04', name: 'Bienes de cambio', kind: 'ASSET', section: 'CURRENT', group: 'Bienes de cambio', statementGroup: 'INVENTORIES', parentCode: '1.1', isHeader: true },
     { code: '1.1.04.01', name: 'Mercaderías', kind: 'ASSET', section: 'CURRENT', group: 'Bienes de cambio', statementGroup: 'INVENTORIES', parentCode: '1.1.04' },
+    { code: '1.1.04.02', name: 'Anticipos a proveedores', kind: 'ASSET', section: 'CURRENT', group: 'Bienes de cambio', statementGroup: 'INVENTORIES', parentCode: '1.1.04' },
+
+    // 1.1.05 - Inversiones transitorias
+    { code: '1.1.05', name: 'Inversiones transitorias', kind: 'ASSET', section: 'CURRENT', group: 'Inversiones transitorias', statementGroup: 'INVESTMENTS', parentCode: '1.1', isHeader: true },
+    { code: '1.1.05.01', name: 'Plazos fijos a cobrar', kind: 'ASSET', section: 'CURRENT', group: 'Inversiones transitorias', statementGroup: 'INVESTMENTS', parentCode: '1.1.05' },
+    { code: '1.1.05.02', name: 'Fondos Comunes de Inversión', kind: 'ASSET', section: 'CURRENT', group: 'Inversiones transitorias', statementGroup: 'INVESTMENTS', parentCode: '1.1.05' },
+    { code: '1.1.05.03', name: 'Inversiones transitorias ME', kind: 'ASSET', section: 'CURRENT', group: 'Inversiones transitorias', statementGroup: 'INVESTMENTS', parentCode: '1.1.05' },
 
     // 1.2 - Activo No Corriente
     { code: '1.2', name: 'Activo No Corriente', kind: 'ASSET', section: 'NON_CURRENT', group: 'Activo No Corriente', statementGroup: null, parentCode: '1', isHeader: true },
@@ -67,6 +102,8 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '1.2.01.03', name: 'Muebles y útiles', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
     { code: '1.2.01.04', name: 'Rodados', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
     { code: '1.2.01.05', name: 'Equipos de computación', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
+    { code: '1.2.01.06', name: 'Terrenos', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
+    { code: '1.2.01.07', name: 'Obras en construcción', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
     // Amortizaciones acumuladas
     { code: '1.2.01.90', name: 'Amortización acumulada bienes de uso', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01', isHeader: true, isContra: true, normalSide: 'CREDIT' },
     { code: '1.2.01.91', name: 'Amort. acum. Inmuebles', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
@@ -74,6 +111,7 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '1.2.01.93', name: 'Amort. acum. Muebles y útiles', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
     { code: '1.2.01.94', name: 'Amort. acum. Rodados', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
     { code: '1.2.01.95', name: 'Amort. acum. Equipos comp.', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
+    { code: '1.2.01.96', name: 'Amort. acum. Terrenos', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
 
     // 1.2.02 - Intangibles
     { code: '1.2.02', name: 'Activos intangibles', kind: 'ASSET', section: 'NON_CURRENT', group: 'Intangibles', statementGroup: 'INTANGIBLES', parentCode: '1.2', isHeader: true },
@@ -84,6 +122,12 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     // 1.2.03 - Inversiones
     { code: '1.2.03', name: 'Inversiones', kind: 'ASSET', section: 'NON_CURRENT', group: 'Inversiones', statementGroup: 'INVESTMENTS', parentCode: '1.2', isHeader: true },
     { code: '1.2.03.01', name: 'Inversiones permanentes', kind: 'ASSET', section: 'NON_CURRENT', group: 'Inversiones', statementGroup: 'INVESTMENTS', parentCode: '1.2.03' },
+
+    // 1.2.04 - Otros créditos no corrientes
+    { code: '1.2.04', name: 'Otros créditos no corrientes', kind: 'ASSET', section: 'NON_CURRENT', group: 'Otros créditos no corrientes', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.2', isHeader: true },
+    { code: '1.2.04.01', name: 'Créditos a socios (LP)', kind: 'ASSET', section: 'NON_CURRENT', group: 'Otros créditos no corrientes', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.2.04' },
+    { code: '1.2.04.02', name: 'Comisiones a cobrar (no cte)', kind: 'ASSET', section: 'NON_CURRENT', group: 'Otros créditos no corrientes', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.2.04' },
+    { code: '1.2.04.03', name: 'Indemnizaciones a cobrar (no cte)', kind: 'ASSET', section: 'NON_CURRENT', group: 'Otros créditos no corrientes', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.2.04' },
 
     // ============================================
     // 2 - PASIVO
@@ -97,12 +141,15 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '2.1.01', name: 'Deudas comerciales', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'TRADE_PAYABLES', parentCode: '2.1', isHeader: true },
     { code: '2.1.01.01', name: 'Proveedores', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'TRADE_PAYABLES', parentCode: '2.1.01' },
     { code: '2.1.01.02', name: 'Documentos a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'TRADE_PAYABLES', parentCode: '2.1.01' },
-    { code: '2.1.01.03', name: 'Acreedores varios', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'OTHER_PAYABLES', parentCode: '2.1.01' },
+    // Acreedores varios movido a 2.1.06 Otras deudas
+    { code: '2.1.01.04', name: 'Valores a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'TRADE_PAYABLES', parentCode: '2.1.01' },
+    { code: '2.1.01.05', name: 'Valores a pagar diferidos', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'TRADE_PAYABLES', parentCode: '2.1.01' },
 
     // 2.1.02 - Deudas laborales
     { code: '2.1.02', name: 'Deudas laborales', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas laborales', statementGroup: 'PAYROLL_LIABILITIES', parentCode: '2.1', isHeader: true },
     { code: '2.1.02.01', name: 'Sueldos a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas laborales', statementGroup: 'PAYROLL_LIABILITIES', parentCode: '2.1.02' },
     { code: '2.1.02.02', name: 'Cargas sociales a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas laborales', statementGroup: 'PAYROLL_LIABILITIES', parentCode: '2.1.02' },
+    { code: '2.1.02.03', name: 'Retenciones so/ sueldos a depositar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas laborales', statementGroup: 'PAYROLL_LIABILITIES', parentCode: '2.1.02' },
 
     // 2.1.03 - Deudas fiscales
     { code: '2.1.03', name: 'Deudas fiscales', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas fiscales', statementGroup: 'TAX_LIABILITIES', parentCode: '2.1', isHeader: true },
@@ -113,6 +160,21 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     // 2.1.04 - Anticipos y diferidos
     { code: '2.1.04', name: 'Anticipos y diferidos', kind: 'LIABILITY', section: 'CURRENT', group: 'Anticipos', statementGroup: 'DEFERRED_INCOME', parentCode: '2.1', isHeader: true },
     { code: '2.1.04.01', name: 'Anticipos de clientes', kind: 'LIABILITY', section: 'CURRENT', group: 'Anticipos', statementGroup: 'DEFERRED_INCOME', parentCode: '2.1.04' },
+    { code: '2.1.04.02', name: 'Alquileres cobrados por adelantado', kind: 'LIABILITY', section: 'CURRENT', group: 'Anticipos', statementGroup: 'DEFERRED_INCOME', parentCode: '2.1.04' },
+
+    // 2.1.05 - Préstamos y deudas financieras
+    { code: '2.1.05', name: 'Préstamos y deudas financieras', kind: 'LIABILITY', section: 'CURRENT', group: 'Préstamos y deudas financieras', statementGroup: 'LOANS', parentCode: '2.1', isHeader: true },
+    { code: '2.1.05.01', name: 'Adelantos en cuenta corriente', kind: 'LIABILITY', section: 'CURRENT', group: 'Préstamos y deudas financieras', statementGroup: 'LOANS', parentCode: '2.1.05' },
+    { code: '2.1.05.02', name: 'Préstamos bancarios (CP)', kind: 'LIABILITY', section: 'CURRENT', group: 'Préstamos y deudas financieras', statementGroup: 'LOANS', parentCode: '2.1.05' },
+    { code: '2.1.05.90', name: 'Intereses a devengar (neg)', kind: 'LIABILITY', section: 'CURRENT', group: 'Préstamos y deudas financieras', statementGroup: 'LOANS', parentCode: '2.1.05', isContra: true, normalSide: 'DEBIT' },
+
+    // 2.1.06 - Otras deudas
+    { code: '2.1.06', name: 'Otras deudas', kind: 'LIABILITY', section: 'CURRENT', group: 'Otras deudas', statementGroup: 'OTHER_PAYABLES', parentCode: '2.1', isHeader: true },
+    { code: '2.1.06.01', name: 'Acreedores varios', kind: 'LIABILITY', section: 'CURRENT', group: 'Otras deudas', statementGroup: 'OTHER_PAYABLES', parentCode: '2.1.06' },
+    { code: '2.1.06.02', name: 'Alquileres a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Otras deudas', statementGroup: 'OTHER_PAYABLES', parentCode: '2.1.06' },
+    { code: '2.1.06.03', name: 'Gastos a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Otras deudas', statementGroup: 'OTHER_PAYABLES', parentCode: '2.1.06' },
+    { code: '2.1.06.04', name: 'Deudas con socios (CP)', kind: 'LIABILITY', section: 'CURRENT', group: 'Otras deudas', statementGroup: 'OTHER_PAYABLES', parentCode: '2.1.06' },
+    { code: '2.1.06.05', name: 'Dividendos a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Otras deudas', statementGroup: 'OTHER_PAYABLES', parentCode: '2.1.06' },
 
     // 2.2 - Pasivo No Corriente
     { code: '2.2', name: 'Pasivo No Corriente', kind: 'LIABILITY', section: 'NON_CURRENT', group: 'Pasivo No Corriente', statementGroup: null, parentCode: '2', isHeader: true },
@@ -127,78 +189,104 @@ const SEED_ACCOUNTS: SeedAccount[] = [
 
     { code: '3.1', name: 'Capital', kind: 'EQUITY', section: 'CURRENT', group: 'Capital', statementGroup: 'CAPITAL', parentCode: '3', isHeader: true },
     { code: '3.1.01', name: 'Capital social', kind: 'EQUITY', section: 'CURRENT', group: 'Capital', statementGroup: 'CAPITAL', parentCode: '3.1' },
+    { code: '3.1.02', name: 'Ajuste de capital', kind: 'EQUITY', section: 'CURRENT', group: 'Capital', statementGroup: 'CAPITAL', parentCode: '3.1' },
+    { code: '3.1.03', name: 'Aportes irrevocables', kind: 'EQUITY', section: 'CURRENT', group: 'Capital', statementGroup: 'CAPITAL', parentCode: '3.1' },
+    { code: '3.1.04', name: 'Prima de emisión', kind: 'EQUITY', section: 'CURRENT', group: 'Capital', statementGroup: 'CAPITAL', parentCode: '3.1' },
+    { code: '3.1.05', name: 'Descuento de emisión', kind: 'EQUITY', section: 'CURRENT', group: 'Capital', statementGroup: 'CAPITAL', parentCode: '3.1', isContra: true, normalSide: 'DEBIT' },
+    { code: '3.1.06', name: 'Capital a integrar', kind: 'EQUITY', section: 'CURRENT', group: 'Capital', statementGroup: 'CAPITAL', parentCode: '3.1', isContra: true, normalSide: 'DEBIT' },
 
     { code: '3.2', name: 'Reservas', kind: 'EQUITY', section: 'CURRENT', group: 'Reservas', statementGroup: 'RESERVES', parentCode: '3', isHeader: true },
     { code: '3.2.01', name: 'Reserva legal', kind: 'EQUITY', section: 'CURRENT', group: 'Reservas', statementGroup: 'RESERVES', parentCode: '3.2' },
     { code: '3.2.02', name: 'Reservas estatutarias', kind: 'EQUITY', section: 'CURRENT', group: 'Reservas', statementGroup: 'RESERVES', parentCode: '3.2' },
+    { code: '3.2.03', name: 'Reserva facultativa', kind: 'EQUITY', section: 'CURRENT', group: 'Reservas', statementGroup: 'RESERVES', parentCode: '3.2' },
+    { code: '3.2.04', name: 'Otras reservas', kind: 'EQUITY', section: 'CURRENT', group: 'Reservas', statementGroup: 'RESERVES', parentCode: '3.2' },
+    { code: '3.2.05', name: 'Reserva por revalúo', kind: 'EQUITY', section: 'CURRENT', group: 'Reservas', statementGroup: 'RESERVES', parentCode: '3.2' },
 
-    { code: '3.3', name: 'Resultados', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3', isHeader: true },
-    { code: '3.3.01', name: 'Resultados no asignados', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3' },
-    { code: '3.3.02', name: 'Resultado del ejercicio', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3' },
+    { code: '3.3', name: 'Resultados acumulados', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3', isHeader: true },
+    { code: '3.3.01', name: 'Resultados no asignados', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3' },
+    { code: '3.3.02', name: 'Resultado del ejercicio', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3' },
+    // 3.3.03 - AREA
+    { code: '3.3.03', name: 'Ajustes ejerc. anteriores (AREA)', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3', isHeader: true },
+    { code: '3.3.03.01', name: 'Deudores incobrables AREA', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03', normalSide: 'DEBIT' },
+    { code: '3.3.03.02', name: 'Recupero previsión AREA', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03', normalSide: 'CREDIT' },
+    { code: '3.3.03.03', name: 'Recupero incobrables AREA', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03', normalSide: 'CREDIT' },
+    // 3.3.04 - Distribuciones y retiros
+    { code: '3.3.04', name: 'Distribuciones y retiros', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3', isHeader: true },
+    { code: '3.3.04.01', name: 'Retiros de socios / Distribución', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.04', normalSide: 'DEBIT' },
 
     // ============================================
-    // 4 - INGRESOS
+    // 4 - RESULTADOS
     // ============================================
-    { code: '4', name: 'INGRESOS', kind: 'INCOME', section: 'OPERATING', group: 'Ingresos', statementGroup: null, parentCode: null, isHeader: true },
+    { code: '4', name: 'RESULTADOS', kind: 'INCOME', section: 'OPERATING', group: 'Resultados', statementGroup: null, parentCode: null, isHeader: true },
 
+    // 4.1 - Ingresos operativos
     { code: '4.1', name: 'Ingresos operativos', kind: 'INCOME', section: 'OPERATING', group: 'Ingresos operativos', statementGroup: 'SALES', parentCode: '4', isHeader: true },
     { code: '4.1.01', name: 'Ventas', kind: 'INCOME', section: 'OPERATING', group: 'Ingresos operativos', statementGroup: 'SALES', parentCode: '4.1' },
-    { code: '4.1.02', name: 'Servicios prestados', kind: 'INCOME', section: 'OPERATING', group: 'Ingresos operativos', statementGroup: 'SALES', parentCode: '4.1' },
+    { code: '4.1.02', name: 'Comisiones ganadas', kind: 'INCOME', section: 'OPERATING', group: 'Ingresos operativos', statementGroup: 'SALES', parentCode: '4.1' },
+    { code: '4.1.03', name: 'Alquileres ganados', kind: 'INCOME', section: 'OPERATING', group: 'Ingresos operativos', statementGroup: 'SALES', parentCode: '4.1' },
 
-    { code: '4.2', name: 'Otros ingresos', kind: 'INCOME', section: 'OTHER', group: 'Otros ingresos', statementGroup: 'OTHER_OPERATING_INCOME', parentCode: '4', isHeader: true },
-    { code: '4.2.01', name: 'Comisiones ganadas', kind: 'INCOME', section: 'OTHER', group: 'Otros ingresos', statementGroup: 'OTHER_INCOME', parentCode: '4.2' },
-    { code: '4.2.02', name: 'Alquileres ganados', kind: 'INCOME', section: 'OTHER', group: 'Otros ingresos', statementGroup: 'OTHER_INCOME', parentCode: '4.2' },
+    // 4.2 - Deducciones de ingresos
+    { code: '4.2', name: 'Deducciones de ingresos', kind: 'INCOME', section: 'OPERATING', group: 'Deducciones de ingresos', statementGroup: 'SALES', parentCode: '4', isHeader: true },
+    { code: '4.2.01', name: 'Descuentos otorgados', kind: 'INCOME', section: 'OPERATING', group: 'Deducciones de ingresos', statementGroup: 'SALES', parentCode: '4.2', isContra: true, normalSide: 'DEBIT' },
+    { code: '4.2.02', name: 'Bonificaciones cedidas', kind: 'INCOME', section: 'OPERATING', group: 'Deducciones de ingresos', statementGroup: 'SALES', parentCode: '4.2', isContra: true, normalSide: 'DEBIT' },
+    // 4.1.04 Devoluciones movido a 4.8 como 'Devoluciones sobre ventas' según requerimiento de Movimientos
 
-    // ============================================
-    // 5 - COSTOS
-    // ============================================
-    { code: '5', name: 'COSTOS', kind: 'EXPENSE', section: 'COST', group: 'Costos', statementGroup: null, parentCode: null, isHeader: true },
+    // 4.3 - Costo de ventas
+    { code: '4.3', name: 'Costo de ventas', kind: 'EXPENSE', section: 'COST', group: 'Costo de ventas', statementGroup: 'COGS', parentCode: '4', isHeader: true },
+    { code: '4.3.01', name: 'Costo mercaderías vendidas', kind: 'EXPENSE', section: 'COST', group: 'Costo de ventas', statementGroup: 'COGS', parentCode: '4.3' },
+    { code: '4.3.02', name: 'Diferencia de inventario', kind: 'EXPENSE', section: 'COST', group: 'Costo de ventas', statementGroup: 'COGS', parentCode: '4.3' },
+    // Cuentas periódicas movidas a 4.8 Movimiento de mercaderías
 
-    { code: '5.1', name: 'Costo de ventas', kind: 'EXPENSE', section: 'COST', group: 'Costo de ventas', statementGroup: 'COGS', parentCode: '5', isHeader: true },
-    { code: '5.1.01', name: 'Costo de mercaderías vendidas', kind: 'EXPENSE', section: 'COST', group: 'Costo de ventas', statementGroup: 'COGS', parentCode: '5.1' },
-    { code: '5.1.02', name: 'Costo de servicios', kind: 'EXPENSE', section: 'COST', group: 'Costo de ventas', statementGroup: 'COGS', parentCode: '5.1' },
+    // 4.4 - Gastos de comercialización
+    { code: '4.4', name: 'Gastos de comercialización', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '4', isHeader: true },
+    { code: '4.4.01', name: 'Publicidad', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '4.4' },
+    { code: '4.4.02', name: 'Fletes y acarreos', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '4.4' },
+    { code: '4.4.03', name: 'Comisiones perdidas', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '4.4' },
+    { code: '4.4.04', name: 'Deudores incobrables', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '4.4' },
+    { code: '4.4.05', name: 'Impuesto Ingresos Brutos', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '4.4' },
 
-    // ============================================
-    // 6 - GASTOS
-    // ============================================
-    { code: '6', name: 'GASTOS', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos', statementGroup: null, parentCode: null, isHeader: true },
+    // 4.5 - Gastos de administración
+    { code: '4.5', name: 'Gastos de administración', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4', isHeader: true },
+    { code: '4.5.01', name: 'Sueldos y jornales', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.02', name: 'Cargas sociales', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.03', name: 'Alquileres perdidos', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.04', name: 'Seguros', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.05', name: 'Servicios públicos', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.06', name: 'Gastos de oficina', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.07', name: 'Mantenimiento y reparación', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.08', name: 'Gastos generales', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.09', name: 'Gastos de organización', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.10', name: 'Impuestos y tasas', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.11', name: 'Amortizaciones bienes de uso', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.12', name: 'Honorarios profesionales', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
 
-    // 6.1 - Gastos de administración
-    { code: '6.1', name: 'Gastos de administración', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '6', isHeader: true },
-    { code: '6.1.01', name: 'Sueldos y jornales', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '6.1' },
-    { code: '6.1.02', name: 'Cargas sociales', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '6.1' },
-    { code: '6.1.03', name: 'Alquileres', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '6.1' },
-    { code: '6.1.04', name: 'Servicios públicos', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '6.1' },
-    { code: '6.1.05', name: 'Impuestos y tasas', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '6.1' },
-    { code: '6.1.06', name: 'Gastos de oficina', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '6.1' },
-    { code: '6.1.07', name: 'Amortizaciones', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '6.1' },
-    { code: '6.1.08', name: 'Honorarios profesionales', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administración', statementGroup: 'ADMIN_EXPENSES', parentCode: '6.1' },
+    // 4.6 - Resultados financieros y tenencia
+    { code: '4.6', name: 'Resultados financieros y tenencia', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4', isHeader: true },
+    { code: '4.6.01', name: 'Intereses ganados', kind: 'INCOME', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_INCOME', parentCode: '4.6' },
+    { code: '4.6.02', name: 'Intereses perdidos', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6' },
+    { code: '4.6.03', name: 'Diferencia de cambio', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6' },
+    { code: '4.6.04', name: 'Gastos bancarios', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6' },
+    { code: '4.6.05', name: 'RECPAM', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6', allowOppositeBalance: true },
+    { code: '4.6.06', name: 'Resultado por tenencia', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6', allowOppositeBalance: true },
 
-    // 6.2 - Gastos de comercialización
-    { code: '6.2', name: 'Gastos de comercialización', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '6', isHeader: true },
-    { code: '6.2.01', name: 'Publicidad', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '6.2' },
-    { code: '6.2.02', name: 'Fletes y acarreos', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '6.2' },
-    { code: '6.2.03', name: 'Comisiones pagadas', kind: 'EXPENSE', section: 'SELLING', group: 'Gastos de comercialización', statementGroup: 'SELLING_EXPENSES', parentCode: '6.2' },
+    // 4.7 - Otros ingresos y egresos
+    { code: '4.7', name: 'Otros ingresos y egresos', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_EXPENSES', parentCode: '4', isHeader: true },
+    { code: '4.7.01', name: 'Faltante de caja', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_EXPENSES', parentCode: '4.7' },
+    { code: '4.7.02', name: 'Sobrante de caja', kind: 'INCOME', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_INCOME', parentCode: '4.7' },
+    { code: '4.7.03', name: 'Obsolescencia bienes de uso', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_EXPENSES', parentCode: '4.7' },
+    { code: '4.7.04', name: 'Resultado venta bienes de uso', kind: 'INCOME', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_INCOME', parentCode: '4.7' },
+    { code: '4.7.05', name: 'Siniestros', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_EXPENSES', parentCode: '4.7' },
+    { code: '4.7.06', name: 'Recupero previsión', kind: 'INCOME', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_INCOME', parentCode: '4.7' },
+    { code: '4.7.07', name: 'Recupero deudores incobrables', kind: 'INCOME', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_INCOME', parentCode: '4.7' },
 
-    // ============================================
-    // 7 - RESULTADOS FINANCIEROS Y OTROS
-    // ============================================
-    { code: '7', name: 'RESULTADOS FINANCIEROS Y OTROS', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Financieros', statementGroup: null, parentCode: null, isHeader: true },
-
-    // 7.1 - Resultados financieros
-    { code: '7.1', name: 'Resultados financieros', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Financieros', statementGroup: null, parentCode: '7', isHeader: true },
-    { code: '7.1.01', name: 'Intereses ganados', kind: 'INCOME', section: 'FINANCIAL', group: 'Financieros', statementGroup: 'FINANCIAL_INCOME', parentCode: '7.1' },
-    { code: '7.1.02', name: 'Intereses perdidos', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '7.1' },
-    { code: '7.1.03', name: 'Gastos bancarios', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '7.1' },
-    { code: '7.1.04', name: 'Diferencia de cambio', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '7.1' },
-
-    // 7.2 - Otros resultados
-    { code: '7.2', name: 'Otros resultados', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: null, parentCode: '7', isHeader: true },
-    { code: '7.2.01', name: 'Descuentos obtenidos', kind: 'INCOME', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_INCOME', parentCode: '7.2' },
-    { code: '7.2.02', name: 'Descuentos otorgados', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_EXPENSES', parentCode: '7.2' },
-    { code: '7.2.03', name: 'Deudores incobrables', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_EXPENSES', parentCode: '7.2' },
-    { code: '7.2.04', name: 'Faltantes de caja', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_EXPENSES', parentCode: '7.2' },
-    { code: '7.2.05', name: 'Sobrantes de caja', kind: 'INCOME', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_INCOME', parentCode: '7.2' },
+    // 4.8 - Movimiento de mercaderías (transitorias)
+    { code: '4.8', name: 'Movimiento de mercaderías', kind: 'EXPENSE', section: 'COST', group: 'Movimiento de mercaderías', statementGroup: 'COGS', parentCode: '4', isHeader: true },
+    { code: '4.8.01', name: 'Compras', kind: 'EXPENSE', section: 'COST', group: 'Movimiento de mercaderías', statementGroup: 'COGS', parentCode: '4.8' },
+    { code: '4.8.02', name: 'Gastos sobre compras', kind: 'EXPENSE', section: 'COST', group: 'Movimiento de mercaderías', statementGroup: 'COGS', parentCode: '4.8' },
+    { code: '4.8.03', name: 'Bonificaciones sobre compras', kind: 'EXPENSE', section: 'COST', group: 'Movimiento de mercaderías', statementGroup: 'COGS', parentCode: '4.8', isContra: true, normalSide: 'CREDIT' },
+    { code: '4.8.04', name: 'Devoluciones sobre compras', kind: 'EXPENSE', section: 'COST', group: 'Movimiento de mercaderías', statementGroup: 'COGS', parentCode: '4.8', isContra: true, normalSide: 'CREDIT' },
+    { code: '4.8.05', name: 'Bonificaciones sobre ventas', kind: 'INCOME', section: 'OPERATING', group: 'Movimiento de mercaderías', statementGroup: 'SALES', parentCode: '4.8', isContra: true, normalSide: 'DEBIT' },
+    { code: '4.8.06', name: 'Devoluciones sobre ventas', kind: 'INCOME', section: 'OPERATING', group: 'Movimiento de mercaderías', statementGroup: 'SALES', parentCode: '4.8', isContra: true, normalSide: 'DEBIT' },
 ]
 
 /**
@@ -225,6 +313,7 @@ function seedToAccount(seed: SeedAccount, codeToId: Map<string, string>): Accoun
         normalSide: seed.normalSide || defaultNormalSide,
         isContra: seed.isContra || false,
         isHeader: seed.isHeader || false,
+        allowOppositeBalance: seed.allowOppositeBalance || false,
     }
 }
 

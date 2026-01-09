@@ -397,6 +397,35 @@ export default function Asientos() {
                         💾 Guardar asiento
                     </button>
                 </div>
+
+                {/* Partner Account Guide Helper */}
+                {useMemo(() => {
+                    const hasPartnerAccount = lines.some(line => {
+                        const acc = accounts?.find(a => a.id === line.accountId)
+                        if (!acc) return false
+                        const name = acc.name.toLowerCase()
+                        return name.includes('socio') || name.includes('dividendo') || name.includes('distrib') || name.includes('retiro')
+                    })
+
+                    if (!hasPartnerAccount) return null
+
+                    return (
+                        <div className="alert alert-info" style={{ marginTop: 'var(--space-lg)' }}>
+                            <strong>💡 Guía rápida para Socios y Dividendos:</strong>
+                            <ul style={{ margin: '0.5rem 0 0 1rem', paddingLeft: 0, fontSize: '0.9em' }}>
+                                <li>
+                                    <strong>Préstamo al socio:</strong> Debe <em>Créditos a socios</em> / Haber <em>Caja</em>
+                                </li>
+                                <li>
+                                    <strong>La empresa debe al socio:</strong> Debe <em>Caja</em> / Haber <em>Deudas con socios</em>
+                                </li>
+                                <li>
+                                    <strong>Retiro de utilidades:</strong> Debe <em>Retiros de socios (PN)</em> / Haber <em>Dividendos a pagar</em>
+                                </li>
+                            </ul>
+                        </div>
+                    )
+                }, [lines, accounts])}
             </div>
 
             {/* Delete success toast */}
