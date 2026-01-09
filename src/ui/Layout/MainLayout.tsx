@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { useLocation } from 'react-router-dom'
+
 import Sidebar from './Sidebar'
 import MobileTopBar from './MobileTopBar'
 import MobileDrawer from './MobileDrawer'
@@ -12,27 +12,14 @@ interface Props {
 }
 
 // Map routes to page titles
-function getPageTitle(pathname: string): string {
-    if (pathname === '/') return 'Dashboard'
-    if (pathname === '/cuentas') return 'Plan de Cuentas'
-    if (pathname === '/asientos') return 'Libro Diario'
-    if (pathname === '/mayor') return 'Libro Mayor'
-    if (pathname === '/balance') return 'Balance de SyS'
-    if (pathname === '/estados') return 'Estados contables'
-    if (pathname.startsWith('/planillas')) {
-        if (pathname === '/planillas/inventario') return 'Inventario'
-        if (pathname === '/planillas/amortizaciones') return 'Amortizaciones'
-        return 'Planillas'
-    }
-    return 'ContaLivre'
-}
+
 
 export default function MainLayout({ children }: Props) {
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [drawerOpen, setDrawerOpen] = useState(false)
     const { isMobile } = useMobileBreakpoint()
-    const location = useLocation()
+
 
     useEffect(() => {
         async function init() {
@@ -48,7 +35,7 @@ export default function MainLayout({ children }: Props) {
         init()
     }, [])
 
-    const pageTitle = getPageTitle(location.pathname)
+
 
     if (isLoading) {
         return (
@@ -86,7 +73,6 @@ export default function MainLayout({ children }: Props) {
             {isMobile && (
                 <>
                     <MobileTopBar
-                        title={pageTitle}
                         onMenuClick={() => setDrawerOpen(true)}
                     />
                     <MobileDrawer

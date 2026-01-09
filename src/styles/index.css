@@ -87,6 +87,10 @@
   --sidebar-width: 260px;
   --header-height: 60px;
   --max-content-width: 1200px;
+  --mobile-top-bar-height: 64px;
+  --mobile-bottom-nav-height: 60px;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
 
   /* Transitions */
   --transition-fast: 150ms ease;
@@ -196,10 +200,12 @@ a:hover {
 }
 
 .sidebar-logo img {
-  height: 48px;
+  height: 60px;
   width: auto;
   max-width: 100%;
   object-fit: contain;
+  display: block;
+  flex-shrink: 0;
 }
 
 .sidebar-logo-emoji {
@@ -2202,7 +2208,7 @@ tr:hover .account-row-actions {
   top: 0;
   left: 0;
   right: 0;
-  height: var(--mobile-top-bar-height);
+  height: 64px;
   padding-top: var(--safe-area-top);
   background: var(--brand-navy);
   display: flex;
@@ -2212,6 +2218,18 @@ tr:hover .account-row-actions {
   padding-right: var(--space-sm);
   z-index: 200;
   box-shadow: 0 2px 8px rgba(10, 31, 72, 0.15);
+  transition: transform 0.3s ease-in-out;
+}
+
+.mobile-top-bar-logo {
+  height: 44px;
+  width: auto;
+  max-height: 48px;
+  object-fit: contain;
+}
+
+.mobile-top-bar.hidden {
+  transform: translateY(-100%);
 }
 
 .mobile-top-bar-btn {
@@ -2304,6 +2322,7 @@ tr:hover .account-row-actions {
   overflow-y: auto;
   animation: mobileDrawerSlideIn 0.28s ease-out forwards;
   padding-top: var(--safe-area-top);
+  padding-bottom: var(--space-xl);
 }
 
 @keyframes mobileDrawerSlideIn {
@@ -2319,18 +2338,29 @@ tr:hover .account-row-actions {
 }
 
 .mobile-drawer-header {
-  padding: var(--space-lg);
+  padding: 16px;
+  padding-bottom: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .mobile-drawer-logo {
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
   margin-bottom: var(--space-sm);
+}
+
+.mobile-drawer-logo a {
+  display: block;
+  max-width: 100%;
 }
 
 .mobile-drawer-logo-img {
   height: 48px;
   width: auto;
   max-width: 100%;
+  object-fit: contain;
+  display: block;
 }
 
 .mobile-drawer-title {
@@ -2366,12 +2396,15 @@ tr:hover .account-row-actions {
   gap: var(--space-sm);
   padding: var(--space-md) var(--space-lg);
   color: rgba(255, 255, 255, 0.85);
-  font-size: var(--font-size-base);
+  font-size: 16px;
   font-weight: var(--font-weight-semibold);
   text-decoration: none;
   transition: all var(--transition-fast);
   border-left: 3px solid transparent;
-  min-height: 48px;
+  border-left: 3px solid transparent;
+  min-height: 52px;
+  padding-top: var(--space-sm);
+  padding-bottom: var(--space-sm);
 }
 
 .mobile-drawer-link:hover {
@@ -2855,8 +2888,10 @@ tr:hover .account-row-actions {
 }
 
 .mobile-brand-logo {
-  height: 32px;
+  height: 36px;
   width: auto;
+  max-height: 40px;
+  object-fit: contain;
 }
 
 .mobile-brand-emoji {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, Link } from 'react-router-dom'
 
 interface NavItem {
     path: string
@@ -106,19 +106,18 @@ export default function MobileDrawer({ isOpen, onClose }: MobileDrawerProps) {
                 {/* Header */}
                 <div className="mobile-drawer-header">
                     <div className="mobile-drawer-logo">
-                        <img
-                            src="/brand/ContaLivresf.svg"
-                            alt="ContaLivre"
-                            className="mobile-drawer-logo-img"
-                            onError={(e) => {
-                                const img = e.target as HTMLImageElement
-                                img.onerror = null
-                                img.src = '/brand/contalivre-logo.png'
-                            }}
-                        />
+                        <Link to="/" aria-label="Ir a Inicio" onClick={onClose}>
+                            <img
+                                src="/brand/contalivre-logo-v2.png"
+                                alt="ContaLivre"
+                                className="mobile-drawer-logo-img"
+                            />
+                        </Link>
                     </div>
-                    <h2 className="mobile-drawer-title">ContaLivre</h2>
-                    <p className="mobile-drawer-subtitle">Tu asistente contable</p>
+                    <div className="sr-only">
+                        <h2 className="mobile-drawer-title">ContaLivre</h2>
+                        <p className="mobile-drawer-subtitle">Tu asistente contable</p>
+                    </div>
                 </div>
 
                 {/* Navigation */}

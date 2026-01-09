@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, Link } from 'react-router-dom'
 
 interface NavItem {
     path: string
@@ -26,10 +26,7 @@ const navItems: NavItem[] = [
     },
 ]
 
-type LogoState = 'svg' | 'png' | 'emoji'
-
 export default function Sidebar() {
-    const [logoState, setLogoState] = useState<LogoState>('svg')
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
     const location = useLocation()
 
@@ -46,14 +43,6 @@ export default function Sidebar() {
         })
     }, [location.pathname])
 
-    const handleLogoError = () => {
-        if (logoState === 'svg') {
-            setLogoState('png')
-        } else if (logoState === 'png') {
-            setLogoState('emoji')
-        }
-    }
-
     const toggleGroup = (path: string) => {
         setExpandedGroups(prev => {
             const next = new Set(prev)
@@ -68,26 +57,23 @@ export default function Sidebar() {
 
 
 
-    const logoSrc = logoState === 'svg'
-        ? '/brand/ContaLivresf.svg'
-        : '/brand/contalivre-logo.png'
+
 
     return (
         <aside className="sidebar">
             <div className="sidebar-logo">
-                {logoState !== 'emoji' ? (
+                <Link to="/" aria-label="Ir a Inicio">
                     <img
-                        src={logoSrc}
+                        src="/brand/contalivre-logo-v2.png"
                         alt="ContaLivre"
                         className="sidebar-logo-img"
-                        onError={handleLogoError}
                     />
-                ) : (
-                    <span className="sidebar-logo-emoji">📚</span>
-                )}
+                </Link>
             </div>
-            <h1 className="sidebar-title">ContaLivre</h1>
-            <p className="sidebar-subtitle">Tu asistente contable</p>
+            <div className="sr-only">
+                <h1 className="sidebar-title">ContaLivre</h1>
+                <p className="sidebar-subtitle">Tu asistente contable</p>
+            </div>
 
             <nav className="sidebar-nav">
                 {navItems.map((item) => {

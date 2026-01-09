@@ -1,78 +1,79 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 
 interface MobileTopBarProps {
-    title: string
     onMenuClick: () => void
     rightAction?: React.ReactNode
-    showBrandHeader?: boolean
 }
 
-type LogoState = 'svg' | 'png' | 'emoji'
-
 export default function MobileTopBar({
-    title,
     onMenuClick,
     rightAction,
-    showBrandHeader = true
 }: MobileTopBarProps) {
-    const [logoState, setLogoState] = useState<LogoState>('svg')
+    const [isVisible, setIsVisible] = useState(true)
+    const lastScrollY = useRef(0)
 
-    const handleLogoError = () => {
-        if (logoState === 'svg') {
-            setLogoState('png')
-        } else if (logoState === 'png') {
-            setLogoState('emoji')
+    // Hide on scroll logic
+    useEffect(() => {
+        const handleScroll = () => {
+            const currentScrollY = window.scrollY
+
+            // Show if scrolling up or at the top
+            if (currentScrollY < lastScrollY.current || currentScrollY < 50) {
+                setIsVisible(true)
+            }
+            // Hide if scrolling down and not at the top
+            else if (currentScrollY > lastScrollY.current && currentScrollY > 50) {
+                setIsVisible(false)
+            }
+
+            lastScrollY.current = currentScrollY
         }
-    }
 
-    const logoSrc = logoState === 'svg'
-        ? '/brand/ContaLivresf.svg'
-        : '/brand/contalivre-logo.png'
+        // Throttle scroll event slightly for performance
+        let ticking = false
+        const onScroll = () => {
+            if (!ticking) {
+                window.requestAnimationFrame(() => {
+                    handleScroll()
+                    ticking = false
+                })
+                ticking = true
+            }
+        }
+
+        window.addEventListener('scroll', onScroll, { passive: true })
+        return () => window.removeEventListener('scroll', onScroll)
+    }, [])
+
+
 
     return (
-        <>
-            <header className="mobile-top-bar">
-                <button
-                    type="button"
-                    className="mobile-top-bar-btn"
-                    onClick={onMenuClick}
-                    aria-label="Abrir menú"
-                >
-                    <span className="mobile-hamburger" aria-hidden="true">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                    </span>
-                </button>
+        <header className={`mobile-top-bar ${!isVisible ? 'hidden' : ''}`}>
+            <button
+                type="button"
+                className="mobile-top-bar-btn"
+                onClick={onMenuClick}
+                aria-label="Abrir menú"
+            >
+                <span className="mobile-hamburger" aria-hidden="true">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </span>
+            </button>
 
-                <h1 className="mobile-top-bar-title">{title}</h1>
+            <Link to="/" className="mobile-top-bar-logo-link" aria-label="Ir a Inicio">
+                <img
+                    src="/brand/contalivre-logo-v2.png"
+                    alt="ContaLivre"
+                    className="mobile-top-bar-logo"
+                />
+            </Link>
 
-                <div className="mobile-top-bar-right">
-                    {rightAction || <span style={{ width: 40 }} />}
-                </div>
-            </header>
-
-            {/* Brand Header - Logo visible in mobile */}
-            {showBrandHeader && (
-                <div className="mobile-brand-header">
-                    <div className="mobile-brand-header-content">
-                        {logoState !== 'emoji' ? (
-                            <img
-                                src={logoSrc}
-                                alt="ContaLivre"
-                                className="mobile-brand-logo"
-                                onError={handleLogoError}
-                            />
-                        ) : (
-                            <span className="mobile-brand-emoji">📚</span>
-                        )}
-                        <div className="mobile-brand-text">
-                            <span className="mobile-brand-name">ContaLivre</span>
-                            <span className="mobile-brand-tagline">Tu asistente contable</span>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </>
+            <div className="mobile-top-bar-right">
+                {rightAction || <span style={{ width: 44 }} />}
+            </div>
+        </header>
     )
 }
