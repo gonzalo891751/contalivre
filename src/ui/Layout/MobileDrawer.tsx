@@ -1,0 +1,164 @@
+import { useEffect, useRef, useCallback } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
+
+interface NavItem {
+    path: string
+    label: string
+    icon: string
+    children?: { path: string; label: string }[]
+}
+
+const navItems: NavItem[] = [
+    { path: '/', label: 'Dashboard', icon: '📊' },
+    { path: '/cuentas', label: 'Plan de Cuentas', icon: '📋' },
+    { path: '/asientos', label: 'Libro Diario', icon: '📝' },
+    { path: '/mayor', label: 'Libro Mayor', icon: '📖' },
+    { path: '/balance', label: 'Balance de SyS', icon: '⚖️' },
+    { path: '/estados', label: 'Estados contables', icon: '📈' },
+    {
+        path: '/planillas',
+        label: 'Planillas',
+        icon: '🧮',
+        children: [
+            { path: '/planillas/inventario', label: 'Inventario' },
+            { path: '/planillas/amortizaciones', label: 'Amortizaciones' },
+        ]
+    },
+]
+
+interface MobileDrawerProps {
+    isOpen: boolean
+    onClose: () => void
+}
+
+export default function MobileDrawer({ isOpen, onClose }: MobileDrawerProps) {
+    const drawerRef = useRef<HTMLDivElement>(null)
+    const location = useLocation()
+    const startXRef = useRef<number | null>(null)
+    const currentXRef = useRef<number>(0)
+
+    // Close on route change
+    useEffect(() => {
+        if (isOpen) {
+            onClose()
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.pathname])
+
+    // Focus trap and ESC key
+    useEffect(() => {
+        if (!isOpen) return
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onClose()
+            }
+        }
+
+        // Lock body scroll
+        document.body.style.overflow = 'hidden'
+        document.addEventListener('keydown', handleKeyDown)
+
+        // Focus the drawer
+        drawerRef.current?.focus()
+
+        return () => {
+            document.body.style.overflow = ''
+            document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [isOpen, onClose])
+
+    // Swipe to close
+    const handleTouchStart = useCallback((e: React.TouchEvent) => {
+        startXRef.current = e.touches[0].clientX
+    }, [])
+
+    const handleTouchMove = useCallback((e: React.TouchEvent) => {
+        if (startXRef.current === null) return
+        currentXRef.current = e.touches[0].clientX - startXRef.current
+    }, [])
+
+    const handleTouchEnd = useCallback(() => {
+        // If swiped left more than 80px, close
+        if (currentXRef.current < -80) {
+            onClose()
+        }
+        startXRef.current = null
+        currentXRef.current = 0
+    }, [onClose])
+
+    if (!isOpen) return null
+
+    return (
+        <div className="mobile-drawer-overlay" onClick={onClose}>
+            <div
+                ref={drawerRef}
+                className="mobile-drawer"
+                onClick={(e) => e.stopPropagation()}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                tabIndex={-1}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Menú de navegación"
+            >
+                {/* Header */}
+                <div className="mobile-drawer-header">
+                    <div className="mobile-drawer-logo">
+                        <img
+                            src="/brand/ContaLivresf.svg"
+                            alt="ContaLivre"
+                            className="mobile-drawer-logo-img"
+                            onError={(e) => {
+                                const img = e.target as HTMLImageElement
+                                img.onerror = null
+                                img.src = '/brand/contalivre-logo.png'
+                            }}
+                        />
+                    </div>
+                    <h2 className="mobile-drawer-title">ContaLivre</h2>
+                    <p className="mobile-drawer-subtitle">Tu asistente contable</p>
+                </div>
+
+                {/* Navigation */}
+                <nav className="mobile-drawer-nav">
+                    {navItems.map((item) => (
+                        <div key={item.path} className="mobile-drawer-nav-group">
+                            <NavLink
+                                to={item.path}
+                                className={({ isActive }) =>
+                                    `mobile-drawer-link ${isActive ? 'active' : ''}`
+                                }
+                                end={!item.children}
+                            >
+                                <span className="mobile-drawer-icon">{item.icon}</span>
+                                {item.label}
+                            </NavLink>
+                            {item.children && (
+                                <div className="mobile-drawer-children">
+                                    {item.children.map((child) => (
+                                        <NavLink
+                                            key={child.path}
+                                            to={child.path}
+                                            className={({ isActive }) =>
+                                                `mobile-drawer-link mobile-drawer-child ${isActive ? 'active' : ''}`
+                                            }
+                                        >
+                                            {child.label}
+                                        </NavLink>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </nav>
+
+                {/* Footer */}
+                <div className="mobile-drawer-footer">
+                    <p>ContaLivre v1.0</p>
+                </div>
+            </div>
+        </div>
+    )
+}
