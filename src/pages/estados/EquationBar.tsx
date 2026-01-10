@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+
 
 interface EquationBarProps {
     totalAssets: number
