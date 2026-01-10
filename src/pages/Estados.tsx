@@ -37,35 +37,64 @@ function SectionDisplay({
     return (
         <div className={`statement-group ${className}`}>
             {!hideTitle && (
-                <div className={`statement-group-title text-${colorTheme}`}>
-                    {section.label}
+                <div className="statement-header-wrapper">
+                    <div className="statement-group-title">
+                        {section.label}
+                    </div>
                 </div>
             )}
 
-            {section.accounts.map((item) => (
-                <div
-                    key={item.account.id}
-                    className={`statement-row ${item.isContra ? 'text-muted' : ''}`}
-                    style={{ fontStyle: item.isContra ? 'italic' : 'normal' }}
-                >
-                    <span>
-                        {item.account.id === '__current_result__' && '👉 '}
-                        {item.isContra ? '(-) ' : ''}
-                        {item.account.name}
-                    </span>
-                    <span className="statement-value">
-                        {item.balance < 0 ? '(' : ''}${formatAmount(Math.abs(item.balance))}
-                        {item.balance < 0 ? ')' : ''}
-                    </span>
-                </div>
-            ))}
+            <div className="statement-rows-container">
+                {section.accounts.map((item) => (
+                    <div
+                        key={item.account.id}
+                        className={`statement-row ${item.isContra ? 'text-muted' : ''}`}
+                        style={{ fontStyle: item.isContra ? 'italic' : 'normal' }}
+                    >
+                        <span className="row-label">
+                            {item.account.id === '__current_result__' && '👉 '}
+                            {item.isContra ? '(-) ' : ''}
+                            {item.account.name}
+                        </span>
+                        <span className="statement-value">
+                            {item.balance < 0 ? '(' : ''}${formatAmount(Math.abs(item.balance))}
+                            {item.balance < 0 ? ')' : ''}
+                        </span>
+                    </div>
+                ))}
+            </div>
 
-            <div className={`statement-row statement-row-total theme-${colorTheme}`}>
-                <span>Total {section.label}</span>
-                <span className="statement-value">
+            <div className={`statement-subtotal theme-${colorTheme}`}>
+                <span className="subtotal-label">Total {section.label}</span>
+                <span className="subtotal-value">
                     ${formatAmount(showNetTotal ? section.netTotal : section.subtotal)}
                 </span>
             </div>
+        </div>
+    )
+}
+
+function KeyResultRow({ label, amount, type = 'default' }: { label: string, amount: number, type?: 'default' | 'operating' | 'gross' }) {
+    const formatAmount = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2 })
+
+    return (
+        <div className={`key-result-row type-${type}`}>
+            <span className="key-label">{label}</span>
+            <span className="key-amount">${formatAmount(amount)}</span>
+        </div>
+    )
+}
+
+function NetGroupResultRow({ label, amount }: { label: string, amount: number }) {
+    const formatAmount = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2 })
+    const isGain = amount >= 0
+
+    return (
+        <div className="net-group-row">
+            <span className="net-label">{label}</span>
+            <span className={`net-amount ${isGain ? 'text-success-dark' : 'text-error-dark'}`}>
+                {isGain ? '' : '-'}${formatAmount(Math.abs(amount))}
+            </span>
         </div>
     )
 }
@@ -141,6 +170,7 @@ export default function Estados() {
     }
 
     const { balanceSheet, incomeStatement } = statements
+    const isNetIncomePositive = incomeStatement.netIncome >= 0
 
     return (
         <div className="fade-in">
@@ -172,8 +202,8 @@ export default function Estados() {
                     </p>
                 ) : (
                     <p>
-                        El <strong>Estado de Resultados</strong> muestra las ganancias y pérdidas generadas durante el ejercicio.
-                        El resultado final se traslada al Patrimonio Neto.
+                        El <strong>Estado de Resultados</strong> muestra la performance económica.
+                        Los ingresos suman y los gastos restan para determinar el resultado del ejercicio, excluyendo movimientos de cierre.
                     </p>
                 )}
             </HelpPanel>
@@ -264,59 +294,76 @@ export default function Estados() {
 
                 {viewMode === 'ER' && (
                     <div className="animate-slide-up">
-                        <div ref={erRef} style={{ background: '#f8fafc', padding: '24px', borderRadius: '8px', maxWidth: '800px', margin: '0 auto' }}>
-                            <div className="card p-6">
-                                <h2 className="statement-header text-center mb-6">Estado de Resultados</h2>
+                        <div ref={erRef} className="er-container-export">
+                            <div className="paper-card">
+                                <h2 className="er-main-title">Estado de Resultados</h2>
+                                <p className="er-date text-center text-muted-foreground mb-8">
+                                    Correspondiente al ejercicio actual
+                                </p>
 
-                                <div className="statement-body">
-                                    <SectionDisplay section={incomeStatement.sales} />
-                                    <SectionDisplay section={incomeStatement.cogs} />
+                                <div className="er-body">
+                                    {/* Bloque Operativo */}
+                                    <SectionDisplay section={incomeStatement.sales} colorTheme="primary" />
+                                    <SectionDisplay section={incomeStatement.cogs} colorTheme="default" />
 
-                                    <div className="statement-row statement-row-total bg-bg-surface p-2 rounded">
-                                        <span>RESULTADO BRUTO</span>
-                                        <span className="statement-value">${formatAmount(incomeStatement.grossProfit)}</span>
+                                    <div className="my-6">
+                                        <KeyResultRow
+                                            label="RESULTADO BRUTO"
+                                            amount={incomeStatement.grossProfit}
+                                            type="gross"
+                                        />
                                     </div>
-
-                                    <div className="h-4" />
 
                                     <SectionDisplay section={incomeStatement.adminExpenses} />
                                     <SectionDisplay section={incomeStatement.sellingExpenses} />
 
-                                    <div className="statement-row statement-row-total bg-bg-surface p-2 rounded">
-                                        <span>RESULTADO OPERATIVO</span>
-                                        <span className="statement-value">${formatAmount(incomeStatement.operatingIncome)}</span>
+                                    <div className="my-6">
+                                        <KeyResultRow
+                                            label="RESULTADO OPERATIVO"
+                                            amount={incomeStatement.operatingIncome}
+                                            type="operating"
+                                        />
                                     </div>
 
-                                    <div className="h-4" />
-
-                                    <SectionDisplay section={incomeStatement.financialIncome} />
-                                    <SectionDisplay section={incomeStatement.financialExpenses} />
-                                    {incomeStatement.netFinancialResult !== 0 && (
-                                        <div className="statement-row text-sm text-muted-foreground italic">
-                                            <span>Resultado financiero neto</span>
-                                            <span>${formatAmount(incomeStatement.netFinancialResult)}</span>
+                                    {/* Bloque Financiero y Otros */}
+                                    <div className="grid gap-6 md:grid-cols-2">
+                                        <div className="er-subsection">
+                                            <SectionDisplay section={incomeStatement.financialIncome} />
+                                            <SectionDisplay section={incomeStatement.financialExpenses} />
+                                            <div className="mt-2">
+                                                <NetGroupResultRow
+                                                    label="Resultado financiero neto"
+                                                    amount={incomeStatement.netFinancialResult}
+                                                />
+                                            </div>
                                         </div>
-                                    )}
 
-                                    <SectionDisplay section={incomeStatement.otherIncome} />
-                                    <SectionDisplay section={incomeStatement.otherExpenses} />
-                                    {incomeStatement.netOtherResult !== 0 && (
-                                        <div className="statement-row text-sm text-muted-foreground italic">
-                                            <span>Otros resultados neto</span>
-                                            <span>${formatAmount(incomeStatement.netOtherResult)}</span>
+                                        <div className="er-subsection">
+                                            <SectionDisplay section={incomeStatement.otherIncome} />
+                                            <SectionDisplay section={incomeStatement.otherExpenses} />
+                                            <div className="mt-2">
+                                                <NetGroupResultRow
+                                                    label="Otros resultados neto"
+                                                    amount={incomeStatement.netOtherResult}
+                                                />
+                                            </div>
                                         </div>
-                                    )}
+                                    </div>
                                 </div>
 
-                                <div
-                                    className="statement-grand-total mt-8 p-4 rounded-lg"
-                                    style={{
-                                        background: incomeStatement.netIncome >= 0 ? 'var(--color-success-bg)' : 'var(--color-error-bg)',
-                                        color: incomeStatement.netIncome >= 0 ? 'var(--color-success)' : 'var(--color-error)',
-                                    }}
-                                >
-                                    <span>{incomeStatement.netIncome >= 0 ? 'GANANCIA DEL EJERCICIO' : 'PÉRDIDA DEL EJERCICIO'}</span>
-                                    <span>${formatAmount(Math.abs(incomeStatement.netIncome))}</span>
+                                {/* FOOTER RESULTADO DEL EJERCICIO */}
+                                <div className={`er-final-result ${isNetIncomePositive ? 'is-gain' : 'is-loss'}`}>
+                                    <div className="flex flex-col items-center gap-1">
+                                        <span className="final-label">RESULTADO DEL EJERCICIO</span>
+                                        {isNetIncomePositive ? (
+                                            <span className="final-badge badge-gain">✓ Ganancia</span>
+                                        ) : (
+                                            <span className="final-badge badge-loss">⚠ Pérdida</span>
+                                        )}
+                                    </div>
+                                    <div className="final-amount">
+                                        ${formatAmount(Math.abs(incomeStatement.netIncome))}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -346,24 +393,227 @@ export default function Estados() {
             </div>
 
             <style>{`
+                /* PDF Container Styles */
+                .er-container-export {
+                    background: #f1f5f9;
+                    padding: 32px;
+                    border-radius: 8px;
+                    max-width: 900px;
+                    margin: 0 auto;
+                }
+                
+                .paper-card {
+                    background: white;
+                    padding: 40px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+                    border: 1px solid rgba(0,0,0,0.05);
+                }
+
+                .er-main-title {
+                    text-align: center;
+                    font-size: 1.8rem;
+                    font-weight: 800;
+                    color: #1e293b;
+                    letter-spacing: -0.02em;
+                    margin-bottom: 0.5rem;
+                    text-transform: uppercase;
+                }
+
+                /* Section Headers Premium */
+                .statement-header-wrapper {
+                    border-bottom: 2px solid #e2e8f0;
+                    margin-bottom: 12px;
+                    padding-bottom: 4px;
+                }
+
+                .statement-group-title {
+                    font-size: 0.85rem;
+                    text-transform: uppercase;
+                    color: #334155; /* Blue-grey */
+                    font-weight: 700;
+                    letter-spacing: 0.05em;
+                }
+
+                /* Row Styles */
+                .statement-rows-container {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1px; /* Tighter gap */
+                    margin-bottom: 8px;
+                }
+
+                .statement-group {
+                    margin-bottom: 24px;
+                }
+
+                .statement-row {
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 6px 8px;
+                    font-size: 0.95rem;
+                    border-radius: 4px;
+                    transition: background 0.1s;
+                    color: #475569;
+                }
+
+                .statement-row:hover {
+                    background-color: #f8fafc;
+                }
+
+                .statement-value {
+                    font-variant-numeric: tabular-nums;
+                    font-weight: 500;
+                    color: #1e293b;
+                }
+
+                /* Subtotals */
+                .statement-subtotal {
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 8px 12px;
+                    background: #f8fafc;
+                    border-radius: 4px;
+                    font-weight: 600;
+                    font-size: 0.95rem;
+                    color: #334155;
+                    border-top: 1px solid #e2e8f0;
+                }
+                
+                .statement-subtotal.theme-primary {
+                    background: #eff6ff; /* Blue tint */
+                    color: #1e40af;
+                    border-color: #dbeafe;
+                }
+
+                /* Key Results Rows (Bruto / Operativo) */
+                .key-result-row {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 16px 20px;
+                    border-radius: 8px;
+                    margin: 16px 0;
+                    background: #f1f5f9;
+                    border: 1px solid #e2e8f0;
+                }
+
+                .key-result-row.type-gross {
+                    background: #f8fafc;
+                    border-left: 4px solid #94a3b8;
+                }
+
+                .key-result-row.type-operating {
+                    background: #f1f5f9;
+                    border-left: 4px solid #475569;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+                }
+
+                .key-label {
+                    font-weight: 700;
+                    font-size: 1rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.02em;
+                    color: #334155;
+                }
+
+                .key-amount {
+                    font-size: 1.25rem;
+                    font-weight: 700;
+                    font-variant-numeric: tabular-nums;
+                    color: #1e293b;
+                }
+
+                /* Net Group Results */
+                .net-group-row {
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 12px 0;
+                    border-top: 1px dashed #cbd5e1;
+                    font-size: 0.95rem;
+                }
+
+                .net-label {
+                    font-style: italic;
+                    color: #64748b;
+                    font-weight: 500;
+                }
+
+                .net-amount {
+                    font-weight: 700;
+                }
+
+                .text-success-dark { color: #15803d; }
+                .text-error-dark { color: #b91c1c; }
+
+                /* Final Result */
+                .er-final-result {
+                    margin-top: 40px;
+                    padding: 32px;
+                    border-radius: 12px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    border: 1px solid transparent;
+                }
+
+                .er-final-result.is-gain {
+                    background: linear-gradient(to right, #f0fdf4, #dcfce7);
+                    border-color: #bbf7d0;
+                    color: #166534;
+                }
+
+                .er-final-result.is-loss {
+                    background: linear-gradient(to right, #fef2f2, #fee2e2);
+                    border-color: #fecaca;
+                    color: #991b1b;
+                }
+
+                .final-label {
+                    font-size: 0.9rem;
+                    text-transform: uppercase;
+                    font-weight: 700;
+                    letter-spacing: 0.1em;
+                    opacity: 0.9;
+                }
+
+                .final-badge {
+                    font-size: 0.8rem;
+                    padding: 4px 10px;
+                    border-radius: 9999px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                }
+
+                .badge-gain {
+                    background: white;
+                    color: #15803d;
+                    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+                }
+
+                .badge-loss {
+                    background: white;
+                    color: #b91c1c;
+                    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+                }
+
+                .final-amount {
+                    font-size: 2.2rem;
+                    font-weight: 800;
+                    font-variant-numeric: tabular-nums;
+                    letter-spacing: -0.02em;
+                }
+
+                /* ESP Grid Styles (existing) */
                 .esp-grid {
                     display: grid;
                     grid-template-columns: 1fr;
                     gap: var(--space-xl);
                 }
-
                 @media (min-width: 1024px) {
-                    .esp-grid {
-                        grid-template-columns: 1fr 1fr;
-                    }
+                    .esp-grid { grid-template-columns: 1fr 1fr; }
                 }
-
-                .esp-column {
-                    display: flex;
-                    flex-direction: column;
-                    gap: var(--space-lg);
-                }
-
+                .esp-column { display: flex; flex-direction: column; gap: var(--space-lg); }
                 .section-title {
                     font-size: 1.1rem;
                     font-weight: 700;
@@ -372,143 +622,37 @@ export default function Estados() {
                     padding-bottom: var(--space-xs);
                     display: inline-block;
                 }
-
                 .text-primary { color: #2563EB; }
-                .text-success { color: #7C3AED; } /* PN Purple consistency */
-                .text-error { color: #DC2626; } /* Pasivo Red consistency */
-
+                .text-success { color: #7C3AED; }
+                .text-error { color: #DC2626; }
                 .h-full { height: 100%; }
                 .mt-auto { margin-top: auto; }
                 .flex-1 { flex: 1; }
-
-                /* Hover effect on cards */
-                .card {
-                    transition: transform 0.2s ease, box-shadow 0.2s ease;
-                }
-                .card:hover {
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-                }
-
-                .animate-slide-up {
-                    animation: slideUp 0.4s ease-out forwards;
-                }
-
+                .card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+                .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+                .animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
                 @keyframes slideUp {
-                    from {
-                        opacity: 0;
-                        transform: translateY(10px);
-                    }
-                    to {
-                        opacity: 1;
-                        transform: translateY(0);
-                    }
+                    from { opacity: 0; transform: translateY(10px); }
+                    to { opacity: 1; transform: translateY(0); }
                 }
-
-                /* Reuse existing statement styles but refine spacing */
-                .statement-group {
-                    margin-bottom: var(--space-md);
-                }
-                
-                .statement-group-title {
-                    font-size: 0.9rem;
-                    text-transform: uppercase;
-                    /* Default color overwritten by specific classes */
-                    color: var(--color-text-secondary); 
-                    margin-bottom: var(--space-xs);
-                    font-weight: 800; /* Bold as requested */
-                    border-bottom: 2px solid currentColor; /* Stronger divider */
-                    display: inline-block;
-                    opacity: 0.9;
-                }
-                
-                .statement-group-title.text-primary { color: #1e40af; } /* Dark Blue */
-                .statement-group-title.text-error { color: #991b1b; } /* Dark Red */
-                .statement-group-title.text-success { color: #6d28d9; } /* Dark Violet */
-
                 .statement-grand-total {
-                    display: flex;
-                    justify-content: space-between;
-                    font-size: 1.2rem;
-                    font-weight: 800;
+                    display: flex; justify-content: space-between;
+                    font-size: 1.2rem; font-weight: 800;
                 }
-
-                .statement-row {
-                    display: flex;
-                    justify-content: space-between;
-                    padding: 6px 12px;
-                    border-bottom: 1px dashed rgba(203, 213, 225, 0.5);
-                    font-size: 0.95rem;
-                    border-radius: 4px;
-                    transition: background-color 0.15s ease;
-                }
-                
-                .statement-row:hover {
-                    background-color: rgba(248, 250, 252, 0.5);
-                }
-
-                .statement-row:last-child {
-                    border-bottom: none;
-                }
-
-                .statement-row-total {
-                    font-weight: 700; /* Bold totals */
-                    font-size: 0.95rem;
-                    border-top: 1px solid rgba(0,0,0,0.1);
-                    border-bottom: none;
-                    margin-top: 4px;
-                    padding-top: 8px;
-                    padding-bottom: 8px; /* Added padding bottom */
-                    color: #334155;
-                    background: rgba(241, 245, 249, 0.5); /* Default tint */
-                }
-
-                /* Themed Totals Backgrounds */
-                .statement-row-total.theme-primary { background: rgba(37, 99, 235, 0.04); color: #1e3a8a; }
-                .statement-row-total.theme-error { background: rgba(220, 38, 38, 0.04); color: #7f1d1d; }
-                .statement-row-total.theme-success { background: rgba(124, 58, 237, 0.04); color: #5b21b6; }
-
-                .statement-row-total:hover {
-                    background: rgba(0,0,0,0.02); /* Subtle hover override check */
-                }
-
                 .btn-download {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 12px;
+                    display: inline-flex; align-items: center; gap: 12px;
                     background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
-                    color: white;
-                    padding: 12px 28px;
-                    border-radius: 9999px;
-                    font-weight: 600;
-                    letter-spacing: 0.02em;
-                    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2), 0 2px 4px -1px rgba(37, 99, 235, 0.1);
-                    transition: all 0.2s ease;
-                    border: 1px solid rgba(255,255,255,0.1);
-                    cursor: pointer;
-                    font-size: 1rem;
+                    color: white; padding: 12px 28px; border-radius: 9999px;
+                    font-weight: 600; font-size: 1rem; cursor: pointer;
+                    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+                    transition: all 0.2s ease; border: none;
                 }
-                
                 .btn-download:hover:not(:disabled) {
                     transform: translateY(-1px);
-                    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3), 0 4px 6px -2px rgba(37, 99, 235, 0.15);
+                    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
                     filter: brightness(1.05);
                 }
-
-                .btn-download:active:not(:disabled) {
-                    transform: translateY(1px);
-                    box-shadow: 0 2px 4px -1px rgba(37, 99, 235, 0.2);
-                }
-
-                .btn-download:disabled {
-                    opacity: 0.7;
-                    cursor: not-allowed;
-                    filter: grayscale(0.5);
-                }
-                    padding: var(--space-sm);
-                    background: var(--color-bg-surface-hover);
-                    border-radius: var(--radius-sm);
-                    border: 1px solid var(--color-border);
-                }
+                .btn-download:disabled { opacity: 0.7; cursor: not-allowed; filter: grayscale(0.5); }
             `}</style>
         </div>
     )
