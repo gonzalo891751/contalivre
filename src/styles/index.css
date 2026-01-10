@@ -4258,3 +4258,9 @@ tr:hover .account-row-actions {
     transform: none;
   }
 }
+/* PDF Export Styles */
+.is-exporting [data-export-exclude='true'] { display: none !important; }
+.pdf-only { display: none; }
+.is-exporting .pdf-only { display: block; }
+.is-exporting body { background: white; }
+.is-exporting .card { box-shadow: none !important; border: 1px solid #ddd !important; break-inside: avoid; }

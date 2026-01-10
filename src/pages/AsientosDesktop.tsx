@@ -1,12 +1,14 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
-import { createEntry, getTodayISO, createEmptyLine } from '../storage/entries'
+import { createEntry, updateEntry, getTodayISO, createEmptyLine } from '../storage/entries'
 import { getPostableAccounts } from '../storage/accounts'
 import { validateEntry, sumDebits, sumCredits } from '../core/validation'
 import type { JournalEntry, EntryLine } from '../core/models'
 import { HelpPanel } from '../ui/HelpPanel'
 import AccountSearchSelect, { AccountSearchSelectRef } from '../ui/AccountSearchSelect'
+import jsPDF from 'jspdf'
+import html2canvas from 'html2canvas'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Number formatting utilities for Argentine format (miles con punto)
@@ -37,6 +39,8 @@ export default function AsientosDesktop() {
     const [lines, setLines] = useState<EntryLine[]>([createEmptyLine(), createEmptyLine()])
     const [saveError, setSaveError] = useState('')
     const [saveSuccess, setSaveSuccess] = useState(false)
+    const [editingEntryId, setEditingEntryId] = useState<string | null>(null)
+    const [isExporting, setIsExporting] = useState(false)
 
     // Validation UX state
     const [hasAttemptedSave, setHasAttemptedSave] = useState(false)
@@ -44,8 +48,10 @@ export default function AsientosDesktop() {
     // Delete confirmation state
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
     const [deleteSuccess, setDeleteSuccess] = useState(false)
+    const [editingEntryData, setEditingEntryData] = useState<JournalEntry | null>(null)
 
     // Refs for focus management (grid)
+    const dateRef = useRef<HTMLInputElement>(null)
     const lineRefs = useRef<Array<{
         account: AccountSearchSelectRef | null
         debit: HTMLInputElement | null
@@ -53,9 +59,11 @@ export default function AsientosDesktop() {
         description: HTMLInputElement | null
     }>>([])
 
+    const entriesRef = useRef<HTMLDivElement>(null)
+
     // Validation
     const draftEntry: JournalEntry = {
-        id: 'draft',
+        id: editingEntryId || 'draft',
         date,
         memo,
         lines: lines.filter((l) => l.accountId),
@@ -66,7 +74,7 @@ export default function AsientosDesktop() {
             return { ok: false, errors: ['Necesitás al menos 2 líneas con cuenta'], diff: 0 }
         }
         return validateEntry(draftEntry)
-    }, [date, memo, lines])
+    }, [date, memo, lines, editingEntryId])
 
     const totalDebit = sumDebits(draftEntry)
     const totalCredit = sumCredits(draftEntry)
@@ -78,20 +86,13 @@ export default function AsientosDesktop() {
             l.debit === 0 &&
             l.credit === 0 &&
             !l.description
-        )
-    }, [memo, lines])
+        ) && !editingEntryId
+    }, [memo, lines, editingEntryId])
 
-    const showErrors = hasAttemptedSave || !isPristine
+    const showErrors = hasAttemptedSave || (!isPristine && !editingEntryId)
 
-    // Autofocus on first account search when page loads
-    useEffect(() => {
-        if (accounts && accounts.length > 0) {
-            const timer = setTimeout(() => {
-                lineRefs.current[0]?.account?.focus()
-            }, 100)
-            return () => clearTimeout(timer)
-        }
-    }, [accounts])
+    // Autofocus removed as per UX requirement
+
 
     const updateLine = (index: number, updates: Partial<EntryLine>) => {
         const newLines = [...lines]
@@ -130,6 +131,39 @@ export default function AsientosDesktop() {
         setSaveError('')
         setSaveSuccess(false)
         setHasAttemptedSave(false)
+        setEditingEntryId(null)
+        setEditingEntryData(null)
+    }
+
+    const handleEdit = (entry: JournalEntry) => {
+        setEditingEntryId(entry.id)
+        setEditingEntryData(JSON.parse(JSON.stringify(entry))) // Deep clone
+    }
+
+    const handleCancelEdit = () => {
+        setEditingEntryId(null)
+        setEditingEntryData(null)
+    }
+
+    const handleSaveEditedEntry = async () => {
+        if (!editingEntryData || !editingEntryId) return
+
+        // Validate
+        const totalDebit = editingEntryData.lines.reduce((acc, l) => acc + (l.debit || 0), 0)
+        const totalCredit = editingEntryData.lines.reduce((acc, l) => acc + (l.credit || 0), 0)
+        const diff = Math.abs(totalDebit - totalCredit)
+        const isBalanced = diff < 0.01
+
+        if (!isBalanced) return // Should be blocked by UI, but double check
+
+        try {
+            await updateEntry(editingEntryId, editingEntryData)
+            setEditingEntryId(null)
+            setEditingEntryData(null)
+        } catch (error) {
+            console.error('Failed to update entry', error)
+            alert('Error al guardar los cambios: ' + error)
+        }
     }
 
     const handleSave = async () => {
@@ -142,13 +176,24 @@ export default function AsientosDesktop() {
         }
 
         try {
-            await createEntry({
+            const entryData = {
                 date,
                 memo,
                 lines: lines.filter((l) => l.accountId),
-            })
-            setSaveSuccess(true)
-            resetForm()
+            }
+
+            if (editingEntryId) {
+                await updateEntry(editingEntryId, entryData)
+                setSaveSuccess(true)
+                resetForm()
+            } else {
+                await createEntry(entryData)
+                setSaveSuccess(true)
+                resetForm()
+                // Auto-focus Date after successful creation
+                requestAnimationFrame(() => dateRef.current?.focus())
+            }
+
             setTimeout(() => setSaveSuccess(false), 3000)
         } catch (err) {
             setSaveError(err instanceof Error ? err.message : 'Error al guardar')
@@ -233,11 +278,11 @@ export default function AsientosDesktop() {
         }
         window.addEventListener('keydown', handleGlobalStart)
         return () => window.removeEventListener('keydown', handleGlobalStart)
-    }, [validation])
+    }, [validation, handleSave]) // Added handleSave to dependencies
 
     const getAccountName = (accountId: string) => {
         const acc = accounts?.find((a) => a.id === accountId)
-        return acc ? `${acc.code} - ${acc.name}` : ''
+        return acc ? acc.name : 'Cuenta desconocida'
     }
 
     const formatDate = (dateStr: string) => {
@@ -259,46 +304,48 @@ export default function AsientosDesktop() {
         }
     }
 
-    const handleDownloadCSV = () => {
-        if (!entries || entries.length === 0) return
 
-        const headers = ['Nro', 'Fecha', 'Concepto', 'Cuenta', 'Debe', 'Haber', 'Detalle']
-        const rows: string[][] = []
+    const handleDownloadPDF = async () => {
+        if (!entriesRef.current) return
+        setIsExporting(true)
+        document.documentElement.classList.add('is-exporting')
 
-        entries.forEach((entry, entryIndex) => {
-            entry.lines.forEach((line) => {
-                rows.push([
-                    String(entryIndex + 1),
-                    formatDate(entry.date),
-                    entry.memo || '',
-                    getAccountName(line.accountId),
-                    line.debit > 0 ? formatAmount(line.debit) : '',
-                    line.credit > 0 ? formatAmount(line.credit) : '',
-                    line.description || ''
-                ])
+        try {
+            // Wait for state to propagate (hide actions)
+            await new Promise(r => setTimeout(r, 100))
+
+            const canvas = await html2canvas(entriesRef.current, {
+                scale: 2, // High resolution
+                backgroundColor: '#ffffff',
+                ignoreElements: (element) => {
+                    return element.getAttribute('data-export-exclude') === 'true' || element.classList.contains('no-export')
+                }
             })
-        })
 
-        const csvContent = [
-            headers.join(';'),
-            ...rows.map(row => row.map(cell => `"${cell}"`).join(';'))
-        ].join('\n')
+            const imgData = canvas.toDataURL('image/png')
+            const pdf = new jsPDF('p', 'mm', 'a4')
+            const pdfWidth = pdf.internal.pageSize.getWidth()
+            const pdfHeight = (canvas.height * pdfWidth) / canvas.width
 
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-        const url = URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        const today = new Date().toISOString().split('T')[0]
-        link.href = url
-        link.download = `libro-diario_${today}.csv`
-        link.click()
-        URL.revokeObjectURL(url)
+            // Image (Header is now inside)
+            pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight)
+            pdf.save(`libro_diario_${getTodayISO()}.pdf`)
+
+        } catch (err) {
+            console.error('Error exporting PDF:', err)
+        } finally {
+            setIsExporting(false)
+            document.documentElement.classList.remove('is-exporting')
+        }
     }
 
     return (
         <div>
             <header className="page-header">
-                <h1 className="page-title">Libro Diario</h1>
-                <p className="page-subtitle">Registrá asientos contables y mirá el historial.</p>
+                <div>
+                    <h1 className="page-title">Libro Diario</h1>
+                    <p className="page-subtitle">Registro cronológico de asientos.</p>
+                </div>
             </header>
 
             <HelpPanel title="¿Cómo cargo un asiento?">
@@ -310,19 +357,20 @@ export default function AsientosDesktop() {
                     <strong>Regla de oro:</strong> La suma del Debe siempre tiene que ser igual a la suma
                     del Haber. Si no cuadra, el asiento no se puede guardar.
                 </p>
-                <p>
-                    <em>Ejemplo:</em> Si comprás mercaderías en efectivo por $1000, aumenta Mercaderías
-                    (Debe) y disminuye Caja (Haber).
-                </p>
             </HelpPanel>
 
             {/* Entry Editor */}
-            <div className="entry-editor" style={{ marginBottom: 'var(--space-xl)' }}>
-                <h3 style={{ marginBottom: 'var(--space-lg)' }}>Nuevo asiento</h3>
+            <div className={`entry-editor ${editingEntryId ? 'editing-mode' : ''}`} style={{ marginBottom: 'var(--space-xl)', borderColor: editingEntryId ? 'var(--color-primary)' : '' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+                    <h3>{editingEntryId ? '✏️ Editando asiento' : 'Nuevo asiento'}</h3>
+                    {editingEntryId && (
+                        <span className="badge badge-primary">Modo Edición</span>
+                    )}
+                </div>
 
                 {saveSuccess && (
                     <div className="alert alert-success" style={{ marginBottom: 'var(--space-md)' }}>
-                        ✓ Asiento guardado correctamente
+                        ✓ {editingEntryId ? 'Cambios guardados correctamente' : 'Asiento guardado correctamente'}
                     </div>
                 )}
 
@@ -338,6 +386,7 @@ export default function AsientosDesktop() {
                             Fecha
                         </label>
                         <input
+                            ref={dateRef}
                             id="date"
                             type="date"
                             className="form-input"
@@ -473,8 +522,8 @@ export default function AsientosDesktop() {
                 )}
 
                 <div className="entry-actions">
-                    <button type="button" className="btn btn-secondary" onClick={resetForm}>
-                        🗑️ Limpiar
+                    <button type="button" className="btn btn-secondary" onClick={editingEntryId ? handleCancelEdit : resetForm}>
+                        {editingEntryId ? 'Cancelar edición' : '🗑️ Limpiar'}
                     </button>
                     <button
                         type="button"
@@ -482,7 +531,7 @@ export default function AsientosDesktop() {
                         onClick={handleSave}
                         disabled={!validation.ok}
                     >
-                        💾 Guardar asiento
+                        {editingEntryId ? '💾 Guardar cambios' : '💾 Guardar asiento'}
                     </button>
                 </div>
 
@@ -523,70 +572,356 @@ export default function AsientosDesktop() {
                 </div>
             )}
 
-            {/* Entry History */}
-            <div className="card">
-                <div className="card-header">
-                    <h3 className="card-title">Asientos registrados</h3>
-                    {entries && entries.length > 0 && (
-                        <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={handleDownloadCSV}
-                        >
-                            📥 Descargar libro diario
-                        </button>
+            {/* Entry History - Final Aesthetic Polish */}
+            <div ref={entriesRef} style={{ width: '100%' }}>
+                <div style={{ maxWidth: '980px', margin: '0 auto', width: '100%' }}>
+                    {/* PDF Legal Header */}
+                    <div className="pdf-only" style={{ marginBottom: '20px', padding: '20px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', borderRadius: '4px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #ccc', paddingBottom: '10px', marginBottom: '15px' }}>
+                            <div>
+                                <h1 style={{ fontSize: '24px', fontWeight: '800', margin: 0, textTransform: 'uppercase', color: '#1e293b' }}>LIBRO DIARIO</h1>
+                                <div style={{ fontSize: '14px', color: '#64748b' }}>Asientos registrados</div>
+                            </div>
+                            <div style={{ textAlign: 'right', fontSize: '12px', color: '#64748b' }}>
+                                Emitido: {new Date().toLocaleDateString('es-AR')}
+                            </div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', fontSize: '12px', color: '#334155' }}>
+                            <div>
+                                <div style={{ marginBottom: '4px' }}><strong>Ente:</strong> ______________________</div>
+                                <div style={{ marginBottom: '4px' }}><strong>Domicilio:</strong> ______________________</div>
+                                <div><strong>Condición IVA:</strong> Resp. Inscripto</div>
+                            </div>
+                            <div>
+                                <div style={{ marginBottom: '4px' }}><strong>CUIT:</strong> ______________________</div>
+                                <div style={{ marginBottom: '4px' }}><strong>Período:</strong> Del __/__/____ al __/__/____</div>
+                                <div><strong>Moneda:</strong> Pesos Argentinos (ARS)</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div data-export-exclude="true" style={{ marginBottom: 'var(--space-md)', paddingLeft: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h3 style={{ fontSize: '1.2rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>Asientos registrados</h3>
+                        {entries && entries.length > 0 && (
+                            <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={handleDownloadPDF}
+                                disabled={isExporting}
+                                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                            >
+                                {isExporting ? 'Generando...' : (
+                                    <>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                        </svg>
+                                        Descargar PDF
+                                    </>
+                                )}
+                            </button>
+                        )}
+                    </div>
+
+                    {entries?.length === 0 ? (
+                        <div className="card empty-state">
+                            <div className="empty-state-icon">📝</div>
+                            <p>Todavía no hay asientos. ¡Cargá el primero arriba!</p>
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                            {entries?.map((entry, index) => {
+                                const entryNumber = entries.length - index
+                                const isEditing = editingEntryId === entry.id
+
+                                // View Mode Data
+                                const displayEntry = isEditing && editingEntryData ? editingEntryData : entry
+
+                                // Inline Edit Logic helpers
+                                const totalDebit = sumDebits(displayEntry)
+                                const totalCredit = sumCredits(displayEntry)
+                                const diff = totalDebit - totalCredit
+                                const isBalanced = Math.abs(diff) < 0.01
+                                const isValid = isBalanced && displayEntry.lines.length >= 2 && displayEntry.lines.every(l => l.accountId && (l.debit > 0 || l.credit > 0))
+
+                                return (
+                                    <div key={entry.id} className="card" style={{ padding: '0', overflow: 'hidden', border: isEditing ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', boxShadow: isEditing ? 'var(--shadow-md)' : 'var(--shadow-sm)' }}>
+
+                                        {/* Header Row */}
+                                        <div style={{
+                                            padding: '12px 20px',
+                                            background: 'var(--color-bg-subtle)',
+                                            borderBottom: '1px solid var(--color-border)',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            gap: '12px'
+                                        }}>
+                                            {isEditing ? (
+                                                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flex: 1 }}>
+                                                    <span style={{ fontWeight: 600, fontSize: '0.95em', whiteSpace: 'nowrap' }}>Asiento N° {entryNumber}</span>
+                                                    <input
+                                                        type="date"
+                                                        className="form-input form-input-sm"
+                                                        value={displayEntry.date}
+                                                        onChange={e => setEditingEntryData({ ...displayEntry, date: e.target.value })}
+                                                        style={{ width: 'auto' }}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        className="form-input form-input-sm"
+                                                        placeholder="Concepto..."
+                                                        value={displayEntry.memo}
+                                                        onChange={e => setEditingEntryData({ ...displayEntry, memo: e.target.value })}
+                                                        style={{ flex: 1 }}
+                                                    />
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.95em' }}>
+                                                    <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>
+                                                        Asiento N° {entryNumber}
+                                                    </span>
+                                                    <span style={{ color: 'var(--color-border-dark)', opacity: 0.5 }}>|</span>
+                                                    <span style={{ color: 'var(--color-text)' }}>
+                                                        {formatDate(entry.date)}
+                                                    </span>
+                                                    {entry.memo && (
+                                                        <>
+                                                            <span style={{ color: 'var(--color-border-dark)', opacity: 0.5 }}>|</span>
+                                                            <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                                                                {entry.memo}
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            <div className="no-export" style={{ display: 'flex', gap: '6px' }}>
+                                                {isEditing ? (
+                                                    <>
+                                                        <button
+                                                            className="btn btn-secondary btn-sm"
+                                                            onClick={handleCancelEdit}
+                                                            title="Cancelar edición"
+                                                        >
+                                                            Cancelar
+                                                        </button>
+                                                        <button
+                                                            className="btn btn-primary btn-sm"
+                                                            onClick={handleSaveEditedEntry}
+                                                            disabled={!isValid}
+                                                            title={!isValid ? "El asiento debe cuadrar y tener al menos 2 líneas completas" : "Guardar cambios"}
+                                                        >
+                                                            Guardar
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    !isExporting && (
+                                                        <>
+                                                            <button
+                                                                className="btn btn-secondary btn-sm"
+                                                                onClick={() => handleEdit(entry)}
+                                                                disabled={editingEntryId !== null} // Disable other edits
+                                                                title="Editar asiento"
+                                                                style={{ padding: '4px 8px', fontSize: '0.8em', opacity: editingEntryId !== null ? 0.3 : 1 }}
+                                                            >
+                                                                ✏️
+                                                            </button>
+                                                            <button
+                                                                className="btn btn-danger-soft btn-sm"
+                                                                onClick={() => setDeleteConfirmId(entry.id)}
+                                                                disabled={editingEntryId !== null}
+                                                                title="Eliminar asiento"
+                                                                style={{ padding: '4px 8px', fontSize: '0.8em', opacity: editingEntryId !== null ? 0.3 : 1 }}
+                                                            >
+                                                                🗑️
+                                                            </button>
+                                                        </>
+                                                    )
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Table Header - Inside Card */}
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: isEditing ? '1fr 120px 120px 40px' : '1fr 130px 130px',
+                                            gap: '12px',
+                                            padding: '8px 20px 6px',
+                                            borderBottom: '1px solid rgba(0,0,0,0.03)'
+                                        }}>
+                                            <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cuenta</div>
+                                            <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>Debe</div>
+                                            <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>Haber</div>
+                                        </div>
+
+                                        {/* Lines */}
+                                        <div style={{ padding: '0' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                {displayEntry.lines.map((l, i) => {
+                                                    const isCredit = l.credit > 0
+
+                                                    if (isEditing) {
+                                                        // Edit Mode Line
+                                                        return (
+                                                            <div key={i} style={{
+                                                                display: 'grid',
+                                                                gridTemplateColumns: '1fr 120px 120px 40px',
+                                                                gap: '12px',
+                                                                alignItems: 'center',
+                                                                padding: '8px 20px',
+                                                                borderBottom: '1px solid rgba(0,0,0,0.04)',
+                                                                background: '#fff'
+                                                            }}>
+                                                                <AccountSearchSelect
+                                                                    accounts={accounts || []}
+                                                                    value={l.accountId}
+                                                                    onChange={(val) => {
+                                                                        const newLines = [...displayEntry.lines]
+                                                                        newLines[i] = { ...l, accountId: val }
+                                                                        setEditingEntryData({ ...displayEntry, lines: newLines })
+                                                                    }}
+                                                                />
+                                                                <input
+                                                                    type="text"
+                                                                    className="form-input form-input-sm"
+                                                                    style={{ textAlign: 'right' }}
+                                                                    value={l.debit > 0 ? formatARNumber(l.debit) : ''}
+                                                                    onChange={(e) => {
+                                                                        const val = parseARNumber(e.target.value)
+                                                                        const newLines = [...displayEntry.lines]
+                                                                        newLines[i] = { ...l, debit: val, credit: 0 } // Mutual exclusion
+                                                                        setEditingEntryData({ ...displayEntry, lines: newLines })
+                                                                    }}
+                                                                    placeholder="0,00"
+                                                                />
+                                                                <input
+                                                                    type="text"
+                                                                    className="form-input form-input-sm"
+                                                                    style={{ textAlign: 'right' }}
+                                                                    value={l.credit > 0 ? formatARNumber(l.credit) : ''}
+                                                                    onChange={(e) => {
+                                                                        const val = parseARNumber(e.target.value)
+                                                                        const newLines = [...displayEntry.lines]
+                                                                        newLines[i] = { ...l, credit: val, debit: 0 } // Mutual exclusion
+                                                                        setEditingEntryData({ ...displayEntry, lines: newLines })
+                                                                    }}
+                                                                    placeholder="0,00"
+                                                                />
+                                                                <button
+                                                                    className="btn btn-icon btn-danger-soft btn-sm"
+                                                                    onClick={() => {
+                                                                        const newLines = displayEntry.lines.filter((_, idx) => idx !== i)
+                                                                        setEditingEntryData({ ...displayEntry, lines: newLines })
+                                                                    }}
+                                                                    tabIndex={-1}
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </div>
+                                                        )
+                                                    }
+
+                                                    // View Mode Line - Classic Arrow Style
+                                                    return (
+                                                        <div key={i} style={{
+                                                            display: 'grid',
+                                                            gridTemplateColumns: '1fr 130px 130px',
+                                                            gap: '12px',
+                                                            alignItems: 'center',
+                                                            padding: '8px 20px',
+                                                            borderBottom: '1px solid rgba(0,0,0,0.04)',
+                                                            background: '#fff'
+                                                        }}>
+                                                            {/* Account Name */}
+                                                            <div style={{ paddingLeft: isCredit ? '24px' : '0', display: 'flex', alignItems: 'center' }}>
+                                                                {isCredit && (
+                                                                    <span style={{
+                                                                        color: 'var(--color-border-dark)',
+                                                                        opacity: 0.6,
+                                                                        marginRight: '8px',
+                                                                        fontSize: '1em',
+                                                                        transform: 'translateY(-1px)'
+                                                                    }}>→</span>
+                                                                )}
+                                                                <div>
+                                                                    <div style={{ fontWeight: 500, fontSize: '0.95rem', color: 'var(--color-text)' }}>
+                                                                        {getAccountName(l.accountId)}
+                                                                    </div>
+                                                                    {l.description && (
+                                                                        <div style={{ fontSize: '0.8em', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                                                            {l.description}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Debit */}
+                                                            <div style={{ textAlign: 'right', fontSize: '0.95em', color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
+                                                                {l.debit > 0 ? (
+                                                                    <span>{formatAmount(l.debit)}</span>
+                                                                ) : ''}
+                                                            </div>
+
+                                                            {/* Credit */}
+                                                            <div style={{ textAlign: 'right', fontSize: '0.95em', color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
+                                                                {l.credit > 0 ? (
+                                                                    <span>{formatAmount(l.credit)}</span>
+                                                                ) : ''}
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })}
+
+                                                {isEditing && (
+                                                    <div style={{ padding: '8px 20px' }}>
+                                                        <button
+                                                            className="btn btn-secondary btn-sm"
+                                                            style={{ width: '100%', borderStyle: 'dashed' }}
+                                                            onClick={() => {
+                                                                setEditingEntryData({
+                                                                    ...displayEntry,
+                                                                    lines: [...displayEntry.lines, createEmptyLine()]
+                                                                })
+                                                            }}
+                                                        >
+                                                            + Agregar línea
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Footer Totals */}
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: isEditing ? '1fr 120px 120px 40px' : '1fr 130px 130px',
+                                            gap: '12px',
+                                            padding: '10px 20px',
+                                            background: 'rgba(15,23,42,0.02)',
+                                            borderTop: '1px solid var(--color-border-light)',
+                                            alignItems: 'center'
+                                        }}>
+                                            <div style={{ fontSize: '0.85em', fontWeight: 600, color: 'var(--color-text-muted)' }}>
+                                                {isEditing && !isBalanced ? (
+                                                    <span style={{ color: 'var(--color-danger)', background: '#fee2e2', padding: '2px 8px', borderRadius: '12px', border: '1px solid #fecaca' }}>
+                                                        Diferencia: ${formatAmount(Math.abs(diff))}
+                                                    </span>
+                                                ) : 'Totales'}
+                                            </div>
+                                            <div style={{ textAlign: 'right', fontSize: '0.95em', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                                                ${formatAmount(totalDebit)}
+                                            </div>
+                                            <div style={{ textAlign: 'right', fontSize: '0.95em', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                                                ${formatAmount(totalCredit)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
                     )}
                 </div>
-
-                {entries?.length === 0 ? (
-                    <div className="empty-state">
-                        <div className="empty-state-icon">📝</div>
-                        <p>Todavía no hay asientos. ¡Cargá el primero arriba!</p>
-                    </div>
-                ) : (
-                    <div className="table-container">
-                        <table className="table entries-table">
-                            <thead>
-                                <tr>
-                                    <th>Fecha</th>
-                                    <th>Concepto</th>
-                                    <th className="text-right">Debe</th>
-                                    <th className="text-right">Haber</th>
-                                    <th className="text-center">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {entries?.map((entry) => (
-                                    <tr key={entry.id}>
-                                        <td>{formatDate(entry.date)}</td>
-                                        <td>
-                                            <strong>{entry.memo || '(sin concepto)'}</strong>
-                                            <div className="entry-lines-detail">
-                                                {entry.lines.map((l, i) => (
-                                                    <div key={i}>
-                                                        {getAccountName(l.accountId)}: {l.debit > 0 ? `D $${formatAmount(l.debit)}` : `H $${formatAmount(l.credit)}`}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </td>
-                                        <td className="table-number">${formatAmount(sumDebits(entry))}</td>
-                                        <td className="table-number">${formatAmount(sumCredits(entry))}</td>
-                                        <td className="text-center">
-                                            <button
-                                                type="button"
-                                                className="btn btn-danger-soft btn-sm"
-                                                onClick={() => setDeleteConfirmId(entry.id)}
-                                                title="Eliminar asiento"
-                                            >
-                                                🗑️
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
             </div>
 
             {/* Delete Confirmation Modal */}
