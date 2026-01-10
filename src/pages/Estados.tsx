@@ -4,6 +4,7 @@ import { db } from '../storage/db'
 import { computeLedger } from '../core/ledger'
 import { computeTrialBalance } from '../core/balance'
 import { computeStatements } from '../core/statements'
+import { excludeClosingEntries } from '../utils/resultsStatement'
 import { HelpPanel } from '../ui/HelpPanel'
 import { EquationBar } from './estados/EquationBar'
 import SegmentedTabs from '../ui/SegmentedTabs'
@@ -97,7 +98,11 @@ export default function Estados() {
 
     const statements = useMemo(() => {
         if (!accounts || !entries || entries.length === 0) return null
-        const ledger = computeLedger(entries, accounts)
+
+        // Filter closing entries (Task 3)
+        const entriesWithoutClosing = excludeClosingEntries(entries, accounts)
+
+        const ledger = computeLedger(entriesWithoutClosing, accounts)
         const trialBalance = computeTrialBalance(ledger, accounts)
         return computeStatements(trialBalance, accounts)
     }, [accounts, entries])
@@ -176,23 +181,20 @@ export default function Estados() {
             <div style={{ marginTop: 'var(--space-lg)' }}>
                 {viewMode === 'ESP' && (
                     <div className="animate-slide-up">
-                        {/* Wrap content for PDF Capture */}
-                        <div ref={espRef} style={{ background: '#f8fafc', padding: '24px', borderRadius: '8px' }}>
-                            <h2 className="text-center text-xl font-bold text-slate-700 mb-6 hidden-print-header">Estado de Situación Patrimonial</h2>
+                        {/* 1. PDF Capture Container (Wraps ONLY the statement content) */}
+                        <div ref={espRef} style={{ background: '#f8fafc', padding: '32px', borderRadius: '8px' }}>
+                            <h2 className="text-center text-xl font-bold text-slate-700 mb-8 hidden-print-header" style={{ letterSpacing: '0.05em' }}>Estado de Situación Patrimonial</h2>
 
                             {/* 2-Column Grid Layout */}
                             <div className="esp-grid">
-
                                 {/* Left Column: ACTIVO */}
                                 <div className="esp-column">
                                     <div className="card h-full">
                                         <h2 className="section-title text-primary">ACTIVO</h2>
-
                                         <div className="esp-section-content">
                                             <SectionDisplay section={balanceSheet.currentAssets} showNetTotal colorTheme="primary" />
                                             <SectionDisplay section={balanceSheet.nonCurrentAssets} showNetTotal colorTheme="primary" />
                                         </div>
-
                                         <div className="statement-grand-total mt-auto">
                                             <span>TOTAL ACTIVO</span>
                                             <span>${formatAmount(balanceSheet.totalAssets)}</span>
@@ -205,12 +207,10 @@ export default function Estados() {
                                     {/* PASIVO */}
                                     <div className="card">
                                         <h2 className="section-title text-error">PASIVO</h2>
-
                                         <div className="esp-section-content">
                                             <SectionDisplay section={balanceSheet.currentLiabilities} showNetTotal colorTheme="error" />
                                             <SectionDisplay section={balanceSheet.nonCurrentLiabilities} showNetTotal colorTheme="error" />
                                         </div>
-
                                         <div className="statement-grand-total mt-4">
                                             <span>TOTAL PASIVO</span>
                                             <span>${formatAmount(balanceSheet.totalLiabilities)}</span>
@@ -220,12 +220,9 @@ export default function Estados() {
                                     {/* PATRIMONIO NETO */}
                                     <div className="card flex-1">
                                         <h2 className="section-title text-success">PATRIMONIO NETO</h2>
-
                                         <div className="esp-section-content">
-                                            {/* Hide the duplicate "Patrimonio Neto" subtitle since the card header already says it */}
                                             <SectionDisplay section={balanceSheet.equity} showNetTotal colorTheme="success" hideTitle />
                                         </div>
-
                                         <div className="statement-grand-total mt-auto">
                                             <span>TOTAL PATRIMONIO NETO</span>
                                             <span>${formatAmount(balanceSheet.totalEquity)}</span>
@@ -233,23 +230,33 @@ export default function Estados() {
                                     </div>
                                 </div>
                             </div>
-
-                            {/* Equation Validation Bar */}
-                            <EquationBar
-                                totalAssets={balanceSheet.totalAssets}
-                                totalLiabilities={balanceSheet.totalLiabilities}
-                                totalEquity={balanceSheet.totalEquity}
-                            />
                         </div>
 
-                        {/* Download Button */}
-                        <div className="flex justify-center mt-8">
+                        {/* 2. Equation Bar (OUTSIDE PDF REF) */}
+                        <EquationBar
+                            totalAssets={balanceSheet.totalAssets}
+                            totalLiabilities={balanceSheet.totalLiabilities}
+                            totalEquity={balanceSheet.totalEquity}
+                        />
+
+                        {/* 3. Download Button (OUTSIDE PDF REF) */}
+                        <div className="flex justify-center mt-10 mb-8">
                             <button
                                 onClick={handleDownload}
                                 disabled={isExporting}
-                                className="btn-primary flex items-center gap-2 px-6 py-3 rounded-full shadow-lg hover:shadow-xl transition-all"
+                                className="btn-download"
                             >
-                                {isExporting ? 'Generando PDF...' : '📥 Descargar Estado de Situación Patrimonial'}
+                                {isExporting ? (
+                                    <>
+                                        <span className="animate-spin text-lg">⏳</span>
+                                        <span>Generando PDF...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="text-xl">📥</span>
+                                        <span>Descargar PDF</span>
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
@@ -315,13 +322,23 @@ export default function Estados() {
                         </div>
 
                         {/* Download Button */}
-                        <div className="flex justify-center mt-8">
+                        <div className="flex justify-center mt-10 mb-8">
                             <button
                                 onClick={handleDownload}
                                 disabled={isExporting}
-                                className="btn-primary flex items-center gap-2 px-6 py-3 rounded-full shadow-lg hover:shadow-xl transition-all"
+                                className="btn-download"
                             >
-                                {isExporting ? 'Generando PDF...' : '📥 Descargar Estado de Resultados'}
+                                {isExporting ? (
+                                    <>
+                                        <span className="animate-spin text-lg">⏳</span>
+                                        <span>Generando PDF...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="text-xl">📥</span>
+                                        <span>Descargar PDF</span>
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
@@ -408,6 +425,13 @@ export default function Estados() {
                 .statement-group-title.text-error { color: #991b1b; } /* Dark Red */
                 .statement-group-title.text-success { color: #6d28d9; } /* Dark Violet */
 
+                .statement-grand-total {
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 1.2rem;
+                    font-weight: 800;
+                }
+
                 .statement-row {
                     display: flex;
                     justify-content: space-between;
@@ -447,11 +471,39 @@ export default function Estados() {
                     background: rgba(0,0,0,0.02); /* Subtle hover override check */
                 }
 
-                .statement-grand-total {
-                    display: flex;
-                    justify-content: space-between;
-                    font-size: 1.2rem;
-                    font-weight: 800;
+                .btn-download {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 12px;
+                    background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+                    color: white;
+                    padding: 12px 28px;
+                    border-radius: 9999px;
+                    font-weight: 600;
+                    letter-spacing: 0.02em;
+                    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2), 0 2px 4px -1px rgba(37, 99, 235, 0.1);
+                    transition: all 0.2s ease;
+                    border: 1px solid rgba(255,255,255,0.1);
+                    cursor: pointer;
+                    font-size: 1rem;
+                }
+                
+                .btn-download:hover:not(:disabled) {
+                    transform: translateY(-1px);
+                    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3), 0 4px 6px -2px rgba(37, 99, 235, 0.15);
+                    filter: brightness(1.05);
+                }
+
+                .btn-download:active:not(:disabled) {
+                    transform: translateY(1px);
+                    box-shadow: 0 2px 4px -1px rgba(37, 99, 235, 0.2);
+                }
+
+                .btn-download:disabled {
+                    opacity: 0.7;
+                    cursor: not-allowed;
+                    filter: grayscale(0.5);
+                }
                     padding: var(--space-sm);
                     background: var(--color-bg-surface-hover);
                     border-radius: var(--radius-sm);

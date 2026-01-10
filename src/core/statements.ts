@@ -223,84 +223,14 @@ function computeBalanceSheet(
  * +/- Otros resultados
  * = RESULTADO DEL EJERCICIO
  */
+import { computeRevisedIncomeStatement } from '../utils/resultsStatement'
+
+/**
+ * Calcula el Estado de Resultados (mejorado)
+ * Delega en la nueva lógica que maneja signos y split de rubros
+ */
 function computeIncomeStatement(trialBalance: TrialBalance): IncomeStatement {
-    const rows = trialBalance.rows.map((r) => ({
-        account: r.account,
-        balanceDebit: r.balanceDebit,
-        balanceCredit: r.balanceCredit,
-    }))
-
-    const groups = groupByStatementGroup(rows)
-
-    // Ventas
-    const sales = createSection('sales', 'Ingresos por ventas', groups, [
-        'SALES',
-        'OTHER_OPERATING_INCOME',
-    ])
-
-    // Costo de ventas
-    const cogs = createSection('cogs', 'Costo de ventas', groups, ['COGS'])
-
-    // Resultado bruto
-    const grossProfit = Math.round((sales.netTotal - Math.abs(cogs.netTotal)) * 100) / 100
-
-    // Gastos de administración
-    const adminExpenses = createSection('adminExpenses', 'Gastos de administración', groups, [
-        'ADMIN_EXPENSES',
-    ])
-
-    // Gastos de comercialización
-    const sellingExpenses = createSection('sellingExpenses', 'Gastos de comercialización', groups, [
-        'SELLING_EXPENSES',
-    ])
-
-    // Resultado operativo
-    const operatingIncome = Math.round(
-        (grossProfit - Math.abs(adminExpenses.netTotal) - Math.abs(sellingExpenses.netTotal)) * 100
-    ) / 100
-
-    // Resultados financieros
-    const financialIncome = createSection('financialIncome', 'Ingresos financieros', groups, [
-        'FINANCIAL_INCOME',
-    ])
-
-    const financialExpenses = createSection('financialExpenses', 'Gastos financieros', groups, [
-        'FINANCIAL_EXPENSES',
-    ])
-
-    const netFinancialResult = Math.round(
-        (financialIncome.netTotal - Math.abs(financialExpenses.netTotal)) * 100
-    ) / 100
-
-    // Otros resultados
-    const otherIncome = createSection('otherIncome', 'Otros ingresos', groups, ['OTHER_INCOME'])
-
-    const otherExpenses = createSection('otherExpenses', 'Otros gastos', groups, ['OTHER_EXPENSES'])
-
-    const netOtherResult = Math.round(
-        (otherIncome.netTotal - Math.abs(otherExpenses.netTotal)) * 100
-    ) / 100
-
-    // Resultado del ejercicio
-    const netIncome = Math.round(
-        (operatingIncome + netFinancialResult + netOtherResult) * 100
-    ) / 100
-
-    return {
-        sales,
-        cogs,
-        grossProfit,
-        adminExpenses,
-        sellingExpenses,
-        operatingIncome,
-        financialIncome,
-        financialExpenses,
-        netFinancialResult,
-        otherIncome,
-        otherExpenses,
-        netOtherResult,
-        netIncome,
-    }
+    return computeRevisedIncomeStatement(trialBalance)
 }
 
 /**

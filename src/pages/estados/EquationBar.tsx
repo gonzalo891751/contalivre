@@ -29,7 +29,7 @@ export function EquationBar({
                     <span className="equation-title">Ecuación Patrimonial</span>
                 </div>
 
-                {/* Body: Compact Grid */}
+                {/* Body: Compact Grid 3 Columns */}
                 <div className="equation-grid">
                     {/* Activo (Col 1) */}
                     <div className="metric-col">
@@ -42,21 +42,10 @@ export function EquationBar({
                         <span>=</span>
                     </div>
 
-                    {/* Pasivo (Col 3) */}
+                    {/* Pasivo + PN (Col 3) */}
                     <div className="metric-col">
-                        <span className="metric-label text-error">PASIVO</span>
-                        <span className="metric-value">${formatAmount(totalLiabilities)}</span>
-                    </div>
-
-                    {/* + (Col 4) */}
-                    <div className="symbol-col">
-                        <span>+</span>
-                    </div>
-
-                    {/* PN (Col 5) */}
-                    <div className="metric-col">
-                        <span className="metric-label text-success">PN</span>
-                        <span className="metric-value">${formatAmount(totalEquity)}</span>
+                        <span className="metric-label text-combined">PASIVO + PN</span>
+                        <span className="metric-value">${formatAmount(rightSide)}</span>
                     </div>
                 </div>
 
@@ -89,9 +78,9 @@ export function EquationBar({
                     backdrop-filter: blur(12px);
                     border: 1px solid rgba(226, 232, 240, 0.8);
                     border-radius: 16px;
-                    padding: 20px 32px;
+                    padding: 24px 32px;
                     width: 100%;
-                    max-width: 800px; /* Constrain width for compactness */
+                    max-width: 600px; /* Reduced width for compactness */
                     box-shadow: 
                         0 4px 6px -1px rgba(0, 0, 0, 0.05), 
                         0 2px 4px -1px rgba(0, 0, 0, 0.03);
@@ -129,51 +118,57 @@ export function EquationBar({
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    gap: 6px;
-                    margin-bottom: 16px;
-                    opacity: 0.7;
+                    gap: 8px;
+                    margin-bottom: 20px;
+                    opacity: 0.8;
+                    /* border-bottom: 1px solid rgba(0,0,0,0.05); Optional hierarchy line */
+                    padding-bottom: 8px;
                 }
                 
                 .equation-title {
-                    font-size: 0.75rem;
+                    font-size: 0.85rem;
                     text-transform: uppercase;
                     letter-spacing: 0.12em;
-                    font-weight: 600;
-                    color: #64748b;
+                    font-weight: 700;
+                    color: #475569;
+                }
+                
+                .equation-icon {
+                    font-size: 1.1em;
                 }
 
-                /* Compact Grid Layout */
+                /* Compact Grid Layout 3 Cols */
                 .equation-grid {
                     display: grid;
-                    grid-template-columns: 1fr auto 1fr auto 1fr;
-                    gap: 16px;
+                    grid-template-columns: 1fr auto 1fr;
+                    gap: 24px;
                     align-items: center; /* Vertical center alignment */
-                    margin-bottom: 20px;
+                    margin-bottom: 24px;
                 }
 
                 .metric-col {
                     display: flex;
                     flex-direction: column;
                     align-items: center;
-                    gap: 2px;
+                    gap: 4px;
                 }
 
                 .metric-label {
                     font-size: 0.8rem;
-                    font-weight: 700;
+                    font-weight: 800;
                     letter-spacing: 0.05em;
                 }
 
                 .metric-value {
-                    font-size: 1.6rem;
-                    font-weight: 700;
+                    font-size: 1.7rem; /* Slightly Larger */
+                    font-weight: 800;
                     color: #1e293b;
                     font-feature-settings: "tnum";
                     letter-spacing: -0.02em;
                 }
 
                 .symbol-col {
-                    font-size: 1.5rem;
+                    font-size: 1.8rem;
                     color: #94a3b8;
                     font-weight: 300;
                     opacity: 0.5;
@@ -181,8 +176,11 @@ export function EquationBar({
                 }
 
                 .text-primary { color: #2563EB; }
-                .text-error { color: #dc2626; } 
-                .text-success { color: #7C3AED; } 
+                .text-combined { 
+                    background: linear-gradient(90deg, #dc2626, #7C3AED);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                } 
 
                 .equation-footer {
                     display: flex;
@@ -193,9 +191,9 @@ export function EquationBar({
                     display: inline-flex;
                     align-items: center;
                     gap: 6px;
-                    padding: 4px 12px;
+                    padding: 4px 14px;
                     border-radius: 9999px;
-                    font-size: 0.8rem;
+                    font-size: 0.85rem;
                     font-weight: 600;
                     border: 1px solid transparent;
                 }
@@ -218,10 +216,6 @@ export function EquationBar({
                         grid-template-columns: 1fr;
                         gap: 12px;
                     }
-                    .symbol-col {
-                        display: none; /* Hide symbols on mobile stack for cleaner look, or rotate them */
-                    }
-                    /* Alternatively show them as small dividers */
                     .symbol-col {
                         display: flex;
                         justify-content: center;
