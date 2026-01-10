@@ -148,48 +148,42 @@ export default function Estados() {
                 <div className="statement">
                     <div className="statement-header">Estado de Situación Patrimonial</div>
                     <div className="statement-body">
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <div>
-                                {/* ACTIVO */}
-                                <div className="statement-section-title" style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', marginBottom: 'var(--space-md)' }}>
-                                    ACTIVO
-                                </div>
-
-                                <SectionDisplay section={balanceSheet.currentAssets} showNetTotal />
-                                <SectionDisplay section={balanceSheet.nonCurrentAssets} showNetTotal />
-
-                                <div className="statement-grand-total" style={{ marginTop: 'var(--space-md)' }}>
-                                    <span>TOTAL ACTIVO</span>
-                                    <span>${formatAmount(balanceSheet.totalAssets)}</span>
-                                </div>
-                            </div>
-
-                            <div className="flex flex-col gap-6">
-                                <div>
-                                    {/* PASIVO */}
-                                    <div className="statement-section-title" style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', marginBottom: 'var(--space-md)' }}>
-                                        PASIVO
-                                    </div>
-
-                                    <SectionDisplay section={balanceSheet.currentLiabilities} showNetTotal />
-                                    <SectionDisplay section={balanceSheet.nonCurrentLiabilities} showNetTotal />
-
-                                    <div className="statement-row statement-row-total" style={{ marginTop: 'var(--space-sm)' }}>
-                                        <span>TOTAL PASIVO</span>
-                                        <span className="statement-value">${formatAmount(balanceSheet.totalLiabilities)}</span>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    {/* PATRIMONIO NETO */}
-                                    <div className="statement-section-title" style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', marginBottom: 'var(--space-md)' }}>
-                                        PATRIMONIO NETO
-                                    </div>
-
-                                    <SectionDisplay section={balanceSheet.equity} showNetTotal />
-                                </div>
-                            </div>
+                        {/* ACTIVO */}
+                        <div className="statement-section-title" style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', marginBottom: 'var(--space-md)' }}>
+                            ACTIVO
                         </div>
+
+                        <SectionDisplay section={balanceSheet.currentAssets} showNetTotal />
+                        <SectionDisplay section={balanceSheet.nonCurrentAssets} showNetTotal />
+
+                        <div className="statement-grand-total" style={{ marginTop: 'var(--space-md)' }}>
+                            <span>TOTAL ACTIVO</span>
+                            <span>${formatAmount(balanceSheet.totalAssets)}</span>
+                        </div>
+
+                        <div style={{ height: 'var(--space-lg)' }} />
+
+                        {/* PASIVO */}
+                        <div className="statement-section-title" style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', marginBottom: 'var(--space-md)' }}>
+                            PASIVO
+                        </div>
+
+                        <SectionDisplay section={balanceSheet.currentLiabilities} showNetTotal />
+                        <SectionDisplay section={balanceSheet.nonCurrentLiabilities} showNetTotal />
+
+                        <div className="statement-row statement-row-total" style={{ marginTop: 'var(--space-sm)' }}>
+                            <span>TOTAL PASIVO</span>
+                            <span className="statement-value">${formatAmount(balanceSheet.totalLiabilities)}</span>
+                        </div>
+
+                        <div style={{ height: 'var(--space-md)' }} />
+
+                        {/* PATRIMONIO NETO */}
+                        <div className="statement-section-title" style={{ fontWeight: 700, fontSize: 'var(--font-size-lg)', marginBottom: 'var(--space-md)' }}>
+                            PATRIMONIO NETO
+                        </div>
+
+                        <SectionDisplay section={balanceSheet.equity} showNetTotal />
                     </div>
 
                     <div className="statement-grand-total">
