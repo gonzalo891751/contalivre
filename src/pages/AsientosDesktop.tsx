@@ -45,8 +45,13 @@ export default function AsientosDesktop() {
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
     const [deleteSuccess, setDeleteSuccess] = useState(false)
 
-    // Refs for account search inputs (for focus management)
-    const accountRefs = useRef<(AccountSearchSelectRef | null)[]>([])
+    // Refs for focus management (grid)
+    const lineRefs = useRef<Array<{
+        account: AccountSearchSelectRef | null
+        debit: HTMLInputElement | null
+        credit: HTMLInputElement | null
+        description: HTMLInputElement | null
+    }>>([])
 
     // Validation
     const draftEntry: JournalEntry = {
@@ -82,7 +87,7 @@ export default function AsientosDesktop() {
     useEffect(() => {
         if (accounts && accounts.length > 0) {
             const timer = setTimeout(() => {
-                accountRefs.current[0]?.focus()
+                lineRefs.current[0]?.account?.focus()
             }, 100)
             return () => clearTimeout(timer)
         }
@@ -105,6 +110,11 @@ export default function AsientosDesktop() {
 
     const addLine = () => {
         setLines([...lines, createEmptyLine()])
+        // Focus the new line's account after render
+        setTimeout(() => {
+            const lastIndex = lines.length // Because we added one
+            lineRefs.current[lastIndex]?.account?.focus()
+        }, 50)
     }
 
     const removeLine = (index: number) => {
@@ -146,13 +156,84 @@ export default function AsientosDesktop() {
     }
 
     const handleAccountSelected = (index: number) => {
-        const nextIndex = index + 1
-        if (nextIndex < lines.length && !lines[nextIndex].accountId) {
-            setTimeout(() => {
-                accountRefs.current[nextIndex]?.focus()
-            }, 50)
+        // Move focus to Debit
+        setTimeout(() => {
+            lineRefs.current[index]?.debit?.focus()
+        }, 50)
+    }
+
+    // Keyboard Navigation Logic
+    const handleKeyDown = (
+        e: React.KeyboardEvent,
+        index: number,
+        field: 'account' | 'debit' | 'credit' | 'description'
+    ) => {
+        const isLastLine = index === lines.length - 1
+
+        switch (e.key) {
+            case 'Enter': {
+                e.preventDefault()
+                // If it's the last line and last field (or valid previous field), try to save
+                if (validation.ok && (field === 'description' || field === 'credit' || (field === 'debit' && lines[index].debit > 0)) && isLastLine) {
+                    handleSave()
+                    return
+                }
+
+                // If not ready to save, move to next field naturally or custom
+                if (field === 'account') {
+                    // Should be handled by AccountSelect onAccountSelected, but if Enter pressed without selection:
+                    lineRefs.current[index]?.debit?.focus()
+                } else if (field === 'debit') {
+                    // Smart navigation: if debit has value, skip credit
+                    const val = lines[index].debit
+                    if (val > 0) {
+                        lineRefs.current[index]?.description?.focus()
+                    } else {
+                        lineRefs.current[index]?.credit?.focus()
+                    }
+                } else if (field === 'credit') {
+                    lineRefs.current[index]?.description?.focus()
+                } else if (field === 'description') {
+                    if (isLastLine) {
+                        // Auto-add line
+                        addLine()
+                    } else {
+                        // Go to next line account
+                        lineRefs.current[index + 1]?.account?.focus()
+                    }
+                }
+                break
+            }
+            case 'Tab': {
+                if (e.shiftKey) return // Let default shift-tab work
+
+                if (field === 'debit') {
+                    const val = lines[index].debit
+                    if (val > 0) {
+                        e.preventDefault()
+                        lineRefs.current[index]?.description?.focus()
+                    }
+                } else if (field === 'description' && isLastLine) {
+                    e.preventDefault()
+                    addLine()
+                }
+                break
+            }
         }
     }
+
+    // Global shortcut for Ctrl+Enter
+    useEffect(() => {
+        const handleGlobalStart = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                if (validation.ok) {
+                    handleSave()
+                }
+            }
+        }
+        window.addEventListener('keydown', handleGlobalStart)
+        return () => window.removeEventListener('keydown', handleGlobalStart)
+    }, [validation])
 
     const getAccountName = (accountId: string) => {
         const acc = accounts?.find((a) => a.id === accountId)
@@ -293,7 +374,10 @@ export default function AsientosDesktop() {
                     {lines.map((line, index) => (
                         <div key={index} className="entry-line">
                             <AccountSearchSelect
-                                ref={(el) => { accountRefs.current[index] = el }}
+                                ref={(el) => {
+                                    if (!lineRefs.current[index]) lineRefs.current[index] = { account: null, debit: null, credit: null, description: null }
+                                    lineRefs.current[index].account = el
+                                }}
                                 accounts={accounts || []}
                                 value={line.accountId}
                                 onChange={(accountId) => updateLine(index, { accountId })}
@@ -302,30 +386,45 @@ export default function AsientosDesktop() {
                             />
 
                             <input
+                                ref={(el) => {
+                                    if (!lineRefs.current[index]) lineRefs.current[index] = { account: null, debit: null, credit: null, description: null }
+                                    lineRefs.current[index].debit = el
+                                }}
                                 type="text"
                                 inputMode="numeric"
                                 className={`form-input form-input-number ${line.credit > 0 ? 'input-disabled' : ''}`}
                                 value={line.debit > 0 ? formatARNumber(line.debit) : ''}
                                 onChange={(e) => updateLine(index, { debit: parseARNumber(e.target.value) })}
+                                onKeyDown={(e) => handleKeyDown(e, index, 'debit')}
                                 disabled={line.credit > 0}
                                 placeholder="0"
                             />
 
                             <input
+                                ref={(el) => {
+                                    if (!lineRefs.current[index]) lineRefs.current[index] = { account: null, debit: null, credit: null, description: null }
+                                    lineRefs.current[index].credit = el
+                                }}
                                 type="text"
                                 inputMode="numeric"
                                 className={`form-input form-input-number ${line.debit > 0 ? 'input-disabled' : ''}`}
                                 value={line.credit > 0 ? formatARNumber(line.credit) : ''}
                                 onChange={(e) => updateLine(index, { credit: parseARNumber(e.target.value) })}
+                                onKeyDown={(e) => handleKeyDown(e, index, 'credit')}
                                 disabled={line.debit > 0}
                                 placeholder="0"
                             />
 
                             <input
+                                ref={(el) => {
+                                    if (!lineRefs.current[index]) lineRefs.current[index] = { account: null, debit: null, credit: null, description: null }
+                                    lineRefs.current[index].description = el
+                                }}
                                 type="text"
                                 className="form-input"
                                 value={line.description || ''}
                                 onChange={(e) => updateLine(index, { description: e.target.value })}
+                                onKeyDown={(e) => handleKeyDown(e, index, 'description')}
                                 placeholder="Detalle (opcional)"
                             />
 

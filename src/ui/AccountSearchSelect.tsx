@@ -87,27 +87,42 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
     const handleKeyDown = (e: React.KeyboardEvent) => {
         switch (e.key) {
             case 'Tab':
-                // Allow native Tab navigation - just close dropdown
-                setIsOpen(false)
-                setSearch('')
+                // If open, just close and let default behavior check happen (or parent)
+                // We do NOT prevent default here so it moves focus, unless we really want strict control.
+                // But better UX: if open, close. The focus move happens naturally.
+                if (isOpen) {
+                    setIsOpen(false)
+                    setSearch('')
+                }
                 break
             case 'ArrowDown':
                 e.preventDefault()
+                if (!isOpen) setIsOpen(true)
                 setHighlightedIndex(prev =>
                     Math.min(prev + 1, filteredAccounts.length - 1)
                 )
                 break
             case 'ArrowUp':
                 e.preventDefault()
+                if (!isOpen) setIsOpen(true)
                 setHighlightedIndex(prev => Math.max(prev - 1, 0))
                 break
             case 'Enter':
                 e.preventDefault()
-                if (filteredAccounts[highlightedIndex]) {
+                e.stopPropagation() // Stop form submission
+
+                if (isOpen && filteredAccounts[highlightedIndex]) {
                     selectAccount(filteredAccounts[highlightedIndex])
+                } else if (!isOpen && filteredAccounts.length > 0) {
+                    // If closed but user hits enter, maybe open or select top match?
+                    // For now, let's just ensure if they were searching and hit enter:
+                    if (search && filteredAccounts.length > 0) {
+                        selectAccount(filteredAccounts[0])
+                    }
                 }
                 break
             case 'Escape':
+                e.preventDefault() // Prevent dialog closing if inside one
                 setIsOpen(false)
                 setSearch('')
                 break

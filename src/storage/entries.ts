@@ -108,6 +108,14 @@ export function createEmptyLine(): EntryLine {
         description: '',
     }
 }
+/**
+ * Elimina TODOS los asientos (Reiniciar ejercicio)
+ */
+export async function resetExercise(): Promise<{ deletedEntries: number }> {
+    const count = await db.entries.count()
+    await db.entries.clear()
+    return { deletedEntries: count }
+}
 
 /**
  * Obtiene la fecha actual en formato ISO
