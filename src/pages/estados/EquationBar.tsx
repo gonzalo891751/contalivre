@@ -1,5 +1,4 @@
 
-
 interface EquationBarProps {
     totalAssets: number
     totalLiabilities: number
@@ -11,7 +10,7 @@ export function EquationBar({
     totalLiabilities,
     totalEquity
 }: EquationBarProps) {
-    const TOLERANCE = 0.05 // increased slightly to be safe against floating point
+    const TOLERANCE = 0.05
 
     const rightSide = totalLiabilities + totalEquity
     const diff = totalAssets - rightSide
@@ -21,138 +20,214 @@ export function EquationBar({
         n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
     return (
-        <div className="equation-bar-container">
-            <div className={`equation-bar ${isBalanced ? 'balanced' : 'imbalanced'}`}>
-                <div className="equation-content">
-                    <div className="equation-part">
-                        <span className="equation-label">TOTAL ACTIVO</span>
-                        <span className="equation-value">${formatAmount(totalAssets)}</span>
+        <div className="equation-card-wrapper">
+            <div className={`equation-card ${isBalanced ? 'balanced' : 'imbalanced'}`}>
+
+                {/* Header */}
+                <div className="equation-header">
+                    <span className="equation-icon">⚖️</span>
+                    <span className="equation-title">Ecuación Patrimonial</span>
+                </div>
+
+                {/* Body: Compact Grid */}
+                <div className="equation-grid">
+                    {/* Activo (Col 1) */}
+                    <div className="metric-col">
+                        <span className="metric-label text-primary">ACTIVO</span>
+                        <span className="metric-value">${formatAmount(totalAssets)}</span>
                     </div>
 
-                    <div className="equation-operator">=</div>
-
-                    <div className="equation-part">
-                        <span className="equation-label">TOTAL PASIVO</span>
-                        <span className="equation-value">${formatAmount(totalLiabilities)}</span>
+                    {/* = (Col 2) */}
+                    <div className="symbol-col">
+                        <span>=</span>
                     </div>
 
-                    <div className="equation-operator">+</div>
+                    {/* Pasivo (Col 3) */}
+                    <div className="metric-col">
+                        <span className="metric-label text-error">PASIVO</span>
+                        <span className="metric-value">${formatAmount(totalLiabilities)}</span>
+                    </div>
 
-                    <div className="equation-part">
-                        <span className="equation-label">TOTAL PN</span>
-                        <span className="equation-value">${formatAmount(totalEquity)}</span>
+                    {/* + (Col 4) */}
+                    <div className="symbol-col">
+                        <span>+</span>
+                    </div>
+
+                    {/* PN (Col 5) */}
+                    <div className="metric-col">
+                        <span className="metric-label text-success">PN</span>
+                        <span className="metric-value">${formatAmount(totalEquity)}</span>
                     </div>
                 </div>
 
-                <div className="equation-status">
+                {/* Footer: Integrated Status Pill */}
+                <div className="equation-footer">
                     {isBalanced ? (
-                        <span className="status-badge success">
-                            ✓ ECUACIÓN VERIFICADA
-                        </span>
+                        <div className="status-pill success">
+                            <span className="status-icon">✓</span>
+                            <span>Balanceado</span>
+                        </div>
                     ) : (
-                        <span className="status-badge error">
-                            ⚠ DIFERENCIA: ${formatAmount(diff)}
-                        </span>
+                        <div className="status-pill error">
+                            <span className="status-icon">⚠️</span>
+                            <span>Diferencia: ${formatAmount(diff)}</span>
+                        </div>
                     )}
                 </div>
             </div>
 
             <style>{`
-                .equation-bar-container {
+                .equation-card-wrapper {
                     margin-top: var(--space-xl);
                     width: 100%;
-                }
-
-                .equation-bar {
                     display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    gap: var(--space-md);
-                    padding: var(--space-lg);
-                    border-radius: var(--radius-md);
-                    border: 1px solid;
-                    background: var(--color-bg-surface);
-                    box-shadow: var(--shadow-md);
-                    transition: all 0.3s ease;
+                    justify-content: center;
                 }
 
-                .equation-bar.balanced {
-                    border-color: var(--color-success-border);
-                    background: linear-gradient(to bottom, var(--color-bg-surface), #f0fdf4);
+                .equation-card {
+                    background: rgba(255, 255, 255, 0.95);
+                    backdrop-filter: blur(12px);
+                    border: 1px solid rgba(226, 232, 240, 0.8);
+                    border-radius: 16px;
+                    padding: 20px 32px;
+                    width: 100%;
+                    max-width: 800px; /* Constrain width for compactness */
+                    box-shadow: 
+                        0 4px 6px -1px rgba(0, 0, 0, 0.05), 
+                        0 2px 4px -1px rgba(0, 0, 0, 0.03);
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                    position: relative;
+                    overflow: hidden;
                 }
 
-                .equation-bar.imbalanced {
-                    border-color: var(--color-error-border);
-                    background: linear-gradient(to bottom, var(--color-bg-surface), #fef2f2);
+                .equation-card:hover {
+                    transform: translateY(-1px);
+                    box-shadow: 
+                        0 10px 15px -3px rgba(0, 0, 0, 0.05), 
+                        0 4px 6px -2px rgba(0, 0, 0, 0.025);
+                    border-color: rgba(148, 163, 184, 0.5);
                 }
 
-                .equation-content {
+                /* Status Top Border Highlight */
+                .equation-card.balanced::before {
+                    content: '';
+                    position: absolute;
+                    top: 0; left: 0; right: 0; height: 3px;
+                    background: linear-gradient(90deg, transparent, #22c55e, transparent);
+                    opacity: 0.6;
+                }
+
+                .equation-card.imbalanced::before {
+                    content: '';
+                    position: absolute;
+                    top: 0; left: 0; right: 0; height: 3px;
+                    background: linear-gradient(90deg, transparent, #ef4444, transparent);
+                    opacity: 0.6;
+                }
+
+                .equation-header {
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    flex-wrap: wrap;
-                    gap: var(--space-md);
-                    width: 100%;
+                    gap: 6px;
+                    margin-bottom: 16px;
+                    opacity: 0.7;
+                }
+                
+                .equation-title {
+                    font-size: 0.75rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.12em;
+                    font-weight: 600;
+                    color: #64748b;
                 }
 
-                .equation-part {
+                /* Compact Grid Layout */
+                .equation-grid {
+                    display: grid;
+                    grid-template-columns: 1fr auto 1fr auto 1fr;
+                    gap: 16px;
+                    align-items: center; /* Vertical center alignment */
+                    margin-bottom: 20px;
+                }
+
+                .metric-col {
                     display: flex;
                     flex-direction: column;
                     align-items: center;
-                    gap: 4px;
+                    gap: 2px;
                 }
 
-                .equation-label {
-                    font-size: 0.75rem;
-                    text-transform: uppercase;
-                    letter-spacing: 1px;
-                    color: var(--color-text-secondary);
-                    font-weight: 600;
-                }
-
-                .equation-value {
-                    font-size: 1.25rem;
+                .metric-label {
+                    font-size: 0.8rem;
                     font-weight: 700;
-                    color: var(--color-text-primary);
+                    letter-spacing: 0.05em;
+                }
+
+                .metric-value {
+                    font-size: 1.6rem;
+                    font-weight: 700;
+                    color: #1e293b;
                     font-feature-settings: "tnum";
+                    letter-spacing: -0.02em;
                 }
 
-                .equation-operator {
+                .symbol-col {
                     font-size: 1.5rem;
-                    color: var(--color-text-tertiary);
+                    color: #94a3b8;
                     font-weight: 300;
-                    padding: 0 var(--space-xs);
+                    opacity: 0.5;
+                    padding-bottom: 8px; /* Optical alignment with numbers */
                 }
 
-                .status-badge {
+                .text-primary { color: #2563EB; }
+                .text-error { color: #dc2626; } 
+                .text-success { color: #7C3AED; } 
+
+                .equation-footer {
+                    display: flex;
+                    justify-content: center;
+                }
+
+                .status-pill {
                     display: inline-flex;
                     align-items: center;
+                    gap: 6px;
                     padding: 4px 12px;
                     border-radius: 9999px;
-                    font-size: 0.85rem;
+                    font-size: 0.8rem;
                     font-weight: 600;
+                    border: 1px solid transparent;
                 }
 
-                .status-badge.success {
-                    background-color: var(--color-success-bg);
-                    color: var(--color-success);
+                .status-pill.success {
+                    background-color: #f0fdf4;
+                    color: #15803d;
+                    border-color: rgba(34, 197, 94, 0.2);
                 }
 
-                .status-badge.error {
-                    background-color: var(--color-error-bg);
-                    color: var(--color-error);
+                .status-pill.error {
+                    background-color: #fef2f2;
+                    color: #b91c1c;
+                    border-color: rgba(239, 68, 68, 0.2);
                 }
 
+                /* Mobile Stack */
                 @media (max-width: 640px) {
-                    .equation-content {
-                        flex-direction: column;
-                        align-items: center;
-                        gap: var(--space-sm);
+                    .equation-grid {
+                        grid-template-columns: 1fr;
+                        gap: 12px;
                     }
-                    
-                    .equation-operator {
+                    .symbol-col {
+                        display: none; /* Hide symbols on mobile stack for cleaner look, or rotate them */
+                    }
+                    /* Alternatively show them as small dividers */
+                    .symbol-col {
+                        display: flex;
+                        justify-content: center;
+                        height: 20px;
+                        font-size: 1.2rem;
                         transform: rotate(90deg);
-                        margin: -8px 0;
                     }
                 }
             `}</style>

@@ -2,14 +2,44 @@ import { useState, useMemo, useRef } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
 import { computeLedger } from '../core/ledger'
+import { getAccountClass, RUBRO_CONFIG } from '../core/account-classification' // [NEW] Import
 
 import AccountSearchSelect, { AccountSearchSelectRef } from '../ui/AccountSearchSelect'
 import BrandSegmentedToggle from '../ui/BrandSegmentedToggle'
 import BrandSwitch from '../ui/BrandSwitch'
 
 type ViewMode = 'single' | 'all'
-type SortField = 'balance' | 'name' | 'code'
+type SortField = 'balance' | 'name' | 'code' | 'rubro' // [MODIFIED] added rubro
 type SortOrder = 'asc' | 'desc'
+
+// Badge Component Logic (Moved outside)
+const RubroBadge = ({ config }: { config: typeof RUBRO_CONFIG['activo'] }) => (
+    <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '4px 10px',
+        borderRadius: '999px',
+        fontSize: '0.70rem',
+        fontWeight: 800,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        color: config.color,
+        backgroundColor: `rgba(${config.bgTint}, 0.12)`,
+        border: `1px solid rgba(${config.bgTint}, 0.2)`,
+        whiteSpace: 'nowrap',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+        transition: 'all 0.2s ease',
+        cursor: 'default'
+    }} className="rubro-badge">
+        {/* Optional Icon if desired, user said "sutil" */}
+        {/* <span style={{ opacity: 0.8, fontSize: '0.8rem' }}>{config.icon}</span> */}
+        {/* User said "chip/pill con color + texto (y si podés, un ícono sutil)" */}
+        {/* Let's try text only for cleaner look first, or very small icon */}
+        <span style={{ opacity: 0.7, fontSize: '0.85em', filter: 'grayscale(0.2)' }}>{config.icon}</span>
+        <span>{config.label}</span>
+    </span>
+)
 
 export default function Mayor() {
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
@@ -27,8 +57,8 @@ export default function Mayor() {
 
     // "Todas las cuentas" table state
     const [filterText, setFilterText] = useState('')
-    const [sortField, setSortField] = useState<SortField>('balance')
-    const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+    const [sortField, setSortField] = useState<SortField>('rubro') // [MODIFIED] Default sort by Rubro (which usually implies code structure too)
+    const [sortOrder, setSortOrder] = useState<SortOrder>('asc') // Ascending for rubros
 
     const searchRef = useRef<AccountSearchSelectRef>(null)
 
@@ -53,6 +83,13 @@ export default function Mayor() {
     // Single view derived data
     const selectedAccount = accounts?.find((a) => a.id === selectedAccountId)
     const ledgerAccount = ledger && selectedAccountId ? ledger.get(selectedAccountId) : null
+
+    // [NEW] Selected Account Rubro for Badge in Single View
+    // We pass the total balance from ledgerAccount if available
+    const selectedAccountRubro = selectedAccount
+        ? getAccountClass(selectedAccount, ledgerAccount ? { debit: ledgerAccount.totalDebit, credit: ledgerAccount.totalCredit } : undefined)
+        : 'unknown'
+    const selectedRubroConfig = RUBRO_CONFIG[selectedAccountRubro]
 
     // Parent Aggregation Logic
     // We calculate "Aggregated Totals" (Direct + Children) to support the "Include Parents" toggle properly.
@@ -155,6 +192,10 @@ export default function Mayor() {
             if (rawDelta > 0.005) type = 'Deudor'
             else if (rawDelta < -0.005) type = 'Acreedor'
 
+            // [NEW] Classification - Now passing balance for Dynamic Results
+            const rubroKey = getAccountClass(account, { debit: displayDebit, credit: displayCredit })
+            const rubroConfig = RUBRO_CONFIG[rubroKey]
+
             list.push({
                 id: account.id,
                 code: account.code,
@@ -162,10 +203,12 @@ export default function Mayor() {
                 debit: displayDebit,
                 credit: displayCredit,
                 balance: Math.abs(rawDelta),
-                type,
+                balanceTypeLabel: type, // Renamed to avoid confusion with Rubro config
                 rawDelta,
                 isHeader: account.isHeader,
-                kind: account.kind // Pass kind for KPIs
+                kind: account.kind, // Pass kind for KPIs
+                rubroKey,     // [NEW]
+                rubroConfig,  // [NEW]
             })
         }
         return list
@@ -190,6 +233,16 @@ export default function Mayor() {
                 valA = a.name
                 valB = b.name
             } else if (sortField === 'code') {
+                valA = a.code || ''
+                valB = b.code || ''
+            } else if (sortField === 'rubro') {
+                // Sorting by Rubro usually means sorting by Code (as code dictates hierarchy)
+                // However, we can also sort by Rubro Type Label if desired, but user likely wants logical order.
+                // Let's sort by Code as "Rubro" primary sort because Rubro is derived from it often.
+                // User requirement: "El código sigue disponible... pero que la primera columna visible sea el rubro."
+                // Sorting by Rubro Name might split the chart of accounts weirdly (Activo -> Ingreso -> Pasivo alphabetical).
+                // It's safer to sort by CODE when Rubro is selected, OR sort by Rubro ID logic (1,2,3..).
+                // Let's assume standard Code sort produces correct Rubro grouping.
                 valA = a.code || ''
                 valB = b.code || ''
             } else {
@@ -236,10 +289,11 @@ export default function Mayor() {
             setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
         } else {
             setSortField(field)
-            setSortOrder('desc')
+            setSortOrder('asc') // Default asc for text/rubro
         }
     }
 
+    // Badge Component Logic (Inline for reusability within file)
     // Note: Auto-focus removed per user request - user must manually click to interact with search
 
     return (
@@ -284,7 +338,7 @@ export default function Mayor() {
                     margin-bottom: var(--space-xl);
                 }
 
-                /* Badge Pills */
+                /* Badge Pills (Legacy / Balance Types) */
                 .badge-pill {
                     display: inline-flex;
                     align-items: center;
@@ -299,6 +353,12 @@ export default function Mayor() {
                 .badge-deudor { background: #dbeafe; color: #1e40af; } 
                 .badge-acreedor { background: #fee2e2; color: #991b1b; } 
                 .badge-saldada { background: #f3f4f6; color: #6b7280; } 
+
+                .rubro-badge:hover {
+                    box-shadow: 0 0 12px rgba(var(--primary-rgb), 0.15); /* Soft glow simulation - needs var but we use inline styles mostly */
+                    transform: translateY(-1px);
+                    filter: brightness(1.02);
+                }
 
                 .text-balance-deudor { color: #1e40af; }
                 .text-balance-acreedor { color: #991b1b; }
@@ -377,11 +437,16 @@ export default function Mayor() {
                                 <div className="card" style={{ maxWidth: '600px', marginBottom: 'var(--space-xl)' }}>
                                     <div className="flex-between">
                                         <div>
-                                            <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-                                                Saldo actual
+                                            {/* [NEW] Show Rubro Badge above name or near it */}
+                                            <div style={{ marginBottom: '8px' }}>
+                                                <RubroBadge config={selectedRubroConfig} />
                                             </div>
+
                                             <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600 }}>
                                                 {selectedAccount.name}
+                                            </div>
+                                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '2px', fontFamily: 'monospace' }}>
+                                                {selectedAccount.code}
                                             </div>
                                         </div>
                                         <div className="text-right">
@@ -558,8 +623,9 @@ export default function Mayor() {
                                 <table className="table">
                                     <thead>
                                         <tr>
-                                            <th onClick={() => handleSort('code')} className="cursor-pointer hover:text-primary" style={{ width: '15%' }}>
-                                                Código {sortField === 'code' && (sortOrder === 'asc' ? '↑' : '↓')}
+                                            {/* [MODIFIED] Changed Code to Rubro */}
+                                            <th onClick={() => handleSort('rubro')} className="cursor-pointer hover:text-primary" style={{ width: '180px' }}>
+                                                Rubro {sortField === 'rubro' && (sortOrder === 'asc' ? '↓' : '↑')}
                                             </th>
                                             <th onClick={() => handleSort('name')} className="cursor-pointer hover:text-primary">
                                                 Cuenta {sortField === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
@@ -588,24 +654,32 @@ export default function Mayor() {
                                                 }}
                                                 className={`hover:bg-slate-50 transition-colors ${acc.isHeader ? '' : ''}`}
                                             >
-                                                <td className={acc.isHeader ? '' : 'text-muted'} style={{ fontSize: acc.isHeader ? '1rem' : '0.9rem' }}>
-                                                    {acc.code}
+                                                {/* [MODIFIED] Render Rubro Badge instead of Code */}
+                                                <td>
+                                                    <RubroBadge config={acc.rubroConfig} />
                                                 </td>
                                                 <td style={{ fontSize: acc.isHeader ? '1.05rem' : '1rem' }}>
-                                                    {acc.name}
+                                                    <div title={acc.code ? `#${acc.code}` : undefined}>
+                                                        {acc.name}
+                                                    </div>
                                                 </td>
                                                 <td className="text-right text-muted hidden-mobile" style={{ fontSize: '0.9rem' }}>${formatAmount(acc.debit)}</td>
                                                 <td className="text-right text-muted hidden-mobile" style={{ fontSize: '0.9rem' }}>${formatAmount(acc.credit)}</td>
                                                 <td className="text-right" style={{
                                                     fontSize: '1.25rem',
                                                     fontWeight: acc.isHeader ? 800 : 700,
-                                                    color: 'var(--text-primary)'
+                                                    color: acc.balanceTypeLabel === 'Deudor'
+                                                        ? '#0F2A5F'
+                                                        : acc.balanceTypeLabel === 'Acreedor'
+                                                            ? '#7F1D1D'
+                                                            : 'var(--text-secondary)',
+                                                    transition: 'color 0.2s ease'
                                                 }}>
                                                     ${formatAmount(acc.balance)}
                                                 </td>
                                                 <td className="text-center">
-                                                    <span className={`badge-pill badge-${acc.type.toLowerCase()}`}>
-                                                        {acc.type}
+                                                    <span className={`badge-pill badge-${acc.balanceTypeLabel.toLowerCase()}`}>
+                                                        {acc.balanceTypeLabel}
                                                     </span>
                                                 </td>
                                             </tr>
