@@ -4,6 +4,7 @@ import type { Account } from '../../../core/models'
 import ImportModal from './ImportModal'
 import AccountSearchSelect from '../../../ui/AccountSearchSelect'
 import BrandSwitch from '../../../ui/BrandSwitch'
+import BankReconciliationCard from './BankReconciliationCard'
 
 // Helper to determine if an account is likely cash/bank
 const isCashOrBank = (account: Account) => {
@@ -51,6 +52,244 @@ export default function ConciliacionesPage() {
     const [showRefs, setShowRefs] = useState(false)
     const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set())
     const [isExternalEditing, setIsExternalEditing] = useState(false)
+    const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
+
+    // --- PDF Handler (Vector) ---
+    const handleDownloadPDF = async () => {
+        setIsGeneratingPdf(true)
+        try {
+            const jsPDF = (await import('jspdf')).default
+            const autoTable = (await import('jspdf-autotable')).default
+
+            // 1. Setup Document
+            const doc = new jsPDF()
+            const pageWidth = doc.internal.pageSize.width
+            const margin = 14
+            let finalY = margin
+
+            // --- HEADER ---
+            doc.setFontSize(8)
+            doc.setTextColor(100)
+
+            // Company Info (Placeholders)
+            const company = {
+                name: "EMPRESA DEMO S.A.", // Placeholder/Future Config
+                address: "Av. Corrientes 1234, CABA",
+                cuit: "30-12345678-9",
+                iva: "Responsable Inscripto"
+            }
+
+            doc.text(`${company.name}`, margin, finalY)
+            doc.text(`${company.address}`, margin, finalY + 4)
+            doc.text(`IVA: ${company.iva}`, margin, finalY + 8)
+
+            // Right Side Header
+            const dateStr = new Date().toLocaleDateString('es-AR')
+            const accName = accountOptions.find(a => a.id === cuentaId)?.name || 'Cuenta'
+
+            doc.text(`Emitido: ${dateStr}`, pageWidth - margin, finalY, { align: 'right' })
+            doc.text(`CUIT: ${company.cuit}`, pageWidth - margin, finalY + 4, { align: 'right' })
+            doc.text(`Moneda: Pesos Argentinos`, pageWidth - margin, finalY + 8, { align: 'right' })
+
+            finalY += 16
+
+            // Title
+            doc.setFontSize(14)
+            doc.setTextColor(0)
+            doc.setFont('helvetica', 'bold')
+            doc.text("CONCILIACIÓN BANCARIA", pageWidth / 2, finalY, { align: 'center' })
+
+            finalY += 6
+            doc.setFontSize(10)
+            doc.setFont('helvetica', 'normal')
+            doc.text(`Cuenta: ${accName}`, pageWidth / 2, finalY, { align: 'center' })
+            finalY += 5
+            doc.setFontSize(9)
+            doc.text(`Período: ${formatDateAR(desde)} al ${formatDateAR(hasta)}`, pageWidth / 2, finalY, { align: 'center' })
+
+            finalY += 10
+
+            // Helper for currency
+            const fmt = (n: number) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(n)
+
+            // --- TABLE 1: LIBROS (MAYOR) ---
+            doc.setFontSize(10)
+            doc.setFont('helvetica', 'bold')
+            doc.text("1. Libros (Mayor)", margin, finalY)
+            finalY += 2
+
+            const librosData = filteredLibros.map(r => [
+                formatDateAR(r.fecha),
+                r.concepto,
+                r.debe > 0 ? fmt(r.debe) : '',
+                r.haber > 0 ? fmt(r.haber) : ''
+            ])
+
+            // Add Totals Row
+            librosData.push([
+                'TOTALES',
+                '',
+                fmt(filteredLibros.reduce((s, r) => s + r.debe, 0)),
+                fmt(filteredLibros.reduce((s, r) => s + r.haber, 0))
+            ])
+
+            autoTable(doc, {
+                startY: finalY,
+                head: [['Fecha', 'Concepto', 'Debe', 'Haber']],
+                body: librosData,
+                theme: 'striped',
+                headStyles: { fillColor: [30, 41, 59], fontSize: 8 },
+                bodyStyles: { fontSize: 8 },
+                columnStyles: {
+                    0: { cellWidth: 22 },
+                    1: { cellWidth: 'auto' }, // Concepto takes available space
+                    2: { cellWidth: 28, halign: 'right' },
+                    3: { cellWidth: 28, halign: 'right' },
+                },
+                margin: { left: margin, right: margin }
+            })
+
+            // @ts-ignore
+            finalY = doc.lastAutoTable.finalY + 8
+
+            // --- TABLE 2: EXTERNO (EXTRACTO) ---
+            doc.setFontSize(10)
+            doc.setFont('helvetica', 'bold')
+            doc.text("2. Externo (Extracto Bancario)", margin, finalY)
+            finalY += 2
+
+            const externoData = filteredExterno.map(r => [
+                formatDateAR(r.fecha),
+                r.concepto,
+                r.debe > 0 ? fmt(r.debe) : '',
+                r.haber > 0 ? fmt(r.haber) : ''
+            ])
+            // Add Totals Row
+            externoData.push([
+                'TOTALES',
+                '',
+                fmt(filteredExterno.reduce((s, r) => s + r.debe, 0)),
+                fmt(filteredExterno.reduce((s, r) => s + r.haber, 0))
+            ])
+
+            autoTable(doc, {
+                startY: finalY,
+                head: [['Fecha', 'Concepto', 'Debe', 'Haber']],
+                body: externoData,
+                theme: 'striped',
+                headStyles: { fillColor: [71, 85, 105], fontSize: 8 },
+                bodyStyles: { fontSize: 8 },
+                columnStyles: {
+                    0: { cellWidth: 22 },
+                    1: { cellWidth: 'auto' },
+                    2: { cellWidth: 28, halign: 'right' },
+                    3: { cellWidth: 28, halign: 'right' },
+                },
+                margin: { left: margin, right: margin }
+            })
+
+            // @ts-ignore
+            finalY = doc.lastAutoTable.finalY + 10
+
+            // Check if we need a new page for summary
+            if (finalY > 200) {
+                doc.addPage()
+                finalY = 20
+            }
+
+            // --- SUMMARY BLOCK ---
+            doc.setFillColor(241, 245, 249)
+            doc.rect(margin, finalY, pageWidth - (margin * 2), 70, 'F')
+            doc.setDrawColor(203, 213, 225)
+            doc.rect(margin, finalY, pageWidth - (margin * 2), 70, 'S')
+
+            const leftX = margin + 5
+            const rightX = pageWidth / 2 + 5
+            let currentY = finalY + 8
+
+            doc.setFontSize(10)
+            doc.setFont('helvetica', 'bold')
+            doc.text("RESUMEN DE CONCILIACIÓN", margin + 5, currentY)
+            currentY += 8
+
+            // Setup columns
+            const colWidth = (pageWidth - (margin * 2)) / 2 - 10
+            const rowH = 6
+            const valX1 = pageWidth / 2 - 10
+            const valX2 = pageWidth - margin - 10
+
+            doc.setFontSize(9)
+
+            // Function to draw row
+            const drawRow = (label: string, val: number, x: number, valX: number, isTotal = false, color: [number, number, number] = [0, 0, 0]) => {
+                doc.setTextColor(...color)
+                if (isTotal) doc.setFont('helvetica', 'bold')
+                else doc.setFont('helvetica', 'normal')
+
+                doc.text(label, x, currentY)
+                doc.text(fmt(Math.abs(val)), valX, currentY, { align: 'right' })
+            }
+
+            // --- Left Column (Bank Side) ---
+            const startYCols = currentY
+
+            drawRow("Saldo según extracto", totalsExterno.saldo, leftX, valX1)
+            currentY += rowH
+            drawRow("+ Depósitos en tránsito", depositsInTransit.reduce((a, r) => a + r.debe, 0), leftX, valX1, false, [21, 128, 61])
+            currentY += rowH
+            drawRow("- Pagos pendientes", outstandingPayments.reduce((a, r) => a + r.haber, 0), leftX, valX1, false, [220, 38, 38])
+            currentY += rowH + 2
+
+            doc.setDrawColor(200)
+            doc.line(leftX, currentY - 4, valX1, currentY - 4)
+            drawRow("Saldo Conciliado", reconciledBankBalance, leftX, valX1, true)
+
+            // --- Right Column (Book Side) ---
+            currentY = startYCols // Reset Y
+
+            drawRow("Saldo según libros", totalsLibros.saldo, rightX, valX2)
+            currentY += rowH
+            drawRow("+ Créditos bancarios (no reg.)", bankCredits.reduce((a, r) => a + r.haber, 0), rightX, valX2, false, [21, 128, 61])
+            currentY += rowH
+            drawRow("- Débitos bancarios (no reg.)", bankDebits.reduce((a, r) => a + r.debe, 0), rightX, valX2, false, [220, 38, 38])
+            currentY += rowH + 2
+
+            doc.setDrawColor(200)
+            doc.line(rightX, currentY - 4, valX2, currentY - 4)
+            drawRow("Saldo Libros Ajustado", adjustedBookBalance, rightX, valX2, true)
+
+            // --- Footer Status ---
+            currentY += 12
+            doc.setFontSize(10)
+            if (isReconBalanced) {
+                doc.setTextColor(21, 128, 61)
+                doc.setFont('helvetica', 'bold')
+                doc.text("✓ CONCILIACIÓN OK", pageWidth / 2, currentY, { align: 'center' })
+            } else {
+                doc.setTextColor(180, 83, 9)
+                doc.setFont('helvetica', 'bold')
+                doc.text(`⚠ REVISAR DIFERENCIAS (Residual: ${fmt(Math.abs(reconDiff))})`, pageWidth / 2, currentY, { align: 'center' })
+            }
+
+            // Page Numbers Footer
+            const pageCount = doc.getNumberOfPages()
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i)
+                doc.setFontSize(8)
+                doc.setTextColor(150)
+                doc.text(`Página ${i} de ${pageCount}`, pageWidth - margin, doc.internal.pageSize.height - 10, { align: 'right' })
+                doc.text(`Generado por ContaLivre`, margin, doc.internal.pageSize.height - 10)
+            }
+
+            doc.save(`Conciliacion_${cuentaId}_${desde}_${hasta}.pdf`)
+
+        } catch (error) {
+            console.error('Error generating PDF:', error)
+            alert('Error al generar el PDF. Revise la consola.')
+        } finally {
+            setIsGeneratingPdf(false)
+        }
+    }
 
     const handleRowClick = (key: string) => {
         const newSet = new Set(selectedRowKeys)
@@ -186,7 +425,12 @@ export default function ConciliacionesPage() {
     }
 
     const totalsLibros = useMemo(() => calculateTotals(filteredLibros), [filteredLibros])
-    const totalsExterno = useMemo(() => calculateTotals(filteredExterno), [filteredExterno])
+    const totalsExterno = useMemo(() => {
+        const { tDebe, tHaber } = calculateTotals(filteredExterno)
+        // For External/Bank: Credit (Haber) increases balance, Debit (Debe) decreases it.
+        // Formula: Haber - Debe
+        return { tDebe, tHaber, saldo: tHaber - tDebe }
+    }, [filteredExterno])
 
     // --- Reference Matching Logic ---
     const commonRefs = useMemo(() => {
@@ -227,7 +471,54 @@ export default function ConciliacionesPage() {
         return 'grid-row'
     }
 
-    const difference = totalsExterno.saldo - totalsLibros.saldo
+    // --- Reconciliation Calculations (Lifted State) ---
+    // Rule: Matched = In selectedRowKeys set (key format "libros:id" or "externo:id")
+
+    // Filter unmatched rows
+    const unmatchedLibros = useMemo(() => {
+        return filteredLibros.filter(r => !selectedRowKeys.has(`libros:${r.id}`))
+    }, [filteredLibros, selectedRowKeys])
+
+    const unmatchedExterno = useMemo(() => {
+        return filteredExterno.filter(r => !selectedRowKeys.has(`externo:${r.id}`))
+    }, [filteredExterno, selectedRowKeys])
+
+    // 1. Bank Side Adjustments (from Books unmatched)
+    // "Depósitos en tránsito" = Unmatched Books DEBE (Inflows) => Adds to bank balance
+    // "Pagos pendientes" = Unmatched Books HABER (Outflows) => Subtracts from bank balance
+    const depositsInTransit = useMemo(() => unmatchedLibros.filter(r => r.debe > 0), [unmatchedLibros])
+    const outstandingPayments = useMemo(() => unmatchedLibros.filter(r => r.haber > 0), [unmatchedLibros])
+
+    const totalDepositsInTransit = depositsInTransit.reduce((acc, r) => acc + r.debe, 0)
+    const totalOutstandingPayments = outstandingPayments.reduce((acc, r) => acc + r.haber, 0)
+
+    // Saldo Conciliado (Bank Side) = SaldoExtracto (Haber-Debe) + Depósitos - Pagos
+    const reconciledBankBalance = totalsExterno.saldo + totalDepositsInTransit - totalOutstandingPayments
+
+    // 2. Book Side Adjustments (from External unmatched)
+    // "Créditos bancarios no reg" (External Credit/Haber unmatched) => Increases Books Balance (Income/Inflow)
+    // "Débitos bancarios no reg" (External Debit/Debe unmatched) => Decreases Books Balance (Expense/Outflow)
+    const bankCredits = useMemo(() => unmatchedExterno.filter(r => r.haber > 0), [unmatchedExterno])
+    const bankDebits = useMemo(() => unmatchedExterno.filter(r => r.debe > 0), [unmatchedExterno])
+
+    const totalBankCredits = bankCredits.reduce((acc, r) => acc + r.haber, 0)
+    const totalBankDebits = bankDebits.reduce((acc, r) => acc + r.debe, 0)
+
+    // Saldo Libros Ajustado = SaldoLibros + Creditos - Debitos
+    const adjustedBookBalance = totalsLibros.saldo + totalBankCredits - totalBankDebits
+
+    // Difference and Balance Check
+    const reconDiff = reconciledBankBalance - adjustedBookBalance
+    const isReconBalanced = Math.abs(reconDiff) < 0.01
+
+    // --- ABS Difference Logic (Magnitude for Top Widget) ---
+    const absLibros = Math.abs(totalsLibros.saldo)
+    const absExterno = Math.abs(totalsExterno.saldo)
+
+    // Difference based on magnitude (volume), ignoring accounting sign
+    // If External > Books => Falta (Missing in books)
+    // If External < Books => Sobra (Excess in books)
+    const difference = absExterno - absLibros
     const isBalanced = Math.abs(difference) <= 0.01
 
     return (
@@ -591,7 +882,7 @@ export default function ConciliacionesPage() {
                 </div>
             </div>
 
-            {/* Bottom Difference Widget */}
+            {/* Bottom Difference Widget & Bank Reconciliation Card */}
             <div className="bottom-widget-container">
                 <button
                     className={`diff-pill ${isBalanced ? 'status-ok' : (difference > 0 ? 'status-surplus' : 'status-missing')}`}
@@ -609,7 +900,7 @@ export default function ConciliacionesPage() {
                         <span className="pill-amount tabular-nums">{formatMoney(Math.abs(difference))}</span>
                     </div>
                     <div className="pill-tag">
-                        {isBalanced ? 'OK' : (difference > 0 ? 'Sobra' : 'Falta')}
+                        {isBalanced ? 'OK' : (difference > 0 ? 'Falta' : 'Sobra')}
                     </div>
                     <div className="pill-chevron">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isDiffExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>
@@ -623,13 +914,13 @@ export default function ConciliacionesPage() {
                         <div className="popover-row">
                             <span className="pop-label">Saldo Externo:</span>
                             <span className={`pop-value ${totalsExterno.saldo >= 0 ? 'text-deudor' : 'text-acreedor'}`}>
-                                {formatMoney(totalsExterno.saldo)} ({totalsExterno.saldo >= 0 ? 'D' : 'A'})
+                                {formatMoney(Math.abs(totalsExterno.saldo))} ({totalsExterno.saldo >= 0 ? 'D' : 'A'})
                             </span>
                         </div>
                         <div className="popover-row">
                             <span className="pop-label">Saldo Libros:</span>
                             <span className={`pop-value ${totalsLibros.saldo >= 0 ? 'text-deudor' : 'text-acreedor'}`}>
-                                {formatMoney(totalsLibros.saldo)} ({totalsLibros.saldo >= 0 ? 'D' : 'A'})
+                                {formatMoney(Math.abs(totalsLibros.saldo))} ({totalsLibros.saldo >= 0 ? 'D' : 'A'})
                             </span>
                         </div>
                         <div className="popover-divider"></div>
@@ -638,6 +929,65 @@ export default function ConciliacionesPage() {
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/* Bank Reconciliation Card Integration */}
+            <div className="mt-6">
+                <BankReconciliationCard
+                    saldoLibros={totalsLibros.saldo}
+                    saldoExterno={totalsExterno.saldo}
+
+                    // Detail Lists
+                    depositsInTransit={depositsInTransit}
+                    outstandingPayments={outstandingPayments}
+                    bankCredits={bankCredits}
+                    bankDebits={bankDebits}
+
+                    // Pre-calculated Totals
+                    reconciledBankBalance={reconciledBankBalance}
+                    adjustedBookBalance={adjustedBookBalance}
+                    diff={reconDiff}
+                    isBalanced={isReconBalanced}
+
+                    onFocusRow={(side, id) => {
+                        // Optional: Implementation for scrolling/focusing
+                        // For now, we can log or just let it be.
+                        console.log('Focus request:', side, id)
+                    }}
+                />
+            </div>
+
+            {/* Premium PDF Download Button */}
+            <div className="flex justify-end mt-8 mb-8">
+                <button
+                    onClick={handleDownloadPDF}
+                    disabled={isGeneratingPdf}
+                    className={`
+                        group relative flex items-center gap-3 px-6 h-12 rounded-2xl
+                        bg-gradient-to-r from-blue-600 to-emerald-500
+                        text-white font-bold text-sm tracking-wide shadow-md
+                        transition-all duration-200 ease-out
+                        hover:from-blue-700 hover:to-emerald-600 hover:shadow-lg hover:-translate-y-0.5
+                        disabled:opacity-75 disabled:cursor-not-allowed disabled:shadow-none disabled:translate-y-0
+                    `}
+                >
+                    {isGeneratingPdf ? (
+                        <>
+                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>GENERANDO...</span>
+                        </>
+                    ) : (
+                        <>
+                            <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            <span>DESCARGAR PDF (Conciliación bancaria)</span>
+                        </>
+                    )}
+                </button>
             </div>
 
             <ImportModal

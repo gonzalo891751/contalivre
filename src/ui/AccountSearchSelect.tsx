@@ -202,46 +202,52 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
             {isOpen && createPortal(
                 <div
                     ref={listRef}
-                    className="fixed z-[9999] bg-white border border-slate-200 shadow-xl rounded-xl max-h-72 overflow-y-auto flex flex-col no-scrollbar"
+                    className="fixed z-[9999] bg-white border border-slate-200 shadow-2xl rounded-xl flex flex-col"
                     style={{
-                        top: coords.top + 6, // 6px gap for more air
+                        top: coords.top + 8,
                         left: coords.left,
                         width: coords.width,
                     }}
                 >
-                    {filteredAccounts.length === 0 ? (
-                        <div className="p-4 text-sm text-slate-400 text-center italic">
-                            No se encontraron cuentas
-                        </div>
-                    ) : (
-                        filteredAccounts.map((acc, index) => (
-                            <div
-                                key={acc.id}
-                                className={`
-                                    flex flex-col gap-0.5 px-4 py-3 cursor-pointer border-b border-slate-50 last:border-none transition-all duration-150
-                                    ${index === highlightedIndex ? 'bg-slate-50' : 'hover:bg-slate-50'}
-                                    ${acc.id === value ? 'bg-blue-50/60' : ''}
-                                `}
-                                onMouseEnter={() => setHighlightedIndex(index)}
-                                onClick={() => selectAccount(acc)}
-                            >
-                                {/* Line 1: Code (Accent Color) */}
-                                <div className="text-xs font-bold text-blue-600 font-mono tracking-wide">
-                                    {acc.code}
-                                </div>
-
-                                {/* Line 2: Name (Large & Bold) */}
-                                <div className="text-sm font-bold text-slate-800">
-                                    {acc.name}
-                                </div>
-
-                                {/* Line 3: Path/Subtitle (Gray) */}
-                                <div className="text-xs text-slate-500 font-normal truncate">
-                                    {accountPaths.get(acc.id) || acc.name}
-                                </div>
+                    <div className="overflow-y-auto max-h-[320px] p-1.5 custom-scrollbar">
+                        {filteredAccounts.length === 0 ? (
+                            <div className="p-4 text-sm text-slate-500 text-center italic">
+                                No se encontraron cuentas
                             </div>
-                        ))
-                    )}
+                        ) : (
+                            filteredAccounts.map((acc, index) => (
+                                <div
+                                    key={acc.id}
+                                    className={`
+                                        flex flex-col gap-0.5 px-3 py-2.5 cursor-pointer rounded-lg transition-colors duration-150 mb-0.5 last:mb-0
+                                        ${index === highlightedIndex ? 'bg-slate-100' : 'hover:bg-slate-50'}
+                                        ${acc.id === value ? 'bg-sky-50 ring-1 ring-sky-100' : ''}
+                                    `}
+                                    onMouseEnter={() => setHighlightedIndex(index)}
+                                    // Use onMouseDown to prevent blur before click
+                                    onMouseDown={(e) => {
+                                        e.preventDefault()
+                                        selectAccount(acc)
+                                    }}
+                                >
+                                    {/* Line 1: Code */}
+                                    <div className="text-xs font-semibold text-sky-600 tabular-nums">
+                                        {acc.code}
+                                    </div>
+
+                                    {/* Line 2: Name */}
+                                    <div className="text-sm font-semibold text-slate-900 leading-tight">
+                                        {acc.name}
+                                    </div>
+
+                                    {/* Line 3: Path */}
+                                    <div className="text-xs text-slate-400 font-medium truncate mt-0.5">
+                                        {accountPaths.get(acc.id) || acc.name}
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </div>,
                 document.body
             )}

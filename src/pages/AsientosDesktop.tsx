@@ -8,8 +8,7 @@ import { validateEntry, sumDebits, sumCredits } from '../core/validation'
 import type { JournalEntry, EntryLine } from '../core/models'
 import { HelpPanel } from '../ui/HelpPanel'
 import AccountSearchSelect, { AccountSearchSelectRef } from '../ui/AccountSearchSelect'
-import jsPDF from 'jspdf'
-import html2canvas from 'html2canvas'
+import { downloadJournalPdf } from '../pdf/journalPdf'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Number formatting utilities for Argentine format (miles con punto)
@@ -311,36 +310,25 @@ export default function AsientosDesktop() {
 
 
     const handleDownloadPDF = async () => {
-        if (!entriesRef.current) return
+        if (!entries || entries.length === 0) return
         setIsExporting(true)
-        document.documentElement.classList.add('is-exporting')
 
         try {
-            // Wait for state to propagate (hide actions)
-            await new Promise(r => setTimeout(r, 100))
-
-            const canvas = await html2canvas(entriesRef.current, {
-                scale: 2, // High resolution
-                backgroundColor: '#ffffff',
-                ignoreElements: (element) => {
-                    return element.getAttribute('data-export-exclude') === 'true' || element.classList.contains('no-export')
-                }
+            await downloadJournalPdf(entries, accounts || [], {
+                entityName: '', // Placeholder
+                cuit: '',
+                address: '',
+                ivaCondition: 'Resp. Inscripto',
+                periodStart: '',
+                periodEnd: '',
+                currency: 'Pesos Argentinos (ARS)',
+                generatedBy: 'Generado por ContaLivre'
             })
-
-            const imgData = canvas.toDataURL('image/png')
-            const pdf = new jsPDF('p', 'mm', 'a4')
-            const pdfWidth = pdf.internal.pageSize.getWidth()
-            const pdfHeight = (canvas.height * pdfWidth) / canvas.width
-
-            // Image (Header is now inside)
-            pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight)
-            pdf.save(`libro_diario_${getTodayISO()}.pdf`)
-
         } catch (err) {
             console.error('Error exporting PDF:', err)
+            alert('Hubo un error al generar el PDF.')
         } finally {
             setIsExporting(false)
-            document.documentElement.classList.remove('is-exporting')
         }
     }
 
@@ -619,30 +607,7 @@ export default function AsientosDesktop() {
             {/* Entry History - Final Aesthetic Polish */}
             <div ref={entriesRef} style={{ width: '100%' }}>
                 <div style={{ maxWidth: '980px', margin: '0 auto', width: '100%' }}>
-                    {/* PDF Legal Header */}
-                    <div className="pdf-only" style={{ marginBottom: '20px', padding: '20px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', borderRadius: '4px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #ccc', paddingBottom: '10px', marginBottom: '15px' }}>
-                            <div>
-                                <h1 style={{ fontSize: '24px', fontWeight: '800', margin: 0, textTransform: 'uppercase', color: '#1e293b' }}>LIBRO DIARIO</h1>
-                                <div style={{ fontSize: '14px', color: '#64748b' }}>Asientos registrados</div>
-                            </div>
-                            <div style={{ textAlign: 'right', fontSize: '12px', color: '#64748b' }}>
-                                Emitido: {new Date().toLocaleDateString('es-AR')}
-                            </div>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', fontSize: '12px', color: '#334155' }}>
-                            <div>
-                                <div style={{ marginBottom: '4px' }}><strong>Ente:</strong> ______________________</div>
-                                <div style={{ marginBottom: '4px' }}><strong>Domicilio:</strong> ______________________</div>
-                                <div><strong>Condición IVA:</strong> Resp. Inscripto</div>
-                            </div>
-                            <div>
-                                <div style={{ marginBottom: '4px' }}><strong>CUIT:</strong> ______________________</div>
-                                <div style={{ marginBottom: '4px' }}><strong>Período:</strong> Del __/__/____ al __/__/____</div>
-                                <div><strong>Moneda:</strong> Pesos Argentinos (ARS)</div>
-                            </div>
-                        </div>
-                    </div>
+                    {/* PDF Legal Header removed - generated natively */}
 
                     <div data-export-exclude="true" style={{ marginBottom: 'var(--space-md)', paddingLeft: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <h3 style={{ fontSize: '1.2rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>Asientos registrados</h3>
