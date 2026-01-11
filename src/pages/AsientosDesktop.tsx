@@ -352,21 +352,32 @@ export default function AsientosDesktop() {
                     <p className="page-subtitle">Registro cronológico de asientos.</p>
                 </div>
                 <button
-                    className="btn btn-white"
+                    className="btn"
                     onClick={() => setIsImportModalOpen(true)}
                     style={{
-                        border: '1px solid var(--color-border)',
-                        boxShadow: 'var(--shadow-sm)',
-                        background: 'linear-gradient(to bottom, white, #f9fafb)',
+                        border: '1px solid rgba(14, 165, 233, 0.2)',
+                        background: 'linear-gradient(to bottom, #f0f9ff, #e0f2fe)',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '8px',
                         padding: '8px 16px',
                         fontWeight: 600,
-                        color: 'var(--color-text)'
+                        color: '#0284c7',
+                        borderRadius: '8px',
+                        boxShadow: '0 1px 2px rgba(14, 165, 233, 0.1), 0 0 0 1px rgba(255,255,255,0.5) inset',
+                        transition: 'all 0.2s',
+                        cursor: 'pointer'
+                    }}
+                    onMouseEnter={e => {
+                        e.currentTarget.style.transform = 'translateY(-1px)'
+                        e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(14, 165, 233, 0.15), 0 2px 4px -1px rgba(14, 165, 233, 0.1)'
+                    }}
+                    onMouseLeave={e => {
+                        e.currentTarget.style.transform = 'none'
+                        e.currentTarget.style.boxShadow = '0 1px 2px rgba(14, 165, 233, 0.1), 0 0 0 1px rgba(255,255,255,0.5) inset'
                     }}
                 >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#0ea5e9' }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="17 8 12 3 7 8"></polyline>
                         <line x1="12" y1="3" x2="12" y2="15"></line>

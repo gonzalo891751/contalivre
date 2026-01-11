@@ -112,23 +112,24 @@ export default function AsientosMobile() {
         <div className="mobile-asientos-page">
             <div style={{ padding: '12px 16px 0' }}>
                 <button
-                    className="btn btn-white w-full"
+                    className="btn w-full"
                     onClick={() => setIsImportModalOpen(true)}
                     style={{
-                        border: '1px solid var(--color-border)',
-                        background: 'white',
+                        border: '1px solid rgba(14, 165, 233, 0.2)',
+                        background: 'linear-gradient(to bottom, #f0f9ff, #e0f2fe)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         gap: '8px',
                         padding: '12px',
                         fontWeight: 600,
-                        color: 'var(--color-text)',
+                        color: '#0284c7',
                         borderRadius: '12px',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                        boxShadow: '0 1px 2px rgba(14, 165, 233, 0.1), 0 0 0 1px rgba(255,255,255,0.5) inset',
+                        transition: 'all 0.2s'
                     }}
                 >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#0ea5e9' }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="17 8 12 3 7 8"></polyline>
                         <line x1="12" y1="3" x2="12" y2="15"></line>
