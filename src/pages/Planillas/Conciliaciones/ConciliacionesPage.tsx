@@ -213,7 +213,7 @@ export default function ConciliacionesPage() {
             currentY += 8
 
             // Setup columns
-            const colWidth = (pageWidth - (margin * 2)) / 2 - 10
+            // const colWidth = (pageWidth - (margin * 2)) / 2 - 10
             const rowH = 6
             const valX1 = pageWidth / 2 - 10
             const valX2 = pageWidth - margin - 10
