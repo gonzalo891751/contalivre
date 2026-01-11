@@ -56,11 +56,13 @@ export default function AmortizacionesPage() {
 
     // Auto-save with debounce
     const debouncedSave = useCallback((newState: AmortizationState) => {
-        if (saveTimeoutRef.current) {
-            clearTimeout(saveTimeoutRef.current)
+        if (saveTimeoutRef.current !== null) {
+            window.clearTimeout(saveTimeoutRef.current)
         }
-        saveTimeoutRef.current = setTimeout(() => {
+
+        saveTimeoutRef.current = window.setTimeout(() => {
             saveAmortizationState(newState)
+            saveTimeoutRef.current = null
         }, 500)
     }, [])
 

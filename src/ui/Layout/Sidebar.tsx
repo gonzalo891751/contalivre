@@ -106,7 +106,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                                     }
                                     title={isCollapsed ? item.label : undefined}
                                     end={!hasChildren}
-                                    onClick={(e) => {
+                                    onClick={() => {
                                         if (hasChildren && !isCollapsed) {
                                             // Optional: click parent to toggle? 
                                             // Default: navigate (if parent has path) or toggle?

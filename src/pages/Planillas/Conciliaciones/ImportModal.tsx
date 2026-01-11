@@ -173,7 +173,7 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
         const processed: any[] = []
         let errorsCount = 0
 
-        rawRows.forEach((row, idx) => {
+        rawRows.forEach((row) => {
             const fechaRaw = row[mapping.fecha]
             const conceptoRaw = row[mapping.concepto] || ''
             const refRaw = mapping.ref ? row[mapping.ref] : ''

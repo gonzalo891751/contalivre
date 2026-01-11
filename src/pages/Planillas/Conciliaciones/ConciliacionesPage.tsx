@@ -22,7 +22,7 @@ const GRID_TEMPLATE = "120px minmax(0, 1fr) 130px 130px 48px"
 export default function ConciliacionesPage() {
     const { accounts, ledger } = useLedger()
 
-    const [tipo, setTipo] = useState<'bancaria' | 'arqueo'>('bancaria')
+    const [tipo] = useState<'bancaria' | 'arqueo'>('bancaria')
     const [cuentaId, setCuentaId] = useState('') // Selected Account ID
     const [showAllAccounts, setShowAllAccounts] = useState(false)
     const [desde, setDesde] = useState('2026-01-01')

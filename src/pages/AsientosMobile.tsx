@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import JournalImportModal from '../components/JournalImportModal'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { createEntry, getTodayISO, createEmptyLine } from '../storage/entries'
 import { getPostableAccounts } from '../storage/accounts'
@@ -16,6 +17,7 @@ export default function AsientosMobile() {
     const [lines, setLines] = useState<EntryLine[]>([createEmptyLine(), createEmptyLine()])
     const [saveError, setSaveError] = useState('')
     const [saveSuccess, setSaveSuccess] = useState(false)
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false)
 
     // Validation
     const draftEntry: JournalEntry = {
@@ -108,6 +110,33 @@ export default function AsientosMobile() {
 
     return (
         <div className="mobile-asientos-page">
+            <div style={{ padding: '12px 16px 0' }}>
+                <button
+                    className="btn btn-white w-full"
+                    onClick={() => setIsImportModalOpen(true)}
+                    style={{
+                        border: '1px solid var(--color-border)',
+                        background: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        padding: '12px',
+                        fontWeight: 600,
+                        color: 'var(--color-text)',
+                        borderRadius: '12px',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                    }}
+                >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#0ea5e9' }}>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Importar asientos
+                </button>
+            </div>
+
             <MobileAsientosGrid
                 accounts={accounts}
                 date={date}
@@ -126,6 +155,14 @@ export default function AsientosMobile() {
                 saveError={saveError}
             />
             <MobileAsientosRegistrados accounts={accounts} />
+
+            <JournalImportModal
+                isOpen={isImportModalOpen}
+                onClose={() => setIsImportModalOpen(false)}
+                onSuccess={() => {
+                    // Mobile might just auto-refresh via liveQuery
+                }}
+            />
         </div>
     )
 }

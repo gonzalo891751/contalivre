@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
+import JournalImportModal from '../components/JournalImportModal'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
 import { createEntry, updateEntry, getTodayISO, createEmptyLine } from '../storage/entries'
@@ -49,6 +50,10 @@ export default function AsientosDesktop() {
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
     const [deleteSuccess, setDeleteSuccess] = useState(false)
     const [editingEntryData, setEditingEntryData] = useState<JournalEntry | null>(null)
+
+    // Import Modal
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false)
+    const [importSuccessCount, setImportSuccessCount] = useState<number | null>(null)
 
     // Refs for focus management (grid)
     const dateRef = useRef<HTMLInputElement>(null)
@@ -341,11 +346,33 @@ export default function AsientosDesktop() {
 
     return (
         <div>
-            <header className="page-header">
+            <header className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                     <h1 className="page-title">Libro Diario</h1>
                     <p className="page-subtitle">Registro cronológico de asientos.</p>
                 </div>
+                <button
+                    className="btn btn-white"
+                    onClick={() => setIsImportModalOpen(true)}
+                    style={{
+                        border: '1px solid var(--color-border)',
+                        boxShadow: 'var(--shadow-sm)',
+                        background: 'linear-gradient(to bottom, white, #f9fafb)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 16px',
+                        fontWeight: 600,
+                        color: 'var(--color-text)'
+                    }}
+                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#0ea5e9' }}>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Importar asientos
+                </button>
             </header>
 
             <HelpPanel title="¿Cómo cargo un asiento?">
@@ -371,6 +398,12 @@ export default function AsientosDesktop() {
                 {saveSuccess && (
                     <div className="alert alert-success" style={{ marginBottom: 'var(--space-md)' }}>
                         ✓ {editingEntryId ? 'Cambios guardados correctamente' : 'Asiento guardado correctamente'}
+                    </div>
+                )}
+
+                {importSuccessCount !== null && (
+                    <div className="alert alert-success" style={{ marginBottom: 'var(--space-md)' }}>
+                        ✓ Se importaron {importSuccessCount} asientos correctamente.
                     </div>
                 )}
 
@@ -960,6 +993,15 @@ export default function AsientosDesktop() {
                     </div>
                 </div>
             )}
+
+            <JournalImportModal
+                isOpen={isImportModalOpen}
+                onClose={() => setIsImportModalOpen(false)}
+                onSuccess={(count) => {
+                    setImportSuccessCount(count)
+                    setTimeout(() => setImportSuccessCount(null), 5000)
+                }}
+            />
         </div>
     )
 }

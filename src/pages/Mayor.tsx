@@ -40,7 +40,7 @@ const RubroBadge = ({ config }: { config: typeof RUBRO_CONFIG['activo'] }) => (
 )
 
 export default function Mayor() {
-    const { accounts, entries, ledger } = useLedger()
+    const { accounts, ledger } = useLedger()
 
     // --- State ---
     // User Requirement: ALWAYS default to 'all' when entering. Ignore localStorage for initial state.
