@@ -8,6 +8,7 @@ import Balance from './pages/Balance'
 import Estados from './pages/Estados'
 import AmortizacionesPage from './pages/Planillas/AmortizacionesPage'
 import InventarioPage from './pages/Planillas/InventarioPage'
+import ConciliacionesPage from './pages/Planillas/Conciliaciones/ConciliacionesPage'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
 import PlanillasHome from './pages/Planillas/PlanillasHome'
 
@@ -25,6 +26,7 @@ function App() {
                 <Route path="/planillas" element={<PlanillasLayout />}>
                     <Route index element={<PlanillasHome />} />
                     <Route path="inventario" element={<InventarioPage />} />
+                    <Route path="conciliaciones" element={<ConciliacionesPage />} />
                     <Route path="amortizaciones" element={<AmortizacionesPage />} />
                 </Route>
             </Routes>

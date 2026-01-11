@@ -1,6 +1,7 @@
 /* ===========================================
    CONTALIVRE - Design System
    =========================================== */
+@import "tailwindcss";
 
 /* ---- CSS Variables ---- */
 :root {
@@ -84,9 +85,16 @@
   --shadow-lg: 0 10px 24px rgba(10, 31, 72, 0.1);
 
   /* Layout */
+  /* Layout */
   --sidebar-width: 260px;
   --header-height: 60px;
   --max-content-width: 1200px;
+
+  /* Collapsed state overrides */
+  .layout.collapsed {
+    --sidebar-width: 80px;
+  }
+
   --mobile-top-bar-height: 64px;
   --mobile-bottom-nav-height: 60px;
   --safe-area-top: env(safe-area-inset-top, 0px);
@@ -190,13 +198,33 @@ a:hover {
   bottom: 0;
   z-index: 100;
   overflow-y: auto;
+  transition: width 0.3s ease, padding 0.3s ease;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
+
+/* Collapsed Sidebar overrides */
+.layout.collapsed .sidebar {
+  padding: var(--space-lg) var(--space-xs);
+  /* Reduce horizontal padding */
+  overflow: visible;
+  /* Allow flyouts */
+}
+
+/* Hide scrollbar when collapsed to avoid ugliness */
+.layout.collapsed .sidebar::-webkit-scrollbar {
+  width: 0px;
+  background: transparent;
+}
+
 
 .sidebar-logo {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   margin-bottom: var(--space-sm);
+  justify-content: center;
+  /* Center logo in collapsed */
 }
 
 .sidebar-logo img {
@@ -206,6 +234,12 @@ a:hover {
   object-fit: contain;
   display: block;
   flex-shrink: 0;
+  transition: height 0.3s ease;
+}
+
+/* Smaller logo in collapsed mode */
+.layout.collapsed .sidebar-logo img {
+  height: 48px;
 }
 
 .sidebar-logo-emoji {
@@ -227,6 +261,22 @@ a:hover {
   margin-bottom: var(--space-xl);
 }
 
+/* Visually hide titles in collapsed mode but keep accessible? 
+   Actually standard sr-only pattern is better. 
+   Sidebar.tsx handles rendering using 'sr-only' class.
+*/
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;
@@ -245,6 +295,14 @@ a:hover {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   border-left: 3px solid transparent;
+  white-space: nowrap;
+  /* Prevent text wrapping during transition */
+  overflow: hidden;
+}
+
+.layout.collapsed .sidebar-link {
+  padding: var(--space-sm);
+  justify-content: center;
 }
 
 .sidebar-link:hover {
@@ -259,11 +317,28 @@ a:hover {
   border-left-color: var(--brand-blue);
 }
 
+/* In collapsed mode, active border might look weird on left. 
+   Maybe just background or border-bottom? 
+   Let's keep it but ensure it's visible. */
+.layout.collapsed .sidebar-link.active {
+  border-left: none;
+  background: rgba(64, 148, 218, 0.4);
+  /* Stronger bg */
+}
+
 .sidebar-link svg,
 .sidebar-link .icon {
   width: 20px;
   height: 20px;
   flex-shrink: 0;
+  font-size: 1.25rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.layout.collapsed .sidebar-link .icon {
+  margin-right: 0;
+  font-size: 1.5rem;
 }
 
 .main-content {
@@ -271,6 +346,7 @@ a:hover {
   margin-left: var(--sidebar-width);
   padding: var(--space-xl);
   min-height: 100vh;
+  transition: margin-left 0.3s ease;
 }
 
 .page-header {
@@ -4258,9 +4334,26 @@ tr:hover .account-row-actions {
     transform: none;
   }
 }
+
 /* PDF Export Styles */
-.is-exporting [data-export-exclude='true'] { display: none !important; }
-.pdf-only { display: none; }
-.is-exporting .pdf-only { display: block; }
-.is-exporting body { background: white; }
-.is-exporting .card { box-shadow: none !important; border: 1px solid #ddd !important; break-inside: avoid; }
+.is-exporting [data-export-exclude='true'] {
+  display: none !important;
+}
+
+.pdf-only {
+  display: none;
+}
+
+.is-exporting .pdf-only {
+  display: block;
+}
+
+.is-exporting body {
+  background: white;
+}
+
+.is-exporting .card {
+  box-shadow: none !important;
+  border: 1px solid #ddd !important;
+  break-inside: avoid;
+}

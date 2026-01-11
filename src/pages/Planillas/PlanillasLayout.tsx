@@ -9,7 +9,9 @@ export default function PlanillasLayout() {
     if (location.pathname.includes('/inventario')) {
         subtitle = 'Inventario periódico (por diferencias)'
     } else if (location.pathname.includes('/amortizaciones')) {
-        subtitle = 'Herramientas de cálculo' // Manteniendo el original de AmortizacionesPage
+        subtitle = 'Herramientas de cálculo'
+    } else if (location.pathname.includes('/conciliaciones')) {
+        subtitle = 'Conciliación y arqueo'
     }
 
     return (

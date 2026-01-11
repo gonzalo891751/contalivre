@@ -25,7 +25,28 @@ export default function PlanillasHome() {
                     </div>
                 </div>
 
-                {/* Card 2: Amortizaciones */}
+                {/* Card 2: Conciliaciones */}
+                <div className="card planillas-card">
+                    <div className="card-header">
+                        <div className="flex items-center justify-between width-100">
+                            <div className="flex items-center gap-md">
+                                <span className="text-2xl">⚖️</span>
+                                <h3 className="card-title">Conciliaciones</h3>
+                            </div>
+                            <span className="badge badge-purple">Control</span>
+                        </div>
+                    </div>
+                    <div className="card-body">
+                        <p className="text-secondary mb-lg">
+                            Compará tus libros con extractos bancarios o arqueos de caja.
+                        </p>
+                        <Link to="/planillas/conciliaciones" className="btn btn-primary width-100">
+                            Abrir
+                        </Link>
+                    </div>
+                </div>
+
+                {/* Card 3: Amortizaciones */}
                 <div className="card planillas-card">
                     <div className="card-header">
                         <div className="flex items-center justify-between width-100">
@@ -95,6 +116,7 @@ export default function PlanillasHome() {
                 .text-2xl { font-size: 1.5rem; }
                 .badge-blue { background-color: #e3f2fd; color: #1976d2; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
                 .badge-green { background-color: #e8f5e9; color: #2e7d32; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+                .badge-purple { background-color: #f3e5f5; color: #7b1fa2; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
                 .opacity-60 { opacity: 0.6; }
                 .gap-md { gap: var(--space-md); }
                 .mb-lg { margin-bottom: var(--space-lg); }

@@ -1,7 +1,5 @@
 import { useState, useMemo, useRef } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../storage/db'
-import { computeLedger } from '../core/ledger'
+import { useLedger } from '../hooks/useLedger'
 import { getAccountClass, RUBRO_CONFIG } from '../core/account-classification' // [NEW] Import
 
 import AccountSearchSelect, { AccountSearchSelectRef } from '../ui/AccountSearchSelect'
@@ -42,8 +40,7 @@ const RubroBadge = ({ config }: { config: typeof RUBRO_CONFIG['activo'] }) => (
 )
 
 export default function Mayor() {
-    const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
-    const entries = useLiveQuery(() => db.entries.toArray())
+    const { accounts, entries, ledger } = useLedger()
 
     // --- State ---
     // User Requirement: ALWAYS default to 'all' when entering. Ignore localStorage for initial state.
@@ -75,10 +72,7 @@ export default function Mayor() {
     }
 
     // --- Computations ---
-    const ledger = useMemo(() => {
-        if (!accounts || !entries) return null
-        return computeLedger(entries, accounts)
-    }, [accounts, entries])
+    // ledger is now provided by hook
 
     // Single view derived data
     const selectedAccount = accounts?.find((a) => a.id === selectedAccountId)

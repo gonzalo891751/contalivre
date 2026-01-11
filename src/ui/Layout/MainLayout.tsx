@@ -20,6 +20,19 @@ export default function MainLayout({ children }: Props) {
     const [drawerOpen, setDrawerOpen] = useState(false)
     const { isMobile } = useMobileBreakpoint()
 
+    // Sidebar collapse state
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+        const stored = localStorage.getItem("contalivre.sidebar.collapsed")
+        return stored === "true"
+    })
+
+    const toggleSidebar = () => {
+        setIsSidebarCollapsed(prev => {
+            const newState = !prev
+            localStorage.setItem("contalivre.sidebar.collapsed", String(newState))
+            return newState
+        })
+    }
 
     useEffect(() => {
         async function init() {
@@ -39,8 +52,8 @@ export default function MainLayout({ children }: Props) {
 
     if (isLoading) {
         return (
-            <div className="layout">
-                {!isMobile && <Sidebar />}
+            <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
+                {!isMobile && <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />}
                 <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
                     <div className="empty-state">
                         <div className="empty-state-icon">⏳</div>
@@ -53,8 +66,8 @@ export default function MainLayout({ children }: Props) {
 
     if (error) {
         return (
-            <div className="layout">
-                {!isMobile && <Sidebar />}
+            <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
+                {!isMobile && <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />}
                 <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
                     <div className="alert alert-error">
                         <strong>Error al iniciar:</strong> {error}
@@ -65,9 +78,14 @@ export default function MainLayout({ children }: Props) {
     }
 
     return (
-        <div className="layout">
+        <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
             {/* Desktop: Sidebar */}
-            {!isMobile && <Sidebar />}
+            {!isMobile && (
+                <Sidebar
+                    isCollapsed={isSidebarCollapsed}
+                    onToggle={toggleSidebar}
+                />
+            )}
 
             {/* Mobile: Top Bar + Drawer */}
             {isMobile && (
