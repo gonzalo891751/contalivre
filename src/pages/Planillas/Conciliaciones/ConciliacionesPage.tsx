@@ -16,6 +16,18 @@ const isCashOrBank = (account: Account) => {
         name.includes('recaudacion')
 }
 
+// Helper to extract reference from concept
+const extractRef = (concept: string): string | null => {
+    if (!concept) return null
+    // Matches patterns like DEP-301, CH-101, TR-812, INT-09, DA-044
+    // Should be case insensitive and ignore "REF " prefix if present
+    const match = concept.match(/([A-Z]{2,5})-(\d{1,5})/i)
+    if (match) {
+        return match[0].toUpperCase()
+    }
+    return null
+}
+
 // CONSTANTS
 const GRID_TEMPLATE = "120px minmax(0, 1fr) 130px 130px 48px"
 
@@ -34,6 +46,21 @@ export default function ConciliacionesPage() {
 
     // State for difference widget expansion
     const [isDiffExpanded, setIsDiffExpanded] = useState(false)
+
+    // --- New Features: Logic ---
+    const [showRefs, setShowRefs] = useState(false)
+    const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set())
+    const [isExternalEditing, setIsExternalEditing] = useState(false)
+
+    const handleRowClick = (key: string) => {
+        const newSet = new Set(selectedRowKeys)
+        if (newSet.has(key)) {
+            newSet.delete(key)
+        } else {
+            newSet.add(key)
+        }
+        setSelectedRowKeys(newSet)
+    }
 
     // --- Account Selector Logic ---
     const accountOptions = useMemo(() => {
@@ -161,6 +188,45 @@ export default function ConciliacionesPage() {
     const totalsLibros = useMemo(() => calculateTotals(filteredLibros), [filteredLibros])
     const totalsExterno = useMemo(() => calculateTotals(filteredExterno), [filteredExterno])
 
+    // --- Reference Matching Logic ---
+    const commonRefs = useMemo(() => {
+        if (!showRefs) return new Set<string>()
+
+        const refsLibros = new Set<string>()
+        filteredLibros.forEach(r => {
+            const ref = extractRef(r.concepto)
+            if (ref) refsLibros.add(ref)
+        })
+
+        const refsExterno = new Set<string>()
+        filteredExterno.forEach(r => {
+            const ref = extractRef(r.concepto)
+            if (ref) refsExterno.add(ref)
+        })
+
+        // Return intersection
+        return new Set([...refsLibros].filter(x => refsExterno.has(x)))
+    }, [showRefs, filteredLibros, filteredExterno])
+
+    const getRowClass = (row: any, side: 'libros' | 'externo') => {
+        // Construct stable key logic
+        // For Libros, row.id is usually unique enough (entry_idx). 
+        // For Externo, row.id is unique (timestamp).
+        // BUT user asked for stable key if ID not enough. Here IDs seem fine.
+        // Let's use `side:row.id` as unique key for selection.
+        const key = `${side}:${row.id}`
+
+        if (selectedRowKeys.has(key)) return 'grid-row row-selected'
+
+        if (showRefs) {
+            const ref = extractRef(row.concepto)
+            if (ref && commonRefs.has(ref)) {
+                return 'grid-row row-ref-match'
+            }
+        }
+        return 'grid-row'
+    }
+
     const difference = totalsExterno.saldo - totalsLibros.saldo
     const isBalanced = Math.abs(difference) <= 0.01
 
@@ -201,20 +267,32 @@ export default function ConciliacionesPage() {
                         {/* Control: Search */}
                         <div className="control-group flex-grow">
                             <label className="control-label">BUSCAR</label>
-                            <div className="search-wrapper">
-                                <input
-                                    type="text"
-                                    className="premium-input search-input"
-                                    placeholder="Concepto, importe..."
-                                    value={searchText}
-                                    onChange={e => setSearchText(e.target.value)}
-                                />
-                                <div className="search-icon">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <circle cx="11" cy="11" r="8"></circle>
-                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                                    </svg>
+                            <div className="search-row-flex">
+                                <div className="search-wrapper">
+                                    <input
+                                        type="text"
+                                        className="premium-input search-input"
+                                        placeholder="Concepto, importe..."
+                                        value={searchText}
+                                        onChange={e => setSearchText(e.target.value)}
+                                    />
+                                    <div className="search-icon">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                            <circle cx="11" cy="11" r="8"></circle>
+                                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                        </svg>
+                                    </div>
                                 </div>
+                                <button
+                                    className={`btn-ref-toggle ${showRefs ? 'active' : ''}`}
+                                    onClick={() => setShowRefs(!showRefs)}
+                                    title="Resaltar referencias coincidentes"
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                                    </svg>
+                                    <span className="hidden-mobile">Resaltar refs</span>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -270,7 +348,19 @@ export default function ConciliacionesPage() {
                     {/* Grid Body */}
                     <div className="table-container">
                         {filteredLibros.map(row => (
-                            <div key={row.id} className="grid-row" style={{ gridTemplateColumns: GRID_TEMPLATE }}>
+                            <div
+                                key={row.id}
+                                className={getRowClass(row, 'libros')}
+                                style={{ gridTemplateColumns: GRID_TEMPLATE }}
+                                onClick={() => handleRowClick(`libros:${row.id}`)}
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault()
+                                        handleRowClick(`libros:${row.id}`)
+                                    }
+                                }}
+                            >
                                 <div className="gd-cell text-secondary">{formatDateAR(row.fecha)}</div>
                                 <div className="gd-cell cell-concept" title={row.concepto}>{row.concepto}</div>
                                 <div className="gd-cell text-right text-debit tabular-nums" title={formatMoney(row.debe)}>
@@ -320,6 +410,28 @@ export default function ConciliacionesPage() {
                         </div>
                         <div className="actions">
                             <button
+                                className={`btn-premium-toggle ${isExternalEditing ? 'active-mode' : ''}`}
+                                onClick={() => setIsExternalEditing(!isExternalEditing)}
+                                title={isExternalEditing ? "Finalizar edición" : "Habilitar edición"}
+                            >
+                                {isExternalEditing ? (
+                                    <>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="20 6 9 17 4 12"></polyline>
+                                        </svg>
+                                        <span className="hidden-mobile">Listo</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                                        </svg>
+                                        <span className="hidden-mobile">Editar</span>
+                                    </>
+                                )}
+                            </button>
+                            <div className="divider-v"></div>
+                            <button
                                 className="btn-brand-gradient"
                                 onClick={() => setIsImportModalOpen(true)}
                                 title="Importar desde Excel o CSV"
@@ -352,54 +464,95 @@ export default function ConciliacionesPage() {
 
                     <div className="table-container">
                         {filteredExterno.map(row => (
-                            <div key={row.id} className="grid-row editable-row" style={{ gridTemplateColumns: GRID_TEMPLATE }}>
-                                <div className="gd-cell p-0">
-                                    {editingDateId === row.id ? (
-                                        <input
-                                            type="date"
-                                            className="edit-input"
-                                            value={row.fecha}
-                                            onChange={e => handleExternoChange(row.id, 'fecha', e.target.value)}
-                                            onBlur={() => setEditingDateId(null)}
-                                            autoFocus
-                                        />
+                            <div
+                                key={row.id}
+                                className={`${isExternalEditing ? 'grid-row editable-row' : getRowClass(row, 'externo')}`}
+                                style={{ gridTemplateColumns: GRID_TEMPLATE }}
+                                onClick={(e) => {
+                                    if (isExternalEditing) return // Disable selection in edit mode
+                                    // Avoid toggling when clicking inputs/buttons (though in Read mode there are no inputs)
+                                    if ((e.target as HTMLElement).closest('button')) return
+                                    handleRowClick(`externo:${row.id}`)
+                                }}
+                            >
+                                {/* Date Cell */}
+                                <div className={`gd-cell ${isExternalEditing ? 'p-0' : 'text-secondary'}`}>
+                                    {isExternalEditing ? (
+                                        editingDateId === row.id ? (
+                                            <input
+                                                type="date"
+                                                className="edit-input"
+                                                value={row.fecha}
+                                                onChange={e => handleExternoChange(row.id, 'fecha', e.target.value)}
+                                                onBlur={() => setEditingDateId(null)}
+                                                autoFocus
+                                            />
+                                        ) : (
+                                            <div
+                                                className="edit-placeholder"
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    setEditingDateId(row.id)
+                                                }}
+                                            >
+                                                {row.fecha ? formatDateAR(row.fecha) : 'dd/mm'}
+                                            </div>
+                                        )
                                     ) : (
-                                        <div
-                                            className="edit-placeholder"
-                                            onClick={() => setEditingDateId(row.id)}
-                                        >
-                                            {row.fecha ? formatDateAR(row.fecha) : 'dd/mm'}
-                                        </div>
+                                        formatDateAR(row.fecha)
                                     )}
                                 </div>
-                                <div className="gd-cell p-0">
-                                    <input
-                                        type="text"
-                                        className="edit-input"
-                                        value={row.concepto}
-                                        onChange={e => handleExternoChange(row.id, 'concepto', e.target.value)}
-                                    />
+
+                                {/* Concepto Cell */}
+                                <div className={`gd-cell ${isExternalEditing ? 'p-0' : 'cell-concept'}`} title={row.concepto}>
+                                    {isExternalEditing ? (
+                                        <input
+                                            type="text"
+                                            className="edit-input"
+                                            value={row.concepto}
+                                            onChange={e => handleExternoChange(row.id, 'concepto', e.target.value)}
+                                        />
+                                    ) : (
+                                        row.concepto
+                                    )}
                                 </div>
-                                <div className="gd-cell p-0">
-                                    <input
-                                        type="number"
-                                        className="edit-input text-right tabular-nums"
-                                        value={row.debe}
-                                        onChange={e => handleExternoChange(row.id, 'debe', parseFloat(e.target.value) || 0)}
-                                    />
+
+                                {/* Debe Cell */}
+                                <div className={`gd-cell ${isExternalEditing ? 'p-0' : 'text-right text-debit tabular-nums'}`} title={formatMoney(row.debe)}>
+                                    {isExternalEditing ? (
+                                        <input
+                                            type="number"
+                                            className="edit-input text-right tabular-nums"
+                                            value={row.debe}
+                                            onChange={e => handleExternoChange(row.id, 'debe', parseFloat(e.target.value) || 0)}
+                                        />
+                                    ) : (
+                                        row.debe > 0 ? formatShortMoney(row.debe) : '-'
+                                    )}
                                 </div>
-                                <div className="gd-cell p-0">
-                                    <input
-                                        type="number"
-                                        className="edit-input text-right tabular-nums"
-                                        value={row.haber}
-                                        onChange={e => handleExternoChange(row.id, 'haber', parseFloat(e.target.value) || 0)}
-                                    />
+
+                                {/* Haber Cell */}
+                                <div className={`gd-cell ${isExternalEditing ? 'p-0' : 'text-right text-credit tabular-nums'}`} title={formatMoney(row.haber)}>
+                                    {isExternalEditing ? (
+                                        <input
+                                            type="number"
+                                            className="edit-input text-right tabular-nums"
+                                            value={row.haber}
+                                            onChange={e => handleExternoChange(row.id, 'haber', parseFloat(e.target.value) || 0)}
+                                        />
+                                    ) : (
+                                        row.haber > 0 ? formatShortMoney(row.haber) : '-'
+                                    )}
                                 </div>
+
+                                {/* Actions Cell */}
                                 <div className="gd-cell flex-center">
                                     <button
                                         className="btn-delete-action"
-                                        onClick={() => handleDeleteRow(row.id)}
+                                        onClick={(e) => {
+                                            e.stopPropagation() // Prevent selection
+                                            handleDeleteRow(row.id)
+                                        }}
                                         title="Eliminar fila"
                                     >
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -587,12 +740,31 @@ export default function ConciliacionesPage() {
                 }
                 .separator { font-size: 1.2rem; color: #cbd5e1; padding-bottom: 2px; }
 
-                /* Search Input */
+                /* Search Input & Button */
+                .search-row-flex {
+                    display: flex;
+                    gap: 8px;
+                    width: 100%;
+                }
                 .search-wrapper { position: relative; width: 100%; }
                 .search-input { padding-left: 36px; }
                 .search-icon {
                     position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
                     pointer-events: none; color: #94a3b8; display: flex; align-items: center;
+                }
+
+                .btn-ref-toggle {
+                    display: flex; align-items: center; gap: 6px;
+                    background: #ffffff; border: 1px solid #e2e8f0;
+                    color: #64748b; padding: 0 12px;
+                    border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+                    white-space: nowrap; cursor: pointer;
+                    transition: all 0.2s;
+                    height: 40px;
+                }
+                .btn-ref-toggle:hover { background: #f8fafc; border-color: #cbd5e1; }
+                .btn-ref-toggle.active {
+                    background: #f0fdf4; border-color: #86efac; color: #15803d;
                 }
 
                 /* Tables Grid Layout */
@@ -681,6 +853,23 @@ export default function ConciliacionesPage() {
                     border-radius: 6px; font-size: 0.85rem; font-weight: 600;
                     cursor: pointer; height: 36px;
                 }
+
+                .btn-premium-toggle {
+                    display: flex; align-items: center; gap: 6px;
+                    background-color: white; color: var(--text-secondary);
+                    border: 1px solid var(--border-color); padding: 6px 14px;
+                    border-radius: 6px; font-size: 0.85rem; font-weight: 600;
+                    cursor: pointer; height: 36px;
+                    transition: all 0.2s;
+                }
+                .btn-premium-toggle:hover { background-color: #f8fafc; border-color: #cbd5e1; }
+                .btn-premium-toggle.active-mode {
+                    background-color: #0f172a; color: white; border-color: #0f172a;
+                }
+
+                .divider-v {
+                    width: 1px; height: 24px; background-color: #e2e8f0; margin: 0 4px;
+                }
                 
                 @media (max-width: 640px) {
                     .hidden-mobile { display: none; }
@@ -715,8 +904,20 @@ export default function ConciliacionesPage() {
                     color: var(--text-primary);
                     align-items: center; /* Vertical center */
                     transition: background 0.1s;
+                    cursor: pointer;
                 }
                 .grid-row:hover { background-color: #f8fafc; }
+                
+                /* Selection & Highlighting States */
+                .grid-row.row-ref-match {
+                    background-color: #fef9c3 !important; /* Yellow-50 */
+                    border-left: 3px solid #facc15;
+                    padding-left: 0; /* Adjust for border if needed, or keep standard */
+                }
+                .grid-row.row-selected {
+                    background-color: #ecfdf5 !important; /* Emerald-50 */
+                    border-left: 3px solid #10b981;
+                }
                 
                 .gd-cell {
                     padding: 8px 12px;

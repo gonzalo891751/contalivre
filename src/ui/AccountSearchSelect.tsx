@@ -185,7 +185,7 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
             <input
                 ref={inputRef}
                 type="text"
-                className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 bg-white shadow-sm"
+                className="form-input w-full h-11 truncate placeholder:text-slate-400"
                 placeholder={placeholder}
                 value={isOpen ? search : displayValue}
                 onChange={(e) => {
@@ -202,15 +202,15 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
             {isOpen && createPortal(
                 <div
                     ref={listRef}
-                    className="fixed z-[9999] bg-white border border-slate-200 shadow-xl rounded-lg max-h-60 overflow-y-auto flex flex-col"
+                    className="fixed z-[9999] bg-white border border-slate-200 shadow-xl rounded-xl max-h-72 overflow-y-auto flex flex-col no-scrollbar"
                     style={{
-                        top: coords.top + 4, // 4px gap
+                        top: coords.top + 6, // 6px gap for more air
                         left: coords.left,
                         width: coords.width,
                     }}
                 >
                     {filteredAccounts.length === 0 ? (
-                        <div className="p-3 text-sm text-slate-400 text-center italic">
+                        <div className="p-4 text-sm text-slate-400 text-center italic">
                             No se encontraron cuentas
                         </div>
                     ) : (
@@ -218,19 +218,26 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
                             <div
                                 key={acc.id}
                                 className={`
-                                    px-3 py-2 cursor-pointer border-b border-slate-50 last:border-none transition-colors
-                                    ${index === highlightedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'}
-                                    ${acc.id === value ? 'bg-blue-100/50' : ''}
+                                    flex flex-col gap-0.5 px-4 py-3 cursor-pointer border-b border-slate-50 last:border-none transition-all duration-150
+                                    ${index === highlightedIndex ? 'bg-slate-50' : 'hover:bg-slate-50'}
+                                    ${acc.id === value ? 'bg-blue-50/60' : ''}
                                 `}
                                 onMouseEnter={() => setHighlightedIndex(index)}
                                 onClick={() => selectAccount(acc)}
                             >
-                                <div className="flex items-center justify-between">
-                                    <span className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{acc.code}</span>
+                                {/* Line 1: Code (Accent Color) */}
+                                <div className="text-xs font-bold text-blue-600 font-mono tracking-wide">
+                                    {acc.code}
                                 </div>
-                                <div className="text-sm font-medium text-slate-700 mt-1">{acc.name}</div>
-                                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
-                                    {accountPaths.get(acc.id)}
+
+                                {/* Line 2: Name (Large & Bold) */}
+                                <div className="text-sm font-bold text-slate-800">
+                                    {acc.name}
+                                </div>
+
+                                {/* Line 3: Path/Subtitle (Gray) */}
+                                <div className="text-xs text-slate-500 font-normal truncate">
+                                    {accountPaths.get(acc.id) || acc.name}
                                 </div>
                             </div>
                         ))
