@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
@@ -184,6 +184,9 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
     const [sheets, setSheets] = useState<string[]>([])
     const [, setSelectedSheet] = useState<string>('')
     const [availableAccounts, setAvailableAccounts] = useState<Account[]>([])
+
+    // Fix unused variable
+    void sheets
 
     // Processing State
     const [mapping, setMapping] = useState<ColumnMapping>({
@@ -501,7 +504,6 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
         setImportProgress('Iniciando importación segura...')
 
         const insertedIds: string[] = []
-        let errorOccurred = false
 
         try {
             const total = draftEntries.length
@@ -533,7 +535,6 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
             handleClose()
 
         } catch (error: any) {
-            errorOccurred = true
             console.error('Import failed', error)
             setImportProgress('Error detectado. Deshaciendo cambios (Rollback)...')
 
@@ -964,7 +965,9 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
                         Cancelar
                     </button>
 
-                    <div className="flex gap-3">
+                    <div className="flex gap-3 items-center">
+                        {isLoading && <span className="text-xs text-slate-500 font-medium animate-pulse hidden md:inline-block">{importProgress}</span>}
+
                         {step > 1 && (
                             <button
                                 onClick={() => setStep(prev => prev - 1 as any)}
