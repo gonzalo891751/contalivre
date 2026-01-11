@@ -29,7 +29,6 @@ interface ProcessedEntry {
     debe: number
     haber: number
     concepto: string
-    // Removed 'detalle'
     sourceRowIndex: number
     errors: string[]
     isValid: boolean
@@ -151,7 +150,7 @@ const detectMapping = (headers: string[]): ColumnMapping => {
         cuenta_nombre: ['cuenta_nombre', 'nombre_cuenta', 'cuenta', 'account', 'detalle_cuenta', 'nombre'],
         debe: ['debe', 'debito', 'debit', 'dr'],
         haber: ['haber', 'credito', 'credit', 'cr'],
-        concepto: ['concepto', 'memo', 'glosa', 'descripcion_asiento', 'detalle', 'descripcion', 'obs'], // Added synonyms from 'detalle' here
+        concepto: ['concepto', 'memo', 'glosa', 'descripcion_asiento', 'descripcion', 'obs', 'detalle'],
     }
 
     headers.forEach(h => {
@@ -459,7 +458,7 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
                 accountId,
                 debit: row.debe,
                 credit: row.haber,
-                description: row.concepto || ''
+                description: ''
             })
 
             entry.totalDebe += row.debe
@@ -554,13 +553,390 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Render Helpers
+    // Render Helpers (Calculated)
     // ─────────────────────────────────────────────────────────────────────────
 
     const pendingResolutionCount = unresolvedKeys.filter(k => !accountResolution.has(k)).length
-    const isStep2Valid = validationSummary.rowErrors === 0 && (mapping.cuenta_codigo || mapping.cuenta_nombre)
+
+    // Validation checks
+    const isStep2Valid = validationSummary.rowErrors === 0 && (mapping.cuenta_codigo || mapping.cuenta_nombre) && mapping.nro_asiento && mapping.fecha && mapping.debe && mapping.haber
     const isStep3Valid = pendingResolutionCount === 0
     const isStep4Valid = validationSummary.entryErrors === 0
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Render Steps
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const renderStep2 = () => (
+        <div className="flex flex-col gap-8">
+            {/* Alert for Requirements */}
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 text-blue-900/80 items-start">
+                <span className="text-xl">ℹ️</span>
+                <div className="text-sm">
+                    <strong>Campos Obligatorios:</strong> Para importar correctamente, asegurate de mapear:
+                    <ul className="list-disc list-inside mt-1 ml-1 space-y-1">
+                        <li>N° de Asiento, Fecha, Debe, Haber</li>
+                        <li>Cuenta: por <b>Código</b> (recomendado) o <b>Nombre</b> (o ambos)</li>
+                    </ul>
+                </div>
+            </div>
+
+            {/* Mapping Grid */}
+            <div className="grid md:grid-cols-2 gap-8">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative group transition-all hover:shadow-md">
+                    <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity">
+                        <span className="text-4xl text-slate-100">📝</span>
+                    </div>
+                    <h3 className="font-bold text-slate-800 mb-6 border-b pb-2 flex items-center gap-2">
+                        <span>1.</span> Datos del Asiento
+                    </h3>
+                    <div className="space-y-5">
+                        {[
+                            { id: 'nro_asiento', label: 'N° Asiento', req: true, desc: 'Identificador único del asiento' },
+                            { id: 'fecha', label: 'Fecha', req: true, desc: 'DD/MM/AAAA o AAAA-MM-DD' },
+                            { id: 'concepto', label: 'Concepto / Glosa', req: false, desc: 'Descripción del asiento o línea' },
+                        ].map(f => (
+                            <div key={f.id}>
+                                <label className="flex items-center justify-between text-sm font-semibold text-slate-700 mb-1.5">
+                                    <span>{f.label} {f.req && <span className="text-red-500">*</span>}</span>
+                                    {f.req && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Obligatorio</span>}
+                                </label>
+                                <select
+                                    className={`
+                                        w-full text-sm rounded-xl border-slate-300 focus:border-blue-500 focus:ring-blue-500 bg-slate-50 transition-all
+                                        ${!mapping[f.id as keyof ColumnMapping] && f.req ? 'border-amber-300 bg-amber-50' : ''}
+                                    `}
+                                    value={mapping[f.id as keyof ColumnMapping]}
+                                    onChange={e => setMapping(prev => ({ ...prev, [f.id]: e.target.value }))}
+                                >
+                                    <option value="">(Seleccionar columna...)</option>
+                                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                                <p className="text-xs text-slate-400 mt-1.5">{f.desc}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative group transition-all hover:shadow-md">
+                    <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity">
+                        <span className="text-4xl text-slate-100">📊</span>
+                    </div>
+                    <h3 className="font-bold text-slate-800 mb-6 border-b pb-2 flex items-center gap-2">
+                        <span>2.</span> Contabilidad
+                    </h3>
+                    <div className="space-y-6">
+                        <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                            <label className="block text-sm font-bold text-slate-700 mb-3">
+                                Identificación de Cuenta <span className="text-red-500">*</span>
+                            </label>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-xs font-semibold text-slate-500 block mb-1.5 uppercase tracking-wide">Por Código</label>
+                                    <select
+                                        className="w-full text-sm rounded-xl border-slate-300 focus:border-blue-500 bg-white shadow-sm"
+                                        value={mapping.cuenta_codigo}
+                                        onChange={e => setMapping(prev => ({ ...prev, cuenta_codigo: e.target.value }))}
+                                    >
+                                        <option value="">(Ignorar)</option>
+                                        {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-semibold text-slate-500 block mb-1.5 uppercase tracking-wide">Por Nombre</label>
+                                    <select
+                                        className="w-full text-sm rounded-xl border-slate-300 focus:border-blue-500 bg-white shadow-sm"
+                                        value={mapping.cuenta_nombre}
+                                        onChange={e => setMapping(prev => ({ ...prev, cuenta_nombre: e.target.value }))}
+                                    >
+                                        <option value="">(Ignorar)</option>
+                                        {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            {!(mapping.cuenta_codigo || mapping.cuenta_nombre) && (
+                                <div className="flex items-center gap-2 mt-3 text-red-600 bg-red-50 p-2 rounded-lg text-xs font-medium">
+                                    ⚠️ Seleccioná al menos código o nombre
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1.5">Debe <span className="text-red-500">*</span></label>
+                                <select
+                                    className={`
+                                        w-full text-sm rounded-xl border-slate-300 focus:border-blue-500 bg-slate-50
+                                        ${!mapping.debe ? 'border-amber-300 bg-amber-50' : ''}
+                                    `}
+                                    value={mapping.debe}
+                                    onChange={e => setMapping(prev => ({ ...prev, debe: e.target.value }))}
+                                >
+                                    <option value="">(Seleccionar...)</option>
+                                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1.5">Haber <span className="text-red-500">*</span></label>
+                                <select
+                                    className={`
+                                        w-full text-sm rounded-xl border-slate-300 focus:border-blue-500 bg-slate-50
+                                        ${!mapping.haber ? 'border-amber-300 bg-amber-50' : ''}
+                                    `}
+                                    value={mapping.haber}
+                                    onChange={e => setMapping(prev => ({ ...prev, haber: e.target.value }))}
+                                >
+                                    <option value="">(Seleccionar...)</option>
+                                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Preview */}
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm flex flex-col max-h-[500px]">
+                <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
+                    <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                        <span className="text-lg">👁️</span> Vista Previa
+                    </h3>
+                    <div className="flex gap-3 text-xs font-bold uppercase tracking-wide">
+                        <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full">
+                            Válidos: {validationSummary.validRows}
+                        </span>
+                        <span className={`px-3 py-1 rounded-full ${validationSummary.rowErrors > 0 ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-400'}`}>
+                            Errores: {validationSummary.rowErrors}
+                        </span>
+                    </div>
+                </div>
+                <div className="overflow-auto pb-20">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-white sticky top-0 z-10 shadow-sm text-xs font-bold text-slate-500 uppercase tracking-wider">
+                            <tr>
+                                <th className="px-4 py-3 bg-slate-50/95 backdrop-blur w-24 border-b">Estado</th>
+                                <th className="px-4 py-3 bg-slate-50/95 backdrop-blur border-b">Asiento</th>
+                                <th className="px-4 py-3 bg-slate-50/95 backdrop-blur border-b">Fecha</th>
+                                <th className="px-4 py-3 bg-slate-50/95 backdrop-blur border-b">Cuenta</th>
+                                <th className="px-4 py-3 bg-slate-50/95 backdrop-blur text-right border-b">Debe</th>
+                                <th className="px-4 py-3 bg-slate-50/95 backdrop-blur text-right border-b">Haber</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-slate-50/30">
+                            {processedRows.slice(0, 50).map((row, i) => (
+                                <tr key={i} className={`hover:bg-blue-50/50 transition-colors ${!row.isValid ? 'bg-red-50/50' : ''}`}>
+                                    <td className="px-4 py-2.5">
+                                        {row.isValid ? (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 uppercase tracking-wide border border-green-200">OK</span>
+                                        ) : (
+                                            <span className="group relative inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 uppercase tracking-wide border border-red-200 cursor-help">
+                                                ERROR
+                                                <div className="absolute left-0 bottom-full mb-2 w-48 p-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none z-50 transition-opacity">
+                                                    {row.errors.join(', ')}
+                                                </div>
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-2.5 font-mono text-slate-600 font-medium">{row.nro_asiento || '—'}</td>
+                                    <td className="px-4 py-2.5 text-slate-600">{row.fechaISO || '—'}</td>
+                                    <td className="px-4 py-2.5">
+                                        <div className="flex flex-col">
+                                            {row.cuenta_codigo && <span className="font-mono text-xs text-slate-500 font-bold">{row.cuenta_codigo}</span>}
+                                            <span className="text-slate-700 font-medium truncate max-w-[200px] text-xs mt-0.5">{row.cuenta_nombre || '—'}</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right font-mono text-slate-600">{row.debe > 0 ? row.debe.toFixed(2) : '-'}</td>
+                                    <td className="px-4 py-2.5 text-right font-mono text-slate-600">{row.haber > 0 ? row.haber.toFixed(2) : '-'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    )
+
+    const renderStep3 = () => (
+        <div className="flex flex-col gap-8 max-w-5xl mx-auto h-full">
+            {/* Header / Summary */}
+            <div className="shrink-0">
+                {pendingResolutionCount === 0 ? (
+                    <div className="flex flex-col items-center justify-center p-8 bg-green-50 rounded-3xl border border-green-100 text-center animate-in fade-in zoom-in duration-500">
+                        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-3xl mb-4 shadow-sm">🎉</div>
+                        <h3 className="text-2xl font-bold text-green-800">¡Todas las cuentas resueltas!</h3>
+                        <p className="text-green-700/80 mt-2 max-w-md font-medium">
+                            Hemos asignado correctamente todas las cuentas del archivo a tu Plan de Cuentas.
+                            Podés continuar al siguiente paso.
+                        </p>
+                    </div>
+                ) : (
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 flex flex-col md:flex-row gap-5 text-amber-900 shadow-sm items-center">
+                        <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-2xl shrink-0">⚠️</div>
+                        <div className="flex-1 text-center md:text-left">
+                            <h3 className="font-bold text-lg text-amber-950">Acción Requerida</h3>
+                            <p className="opacity-90 mt-1">
+                                Encontramos <strong>{pendingResolutionCount} cuentas</strong> en el archivo que no coinciden automáticamente con tu Plan de Cuentas.
+                                Asignalas manualmente para continuar.
+                            </p>
+                        </div>
+                        <div className="px-4 py-2 bg-white/50 rounded-lg font-mono font-bold text-amber-800 border border-amber-100">
+                            Pendientes: {pendingResolutionCount}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Resolution Table */}
+            {unresolvedKeys.length > 0 && (
+                <div className={`
+                    bg-white rounded-2xl border border-slate-200 shadow-sm flex-1 flex flex-col min-h-[400px] overflow-hidden transition-opacity duration-500
+                    ${pendingResolutionCount === 0 ? 'opacity-50 pointer-events-none grayscale' : 'opacity-100'}
+                `}>
+                    <div className="px-8 py-4 bg-slate-50 border-b border-slate-100 font-bold text-slate-700 flex justify-between uppercase tracking-wider text-xs">
+                        <span>Asignación Manual ({unresolvedKeys.length})</span>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-0">
+                        <table className="w-full text-sm text-left border-collapse">
+                            <thead className="bg-white sticky top-0 z-10 shadow-sm">
+                                <tr className="text-xs text-slate-500 uppercase border-b border-slate-100 font-semibold bg-slate-50/95 backdrop-blur">
+                                    <th className="px-8 py-3 w-1/3">Cuenta en Archivo</th>
+                                    <th className="px-8 py-3">Asignar a...</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {unresolvedKeys.map((key) => {
+                                    const assignedId = accountResolution.get(key)
+                                    const assignedAccount = availableAccounts.find(a => a.id === assignedId)
+                                    const isResolved = !!assignedAccount
+
+                                    return (
+                                        <tr key={key} className={`group transition-colors ${isResolved ? 'bg-blue-50/30' : 'hover:bg-slate-50'}`}>
+                                            <td className="px-8 py-4 align-top">
+                                                <div className="font-bold text-slate-800 text-base">{key}</div>
+                                                <div className="text-xs text-slate-400 mt-1 font-medium bg-slate-100 inline-block px-2 py-0.5 rounded">Sin coincidencia</div>
+                                            </td>
+                                            <td className="px-8 py-4 align-top">
+                                                {isResolved ? (
+                                                    <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-xl shadow-sm group-hover:bg-white group-hover:shadow-md transition-all">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">Asignado a</span>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-mono text-xs font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{assignedAccount.code}</span>
+                                                                <span className="font-medium text-slate-800">{assignedAccount.name}</span>
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => resolveAccount(key, '')}
+                                                            className="ml-4 text-slate-400 hover:text-blue-600 p-2 hover:bg-blue-100 rounded-lg transition-colors"
+                                                            title="Cambiar asignación"
+                                                        >
+                                                            ✏️
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="max-w-md">
+                                                        <AccountSearchSelect
+                                                            accounts={availableAccounts}
+                                                            value=""
+                                                            onChange={(id) => resolveAccount(key, id)}
+                                                            placeholder="Buscar cuenta para asignar..."
+                                                        />
+                                                    </div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+
+    const renderStep4 = () => (
+        <div className="flex flex-col gap-8 max-w-6xl mx-auto h-full">
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+                    <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Total Asientos</div>
+                    <div className="text-5xl font-black text-slate-800 tracking-tight">{draftEntries.length}</div>
+                </div>
+                <div className="bg-green-50 p-6 rounded-2xl border border-green-100 shadow-sm flex flex-col items-center justify-center text-center">
+                    <div className="text-xs font-bold text-green-600 uppercase tracking-widest mb-2">Listos</div>
+                    <div className="text-5xl font-black text-green-600 tracking-tight">{validationSummary.balancedEntries}</div>
+                </div>
+                {validationSummary.entryErrors > 0 && (
+                    <div className="bg-red-50 p-6 rounded-2xl border border-red-100 shadow-sm flex flex-col items-center justify-center text-center animate-pulse">
+                        <div className="text-xs font-bold text-red-600 uppercase tracking-widest mb-2">Errores</div>
+                        <div className="text-5xl font-black text-red-600 tracking-tight">{validationSummary.entryErrors}</div>
+                    </div>
+                )}
+            </div>
+
+            {/* Block Alert */}
+            {validationSummary.entryErrors > 0 && (
+                <div className="bg-red-50 border border-red-200 text-red-900 p-4 rounded-xl flex items-center gap-4 shrink-0 shadow-sm">
+                    <span className="text-3xl">⛔</span>
+                    <div>
+                        <h3 className="font-bold text-lg">Bloqueo de Importación</h3>
+                        <p className="text-sm opacity-90 font-medium">
+                            Existen asientos desbalanceados o incompletos ({validationSummary.entryErrors}).
+                            Por seguridad, no se puede importar hasta que el archivo esté libre de errores críticos.
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {/* Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-1 flex flex-col min-h-[300px]">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 font-bold text-slate-700 flex justify-between items-center">
+                    <span>Detalle de Asientos a Importar</span>
+                    <span className="text-xs bg-slate-200 text-slate-600 px-2 py-1 rounded font-mono">Total: {draftEntries.length}</span>
+                </div>
+                <div className="overflow-auto flex-1">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-white sticky top-0 z-10 text-xs text-slate-500 uppercase font-bold tracking-wider shadow-sm">
+                            <tr>
+                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">Estado</th>
+                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">N°</th>
+                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">Fecha</th>
+                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">Concepto</th>
+                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b text-center">Líneas</th>
+                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {draftEntries.map((entry, i) => (
+                                <tr key={i} className={`hover:bg-slate-50 transition-colors ${!entry.isBalanced ? 'bg-red-50' : ''}`}>
+                                    <td className="px-6 py-3.5">
+                                        {entry.isBalanced && entry.validationErrors.length === 0 ? (
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200 tracking-wide">OK</span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200 tracking-wide">
+                                                ERR
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-3.5 font-mono text-slate-600 font-bold">{entry.nro_asiento}</td>
+                                    <td className="px-6 py-3.5 whitespace-nowrap text-slate-600">{entry.fechaISO}</td>
+                                    <td className="px-6 py-3.5 text-slate-600 truncate max-w-[200px] font-medium">{entry.concepto}</td>
+                                    <td className="px-6 py-3.5 text-center text-slate-500 font-mono bg-slate-50/50">{entry.lines.length}</td>
+                                    <td className="px-6 py-3.5 text-right font-mono font-bold text-slate-700">
+                                        $ {entry.totalDebe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    )
+
 
     if (!isOpen) return null
 
@@ -570,45 +946,80 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
 
             <div className={`
                 relative bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full flex flex-col overflow-hidden border border-white/20
-                ${step === 1 ? 'max-w-2xl' : 'max-w-5xl h-[85vh]'}
-                transition-all duration-300
+                ${step === 1 ? 'max-w-xl' : 'max-w-6xl h-[90vh]'}
+                transition-all duration-500 ease-in-out
             `}>
 
                 {/* Header with Stepper */}
-                <div className="px-8 py-6 border-b border-slate-100 bg-white/50 shrink-0">
+                <div className="px-8 py-6 border-b border-slate-100 bg-white/80 shrink-0">
                     <div className="flex justify-between items-start mb-6">
                         <div>
-                            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                                📥 Importar Asientos
+                            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
+                                <span className="bg-blue-100 text-blue-600 p-2 rounded-lg text-xl">📥</span>
+                                Importar Asientos
                             </h2>
-                            {file && <div className="text-sm text-slate-500 mt-1">{file.name}</div>}
+                            {file && <div className="text-sm font-medium text-slate-500 mt-2 ml-14 flex items-center gap-2">
+                                📎 {file.name}
+                            </div>}
                         </div>
-                        {!isLoading && <button onClick={handleClose} className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-full transition-colors">✕</button>}
+                        {!isLoading && (
+                            <button
+                                onClick={handleClose}
+                                className="p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-full transition-colors"
+                                title="Cerrar"
+                            >
+                                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        )}
                     </div>
 
                     {/* Stepper */}
                     {step > 1 && (
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center justify-center w-full max-w-3xl mx-auto">
                             {[
                                 { n: 1, label: 'Archivo' },
                                 { n: 2, label: 'Mapeo' },
                                 { n: 3, label: 'Cuentas' },
                                 { n: 4, label: 'Confirmar' }
-                            ].map((s, i) => {
+                            ].map((s, i, arr) => {
                                 const isActive = step === s.n
                                 const isDone = step > s.n
+
                                 return (
-                                    <div key={s.n} className="flex items-center gap-2">
-                                        <div className={`
-                                            w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all
-                                            ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : isDone ? 'bg-green-500 text-white' : 'bg-slate-100 text-slate-400'}
-                                        `}>
-                                            {isDone ? '✓' : s.n}
+                                    <div key={s.n} className="flex items-center flex-1 last:flex-none">
+                                        <div className="flex flex-col items-center gap-2 relative z-10 group cursor-default">
+                                            <div className={`
+                                                w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 border-2
+                                                ${isActive
+                                                    ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200 scale-110'
+                                                    : isDone
+                                                        ? 'bg-green-500 border-green-500 text-white'
+                                                        : 'bg-white border-slate-200 text-slate-300'}
+                                            `}>
+                                                {isDone ? (
+                                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                ) : s.n}
+                                            </div>
+                                            <span className={`
+                                                text-xs font-bold whitespace-nowrap transition-colors duration-300
+                                                ${isActive ? 'text-blue-700' : isDone ? 'text-green-600' : 'text-slate-300'}
+                                            `}>
+                                                {s.label}
+                                            </span>
                                         </div>
-                                        <div className={`text-sm font-medium ${isActive ? 'text-slate-800' : 'text-slate-400 hidden md:block'}`}>
-                                            {s.label}
-                                        </div>
-                                        {i < 3 && <div className="w-8 h-[2px] bg-slate-100 mx-2 hidden md:block" />}
+
+                                        {i < arr.length - 1 && (
+                                            <div className="flex-1 h-[2px] mx-4 relative overflow-hidden bg-slate-100 rounded-full">
+                                                <div className={`
+                                                    absolute inset-0 transition-all duration-500 ease-out
+                                                    ${isDone ? 'bg-green-500 w-full' : isActive ? 'bg-blue-600 w-1/2' : 'w-0'}
+                                                `} />
+                                            </div>
+                                        )}
                                     </div>
                                 )
                             })}
@@ -617,411 +1028,122 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
                 </div>
 
                 {/* Body Content */}
-                <div className="flex-1 overflow-y-auto overflow-x-hidden p-8 bg-slate-50/50">
+                <div className="flex-1 overflow-y-auto overflow-x-hidden p-8 bg-slate-50 relative">
 
                     {/* STEP 1: Upload */}
                     {step === 1 && (
-                        <div className="flex flex-col h-full justify-center items-center max-w-lg mx-auto">
-                            <div {...getRootProps()} className={`w-full aspect-video flex flex-col items-center justify-center border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-300 group
-                                ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-blue-400 hover:bg-white bg-slate-50'}`}>
+                        <div className="flex flex-col h-full justify-center items-center">
+                            <div
+                                {...getRootProps()}
+                                className={`
+                                    w-full max-w-lg aspect-[3/2] flex flex-col items-center justify-center 
+                                    border-2 border-dashed rounded-3xl cursor-pointer transition-all duration-300 group
+                                    ${isDragActive
+                                        ? 'border-blue-500 bg-blue-50/50 scale-105 shadow-xl shadow-blue-100'
+                                        : 'border-slate-300 hover:border-blue-400 hover:bg-white bg-slate-50/50 hover:shadow-lg'}
+                                `}
+                            >
                                 <input {...getInputProps()} />
-                                <div className="p-4 bg-white rounded-full shadow-sm mb-4 group-hover:scale-110 transition-transform">
-                                    <span className="text-4xl">📂</span>
+                                <div className="p-6 bg-white rounded-full shadow-lg shadow-slate-200 mb-6 group-hover:scale-110 transition-transform duration-300 text-5xl">
+                                    {isDragActive ? '📂' : '☁️'}
                                 </div>
-                                <p className="text-lg font-semibold text-slate-700">Arrastrá tu archivo aquí</p>
-                                <p className="text-sm text-slate-400 mt-2">Soporta .csv, .xlsx, .xls</p>
+                                <h3 className="text-xl font-bold text-slate-700 mb-2">Subir archivo CSV o Excel</h3>
+                                <p className="text-sm text-slate-400 text-center max-w-xs px-4">
+                                    Arrastrá tu archivo aquí o hacé clic para buscar en tu dispositivo.
+                                </p>
                             </div>
-                            <button onClick={downloadTemplate} className="mt-8 text-sm text-blue-600 font-medium hover:text-blue-800 transition-colors flex items-center gap-2">
-                                <span className="text-lg">📄</span> Descargar plantilla de ejemplo
+
+                            <button onClick={downloadTemplate} className="mt-8 group flex items-center gap-3 px-6 py-3 rounded-xl bg-white border border-slate-200 text-slate-600 font-medium hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-all shadow-sm">
+                                <span className="p-1.5 bg-slate-100 rounded-lg group-hover:bg-blue-100 transition-colors">📄</span>
+                                Descargar plantilla modelo
                             </button>
                         </div>
                     )}
 
                     {/* STEP 2: Map */}
-                    {step === 2 && (
-                        <div className="flex flex-col gap-8">
-
-                            {/* Alert for Requirements */}
-                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 text-blue-900/80 items-start">
-                                <span className="text-xl">ℹ️</span>
-                                <div className="text-sm">
-                                    <strong>Campos Obligatorios:</strong> Para importar correctamente, asegurate de mapear:
-                                    <ul className="list-disc list-inside mt-1 ml-1 space-y-1">
-                                        <li>N° de Asiento, Fecha, Debe, Haber</li>
-                                        <li>Cuenta: por <b>Código</b> (recomendado) o <b>Nombre</b> (o ambos)</li>
-                                    </ul>
-                                </div>
-                            </div>
-
-                            {/* Mapping Grid */}
-                            <div className="grid md:grid-cols-2 gap-8">
-                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                                    <h3 className="font-semibold text-slate-800 mb-4 border-b pb-2">Datos del Asiento</h3>
-                                    <div className="space-y-4">
-                                        {[
-                                            { id: 'nro_asiento', label: 'N° Asiento', req: true, desc: 'Identificador único del asiento' },
-                                            { id: 'fecha', label: 'Fecha', req: true, desc: 'DD/MM/AAAA o AAAA-MM-DD' },
-                                            { id: 'concepto', label: 'Concepto / Glosa', req: false, desc: 'Descripción del asiento o línea' },
-                                        ].map(f => (
-                                            <div key={f.id}>
-                                                <label className="block text-sm font-medium text-slate-700 mb-1">
-                                                    {f.label} {f.req && <span className="text-red-500">*</span>}
-                                                </label>
-                                                <select
-                                                    className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 bg-slate-50"
-                                                    value={mapping[f.id as keyof ColumnMapping]}
-                                                    onChange={e => setMapping(prev => ({ ...prev, [f.id]: e.target.value }))}
-                                                >
-                                                    <option value="">(Ignorar)</option>
-                                                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                                                </select>
-                                                <p className="text-xs text-slate-400 mt-1">{f.desc}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                                    <h3 className="font-semibold text-slate-800 mb-4 border-b pb-2">Contabilidad</h3>
-                                    <div className="space-y-4">
-                                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                                            <label className="block text-sm font-medium text-slate-700 mb-2">Identificación de Cuenta <span className="text-red-500">*</span></label>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-xs text-slate-500 block mb-1">Por Código</label>
-                                                    <select
-                                                        className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 bg-white"
-                                                        value={mapping.cuenta_codigo}
-                                                        onChange={e => setMapping(prev => ({ ...prev, cuenta_codigo: e.target.value }))}
-                                                    >
-                                                        <option value="">(Ignorar)</option>
-                                                        {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                                                    </select>
-                                                </div>
-                                                <div>
-                                                    <label className="text-xs text-slate-500 block mb-1">Por Nombre</label>
-                                                    <select
-                                                        className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 bg-white"
-                                                        value={mapping.cuenta_nombre}
-                                                        onChange={e => setMapping(prev => ({ ...prev, cuenta_nombre: e.target.value }))}
-                                                    >
-                                                        <option value="">(Ignorar)</option>
-                                                        {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                                                    </select>
-                                                </div>
-                                            </div>
-                                            {!(mapping.cuenta_codigo || mapping.cuenta_nombre) && (
-                                                <p className="text-xs text-red-500 mt-2">Debes seleccionar al menos uno.</p>
-                                            )}
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-sm font-medium text-slate-700 mb-1">Debe <span className="text-red-500">*</span></label>
-                                                <select
-                                                    className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 bg-slate-50"
-                                                    value={mapping.debe}
-                                                    onChange={e => setMapping(prev => ({ ...prev, debe: e.target.value }))}
-                                                >
-                                                    <option value="">(Ignorar)</option>
-                                                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium text-slate-700 mb-1">Haber <span className="text-red-500">*</span></label>
-                                                <select
-                                                    className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 bg-slate-50"
-                                                    value={mapping.haber}
-                                                    onChange={e => setMapping(prev => ({ ...prev, haber: e.target.value }))}
-                                                >
-                                                    <option value="">(Ignorar)</option>
-                                                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Preview */}
-                            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col max-h-[400px]">
-                                <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
-                                    <h3 className="font-semibold text-slate-700">Vista Previa</h3>
-                                    <div className="flex gap-4 text-xs font-medium">
-                                        <span className="text-green-600">Válidos: {validationSummary.validRows}</span>
-                                        <span className={validationSummary.rowErrors > 0 ? 'text-red-600' : 'text-slate-400'}>
-                                            Errores: {validationSummary.rowErrors}
-                                        </span>
-                                    </div>
-                                </div>
-                                <div className="overflow-auto pb-20">
-                                    <table className="w-full text-sm text-left">
-                                        <thead className="bg-white sticky top-0 z-10 shadow-sm text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                                            <tr>
-                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur w-20">Estado</th>
-                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur">Asiento</th>
-                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur">Fecha</th>
-                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur">Cuenta (Cod / Nom)</th>
-                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur text-right">Debe</th>
-                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur text-right">Haber</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {processedRows.slice(0, 50).map((row, i) => (
-                                                <tr key={i} className={`hover:bg-blue-50/30 transition-colors ${!row.isValid ? 'bg-red-50/50' : ''}`}>
-                                                    <td className="px-4 py-2">
-                                                        {row.isValid ? (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 uppercase tracking-wide">OK</span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 uppercase tracking-wide cursor-help" title={row.errors.join('\n')}>ERR</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-4 py-2 font-mono text-slate-600">{row.nro_asiento || '—'}</td>
-                                                    <td className="px-4 py-2 text-slate-600">{row.fechaISO || '—'}</td>
-                                                    <td className="px-4 py-2">
-                                                        <div className="flex flex-col">
-                                                            <span className="font-mono text-xs text-slate-500">{row.cuenta_codigo || '—'}</span>
-                                                            <span className="text-slate-700 font-medium truncate max-w-[200px]">{row.cuenta_nombre || '—'}</span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-4 py-2 text-right font-mono text-slate-600">{row.debe > 0 ? row.debe.toFixed(2) : '-'}</td>
-                                                    <td className="px-4 py-2 text-right font-mono text-slate-600">{row.haber > 0 ? row.haber.toFixed(2) : '-'}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                    {step === 2 && renderStep2()}
 
                     {/* STEP 3: Resolve Accounts */}
-                    {step === 3 && (
-                        <div className="flex flex-col gap-8 max-w-4xl mx-auto h-full">
-
-                            {pendingResolutionCount === 0 ? (
-                                <div className="flex flex-col items-center justify-center p-12 bg-green-50 rounded-3xl border border-green-100 text-center animate-in fade-in zoom-in duration-300">
-                                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-3xl mb-4">🎉</div>
-                                    <h3 className="text-xl font-bold text-green-800">¡Todas las cuentas resueltas!</h3>
-                                    <p className="text-green-700/80 mt-2 max-w-sm">
-                                        Hemos asignado correctamente todas las cuentas del archivo a tu Plan de Cuentas.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex gap-3 text-yellow-800 animate-in slide-in-from-top-4">
-                                    <span className="text-2xl mt-1">⚠️</span>
-                                    <div>
-                                        <h3 className="font-bold">Acción Requerida</h3>
-                                        <p className="text-sm mt-1">
-                                            Hay <strong>{pendingResolutionCount}</strong> cuentas en el archivo que no coinciden con tu sistema.
-                                            Asignalas manualmente para continuar.
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-
-                            {unresolvedKeys.length > 0 && (
-                                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex-1 overflow-visible flex flex-col min-h-[400px]">
-                                    <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 font-semibold text-slate-700 flex justify-between">
-                                        <span>Asignación Manual</span>
-                                        <span className="text-slate-400 font-normal">Pendientes: {pendingResolutionCount}</span>
-                                    </div>
-
-                                    {/* Overflow visible for dropdowns */}
-                                    <div className="flex-1 overflow-visible p-2">
-                                        <table className="w-full text-sm text-left border-collapse">
-                                            <thead>
-                                                <tr className="text-xs text-slate-500 uppercase border-b border-slate-100">
-                                                    <th className="px-6 py-3 font-medium w-1/3">Cuenta en Archivo</th>
-                                                    <th className="px-6 py-3 font-medium">Asignar a...</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-50">
-                                                {unresolvedKeys.map((key) => {
-                                                    const assignedId = accountResolution.get(key)
-                                                    const assignedAccount = availableAccounts.find(a => a.id === assignedId)
-
-                                                    return (
-                                                        <tr key={key} className="hover:bg-slate-50 group">
-                                                            <td className="px-6 py-4">
-                                                                <div className="font-medium text-slate-800 text-base">{key}</div>
-                                                                <div className="text-xs text-slate-400 mt-1">No se encontró coincidencia automática</div>
-                                                            </td>
-                                                            <td className="px-6 py-4 relative z-0">
-                                                                {assignedAccount ? (
-                                                                    <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-100 rounded-xl">
-                                                                        <div className="flex flex-col">
-                                                                            <span className="text-xs font-bold text-blue-600 uppercase tracking-widest">Asignado a</span>
-                                                                            <span className="font-medium text-blue-900">{assignedAccount.code} - {assignedAccount.name}</span>
-                                                                        </div>
-                                                                        <button
-                                                                            onClick={() => resolveAccount(key, '')} // Clear
-                                                                            className="text-blue-400 hover:text-blue-600 p-1 font-medium hover:bg-blue-100 rounded text-sm transition-colors"
-                                                                        >
-                                                                            Cambiar
-                                                                        </button>
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="relative z-50">
-                                                                        <AccountSearchSelect
-                                                                            accounts={availableAccounts}
-                                                                            value=""
-                                                                            onChange={(id) => resolveAccount(key, id)}
-                                                                            placeholder="Buscar cuenta..."
-                                                                        />
-                                                                    </div>
-                                                                )}
-                                                            </td>
-                                                        </tr>
-                                                    )
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
+                    {step === 3 && renderStep3()}
 
                     {/* STEP 4: Confirmation */}
-                    {step === 4 && (
-                        <div className="flex flex-col gap-8 max-w-5xl mx-auto">
+                    {step === 4 && renderStep4()}
 
-                            {/* Summary Cards */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
-                                    <div className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Total Asientos</div>
-                                    <div className="text-4xl font-bold text-slate-800">{draftEntries.length}</div>
-                                </div>
-                                <div className="bg-green-50 p-6 rounded-2xl border border-green-100 shadow-sm flex flex-col items-center justify-center text-center">
-                                    <div className="text-sm font-bold text-green-600 uppercase tracking-wider mb-2">Listos para Importar</div>
-                                    <div className="text-4xl font-bold text-green-700">{validationSummary.balancedEntries}</div>
-                                </div>
-                                {validationSummary.entryErrors > 0 && (
-                                    <div className="bg-red-50 p-6 rounded-2xl border border-red-100 shadow-sm flex flex-col items-center justify-center text-center">
-                                        <div className="text-sm font-bold text-red-600 uppercase tracking-wider mb-2">Con Errores</div>
-                                        <div className="text-4xl font-bold text-red-700">{validationSummary.entryErrors}</div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {validationSummary.entryErrors > 0 && (
-                                <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl flex items-center gap-4 animate-pulse">
-                                    <span className="text-3xl">⛔</span>
-                                    <div>
-                                        <h3 className="font-bold text-lg">Bloqueo de Importación</h3>
-                                        <p className="text-sm opacity-90">Existen asientos desbalanceados o incompletos. Por seguridad, no se puede importar hasta corregir el archivo.</p>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Table */}
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-1 flex flex-col min-h-[300px]">
-                                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 font-semibold text-slate-800">
-                                    Detalle de Asientos ({draftEntries.length})
-                                </div>
-                                <div className="overflow-auto max-h-[400px] flex-1">
-                                    <table className="w-full text-sm text-left">
-                                        <thead className="bg-white sticky top-0 z-10 text-xs text-slate-500 uppercase font-semibold">
-                                            <tr>
-                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">Estado</th>
-                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">N°</th>
-                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">Fecha</th>
-                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">Concepto</th>
-                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b text-center">Líneas</th>
-                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b text-right">Total</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {draftEntries.map((entry, i) => (
-                                                <tr key={i} className={`hover:bg-slate-50 ${!entry.isBalanced ? 'bg-red-50' : ''}`}>
-                                                    <td className="px-6 py-3">
-                                                        {entry.isBalanced && entry.validationErrors.length === 0 ? (
-                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">OK</span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">ERR</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-6 py-3 font-mono text-slate-600">{entry.nro_asiento}</td>
-                                                    <td className="px-6 py-3 whitespace-nowrap text-slate-600">{entry.fechaISO}</td>
-                                                    <td className="px-6 py-3 text-slate-600 truncate max-w-[200px]">{entry.concepto}</td>
-                                                    <td className="px-6 py-3 text-center text-slate-500">{entry.lines.length}</td>
-                                                    <td className="px-6 py-3 text-right font-mono font-medium text-slate-800">
-                                                        $ {entry.totalDebe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
 
                 {/* Sticky Footer */}
-                <div className="px-8 py-5 border-t border-slate-200 bg-white shrink-0 flex justify-between items-center z-20 shadow-[0_-5px_20px_-10px_rgba(0,0,0,0.05)]">
-                    <button onClick={handleClose} className="px-5 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 rounded-xl transition-colors">
+                <div className="px-8 py-5 border-t border-slate-200 bg-white/95 backdrop-blur shrink-0 flex justify-between items-center z-40 shadow-[0_-5px_30px_-15px_rgba(0,0,0,0.1)]">
+                    <button onClick={handleClose} className="px-6 py-2.5 text-sm font-bold text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors border border-transparent hover:border-red-100">
                         Cancelar
                     </button>
 
-                    <div className="flex gap-3 items-center">
-                        {isLoading && <span className="text-xs text-slate-500 font-medium animate-pulse hidden md:inline-block">{importProgress}</span>}
+                    <div className="flex gap-4 items-center">
+                        {isLoading && (
+                            <div className="flex items-center gap-3 px-4 py-2 bg-blue-50 rounded-lg border border-blue-100">
+                                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                                <span className="text-xs font-bold text-blue-700">{importProgress}</span>
+                            </div>
+                        )}
 
-                        {step > 1 && (
+                        {step > 1 && !isLoading && (
                             <button
                                 onClick={() => setStep(prev => prev - 1 as any)}
-                                className="px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                                className="px-6 py-2.5 text-sm font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors border border-transparent hover:border-slate-200"
                             >
                                 Atrás
                             </button>
                         )}
 
-                        {step === 2 && (
+                        {!isLoading && step === 2 && (
                             <button
                                 onClick={handleGoToResolution}
-                                disabled={!isStep2Valid || validationSummary.rowErrors > 0}
+                                disabled={!isStep2Valid}
+                                title={!isStep2Valid ? "Completá los campos obligatorios para continuar" : ""}
                                 className={`
-                                    px-8 py-2.5 text-sm font-bold text-white rounded-xl shadow-lg shadow-blue-200 transition-all
-                                    ${(!isStep2Valid || validationSummary.rowErrors > 0)
-                                        ? 'bg-slate-300 shadow-none cursor-not-allowed'
-                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:scale-105 hover:shadow-xl'}
+                                    px-8 py-2.5 text-sm font-bold text-white rounded-xl shadow-lg shadow-blue-200 transition-all flex items-center gap-2
+                                    ${!isStep2Valid
+                                        ? 'bg-slate-300 shadow-none cursor-not-allowed opacity-70'
+                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:scale-105 hover:shadow-blue-300'}
                                 `}
                             >
                                 Siguiente
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                             </button>
                         )}
 
-                        {step === 3 && (
+                        {!isLoading && step === 3 && (
                             <button
                                 onClick={() => {
                                     setStep(4)
                                     prepareDraft(accountResolution)
                                 }}
                                 disabled={!isStep3Valid}
+                                title={!isStep3Valid ? "Resolvé todas las cuentas pendientes para continuar" : ""}
                                 className={`
-                                    px-8 py-2.5 text-sm font-bold text-white rounded-xl shadow-lg shadow-blue-200 transition-all
+                                    px-8 py-2.5 text-sm font-bold text-white rounded-xl shadow-lg shadow-blue-200 transition-all flex items-center gap-2
                                     ${!isStep3Valid
-                                        ? 'bg-slate-300 shadow-none cursor-not-allowed'
-                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:scale-105 hover:shadow-xl'}
+                                        ? 'bg-slate-300 shadow-none cursor-not-allowed opacity-70'
+                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:scale-105 hover:shadow-blue-300'}
                                 `}
                             >
                                 Siguiente
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                             </button>
                         )}
 
-                        {step === 4 && (
+                        {!isLoading && step === 4 && (
                             <button
                                 onClick={handleImport}
-                                disabled={isLoading || !isStep4Valid}
+                                disabled={!isStep4Valid}
                                 className={`
                                     px-8 py-2.5 text-sm font-bold text-white rounded-xl shadow-lg shadow-green-200 transition-all flex items-center gap-2
-                                    ${(isLoading || !isStep4Valid)
-                                        ? 'bg-slate-300 shadow-none cursor-not-allowed'
-                                        : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:scale-105 hover:shadow-xl'}
+                                    ${!isStep4Valid
+                                        ? 'bg-slate-300 shadow-none cursor-not-allowed opacity-70'
+                                        : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:scale-105 hover:shadow-green-300'}
                                 `}
                             >
-                                {isLoading ? 'Procesando...' : 'Confirmar Importación'}
+                                Confirmar Importación
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                             </button>
                         )}
                     </div>

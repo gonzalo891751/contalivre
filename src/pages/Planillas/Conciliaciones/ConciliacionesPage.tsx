@@ -496,12 +496,11 @@ export default function ConciliacionesPage() {
             <style>{`
                 .conciliaciones-page {
                     padding: var(--space-md);
-                    height: 100%;
-                    max-height: 100vh;
+                    /* Removed fixed height/overflow to allow full page scroll */
+                    min-height: 100%;
                     display: flex;
                     flex-direction: column;
                     gap: var(--space-lg);
-                    overflow: hidden; /* Main scroll handled by table containers */
                 }
                 
                 /* Typography & Header */
@@ -601,9 +600,7 @@ export default function ConciliacionesPage() {
                     display: grid;
                     grid-template-columns: 1fr;
                     gap: var(--space-lg);
-                    flex: 1;
-                    min-height: 0;
-                    overflow: hidden; /* Avoid double scroll */
+                    /* Removed flex:1/overflow to allow natural growth */
                 }
                 @media (min-width: 1024px) {
                     .tables-grid {
@@ -618,8 +615,7 @@ export default function ConciliacionesPage() {
                     display: flex;
                     flex-direction: column;
                     border: 1px solid var(--border-color);
-                    overflow: hidden;
-                    height: 100%;
+                    /* Removed height:100% and overflow:hidden */
                 }
 
                 .table-header {
@@ -705,8 +701,7 @@ export default function ConciliacionesPage() {
                 .gh-cell { padding: 10px 12px; }
 
                 .table-container {
-                    flex: 1;
-                    overflow-y: auto;
+                    /* Removed flex:1 and overflow-y:auto */
                     overflow-x: hidden;
                     background: #ffffff;
                     position: relative;
