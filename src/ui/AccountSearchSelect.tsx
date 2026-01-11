@@ -1,13 +1,9 @@
 /**
  * AccountSearchSelect - Searchable account selector component
- * Features:
- * - Search by code and name
- * - Shows account path in dropdown
- * - Keyboard navigation (arrows, Enter, Escape, Tab)
- * - Filters out non-imputable accounts (headers)
- * - Exposes focus() via ref for external control
+ * Updated to use React Portal for the dropdown to avoid clipping in modals/tables.
  */
 import { useState, useRef, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { createPortal } from 'react-dom'
 import type { Account } from '../core/models'
 
 interface AccountSearchSelectProps {
@@ -16,7 +12,7 @@ interface AccountSearchSelectProps {
     onChange: (accountId: string) => void
     placeholder?: string
     filter?: (account: Account) => boolean
-    onAccountSelected?: () => void // Callback after account is confirmed (Enter/click)
+    onAccountSelected?: () => void
 }
 
 export interface AccountSearchSelectRef {
@@ -34,6 +30,8 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
     const [isOpen, setIsOpen] = useState(false)
     const [search, setSearch] = useState('')
     const [highlightedIndex, setHighlightedIndex] = useState(0)
+    const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 })
+
     const inputRef = useRef<HTMLInputElement>(null)
     const listRef = useRef<HTMLDivElement>(null)
 
@@ -63,18 +61,18 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
         return paths
     }, [accounts])
 
-    // Filter accounts based on search (only imputable accounts by default)
+    // Filter accounts
     const filteredAccounts = useMemo(() => {
         const q = search.toLowerCase()
         return accounts
-            .filter(acc => filter ? filter(acc) : !acc.isHeader) // Use custom filter or default to !isHeader
+            .filter(acc => filter ? filter(acc) : !acc.isHeader)
             .filter(acc => {
                 if (!q) return true
                 return acc.code.toLowerCase().includes(q) ||
                     acc.name.toLowerCase().includes(q) ||
                     (accountPaths.get(acc.id) || '').toLowerCase().includes(q)
             })
-            .slice(0, 20) // Limit results for performance
+            .slice(0, 20)
     }, [accounts, search, accountPaths, filter])
 
     // Selected account display
@@ -83,13 +81,34 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
         ? `${selectedAccount.code} — ${selectedAccount.name}`
         : ''
 
-    // Handle keyboard navigation
+    // Update coordinates
+    const updatePosition = () => {
+        if (inputRef.current) {
+            const rect = inputRef.current.getBoundingClientRect()
+            setCoords({
+                top: rect.bottom, // Fixed position relative to viewport
+                left: rect.left,
+                width: rect.width
+            })
+        }
+    }
+
+    // Update position on open and scroll/resize
+    useEffect(() => {
+        if (isOpen) {
+            updatePosition()
+            window.addEventListener('scroll', updatePosition, true) // Capture phase for all scrolls
+            window.addEventListener('resize', updatePosition)
+        }
+        return () => {
+            window.removeEventListener('scroll', updatePosition, true)
+            window.removeEventListener('resize', updatePosition)
+        }
+    }, [isOpen])
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
         switch (e.key) {
             case 'Tab':
-                // If open, just close and let default behavior check happen (or parent)
-                // We do NOT prevent default here so it moves focus, unless we really want strict control.
-                // But better UX: if open, close. The focus move happens naturally.
                 if (isOpen) {
                     setIsOpen(false)
                     setSearch('')
@@ -109,20 +128,15 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
                 break
             case 'Enter':
                 e.preventDefault()
-                e.stopPropagation() // Stop form submission
-
+                e.stopPropagation()
                 if (isOpen && filteredAccounts[highlightedIndex]) {
                     selectAccount(filteredAccounts[highlightedIndex])
-                } else if (!isOpen && filteredAccounts.length > 0) {
-                    // If closed but user hits enter, maybe open or select top match?
-                    // For now, let's just ensure if they were searching and hit enter:
-                    if (search && filteredAccounts.length > 0) {
-                        selectAccount(filteredAccounts[0])
-                    }
+                } else if (!isOpen && filteredAccounts.length > 0 && search) {
+                    selectAccount(filteredAccounts[0])
                 }
                 break
             case 'Escape':
-                e.preventDefault() // Prevent dialog closing if inside one
+                e.preventDefault()
                 setIsOpen(false)
                 setSearch('')
                 break
@@ -133,11 +147,10 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
         onChange(acc.id)
         setIsOpen(false)
         setSearch('')
-        // Notify parent that an account was selected (for focus chaining)
         onAccountSelected?.()
     }
 
-    // Scroll highlighted item into view
+    // Scroll highlighted item
     useEffect(() => {
         if (isOpen && listRef.current) {
             const item = listRef.current.children[highlightedIndex] as HTMLElement
@@ -147,29 +160,32 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
         }
     }, [highlightedIndex, isOpen])
 
-    // Reset highlight when search changes
-    useEffect(() => {
-        setHighlightedIndex(0)
-    }, [search])
-
-    // Close dropdown when clicking outside
+    // Click outside
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
-            if (inputRef.current && !inputRef.current.parentElement?.contains(e.target as Node)) {
+            if (
+                inputRef.current &&
+                !inputRef.current.contains(e.target as Node) &&
+                listRef.current &&
+                !listRef.current.contains(e.target as Node)
+            ) {
                 setIsOpen(false)
                 setSearch('')
             }
         }
-        document.addEventListener('mousedown', handleClickOutside)
+
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside)
+        }
         return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [])
+    }, [isOpen])
 
     return (
-        <div className="account-search-select">
+        <div className="account-search-select w-full">
             <input
                 ref={inputRef}
                 type="text"
-                className="form-input"
+                className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 bg-white shadow-sm"
                 placeholder={placeholder}
                 value={isOpen ? search : displayValue}
                 onChange={(e) => {
@@ -183,27 +199,44 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
                 onKeyDown={handleKeyDown}
             />
 
-            {isOpen && (
-                <div className="account-search-dropdown" ref={listRef}>
+            {isOpen && createPortal(
+                <div
+                    ref={listRef}
+                    className="fixed z-[9999] bg-white border border-slate-200 shadow-xl rounded-lg max-h-60 overflow-y-auto flex flex-col"
+                    style={{
+                        top: coords.top + 4, // 4px gap
+                        left: coords.left,
+                        width: coords.width,
+                    }}
+                >
                     {filteredAccounts.length === 0 ? (
-                        <div className="account-search-empty">
+                        <div className="p-3 text-sm text-slate-400 text-center italic">
                             No se encontraron cuentas
                         </div>
                     ) : (
                         filteredAccounts.map((acc, index) => (
                             <div
                                 key={acc.id}
-                                className={`account-search-option ${index === highlightedIndex ? 'highlighted' : ''} ${acc.id === value ? 'selected' : ''}`}
+                                className={`
+                                    px-3 py-2 cursor-pointer border-b border-slate-50 last:border-none transition-colors
+                                    ${index === highlightedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'}
+                                    ${acc.id === value ? 'bg-blue-100/50' : ''}
+                                `}
                                 onMouseEnter={() => setHighlightedIndex(index)}
                                 onClick={() => selectAccount(acc)}
                             >
-                                <div className="account-search-code">{acc.code}</div>
-                                <div className="account-search-name">{acc.name}</div>
-                                <div className="account-search-path">{accountPaths.get(acc.id)}</div>
+                                <div className="flex items-center justify-between">
+                                    <span className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{acc.code}</span>
+                                </div>
+                                <div className="text-sm font-medium text-slate-700 mt-1">{acc.name}</div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                                    {accountPaths.get(acc.id)}
+                                </div>
                             </div>
                         ))
                     )}
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     )

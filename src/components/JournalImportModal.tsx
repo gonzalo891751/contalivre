@@ -1,10 +1,9 @@
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
 import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
-import { createEntry, getAllEntries, resetExercise } from '../storage/entries'
+import { createEntry, deleteEntry } from '../storage/entries'
 import { getPostableAccounts } from '../storage/accounts'
-import { db } from '../storage/db'
 import type { JournalEntry, Account } from '../core/models'
 import AccountSearchSelect from '../ui/AccountSearchSelect'
 
@@ -30,12 +29,13 @@ interface ProcessedEntry {
     debe: number
     haber: number
     concepto: string
-    detalle: string
+    // Removed 'detalle'
     sourceRowIndex: number
     errors: string[]
     isValid: boolean
 }
 
+// Removed 'detalle' from mapping
 interface ColumnMapping {
     nro_asiento: string
     fecha: string
@@ -43,8 +43,7 @@ interface ColumnMapping {
     cuenta_nombre: string
     debe: string
     haber: string
-    concepto: string // optional
-    detalle: string // optional
+    concepto: string
 }
 
 interface DraftEntry {
@@ -63,7 +62,7 @@ interface DraftEntry {
     validationErrors: string[]
 }
 
-const SAMPLE_CSV = `nro_asiento,fecha,cuenta_codigo,cuenta_nombre,debe,haber,detalle
+const SAMPLE_CSV = `nro_asiento,fecha,cuenta_codigo,cuenta_nombre,debe,haber,concepto
 1,2026-01-10,1.1.01.01,Caja,5000,,Saldo inicial
 1,2026-01-10,3.1.01.01,Capital Social,,5000,Saldo inicial
 2,2026-01-11,4.1.01.01,Ventas,,2500,Fact A 123
@@ -142,7 +141,7 @@ const parseDateStrict = (val: any): string | null => {
 
 const detectMapping = (headers: string[]): ColumnMapping => {
     const map: ColumnMapping = {
-        nro_asiento: '', fecha: '', cuenta_codigo: '', cuenta_nombre: '', debe: '', haber: '', concepto: '', detalle: ''
+        nro_asiento: '', fecha: '', cuenta_codigo: '', cuenta_nombre: '', debe: '', haber: '', concepto: ''
     }
 
     const synonyms: Record<keyof ColumnMapping, string[]> = {
@@ -152,8 +151,7 @@ const detectMapping = (headers: string[]): ColumnMapping => {
         cuenta_nombre: ['cuenta_nombre', 'nombre_cuenta', 'cuenta', 'account', 'detalle_cuenta', 'nombre'],
         debe: ['debe', 'debito', 'debit', 'dr'],
         haber: ['haber', 'credito', 'credit', 'cr'],
-        concepto: ['concepto', 'memo', 'glosa', 'descripcion_asiento'],
-        detalle: ['detalle', 'descripcion', 'detalle_linea', 'obs', 'observacion', 'nota']
+        concepto: ['concepto', 'memo', 'glosa', 'descripcion_asiento', 'detalle', 'descripcion', 'obs'], // Added synonyms from 'detalle' here
     }
 
     headers.forEach(h => {
@@ -182,7 +180,6 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
     // Data State
     const [rawRows, setRawRows] = useState<RawRow[]>([])
     const [rawHeaders, setRawHeaders] = useState<string[]>([])
-    // Removed unused workbook/selectedSheet states if not strictly needed or re-add suppression
     const [, setWorkbook] = useState<XLSX.WorkBook | null>(null)
     const [sheets, setSheets] = useState<string[]>([])
     const [, setSelectedSheet] = useState<string>('')
@@ -190,7 +187,7 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
 
     // Processing State
     const [mapping, setMapping] = useState<ColumnMapping>({
-        nro_asiento: '', fecha: '', cuenta_codigo: '', cuenta_nombre: '', debe: '', haber: '', concepto: '', detalle: ''
+        nro_asiento: '', fecha: '', cuenta_codigo: '', cuenta_nombre: '', debe: '', haber: '', concepto: ''
     })
     const [processedRows, setProcessedRows] = useState<ProcessedEntry[]>([])
 
@@ -217,7 +214,7 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
         const blob = new Blob([SAMPLE_CSV], { type: 'text/csv;charset=utf-8;' })
         const link = document.createElement('a')
         link.href = URL.createObjectURL(blob)
-        link.download = 'plantilla_asientos.csv'
+        link.download = "plantilla_asientos.csv"
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
@@ -317,7 +314,6 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
             const rawDebe = row[mapping.debe]
             const rawHaber = row[mapping.haber]
             const concepto = String(row[mapping.concepto] || '').trim()
-            const detalle = String(row[mapping.detalle] || '').trim()
 
             const debe = parseARNumber(rawDebe)
             const haber = parseARNumber(rawHaber)
@@ -348,19 +344,16 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
 
             // Validations
             if (!rawCuentaCodigo && !rawCuentaNombre) {
-                // Ignore empty spacer rows
-                const isEmptyRow = !actualNro && !hasRawFecha && debe === 0 && haber === 0 && !detalle && !concepto
+                // Ignore empty spacer rows if everything is empty
+                const isEmptyRow = !actualNro && !hasRawFecha && debe === 0 && haber === 0 && !concepto
                 if (!isEmptyRow) errors.push('Falta Cuenta')
             }
 
             if (debe > 0 && haber > 0) errors.push('Debe y Haber > 0 simultáneamente')
-            if ((rawCuentaCodigo || rawCuentaNombre) && debe === 0 && haber === 0) {
+            if ((rawCuentaCodigo || rawCuentaNombre) && debe === 0 && haber === 0 && (debe !== 0 || haber !== 0)) {
                 errors.push('Importe cero')
             }
 
-            // Phase 3 Prep: Identification Key for Resolution
-            // We'll prefer Code if present, else Name.
-            // This just identifies the "Raw Value" we need to match later.
             return {
                 nro_asiento: actualNro,
                 fechaISO: actualFechaVal || '',
@@ -369,7 +362,6 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
                 debe,
                 haber,
                 concepto,
-                detalle,
                 sourceRowIndex: idx + 2,
                 errors,
                 isValid: errors.length === 0
@@ -395,31 +387,29 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
     }, [mapping, rawRows, step])
 
     const handleGoToResolution = () => {
-        // Identify all unique account keys that need resolution
         const validRows = processedRows.filter(r => r.isValid)
         const keysToResolve = new Set<string>()
         const newResolution = new Map<string, string>()
 
+        const codeMap = new Map<string, string>() // code -> id
+        const nameMap = new Map<string, string>() // normalized name -> id
+
+        availableAccounts.forEach(acc => {
+            codeMap.set(acc.code, acc.id)
+            nameMap.set(normalizeText(acc.name), acc.id)
+        })
+
         validRows.forEach(row => {
-            // Priority: Code > Name
             const key = row.cuenta_codigo || row.cuenta_nombre
             if (!key) return
 
-            // Try Auto-Match
-            let match: Account | undefined
+            let matchedId: string | undefined
 
-            // 1. By Code (Exact)
-            if (row.cuenta_codigo) {
-                match = availableAccounts.find(a => a.code === row.cuenta_codigo)
-            }
-            // 2. By Name (Case insensitive)
-            if (!match && row.cuenta_nombre) {
-                const search = normalizeText(row.cuenta_nombre)
-                match = availableAccounts.find(a => normalizeText(a.name) === search)
-            }
+            if (row.cuenta_codigo) matchedId = codeMap.get(row.cuenta_codigo)
+            if (!matchedId && row.cuenta_nombre) matchedId = nameMap.get(normalizeText(row.cuenta_nombre))
 
-            if (match) {
-                newResolution.set(key, match.id)
+            if (matchedId) {
+                newResolution.set(key, matchedId)
             } else {
                 keysToResolve.add(key)
             }
@@ -430,7 +420,7 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
             setUnresolvedKeys(Array.from(keysToResolve))
             setStep(3)
         } else {
-            setStep(4) // Skip to final review if all matched
+            setStep(4)
             prepareDraft(newResolution)
         }
     }
@@ -443,13 +433,13 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
             const key = row.cuenta_codigo || row.cuenta_nombre
             const accountId = resolutionMap.get(key)
 
-            if (!accountId) continue // Should not happen if validation passed
+            if (!accountId) continue
 
             if (!groups.has(row.nro_asiento)) {
                 groups.set(row.nro_asiento, {
                     nro_asiento: row.nro_asiento,
-                    fechaISO: row.fechaISO, // Already inherited/validated
-                    concepto: row.concepto, // Usually header concept, might take first one found
+                    fechaISO: row.fechaISO,
+                    concepto: row.concepto,
                     lines: [],
                     totalDebe: 0,
                     totalHaber: 0,
@@ -460,27 +450,24 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
 
             const entry = groups.get(row.nro_asiento)!
 
-            // If concept is empty in this row but entry has none, verify? 
-            // We usually take the concept from the first line or try to find a non-empty one.
             if (!entry.concepto && row.concepto) entry.concepto = row.concepto
 
             entry.lines.push({
                 accountId,
                 debit: row.debe,
                 credit: row.haber,
-                description: row.detalle || row.concepto || ''
+                description: row.concepto || ''
             })
 
             entry.totalDebe += row.debe
             entry.totalHaber += row.haber
         }
 
-        // Final Validation Per Entry
         const entries = Array.from(groups.values()).map(e => {
             const diff = Math.abs(e.totalDebe - e.totalHaber)
             e.isBalanced = diff < 0.01
 
-            if (!e.isBalanced) e.validationErrors.push(`Desbalanceado (Dif: ${diff.toFixed(2)})`)
+            if (!e.isBalanced) e.validationErrors.push(`Desbalance (Dif: ${diff.toFixed(2)})`)
             if (e.lines.length < 2) e.validationErrors.push('Menos de 2 líneas')
 
             return e
@@ -499,29 +486,24 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
 
     const resolveAccount = (key: string, accountId: string) => {
         setAccountResolution(prev => new Map(prev).set(key, accountId))
-        setUnresolvedKeys(prev => prev.filter(k => k !== key))
+        // Do NOT remove from unresolvedKeys immediately to keep UI stable if user wants to change it?
+        // Ah, requirement was to clear it or show "assigned".
+        // Better UX: Keep it in a "Resolved" state within the same list or move it?
+        // User asked for: row shows "Assigned to: [Chip]" + "Change" button.
+        // So we keep it in unresolvedKeys or a separate list. 
+        // Simpler: use unresolvedKeys for "keys found in file that were NOT auto-matched initially".
+        // We just check accountResolution to see if it has a value.
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Step 4: Import Execution (Atomic + Snapshot)
-    // ─────────────────────────────────────────────────────────────────────────
 
     const handleImport = async () => {
         if (isLoading) return
         setIsLoading(true)
-        setImportProgress('Iniciando respaldo de seguridad...')
+        setImportProgress('Iniciando importación segura...')
 
-        // Declare snapshot outside to access in catch block if needed, 
-        // OR just fetch it inside and keep logic clean.
-        // Actually, for rollback, I need to know what to restore.
-        let snapshot: JournalEntry[] = []
+        const insertedIds: string[] = []
+        let errorOccurred = false
 
         try {
-            // 1. Snapshot
-            snapshot = await getAllEntries()
-
-            // 2. Import Loop
-            let importedCount = 0
             const total = draftEntries.length
 
             for (let i = 0; i < total; i++) {
@@ -539,39 +521,30 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
                     }))
                 }
 
-                await createEntry(newEntryData)
-                importedCount++
+                const created = await createEntry(newEntryData)
+                if (created && created.id) {
+                    insertedIds.push(created.id)
+                }
             }
 
-            setImportProgress('¡Importación completada con éxito!')
-            await new Promise(r => setTimeout(r, 800)) // Show success briefly
-            onSuccess(importedCount)
+            setImportProgress('¡Importación completada!')
+            await new Promise(r => setTimeout(r, 800))
+            onSuccess(insertedIds.length)
             handleClose()
 
         } catch (error: any) {
+            errorOccurred = true
             console.error('Import failed', error)
-            setImportProgress('Error detectado. Restaurando estado anterior...')
+            setImportProgress('Error detectado. Deshaciendo cambios (Rollback)...')
 
-            // 3. Rollback (Atomic Undo)
             try {
-                // We use resetExercise() to clear then restore snapshot
-                // This is drastic but ensures 100% atomic rollback to previous state
-                const { deletedEntries } = await resetExercise()
-                console.log(`Rolled back ${deletedEntries} entries. Restoring snapshot of ${snapshot.length} entries...`)
-
-                // Bulk restore
-                // snapshot is JournalEntry[], createEntry expects Omit<JournalEntry, 'id'> BUT
-                // db.entries.bulkAdd can take full objects (with ID) to restore exactly as was.
-                // We need to cast or just pass it if db supports it. 
-                // Dexie bulkAdd supports objects with keys.
-                if (snapshot.length > 0) {
-                    await db.entries.bulkAdd(snapshot)
+                for (const id of insertedIds) {
+                    await deleteEntry(id)
                 }
-
-                alert(`Error durante la importación:\n${error.message}\n\nSe han restaurado los datos originales.`)
+                alert(`Error durante la importación:\n${error.message}\n\Se deshicieron los ${insertedIds.length} asientos creados.`)
             } catch (rollbackError) {
                 console.error('CRITICAL: Rollback failed', rollbackError)
-                alert('ERROR CRÍTICO: Falló la importación y también la restauración. Por favor contacte soporte.')
+                alert('ERROR CRÍTICO: Falló la importación y el rollback parcial.')
             }
         } finally {
             setIsLoading(false)
@@ -580,150 +553,238 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Render
+    // Render Helpers
     // ─────────────────────────────────────────────────────────────────────────
+
+    const pendingResolutionCount = unresolvedKeys.filter(k => !accountResolution.has(k)).length
+    const isStep2Valid = validationSummary.rowErrors === 0 && (mapping.cuenta_codigo || mapping.cuenta_nombre)
+    const isStep3Valid = pendingResolutionCount === 0
+    const isStep4Valid = validationSummary.entryErrors === 0
 
     if (!isOpen) return null
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={isLoading ? undefined : handleClose} />
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={isLoading ? undefined : handleClose} />
 
             <div className={`
-                relative bg-white rounded-2xl shadow-2xl w-full flex flex-col overflow-hidden border border-slate-100
-                ${step === 1 ? 'max-w-2xl' : 'max-w-6xl h-[90vh]'}
+                relative bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full flex flex-col overflow-hidden border border-white/20
+                ${step === 1 ? 'max-w-2xl' : 'max-w-5xl h-[85vh]'}
                 transition-all duration-300
             `}>
 
-                {/* Header */}
-                <div className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center shrink-0">
-                    <div>
-                        <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                            {isLoading ? '⏳ Importando...' : step === 3 ? '🔍 Resolver Cuentas' : step === 4 ? '✅ Confirmar Importación' : '📥 Importar Asientos'}
-                        </h2>
-                        {step > 1 && !isLoading && (
-                            <div className="flex items-center gap-2 mt-1 text-sm text-slate-500">
-                                <span>Paso {step} de 4</span>
-                                {file && <span className="text-slate-300">|</span>}
-                                {file && <span>{file.name}</span>}
-                            </div>
-                        )}
-                        {isLoading && <p className="text-sm text-blue-600 mt-1">{importProgress}</p>}
+                {/* Header with Stepper */}
+                <div className="px-8 py-6 border-b border-slate-100 bg-white/50 shrink-0">
+                    <div className="flex justify-between items-start mb-6">
+                        <div>
+                            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                                📥 Importar Asientos
+                            </h2>
+                            {file && <div className="text-sm text-slate-500 mt-1">{file.name}</div>}
+                        </div>
+                        {!isLoading && <button onClick={handleClose} className="p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 rounded-full transition-colors">✕</button>}
                     </div>
-                    {!isLoading && <button onClick={handleClose} className="p-2 text-slate-400 hover:bg-slate-50 rounded-full">✕</button>}
+
+                    {/* Stepper */}
+                    {step > 1 && (
+                        <div className="flex items-center gap-4">
+                            {[
+                                { n: 1, label: 'Archivo' },
+                                { n: 2, label: 'Mapeo' },
+                                { n: 3, label: 'Cuentas' },
+                                { n: 4, label: 'Confirmar' }
+                            ].map((s, i) => {
+                                const isActive = step === s.n
+                                const isDone = step > s.n
+                                return (
+                                    <div key={s.n} className="flex items-center gap-2">
+                                        <div className={`
+                                            w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all
+                                            ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : isDone ? 'bg-green-500 text-white' : 'bg-slate-100 text-slate-400'}
+                                        `}>
+                                            {isDone ? '✓' : s.n}
+                                        </div>
+                                        <div className={`text-sm font-medium ${isActive ? 'text-slate-800' : 'text-slate-400 hidden md:block'}`}>
+                                            {s.label}
+                                        </div>
+                                        {i < 3 && <div className="w-8 h-[2px] bg-slate-100 mx-2 hidden md:block" />}
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
                 </div>
 
-                {/* Body */}
-                <div className="flex-1 overflow-y-auto bg-slate-50/50 p-6">
+                {/* Body Content */}
+                <div className="flex-1 overflow-y-auto overflow-x-hidden p-8 bg-slate-50/50">
 
                     {/* STEP 1: Upload */}
                     {step === 1 && (
-                        <div className="flex flex-col h-full justify-center">
-                            <div {...getRootProps()} className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all ${isDragActive ? 'border-blue-500 bg-blue-50/50' : 'border-slate-300 hover:border-blue-400 hover:bg-white'}`}>
+                        <div className="flex flex-col h-full justify-center items-center max-w-lg mx-auto">
+                            <div {...getRootProps()} className={`w-full aspect-video flex flex-col items-center justify-center border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-300 group
+                                ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-blue-400 hover:bg-white bg-slate-50'}`}>
                                 <input {...getInputProps()} />
-                                <div className="text-4xl mb-4">📂</div>
-                                <p className="text-lg font-medium text-slate-700">Arrastrá tu archivo o hacé click</p>
-                                <p className="text-sm text-slate-400 mt-2">.csv, .xlsx, .xls</p>
+                                <div className="p-4 bg-white rounded-full shadow-sm mb-4 group-hover:scale-110 transition-transform">
+                                    <span className="text-4xl">📂</span>
+                                </div>
+                                <p className="text-lg font-semibold text-slate-700">Arrastrá tu archivo aquí</p>
+                                <p className="text-sm text-slate-400 mt-2">Soporta .csv, .xlsx, .xls</p>
                             </div>
-                            <div className="mt-8 text-center">
-                                <button onClick={downloadTemplate} className="text-sm text-blue-600 font-medium hover:underline">
-                                    Descargar plantilla ejemplo
-                                </button>
-                            </div>
+                            <button onClick={downloadTemplate} className="mt-8 text-sm text-blue-600 font-medium hover:text-blue-800 transition-colors flex items-center gap-2">
+                                <span className="text-lg">📄</span> Descargar plantilla de ejemplo
+                            </button>
                         </div>
                     )}
 
-                    {/* STEP 2: Map & Preview */}
+                    {/* STEP 2: Map */}
                     {step === 2 && (
-                        <div className="flex flex-col gap-6">
-                            {/* Validation Stats */}
-                            <div className="grid grid-cols-4 gap-4">
-                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Asientos</div>
-                                    <div className="text-2xl font-bold text-slate-700">{validationSummary.totalEntries}</div>
-                                </div>
-                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Líneas</div>
-                                    <div className="text-2xl font-bold text-slate-700">{validationSummary.totalRows}</div>
-                                </div>
-                                <div className="bg-green-50 p-4 rounded-xl border border-green-100 shadow-sm">
-                                    <div className="text-xs font-bold text-green-600 uppercase tracking-wider">Válidas</div>
-                                    <div className="text-2xl font-bold text-green-700">{validationSummary.validRows}</div>
-                                </div>
-                                <div className={`p-4 rounded-xl border shadow-sm ${validationSummary.rowErrors > 0 ? 'bg-red-50 border-red-100' : 'bg-white border-slate-200'}`}>
-                                    <div className={`text-xs font-bold uppercase tracking-wider ${validationSummary.rowErrors > 0 ? 'text-red-600' : 'text-slate-400'}`}>Errores</div>
-                                    <div className={`text-2xl font-bold ${validationSummary.rowErrors > 0 ? 'text-red-700' : 'text-slate-700'}`}>{validationSummary.rowErrors}</div>
+                        <div className="flex flex-col gap-8">
+
+                            {/* Alert for Requirements */}
+                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 text-blue-900/80 items-start">
+                                <span className="text-xl">ℹ️</span>
+                                <div className="text-sm">
+                                    <strong>Campos Obligatorios:</strong> Para importar correctamente, asegurate de mapear:
+                                    <ul className="list-disc list-inside mt-1 ml-1 space-y-1">
+                                        <li>N° de Asiento, Fecha, Debe, Haber</li>
+                                        <li>Cuenta: por <b>Código</b> (recomendado) o <b>Nombre</b> (o ambos)</li>
+                                    </ul>
                                 </div>
                             </div>
 
-                            {/* Column Mapping */}
-                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-5">
-                                <div className="mb-4 font-semibold text-slate-700">Mapeo de Columnas</div>
-                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                                    {Object.keys(mapping).map((key) => {
-                                        const field = key as keyof ColumnMapping
-                                        const isRequired = ['nro_asiento', 'fecha', 'debe', 'haber'].includes(field)
-                                        return (
-                                            <div key={field}>
-                                                <label className="block text-xs font-medium text-slate-500 mb-1 uppercase">
-                                                    {field.replace('_', ' ')} {isRequired && <span className="text-red-500">*</span>}
+                            {/* Mapping Grid */}
+                            <div className="grid md:grid-cols-2 gap-8">
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                                    <h3 className="font-semibold text-slate-800 mb-4 border-b pb-2">Datos del Asiento</h3>
+                                    <div className="space-y-4">
+                                        {[
+                                            { id: 'nro_asiento', label: 'N° Asiento', req: true, desc: 'Identificador único del asiento' },
+                                            { id: 'fecha', label: 'Fecha', req: true, desc: 'DD/MM/AAAA o AAAA-MM-DD' },
+                                            { id: 'concepto', label: 'Concepto / Glosa', req: false, desc: 'Descripción del asiento o línea' },
+                                        ].map(f => (
+                                            <div key={f.id}>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">
+                                                    {f.label} {f.req && <span className="text-red-500">*</span>}
                                                 </label>
                                                 <select
-                                                    className={`w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 ${!mapping[field] && isRequired ? 'border-red-300 bg-red-50' : ''}`}
-                                                    value={mapping[field]}
-                                                    onChange={e => setMapping(prev => ({ ...prev, [field]: e.target.value }))}
+                                                    className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 bg-slate-50"
+                                                    value={mapping[f.id as keyof ColumnMapping]}
+                                                    onChange={e => setMapping(prev => ({ ...prev, [f.id]: e.target.value }))}
+                                                >
+                                                    <option value="">(Ignorar)</option>
+                                                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                                </select>
+                                                <p className="text-xs text-slate-400 mt-1">{f.desc}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                                    <h3 className="font-semibold text-slate-800 mb-4 border-b pb-2">Contabilidad</h3>
+                                    <div className="space-y-4">
+                                        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">Identificación de Cuenta <span className="text-red-500">*</span></label>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-xs text-slate-500 block mb-1">Por Código</label>
+                                                    <select
+                                                        className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 bg-white"
+                                                        value={mapping.cuenta_codigo}
+                                                        onChange={e => setMapping(prev => ({ ...prev, cuenta_codigo: e.target.value }))}
+                                                    >
+                                                        <option value="">(Ignorar)</option>
+                                                        {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-slate-500 block mb-1">Por Nombre</label>
+                                                    <select
+                                                        className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 bg-white"
+                                                        value={mapping.cuenta_nombre}
+                                                        onChange={e => setMapping(prev => ({ ...prev, cuenta_nombre: e.target.value }))}
+                                                    >
+                                                        <option value="">(Ignorar)</option>
+                                                        {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            {!(mapping.cuenta_codigo || mapping.cuenta_nombre) && (
+                                                <p className="text-xs text-red-500 mt-2">Debes seleccionar al menos uno.</p>
+                                            )}
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Debe <span className="text-red-500">*</span></label>
+                                                <select
+                                                    className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 bg-slate-50"
+                                                    value={mapping.debe}
+                                                    onChange={e => setMapping(prev => ({ ...prev, debe: e.target.value }))}
                                                 >
                                                     <option value="">(Ignorar)</option>
                                                     {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
                                                 </select>
                                             </div>
-                                        )
-                                    })}
-                                </div>
-                                <div className="mt-4 p-3 bg-blue-50 text-xs text-blue-800 border border-blue-100 rounded-lg">
-                                    <strong>Nota:</strong> Mapeá 'Cuenta Código' O 'Cuenta Nombre' (o ambos) para identificar las cuentas.
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-700 mb-1">Haber <span className="text-red-500">*</span></label>
+                                                <select
+                                                    className="w-full text-sm rounded-lg border-slate-300 focus:border-blue-500 bg-slate-50"
+                                                    value={mapping.haber}
+                                                    onChange={e => setMapping(prev => ({ ...prev, haber: e.target.value }))}
+                                                >
+                                                    <option value="">(Ignorar)</option>
+                                                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* Preview Table */}
-                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex-1 min-h-[300px]">
-                                <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                                    <span className="font-semibold text-slate-700">Vista Previa (50 filas)</span>
+                            {/* Preview */}
+                            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col max-h-[400px]">
+                                <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center shrink-0">
+                                    <h3 className="font-semibold text-slate-700">Vista Previa</h3>
+                                    <div className="flex gap-4 text-xs font-medium">
+                                        <span className="text-green-600">Válidos: {validationSummary.validRows}</span>
+                                        <span className={validationSummary.rowErrors > 0 ? 'text-red-600' : 'text-slate-400'}>
+                                            Errores: {validationSummary.rowErrors}
+                                        </span>
+                                    </div>
                                 </div>
-                                <div className="overflow-auto max-h-[400px]">
+                                <div className="overflow-auto pb-20">
                                     <table className="w-full text-sm text-left">
-                                        <thead className="bg-slate-50 text-xs text-slate-500 uppercase sticky top-0">
+                                        <thead className="bg-white sticky top-0 z-10 shadow-sm text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                             <tr>
-                                                <th className="px-4 py-3 font-medium border-b w-16">Fila</th>
-                                                <th className="px-4 py-3 font-medium border-b">Estado</th>
-                                                <th className="px-4 py-3 font-medium border-b">N° Asiento</th>
-                                                <th className="px-4 py-3 font-medium border-b">Fecha</th>
-                                                <th className="px-4 py-3 font-medium border-b">Cuenta (Cod / Nom)</th>
-                                                <th className="px-4 py-3 font-medium border-b text-right">Debe</th>
-                                                <th className="px-4 py-3 font-medium border-b text-right">Haber</th>
+                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur w-20">Estado</th>
+                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur">Asiento</th>
+                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur">Fecha</th>
+                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur">Cuenta (Cod / Nom)</th>
+                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur text-right">Debe</th>
+                                                <th className="px-4 py-3 bg-slate-50/90 backdrop-blur text-right">Haber</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {processedRows.slice(0, 50).map((row, i) => (
-                                                <tr key={i} className={`hover:bg-slate-50 ${!row.isValid ? 'bg-red-50/50' : ''}`}>
-                                                    <td className="px-4 py-2 text-slate-400 text-xs">{row.sourceRowIndex}</td>
+                                                <tr key={i} className={`hover:bg-blue-50/30 transition-colors ${!row.isValid ? 'bg-red-50/50' : ''}`}>
                                                     <td className="px-4 py-2">
                                                         {row.isValid ? (
-                                                            <span className="text-xs font-bold text-green-600">OK</span>
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700 uppercase tracking-wide">OK</span>
                                                         ) : (
-                                                            <span className="text-xs font-bold text-red-600" title={row.errors.join('\n')}>
-                                                                Error ({row.errors.length})
-                                                            </span>
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 uppercase tracking-wide cursor-help" title={row.errors.join('\n')}>ERR</span>
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-2 font-mono">{row.nro_asiento}</td>
-                                                    <td className="px-4 py-2 whitespace-nowrap">{row.fechaISO}</td>
-                                                    <td className="px-4 py-2 text-xs">
-                                                        <div className="font-mono text-slate-500">{row.cuenta_codigo}</div>
-                                                        <div className="font-medium text-slate-700">{row.cuenta_nombre}</div>
+                                                    <td className="px-4 py-2 font-mono text-slate-600">{row.nro_asiento || '—'}</td>
+                                                    <td className="px-4 py-2 text-slate-600">{row.fechaISO || '—'}</td>
+                                                    <td className="px-4 py-2">
+                                                        <div className="flex flex-col">
+                                                            <span className="font-mono text-xs text-slate-500">{row.cuenta_codigo || '—'}</span>
+                                                            <span className="text-slate-700 font-medium truncate max-w-[200px]">{row.cuenta_nombre || '—'}</span>
+                                                        </div>
                                                     </td>
-                                                    <td className="px-4 py-2 text-right font-mono">{row.debe > 0 ? row.debe.toFixed(2) : '-'}</td>
-                                                    <td className="px-4 py-2 text-right font-mono">{row.haber > 0 ? row.haber.toFixed(2) : '-'}</td>
+                                                    <td className="px-4 py-2 text-right font-mono text-slate-600">{row.debe > 0 ? row.debe.toFixed(2) : '-'}</td>
+                                                    <td className="px-4 py-2 text-right font-mono text-slate-600">{row.haber > 0 ? row.haber.toFixed(2) : '-'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -735,113 +796,157 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
 
                     {/* STEP 3: Resolve Accounts */}
                     {step === 3 && (
-                        <div className="flex flex-col gap-6 max-w-4xl mx-auto">
-                            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex gap-3 text-yellow-800">
-                                <span className="text-2xl">⚠️</span>
-                                <div>
-                                    <h3 className="font-bold">Cuentas no reconocidas</h3>
-                                    <p className="text-sm mt-1">
-                                        Detectamos <strong>{unresolvedKeys.length}</strong> cuentas en el archivo que no coinciden exactamente con tu Plan de Cuentas.
-                                        Por favor asignalas manualmente a una cuenta existente.
+                        <div className="flex flex-col gap-8 max-w-4xl mx-auto h-full">
+
+                            {pendingResolutionCount === 0 ? (
+                                <div className="flex flex-col items-center justify-center p-12 bg-green-50 rounded-3xl border border-green-100 text-center animate-in fade-in zoom-in duration-300">
+                                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-3xl mb-4">🎉</div>
+                                    <h3 className="text-xl font-bold text-green-800">¡Todas las cuentas resueltas!</h3>
+                                    <p className="text-green-700/80 mt-2 max-w-sm">
+                                        Hemos asignado correctamente todas las cuentas del archivo a tu Plan de Cuentas.
                                     </p>
                                 </div>
-                            </div>
-
-                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                                <table className="w-full text-sm text-left">
-                                    <thead className="bg-slate-50 text-xs text-slate-500 uppercase border-b border-slate-200">
-                                        <tr>
-                                            <th className="px-6 py-4 font-medium">Cuenta en Archivo</th>
-                                            <th className="px-6 py-4 font-medium">Asignar a Cuenta del Sistema</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {unresolvedKeys.map((key) => (
-                                            <tr key={key} className="hover:bg-slate-50">
-                                                <td className="px-6 py-4 font-medium text-slate-700">
-                                                    {key}
-                                                </td>
-                                                <td className="px-6 py-4 w-[400px]">
-                                                    <AccountSearchSelect
-                                                        accounts={availableAccounts}
-                                                        value=""
-                                                        onChange={(id) => resolveAccount(key, id)}
-                                                        placeholder="Buscar cuenta por código o nombre..."
-                                                    />
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* STEP 4: Final Validation & Confirmation */}
-                    {step === 4 && (
-                        <div className="flex flex-col gap-6">
-
-                            {/* Final Summary Stats */}
-                            <div className="grid grid-cols-3 gap-4">
-                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Asientos a Importar</div>
-                                    <div className="text-3xl font-bold text-slate-800">{draftEntries.length}</div>
-                                </div>
-                                <div className="bg-green-50 p-4 rounded-xl border border-green-100 shadow-sm">
-                                    <div className="text-xs font-bold text-green-600 uppercase tracking-wider">Balanceados</div>
-                                    <div className="text-3xl font-bold text-green-700">{validationSummary.balancedEntries}</div>
-                                </div>
-                                <div className={`p-4 rounded-xl border shadow-sm ${validationSummary.entryErrors > 0 ? 'bg-red-50 border-red-100' : 'bg-white border-slate-200'}`}>
-                                    <div className={`text-xs font-bold uppercase tracking-wider ${validationSummary.entryErrors > 0 ? 'text-red-600' : 'text-slate-400'}`}>Desbalanceados / Erróneos</div>
-                                    <div className={`text-3xl font-bold ${validationSummary.entryErrors > 0 ? 'text-red-700' : 'text-slate-700'}`}>{validationSummary.entryErrors}</div>
-                                </div>
-                            </div>
-
-                            {validationSummary.entryErrors > 0 && (
-                                <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl flex gap-3">
-                                    <span className="text-2xl">⛔</span>
+                            ) : (
+                                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex gap-3 text-yellow-800 animate-in slide-in-from-top-4">
+                                    <span className="text-2xl mt-1">⚠️</span>
                                     <div>
-                                        <h3 className="font-bold">Error Crítico: Asientos Desbalanceados</h3>
-                                        <p className="text-sm">No se puede proceder con la importación porque existen asientos que no balancean (Debe != Haber). Revisá la lista abajo.</p>
+                                        <h3 className="font-bold">Acción Requerida</h3>
+                                        <p className="text-sm mt-1">
+                                            Hay <strong>{pendingResolutionCount}</strong> cuentas en el archivo que no coinciden con tu sistema.
+                                            Asignalas manualmente para continuar.
+                                        </p>
                                     </div>
                                 </div>
                             )}
 
-                            {/* Draft Table */}
-                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex-1 min-h-[300px]">
-                                <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 font-semibold text-slate-700">
-                                    Detalle de Asientos
+                            {unresolvedKeys.length > 0 && (
+                                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex-1 overflow-visible flex flex-col min-h-[400px]">
+                                    <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 font-semibold text-slate-700 flex justify-between">
+                                        <span>Asignación Manual</span>
+                                        <span className="text-slate-400 font-normal">Pendientes: {pendingResolutionCount}</span>
+                                    </div>
+
+                                    {/* Overflow visible for dropdowns */}
+                                    <div className="flex-1 overflow-visible p-2">
+                                        <table className="w-full text-sm text-left border-collapse">
+                                            <thead>
+                                                <tr className="text-xs text-slate-500 uppercase border-b border-slate-100">
+                                                    <th className="px-6 py-3 font-medium w-1/3">Cuenta en Archivo</th>
+                                                    <th className="px-6 py-3 font-medium">Asignar a...</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-50">
+                                                {unresolvedKeys.map((key) => {
+                                                    const assignedId = accountResolution.get(key)
+                                                    const assignedAccount = availableAccounts.find(a => a.id === assignedId)
+
+                                                    return (
+                                                        <tr key={key} className="hover:bg-slate-50 group">
+                                                            <td className="px-6 py-4">
+                                                                <div className="font-medium text-slate-800 text-base">{key}</div>
+                                                                <div className="text-xs text-slate-400 mt-1">No se encontró coincidencia automática</div>
+                                                            </td>
+                                                            <td className="px-6 py-4 relative z-0">
+                                                                {assignedAccount ? (
+                                                                    <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                                                                        <div className="flex flex-col">
+                                                                            <span className="text-xs font-bold text-blue-600 uppercase tracking-widest">Asignado a</span>
+                                                                            <span className="font-medium text-blue-900">{assignedAccount.code} - {assignedAccount.name}</span>
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => resolveAccount(key, '')} // Clear
+                                                                            className="text-blue-400 hover:text-blue-600 p-1 font-medium hover:bg-blue-100 rounded text-sm transition-colors"
+                                                                        >
+                                                                            Cambiar
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="relative z-50">
+                                                                        <AccountSearchSelect
+                                                                            accounts={availableAccounts}
+                                                                            value=""
+                                                                            onChange={(id) => resolveAccount(key, id)}
+                                                                            placeholder="Buscar cuenta..."
+                                                                        />
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    )
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
-                                <div className="overflow-auto max-h-[400px]">
+                            )}
+                        </div>
+                    )}
+
+                    {/* STEP 4: Confirmation */}
+                    {step === 4 && (
+                        <div className="flex flex-col gap-8 max-w-5xl mx-auto">
+
+                            {/* Summary Cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+                                    <div className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Total Asientos</div>
+                                    <div className="text-4xl font-bold text-slate-800">{draftEntries.length}</div>
+                                </div>
+                                <div className="bg-green-50 p-6 rounded-2xl border border-green-100 shadow-sm flex flex-col items-center justify-center text-center">
+                                    <div className="text-sm font-bold text-green-600 uppercase tracking-wider mb-2">Listos para Importar</div>
+                                    <div className="text-4xl font-bold text-green-700">{validationSummary.balancedEntries}</div>
+                                </div>
+                                {validationSummary.entryErrors > 0 && (
+                                    <div className="bg-red-50 p-6 rounded-2xl border border-red-100 shadow-sm flex flex-col items-center justify-center text-center">
+                                        <div className="text-sm font-bold text-red-600 uppercase tracking-wider mb-2">Con Errores</div>
+                                        <div className="text-4xl font-bold text-red-700">{validationSummary.entryErrors}</div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {validationSummary.entryErrors > 0 && (
+                                <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl flex items-center gap-4 animate-pulse">
+                                    <span className="text-3xl">⛔</span>
+                                    <div>
+                                        <h3 className="font-bold text-lg">Bloqueo de Importación</h3>
+                                        <p className="text-sm opacity-90">Existen asientos desbalanceados o incompletos. Por seguridad, no se puede importar hasta corregir el archivo.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Table */}
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-1 flex flex-col min-h-[300px]">
+                                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 font-semibold text-slate-800">
+                                    Detalle de Asientos ({draftEntries.length})
+                                </div>
+                                <div className="overflow-auto max-h-[400px] flex-1">
                                     <table className="w-full text-sm text-left">
-                                        <thead className="bg-slate-50 text-xs text-slate-500 uppercase sticky top-0">
+                                        <thead className="bg-white sticky top-0 z-10 text-xs text-slate-500 uppercase font-semibold">
                                             <tr>
-                                                <th className="px-4 py-3 font-medium border-b">N°</th>
-                                                <th className="px-4 py-3 font-medium border-b">Fecha</th>
-                                                <th className="px-4 py-3 font-medium border-b">Concepto</th>
-                                                <th className="px-4 py-3 font-medium border-b text-center">Líneas</th>
-                                                <th className="px-4 py-3 font-medium border-b text-right">Total Debe</th>
-                                                <th className="px-4 py-3 font-medium border-b text-right">Total Haber</th>
-                                                <th className="px-4 py-3 font-medium border-b">Estado</th>
+                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">Estado</th>
+                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">N°</th>
+                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">Fecha</th>
+                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b">Concepto</th>
+                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b text-center">Líneas</th>
+                                                <th className="px-6 py-3 bg-slate-50/95 backdrop-blur border-b text-right">Total</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {draftEntries.map((entry, i) => (
                                                 <tr key={i} className={`hover:bg-slate-50 ${!entry.isBalanced ? 'bg-red-50' : ''}`}>
-                                                    <td className="px-4 py-2 font-mono text-slate-600">{entry.nro_asiento}</td>
-                                                    <td className="px-4 py-2 whitespace-nowrap text-slate-600">{entry.fechaISO}</td>
-                                                    <td className="px-4 py-2 text-slate-600 truncate max-w-[200px]">{entry.concepto}</td>
-                                                    <td className="px-4 py-2 text-center text-slate-500">{entry.lines.length}</td>
-                                                    <td className="px-4 py-2 text-right font-mono font-medium">{entry.totalDebe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
-                                                    <td className="px-4 py-2 text-right font-mono font-medium">{entry.totalHaber.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
-                                                    <td className="px-4 py-2">
+                                                    <td className="px-6 py-3">
                                                         {entry.isBalanced && entry.validationErrors.length === 0 ? (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-green-100 text-green-800">OK</span>
+                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">OK</span>
                                                         ) : (
-                                                            <span className="text-xs font-bold text-red-600">
-                                                                {entry.validationErrors[0] || 'Error'}
-                                                            </span>
+                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">ERR</span>
                                                         )}
+                                                    </td>
+                                                    <td className="px-6 py-3 font-mono text-slate-600">{entry.nro_asiento}</td>
+                                                    <td className="px-6 py-3 whitespace-nowrap text-slate-600">{entry.fechaISO}</td>
+                                                    <td className="px-6 py-3 text-slate-600 truncate max-w-[200px]">{entry.concepto}</td>
+                                                    <td className="px-6 py-3 text-center text-slate-500">{entry.lines.length}</td>
+                                                    <td className="px-6 py-3 text-right font-mono font-medium text-slate-800">
+                                                        $ {entry.totalDebe.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                                                     </td>
                                                 </tr>
                                             ))}
@@ -853,30 +958,34 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
                     )}
                 </div>
 
-                {/* Footer */}
-                <div className="px-6 py-4 border-t border-slate-100 bg-white flex justify-between items-center shrink-0">
-                    <div className="text-sm text-slate-500">
-                        {step === 3 && unresolvedKeys.length > 0 && `${unresolvedKeys.length} cuentas pendientes`}
-                    </div>
+                {/* Sticky Footer */}
+                <div className="px-8 py-5 border-t border-slate-200 bg-white shrink-0 flex justify-between items-center z-20 shadow-[0_-5px_20px_-10px_rgba(0,0,0,0.05)]">
+                    <button onClick={handleClose} className="px-5 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 rounded-xl transition-colors">
+                        Cancelar
+                    </button>
+
                     <div className="flex gap-3">
-                        {!isLoading && (
-                            <button onClick={handleClose} className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg">
-                                Cancelar
+                        {step > 1 && (
+                            <button
+                                onClick={() => setStep(prev => prev - 1 as any)}
+                                className="px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                            >
+                                Atrás
                             </button>
                         )}
 
                         {step === 2 && (
                             <button
                                 onClick={handleGoToResolution}
-                                disabled={validationSummary.rowErrors > 0}
+                                disabled={!isStep2Valid || validationSummary.rowErrors > 0}
                                 className={`
-                                    px-6 py-2 text-sm font-semibold text-white rounded-lg shadow-sm
-                                    ${validationSummary.rowErrors > 0
-                                        ? 'bg-slate-300 cursor-not-allowed'
-                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow mx-1'}
+                                    px-8 py-2.5 text-sm font-bold text-white rounded-xl shadow-lg shadow-blue-200 transition-all
+                                    ${(!isStep2Valid || validationSummary.rowErrors > 0)
+                                        ? 'bg-slate-300 shadow-none cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:scale-105 hover:shadow-xl'}
                                 `}
                             >
-                                Siguiente: Validar Cuentas
+                                Siguiente
                             </button>
                         )}
 
@@ -886,40 +995,30 @@ export default function JournalImportModal({ isOpen, onClose, onSuccess }: Journ
                                     setStep(4)
                                     prepareDraft(accountResolution)
                                 }}
-                                disabled={unresolvedKeys.length > 0}
+                                disabled={!isStep3Valid}
                                 className={`
-                                    px-6 py-2 text-sm font-semibold text-white rounded-lg shadow-sm
-                                    ${unresolvedKeys.length > 0
-                                        ? 'bg-slate-300 cursor-not-allowed'
-                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow mx-1'}
+                                    px-8 py-2.5 text-sm font-bold text-white rounded-xl shadow-lg shadow-blue-200 transition-all
+                                    ${!isStep3Valid
+                                        ? 'bg-slate-300 shadow-none cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:scale-105 hover:shadow-xl'}
                                 `}
                             >
-                                Siguiente: Confirmar
+                                Siguiente
                             </button>
                         )}
 
                         {step === 4 && (
                             <button
                                 onClick={handleImport}
-                                disabled={isLoading || validationSummary.entryErrors > 0}
+                                disabled={isLoading || !isStep4Valid}
                                 className={`
-                                    px-6 py-2 text-sm font-semibold text-white rounded-lg shadow-sm flex items-center gap-2
-                                    ${(isLoading || validationSummary.entryErrors > 0)
-                                        ? 'bg-slate-300 cursor-not-allowed'
-                                        : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 hover:shadow mx-1'}
+                                    px-8 py-2.5 text-sm font-bold text-white rounded-xl shadow-lg shadow-green-200 transition-all flex items-center gap-2
+                                    ${(isLoading || !isStep4Valid)
+                                        ? 'bg-slate-300 shadow-none cursor-not-allowed'
+                                        : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:scale-105 hover:shadow-xl'}
                                 `}
                             >
-                                {isLoading ? (
-                                    <>
-                                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                        Procesando...
-                                    </>
-                                ) : (
-                                    '✅ Confirmar Importación'
-                                )}
+                                {isLoading ? 'Procesando...' : 'Confirmar Importación'}
                             </button>
                         )}
                     </div>
