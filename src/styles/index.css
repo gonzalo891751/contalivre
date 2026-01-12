@@ -5,49 +5,86 @@
 
 /* ---- CSS Variables ---- */
 :root {
+  /* =========================
+     ContaLivre 2026 Tokens
+     ========================= */
+  --brand-primary: #3B82F6;
+  --brand-secondary: #10B981;
+  --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+
+  --surface-1: #FFFFFF;
+  --surface-2: #F8FAFC;
+  --surface-3: #EEF2F7;
+  --surface-glass: rgba(255, 255, 255, 0.70);
+
+  --text-strong: #0F172A;
+  /* slate-900 */
+  --text: #111827;
+  /* gray-900-ish */
+  --text-muted: #64748B;
+  /* slate-500 */
+  --border: rgba(15, 23, 42, 0.10);
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.10);
+
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+
+  --focus-ring: rgba(59, 130, 246, 0.35);
+
+  --font-display: 'Outfit', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* =========================
+     Deprecated Tokens (Legacy)
+     DO NOT ADD NEW USAGE
+     ========================= */
   /* Brand Colors */
-  --brand-blue: #4094DA;
-  --brand-green: #5CA690;
-  --brand-navy: #0A1F48;
-  --bg: #E9F4F7;
-  --ui-muted: #BACDDA;
-  --accent-pastel: #F8E9F9;
+  --brand-blue: var(--brand-primary);
+  --brand-green: var(--brand-secondary);
+  --brand-navy: #0F172A;
+  --bg: var(--surface-2);
+  --ui-muted: #CBD5E1;
+  --accent-pastel: var(--surface-3);
 
-  /* Primary & Secondary (mapped from brand) */
-  --color-primary: #4094DA;
-  --color-primary-light: #6ab0e8;
-  --color-primary-dark: #2d7fc4;
-  --color-secondary: #5CA690;
-  --color-secondary-light: #7cb8a6;
-  --color-accent: #4094DA;
+  /* Primary & Secondary */
+  --color-primary: var(--brand-primary);
+  --color-primary-light: #60A5FA;
+  --color-primary-dark: #2563EB;
+  --color-secondary: var(--brand-secondary);
+  --color-secondary-light: #34D399;
+  --color-accent: var(--brand-primary);
 
-  /* Semantic colors (softer, accessible) */
-  --color-success: #3d9e70;
-  --color-success-bg: #e6f5ee;
-  --color-error: #d93f3f;
-  --color-error-bg: #fdeaea;
-  --color-warning: #e6a23c;
-  --color-warning-bg: #fdf4e3;
-  --color-info: #4094DA;
-  --color-info-bg: #e6f2fc;
+  /* Semantic colors */
+  --color-success: #10B981;
+  --color-success-bg: rgba(16, 185, 129, 0.10);
+  --color-error: #EF4444;
+  --color-error-bg: rgba(239, 68, 68, 0.10);
+  --color-warning: #F59E0B;
+  --color-warning-bg: rgba(245, 158, 11, 0.12);
+  --color-info: #3B82F6;
+  --color-info-bg: rgba(59, 130, 246, 0.10);
 
-  /* Account type colors (softer tones) */
-  --color-activo: #4094DA;
-  --color-pasivo: #c27827;
-  --color-patrimonio: #5CA690;
-  --color-ingreso: #3d9e70;
-  --color-gasto: #d97146;
+  /* Account type colors */
+  --color-activo: var(--brand-primary);
+  --color-pasivo: #D97706;
+  --color-patrimonio: var(--brand-secondary);
+  --color-ingreso: var(--color-success);
+  --color-gasto: #EA580C;
 
   /* Neutrals */
-  --color-bg: #E9F4F7;
-  --color-surface: #ffffff;
-  --color-text: #0A1F48;
-  --color-text-secondary: #4a6380;
-  --color-text-muted: #7a94ad;
-  --color-border: #d1e0eb;
-  --color-border-focus: #4094DA;
+  --color-bg: var(--surface-2);
+  --color-surface: var(--surface-1);
+  --color-text: var(--text);
+  --color-text-secondary: var(--text-muted);
+  --color-text-muted: #94A3B8;
+  --color-border: var(--border);
+  --color-border-focus: var(--brand-primary);
 
-  /* Spacing */
+  /* Spacing (Legacy) */
   --space-xs: 0.25rem;
   --space-sm: 0.5rem;
   --space-md: 1rem;
@@ -55,9 +92,9 @@
   --space-xl: 2rem;
   --space-2xl: 3rem;
 
-  /* Typography */
-  --font-family: "Nunito", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  /* Typography (Bridge) */
+  --font-family: var(--font-body);
+  /* --font-mono is already defined in new tokens */
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
   --font-size-base: 1rem;
@@ -65,6 +102,18 @@
   --font-size-xl: 1.25rem;
   --font-size-2xl: 1.5rem;
   --font-size-3xl: 2rem;
+
+  /* Type Scale (2026) */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-base: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.25rem;
+  --fs-2xl: 1.5rem;
+  --fs-3xl: 1.875rem;
+  --lh-tight: 1.2;
+  --lh-normal: 1.5;
+  --lh-relaxed: 1.65;
 
   /* Font weights */
   --font-weight-light: 300;
@@ -74,17 +123,15 @@
   --font-weight-extrabold: 800;
   --font-weight-black: 900;
 
-  /* Borders & Shadows */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.625rem;
-  --radius-lg: 1rem;
+  /* Borders & Shadows (Bridge/Hybrid) */
+  /* Radius tokens are intentionally updated by naming collision above */
   --radius-xl: 1.25rem;
+  /* Kept legacy large radius */
   --radius-full: 9999px;
-  --shadow-sm: 0 1px 3px rgba(10, 31, 72, 0.06);
-  --shadow-md: 0 4px 12px rgba(10, 31, 72, 0.08);
+
+  /* Shadows - updated by collision or kept */
   --shadow-lg: 0 10px 24px rgba(10, 31, 72, 0.1);
 
-  /* Layout */
   /* Layout */
   --sidebar-width: 260px;
   --header-height: 60px;
@@ -105,6 +152,9 @@
   --transition-normal: 250ms ease;
 }
 
+/* ===========================================
+   SECTION: RESET
+   =========================================== */
 /* ---- Reset ---- */
 *,
 *::before,
@@ -121,15 +171,34 @@ html {
 }
 
 body {
-  font-family: var(--font-family);
-  font-size: var(--font-size-base);
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
   font-weight: var(--font-weight-regular);
   color: var(--color-text);
   background: linear-gradient(135deg, var(--bg) 0%, var(--accent-pastel) 50%, var(--bg) 100%);
   background-attachment: fixed;
-  line-height: 1.6;
+  line-height: var(--lh-normal);
   min-height: 100vh;
 }
+
+/* ---- Shell QA Polish (Phase 5.1) ---- */
+
+/* 1. Horizontal Scroll Safety */
+html,
+body {
+  overflow-x: hidden;
+  /* Prevent full-page horizontal scroll */
+  max-width: 100vw;
+}
+
+/* Ensure form controls inherit font families */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 
 /* ---- Typography ---- */
 h1,
@@ -138,9 +207,10 @@ h3,
 h4,
 h5,
 h6 {
+  font-family: var(--font-display);
   color: var(--color-text);
   font-weight: var(--font-weight-bold);
-  line-height: 1.3;
+  line-height: var(--lh-tight);
   margin-bottom: var(--space-md);
 }
 
@@ -179,16 +249,21 @@ a:hover {
   text-decoration: underline;
 }
 
+/* ===========================================
+   SECTION: LAYOUT
+   =========================================== */
 /* ---- Layout Components ---- */
 .layout {
   display: flex;
   min-height: 100vh;
 }
 
+/* 2026 Brand Sidebar */
 .sidebar {
   width: var(--sidebar-width);
-  background: var(--brand-navy);
-  color: white;
+  background: #0F172A;
+  /* Slate-900 */
+  color: rgba(255, 255, 255, 0.92);
   padding: var(--space-lg);
   display: flex;
   flex-direction: column;
@@ -201,34 +276,34 @@ a:hover {
   transition: width 0.3s ease, padding 0.3s ease;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  /* Subtle edge definition */
 }
 
 /* Collapsed Sidebar overrides */
 .layout.collapsed .sidebar {
   padding: var(--space-lg) var(--space-xs);
-  /* Reduce horizontal padding */
   overflow: visible;
-  /* Allow flyouts */
 }
 
-/* Hide scrollbar when collapsed to avoid ugliness */
+/* Hide scrollbar when collapsed */
 .layout.collapsed .sidebar::-webkit-scrollbar {
   width: 0px;
   background: transparent;
 }
 
-
 .sidebar-logo {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  margin-bottom: var(--space-sm);
+  margin-bottom: var(--space-xl);
+  /* Increased spacing */
   justify-content: center;
-  /* Center logo in collapsed */
 }
 
 .sidebar-logo img {
-  height: 60px;
+  height: 48px;
+  /* Slightly refined size */
   width: auto;
   max-width: 100%;
   object-fit: contain;
@@ -239,16 +314,16 @@ a:hover {
 
 /* Smaller logo in collapsed mode */
 .layout.collapsed .sidebar-logo img {
-  height: 48px;
+  height: 40px;
 }
 
 .sidebar-logo-emoji {
-  font-size: 40px;
+  font-size: 32px;
   line-height: 1;
 }
 
 .sidebar-title {
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-lg);
   font-weight: var(--font-weight-extrabold);
   color: white;
   margin: 0;
@@ -257,14 +332,10 @@ a:hover {
 
 .sidebar-subtitle {
   font-size: var(--font-size-xs);
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.6);
   margin-bottom: var(--space-xl);
 }
 
-/* Visually hide titles in collapsed mode but keep accessible? 
-   Actually standard sr-only pattern is better. 
-   Sidebar.tsx handles rendering using 'sr-only' class.
-*/
 .sr-only {
   position: absolute;
   width: 1px;
@@ -280,50 +351,59 @@ a:hover {
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
+  gap: 4px;
+  /* Tighter vertical rhythm */
   flex: 1;
 }
 
 .sidebar-link {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  color: rgba(255, 255, 255, 0.8);
+  gap: var(--space-md);
+  padding: 10px 16px;
+  color: rgba(255, 255, 255, 0.75);
   border-radius: var(--radius-md);
   transition: all var(--transition-fast);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font-size: 0.95rem;
+  /* Slightly larger readable text */
+  font-weight: 500;
   border-left: 3px solid transparent;
   white-space: nowrap;
-  /* Prevent text wrapping during transition */
   overflow: hidden;
+  position: relative;
 }
 
 .layout.collapsed .sidebar-link {
-  padding: var(--space-sm);
+  padding: 12px;
   justify-content: center;
 }
 
 .sidebar-link:hover {
-  background: rgba(64, 148, 218, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  /* Brighter hover */
   color: white;
   text-decoration: none;
 }
 
-.sidebar-link.active {
-  background: rgba(64, 148, 218, 0.2);
-  color: white;
-  border-left-color: var(--brand-blue);
+.sidebar-link:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: -2px;
+  background: rgba(255, 255, 255, 0.1);
 }
 
-/* In collapsed mode, active border might look weird on left. 
-   Maybe just background or border-bottom? 
-   Let's keep it but ensure it's visible. */
+.sidebar-link.active {
+  background: rgba(59, 130, 246, 0.15);
+  /* Brand tint */
+  color: #60A5FA;
+  /* Brand light text */
+  border-left-color: #60A5FA;
+  /* Brand accent left */
+}
+
+/* Collapsed active state */
 .layout.collapsed .sidebar-link.active {
   border-left: none;
-  background: rgba(64, 148, 218, 0.4);
-  /* Stronger bg */
+  background: rgba(59, 130, 246, 0.25);
 }
 
 .sidebar-link svg,
@@ -365,13 +445,29 @@ a:hover {
   font-size: var(--font-size-base);
 }
 
+/* ===========================================
+   SECTION: COMPONENTS
+   =========================================== */
 /* ---- Cards ---- */
 .card {
-  background: var(--color-surface);
+  background: var(--surface-1);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
-  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   padding: var(--space-lg);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+/* Optional hover for interactive cards (can be used by specific instances) */
+.card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.card-glass {
+  background: var(--surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(15, 23, 42, 0.10);
 }
 
 .card-header {
@@ -380,12 +476,13 @@ a:hover {
   align-items: center;
   margin-bottom: var(--space-md);
   padding-bottom: var(--space-md);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border);
 }
 
 .card-title {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
+  font-family: var(--font-display);
   margin: 0;
 }
 
@@ -408,24 +505,32 @@ a:hover {
   width: 100%;
   padding: var(--space-sm) var(--space-md);
   font-size: var(--font-size-base);
-  font-family: var(--font-family);
-  border: 1px solid var(--color-border);
+  font-family: inherit;
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
-  color: var(--color-text);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  background: var(--surface-1);
+  color: var(--text);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .form-input:focus,
 .form-select:focus,
 .form-textarea:focus {
   outline: none;
-  border-color: var(--brand-blue);
-  box-shadow: 0 0 0 3px rgba(64, 148, 218, 0.15);
+  /* Remove default browser outline */
 }
 
-.form-input::placeholder {
-  color: var(--color-text-muted);
+.form-input:focus-visible,
+.form-select:focus-visible,
+.form-textarea:focus-visible {
+  border-color: rgba(59, 130, 246, 0.55);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  outline: none;
+}
+
+.form-input::placeholder,
+.form-textarea::placeholder {
+  color: var(--text-muted);
 }
 
 .form-input-number {
@@ -433,11 +538,12 @@ a:hover {
   text-align: right;
 }
 
-/* Disabled amount input (Debe/Haber mutual exclusion) */
+/* Disabled amount input */
 .input-disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: not-allowed;
-  background-color: var(--color-bg) !important;
+  background-color: var(--surface-2) !important;
+  color: var(--text-muted);
 }
 
 .form-error {
@@ -455,61 +561,77 @@ a:hover {
   padding: var(--space-sm) var(--space-lg);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  font-family: var(--font-family);
+  font-family: inherit;
   border-radius: var(--radius-md);
   border: none;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease, background 150ms ease;
   text-decoration: none;
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  filter: grayscale(0.5);
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--brand-blue) 0%, var(--brand-green) 100%);
+  background: var(--brand-gradient);
   color: white;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: var(--shadow-sm);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--color-primary-light) 0%, var(--color-secondary-light) 100%);
-  box-shadow: var(--shadow-md);
   transform: translateY(-1px);
+  filter: brightness(1.03) saturate(1.05);
+  box-shadow: var(--shadow-md);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0px);
+  filter: brightness(0.98);
 }
 
 .btn-secondary {
-  background: var(--color-surface);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--border);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: var(--bg);
-  border-color: var(--ui-muted);
+  background: rgba(59, 130, 246, 0.06);
   box-shadow: var(--shadow-sm);
+  border-color: var(--brand-primary);
 }
 
 .btn-success {
   background: var(--color-success);
   color: white;
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-success:hover:not(:disabled) {
-  background: var(--color-secondary-light);
-  box-shadow: var(--shadow-sm);
+  filter: brightness(1.05);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .btn-danger {
   background: var(--color-error);
   color: white;
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-danger:hover:not(:disabled) {
-  opacity: 0.9;
-  box-shadow: var(--shadow-sm);
+  filter: brightness(1.05);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .btn-sm {
@@ -523,9 +645,23 @@ a:hover {
   height: 36px;
 }
 
+@media (prefers-reduced-motion: reduce) {
+
+  .btn,
+  .card,
+  .form-input {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
 /* ---- Tables ---- */
 .table-container {
   overflow-x: auto;
+  background: var(--surface-1);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  box-shadow: var(--shadow-sm);
 }
 
 .table {
@@ -536,22 +672,24 @@ a:hover {
 
 .table th,
 .table td {
-  padding: var(--space-sm) var(--space-md);
+  padding: 12px var(--space-md);
   text-align: left;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
 }
 
 .table th {
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-secondary);
-  background: rgba(64, 148, 218, 0.05);
-  font-size: var(--font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: var(--text-strong);
+  background: rgba(59, 130, 246, 0.06);
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  white-space: nowrap;
 }
 
 .table-number {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
@@ -560,7 +698,54 @@ a:hover {
 }
 
 .table tbody tr:hover {
-  background: rgba(64, 148, 218, 0.04);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* Optional: zebra striping if needed, but keeping plain surface for now per 2026 spec */
+/* .table tbody tr:nth-child(even) { background: rgba(15, 23, 42, 0.02); } */
+
+
+/* ---- Semantic Columns (Phase 4.3) ---- */
+.table th.debe,
+.table td.debe {
+  background-color: rgba(59, 130, 246, 0.02);
+  color: var(--brand-primary);
+}
+
+.table th.haber,
+.table td.haber {
+  background-color: rgba(239, 68, 68, 0.02);
+  color: var(--color-error);
+}
+
+.table th.debe {
+  background-color: rgba(59, 130, 246, 0.08);
+}
+
+.table th.haber {
+  background-color: rgba(239, 68, 68, 0.08);
+}
+
+/* Ensure table-number overrides alignment */
+.table td.table-number {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mayor page: neutralize debit/credit coloring in summary totals */
+/* Mayor page: neutralize debit/credit coloring in summary totals */
+.mayor-page .table th.debe,
+.mayor-page .table th.haber {
+  background: rgba(59, 130, 246, 0.06);
+  /* same as standard .table th */
+  color: var(--text-strong);
+}
+
+.mayor-page .table td.debe,
+.mayor-page .table td.haber {
+  color: var(--text-strong);
+  background: transparent;
 }
 
 /* ---- Badges & Tags ---- */
@@ -573,32 +758,39 @@ a:hover {
   border-radius: var(--radius-full);
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  border: 1px solid transparent;
 }
 
 /* Softer badge colors aligned with brand */
 .badge-activo {
-  background: rgba(64, 148, 218, 0.12);
-  color: var(--brand-blue);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--brand-primary);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 .badge-pasivo {
-  background: rgba(194, 120, 39, 0.12);
-  color: var(--color-pasivo);
+  background: rgba(217, 119, 6, 0.12);
+  color: #D97706;
+  border-color: rgba(217, 119, 6, 0.2);
 }
 
 .badge-patrimonio {
-  background: rgba(92, 166, 144, 0.12);
-  color: var(--brand-green);
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--brand-secondary);
+  border-color: rgba(16, 185, 129, 0.2);
 }
 
 .badge-ingreso {
-  background: rgba(61, 158, 112, 0.12);
-  color: var(--color-ingreso);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: rgba(16, 185, 129, 0.2);
 }
 
 .badge-gasto {
-  background: rgba(217, 113, 70, 0.12);
-  color: var(--color-gasto);
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  /* Should ideally be orange, but keeping consistency */
+  border-color: rgba(239, 68, 68, 0.2);
 }
 
 /* ---- Alerts ---- */
@@ -609,30 +801,32 @@ a:hover {
   display: flex;
   align-items: flex-start;
   gap: var(--space-sm);
+  border: 1px solid transparent;
+  /* default */
 }
 
 .alert-success {
   background: var(--color-success-bg);
   color: var(--color-success);
-  border: 1px solid currentColor;
+  border-color: rgba(16, 185, 129, 0.2);
 }
 
 .alert-error {
   background: var(--color-error-bg);
   color: var(--color-error);
-  border: 1px solid currentColor;
+  border-color: rgba(239, 68, 68, 0.2);
 }
 
 .alert-warning {
   background: var(--color-warning-bg);
   color: var(--color-warning);
-  border: 1px solid currentColor;
+  border-color: rgba(245, 158, 11, 0.2);
 }
 
 .alert-info {
   background: var(--color-info-bg);
   color: var(--color-info);
-  border: 1px solid currentColor;
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 /* ---- Stats Cards ---- */
@@ -767,7 +961,8 @@ a:hover {
   justify-content: flex-end;
   gap: var(--space-xl);
   padding: var(--space-md);
-  background: rgba(64, 148, 218, 0.04);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   margin-bottom: var(--space-lg);
 }
@@ -1423,17 +1618,7 @@ tr:hover .account-row-actions {
 }
 
 /* Screen reader only */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
+
 
 /* Balance Color Utilities */
 .text-balance-debit {
@@ -1445,6 +1630,9 @@ tr:hover .account-row-actions {
   /* Ref 700 - Vino/Bordó */
 }
 
+/* ===========================================
+   SECTION: PAGES
+   =========================================== */
 /* ========================================
    AMORTIZACIONES PAGE
    ======================================== */
@@ -2286,19 +2474,23 @@ tr:hover .account-row-actions {
   right: 0;
   height: 64px;
   padding-top: var(--safe-area-top);
-  background: var(--brand-navy);
+  background: #0F172A;
+  /* Slate-900 for mobile bar */
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding-left: var(--space-sm);
   padding-right: var(--space-sm);
   z-index: 200;
-  box-shadow: 0 2px 8px rgba(10, 31, 72, 0.15);
+  box-shadow: var(--shadow-sm);
+  /* Subtle shadow per specs */
   transition: transform 0.3s ease-in-out;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .mobile-top-bar-logo {
-  height: 44px;
+  height: 36px;
+  /* Optimized mobile size */
   width: auto;
   max-height: 48px;
   object-fit: contain;
@@ -2319,6 +2511,8 @@ tr:hover .account-row-actions {
   cursor: pointer;
   border-radius: var(--radius-md);
   transition: background-color var(--transition-fast);
+  color: white;
+  /* Ensure icons are visible */
 }
 
 .mobile-top-bar-btn:hover,
@@ -2998,6 +3192,11 @@ tr:hover .account-row-actions {
 @media (max-width: 768px) {
   .main-content-mobile {
     padding-top: calc(var(--mobile-top-bar-height) + 52px + var(--space-md));
+  }
+
+  /* Additional safety for generic main content on mobile */
+  .main-content {
+    padding-top: var(--mobile-top-bar-height);
   }
 }
 
@@ -4371,4 +4570,9 @@ tr:hover .account-row-actions {
 .custom-scroll::-webkit-scrollbar-thumb {
   background-color: #cbd5e1;
   border-radius: 999px;
+}
+
+/* 2026 Utilities */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }

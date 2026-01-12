@@ -291,7 +291,7 @@ export default function Mayor() {
     // Note: Auto-focus removed per user request - user must manually click to interact with search
 
     return (
-        <div>
+        <div className="mayor-page">
             {/* Header Area */}
             <div className="mayor-header">
                 <h1 className="page-title">Libro mayor</h1>
@@ -522,8 +522,8 @@ export default function Mayor() {
                                                     <tr>
                                                         <th>Fecha</th>
                                                         <th>Concepto</th>
-                                                        <th className="text-right">Debe</th>
-                                                        <th className="text-right">Haber</th>
+                                                        <th className="text-right debe">Debe</th>
+                                                        <th className="text-right haber">Haber</th>
                                                         <th className="text-right">Saldo Parcial</th>
                                                     </tr>
                                                 </thead>
@@ -532,10 +532,10 @@ export default function Mayor() {
                                                         <tr key={i}>
                                                             <td>{formatDate(m.date)}</td>
                                                             <td>{m.memo || m.description || '-'}</td>
-                                                            <td className="table-number text-balance-deudor">
+                                                            <td className="table-number debe text-balance-deudor">
                                                                 {m.debit > 0 ? `$${formatAmount(m.debit)}` : '-'}
                                                             </td>
-                                                            <td className="table-number text-balance-acreedor">
+                                                            <td className="table-number haber text-balance-acreedor">
                                                                 {m.credit > 0 ? `$${formatAmount(m.credit)}` : '-'}
                                                             </td>
                                                             <td className="table-number">
@@ -624,8 +624,8 @@ export default function Mayor() {
                                             <th onClick={() => handleSort('name')} className="cursor-pointer hover:text-primary">
                                                 Cuenta {sortField === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
                                             </th>
-                                            <th className="text-right hidden-mobile">Total Debe</th>
-                                            <th className="text-right hidden-mobile">Total Haber</th>
+                                            <th className="text-right hidden-mobile debe">Total Debe</th>
+                                            <th className="text-right hidden-mobile haber">Total Haber</th>
                                             <th onClick={() => handleSort('balance')} className="text-right cursor-pointer hover:text-primary" style={{ width: '20%' }}>
                                                 Saldo {sortField === 'balance' && (sortOrder === 'asc' ? '↑' : '↓')}
                                             </th>
@@ -657,9 +657,9 @@ export default function Mayor() {
                                                         {acc.name}
                                                     </div>
                                                 </td>
-                                                <td className="text-right text-muted hidden-mobile" style={{ fontSize: '0.9rem' }}>${formatAmount(acc.debit)}</td>
-                                                <td className="text-right text-muted hidden-mobile" style={{ fontSize: '0.9rem' }}>${formatAmount(acc.credit)}</td>
-                                                <td className="text-right" style={{
+                                                <td className="text-right hidden-mobile table-number debe" style={{ fontSize: '0.9rem' }}>${formatAmount(acc.debit)}</td>
+                                                <td className="text-right hidden-mobile table-number haber" style={{ fontSize: '0.9rem' }}>${formatAmount(acc.credit)}</td>
+                                                <td className="text-right table-number" style={{
                                                     fontSize: '1.25rem',
                                                     fontWeight: acc.isHeader ? 800 : 700,
                                                     color: acc.balanceTypeLabel === 'Deudor'

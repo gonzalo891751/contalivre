@@ -363,13 +363,13 @@ function MovimientosTab({
                                                     {getMovementTypeLabel(row.movement.type)}
                                                 </span>
                                             </td>
-                                            <td className="text-right">
+                                            <td className="text-right table-number">
                                                 {row.entrada > 0 ? row.entrada.toLocaleString('es-AR') : '—'}
                                             </td>
-                                            <td className="text-right">
+                                            <td className="text-right table-number">
                                                 {row.salida > 0 ? row.salida.toLocaleString('es-AR') : '—'}
                                             </td>
-                                            <td className="text-right font-semibold">
+                                            <td className="text-right font-semibold table-number">
                                                 {row.saldo.toLocaleString('es-AR')}
                                             </td>
                                             <td>{row.movement.observation || '—'}</td>
@@ -431,7 +431,7 @@ function MovimientosTab({
                                                     {getMovementTypeLabel(mov.type)}
                                                 </span>
                                             </td>
-                                            <td className="text-right">{mov.quantity.toLocaleString('es-AR')}</td>
+                                            <td className="text-right table-number">{mov.quantity.toLocaleString('es-AR')}</td>
                                             <td>{mov.observation || '—'}</td>
                                             <td>
                                                 <button
