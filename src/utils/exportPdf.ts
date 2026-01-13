@@ -1,7 +1,4 @@
 
-import html2canvas from 'html2canvas'
-import jsPDF from 'jspdf'
-
 /**
  * Exports an HTML element to a PDF file.
  * @param element The HTML element to capture.
@@ -9,6 +6,11 @@ import jsPDF from 'jspdf'
  */
 export async function exportElementToPdf(element: HTMLElement, filename: string): Promise<void> {
     try {
+        const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+            import('html2canvas'),
+            import('jspdf')
+        ])
+
         // High scale for better quality
         const canvas = await html2canvas(element, {
             scale: 2,

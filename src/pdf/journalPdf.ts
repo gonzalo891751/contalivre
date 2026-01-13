@@ -1,5 +1,3 @@
-import jsPDF from 'jspdf'
-import autoTable from 'jspdf-autotable'
 import { JournalEntry, Account } from '../core/models'
 
 interface PdfMeta {
@@ -28,6 +26,11 @@ export const downloadJournalPdf = async (
     accounts: Account[],
     meta: PdfMeta
 ) => {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable')
+    ])
+
     const doc = new jsPDF()
 
     const today = new Date().toLocaleDateString('es-AR')
