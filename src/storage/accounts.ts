@@ -227,3 +227,159 @@ export async function hasChildren(id: string): Promise<boolean> {
     const count = await db.accounts.where('parentId').equals(id).count()
     return count > 0
 }
+
+// ============================================================================
+// Bulk Operations for Import
+// ============================================================================
+
+/**
+ * Delete all accounts from the database
+ */
+export async function deleteAllAccounts(): Promise<void> {
+    await db.accounts.clear()
+}
+
+/**
+ * Get a map of code -> account for all existing accounts
+ */
+export async function getAccountCodeMap(): Promise<Map<string, Account>> {
+    const all = await db.accounts.toArray()
+    return new Map(all.map(a => [a.code, a]))
+}
+
+/**
+ * Bulk create accounts (for import)
+ * Resolves parent IDs based on code hierarchy
+ */
+export async function bulkCreateAccounts(
+    accountsData: (Omit<Account, 'id'> & { _parentCode?: string | null })[]
+): Promise<Account[]> {
+    // Sort by code to ensure parents are created before children
+    const sorted = [...accountsData].sort((a, b) => a.code.localeCompare(b.code))
+
+    // Map to track code -> id for resolving parent relationships
+    const codeToId = new Map<string, string>()
+
+    // Also get existing accounts for parent resolution
+    const existingMap = await getAccountCodeMap()
+    existingMap.forEach((acc, code) => codeToId.set(code, acc.id))
+
+    const newAccounts: Account[] = []
+
+    for (const data of sorted) {
+        // Resolve parentId from parentCode
+        let parentId: string | null = null
+        const parentCode = data._parentCode
+
+        if (parentCode && codeToId.has(parentCode)) {
+            parentId = codeToId.get(parentCode)!
+        }
+
+        // If no explicit parent code, try to infer from code structure
+        if (!parentId && data.code.includes('.')) {
+            const parts = data.code.split('.')
+            const inferredParentCode = parts.slice(0, -1).join('.')
+            if (codeToId.has(inferredParentCode)) {
+                parentId = codeToId.get(inferredParentCode)!
+            }
+        }
+
+        const level = data.code.split('.').length - 1
+
+        const newAccount: Account = {
+            ...data,
+            id: generateId(),
+            level,
+            parentId,
+            normalSide: data.normalSide || getDefaultNormalSide(data.kind),
+            isContra: data.isContra || false,
+            isHeader: data.isHeader ?? level < 2,
+        }
+
+        // Remove the temporary _parentCode field
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (newAccount as any)._parentCode
+
+        codeToId.set(newAccount.code, newAccount.id)
+        newAccounts.push(newAccount)
+    }
+
+    // Bulk add all accounts
+    await db.accounts.bulkAdd(newAccounts)
+
+    return newAccounts
+}
+
+/**
+ * Replace all accounts with new ones (atomic operation)
+ */
+export async function replaceAllAccounts(
+    accountsData: (Omit<Account, 'id'> & { _parentCode?: string | null })[]
+): Promise<{ created: number }> {
+    return await db.transaction('rw', db.accounts, async () => {
+        // Clear all existing accounts
+        await db.accounts.clear()
+
+        // Create new accounts
+        const created = await bulkCreateAccounts(accountsData)
+
+        return { created: created.length }
+    })
+}
+
+/**
+ * Merge accounts: add new ones, optionally update existing
+ */
+export async function mergeAccounts(
+    accountsData: (Omit<Account, 'id'> & { _parentCode?: string | null })[],
+    updateExisting: boolean = false
+): Promise<{ created: number; updated: number; skipped: number }> {
+    const existingMap = await getAccountCodeMap()
+
+    const toCreate: (Omit<Account, 'id'> & { _parentCode?: string | null })[] = []
+    const toUpdate: { id: string; data: Partial<Account> }[] = []
+    let skipped = 0
+
+    for (const data of accountsData) {
+        const existing = existingMap.get(data.code)
+
+        if (existing) {
+            if (updateExisting) {
+                // Update existing account
+                toUpdate.push({
+                    id: existing.id,
+                    data: {
+                        name: data.name,
+                        kind: data.kind,
+                        section: data.section,
+                    }
+                })
+            } else {
+                skipped++
+            }
+        } else {
+            toCreate.push(data)
+        }
+    }
+
+    // Create new accounts
+    let createdCount = 0
+    if (toCreate.length > 0) {
+        const created = await bulkCreateAccounts(toCreate)
+        createdCount = created.length
+    }
+
+    // Update existing accounts
+    let updatedCount = 0
+    for (const { id, data } of toUpdate) {
+        await db.accounts.update(id, data)
+        updatedCount++
+    }
+
+    return {
+        created: createdCount,
+        updated: updatedCount,
+        skipped,
+    }
+}
+

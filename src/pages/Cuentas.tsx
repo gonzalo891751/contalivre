@@ -11,6 +11,13 @@ import {
 import type { Account, AccountKind, AccountSection, StatementGroup } from '../core/models'
 import { getDefaultNormalSide } from '../core/models'
 import AccountSearchSelect from '../ui/AccountSearchSelect'
+import {
+    AccountsHero,
+    AccountsToolbar,
+    AccountsTreeTable,
+    ImportWizard,
+    type TreeNode,
+} from '../components/accounts'
 
 const KIND_OPTIONS: { value: AccountKind; label: string }[] = [
     { value: 'ASSET', label: 'Activo' },
@@ -46,19 +53,6 @@ const SECTION_OPTIONS: Record<AccountKind, { value: AccountSection; label: strin
     ],
 }
 
-const KIND_BADGES: Record<AccountKind, string> = {
-    ASSET: 'badge-activo',
-    LIABILITY: 'badge-pasivo',
-    EQUITY: 'badge-patrimonio',
-    INCOME: 'badge-ingreso',
-    EXPENSE: 'badge-gasto',
-}
-
-interface TreeNode extends Account {
-    children: TreeNode[]
-    expanded?: boolean
-}
-
 function buildTree(accounts: Account[]): TreeNode[] {
     const map = new Map<string, TreeNode>()
     const roots: TreeNode[] = []
@@ -81,130 +75,13 @@ function buildTree(accounts: Account[]): TreeNode[] {
     return roots
 }
 
-function AccountRow({
-    node,
-    level,
-    expandedNodes,
-    toggleExpand,
-    onEdit,
-    onDelete,
-}: {
-    node: TreeNode
-    level: number
-    expandedNodes: Set<string>
-    toggleExpand: (id: string) => void
-    onEdit: (account: Account) => void
-    onDelete: (account: Account) => void
-}) {
-    const isExpanded = expandedNodes.has(node.id)
-    const hasKids = node.children.length > 0
-    const indent = level * 20
-
-    // Detect if this is a "Mother" account
-    const isParentAccount = hasKids || node.isHeader
-
-    // Determine row class based on level
-    const rowClass = level === 0
-        ? 'account-row-level-0'
-        : level === 1
-            ? 'account-row-level-1'
-            : 'account-row-leaf'
-
-    // Display Type Logic
-    const getDisplayType = () => {
-        // Hide for root rubros and Equity/Results
-        if (level === 0 || ['EQUITY', 'INCOME', 'EXPENSE'].includes(node.kind)) return null
-
-        // Show for Asset/Liability based on code prefix
-        if (node.code.startsWith('1.1') || node.code.startsWith('2.1')) return 'Corriente'
-        if (node.code.startsWith('1.2') || node.code.startsWith('2.2')) return 'No Corriente'
-
-        return null
-    }
-
-    const displayType = getDisplayType()
-
-    return (
-        <>
-            <tr className={rowClass}>
-                <td style={{ paddingLeft: `${indent + 8}px`, paddingTop: '10px', paddingBottom: '10px' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        {hasKids ? (
-                            <button
-                                className="btn btn-icon btn-sm"
-                                style={{
-                                    width: '24px',
-                                    height: '24px',
-                                    padding: 0,
-                                    cursor: 'pointer',
-                                    color: 'var(--color-primary)'
-                                }}
-                                onClick={() => toggleExpand(node.id)}
-                            >
-                                {isExpanded ? '▼' : '▶'}
-                            </button>
-                        ) : (
-                            <span style={{ width: '24px', display: 'inline-block' }} />
-                        )}
-                        <span className="font-mono" style={{ fontWeight: level <= 1 ? 'bold' : 'normal' }}>
-                            {node.code}
-                        </span>
-                    </span>
-                </td>
-                <td style={{ paddingTop: '10px', paddingBottom: '10px' }}>
-                    <span>{node.name}</span>
-
-                    {node.isContra && (
-                        <span className="badge" style={{ marginLeft: '8px', background: '#fce4ec', color: '#c62828', fontSize: '10px', fontWeight: 600 }}>
-                            Contra
-                        </span>
-                    )}
-                    {node.isHeader && level > 1 && (
-                        <span className="badge" style={{ marginLeft: '8px', background: '#e3f2fd', color: '#1565c0', fontSize: '10px', fontWeight: 600 }}>
-                            Rubro
-                        </span>
-                    )}
-                </td>
-                <td style={{ paddingTop: '10px', paddingBottom: '10px' }}>
-                    {displayType && (
-                        <span className={`badge ${KIND_BADGES[node.kind]}`} style={{ opacity: isParentAccount ? 1 : 0.85 }}>
-                            {displayType}
-                        </span>
-                    )}
-                </td>
-                <td style={{ paddingTop: '10px', paddingBottom: '10px' }}>
-                    <div className="account-row-actions" style={{ opacity: isParentAccount ? 1 : 0.6 }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => onEdit(node)}>
-                            Editar
-                        </button>
-                        <button className="btn btn-danger btn-sm" onClick={() => onDelete(node)}>
-                            ✕
-                        </button>
-                    </div>
-                </td>
-            </tr>
-            {isExpanded &&
-                node.children.map((child) => (
-                    <AccountRow
-                        key={child.id}
-                        node={child}
-                        level={level + 1}
-                        expandedNodes={expandedNodes}
-                        toggleExpand={toggleExpand}
-                        onEdit={onEdit}
-                        onDelete={onDelete}
-                    />
-                ))}
-        </>
-    )
-}
-
 export default function Cuentas() {
     const [searchQuery, setSearchQuery] = useState('')
     const [filterKind, setFilterKind] = useState<AccountKind | ''>('')
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
     const [initialExpansionDone, setInitialExpansionDone] = useState(false)
     const [isModalOpen, setIsModalOpen] = useState(false)
+    const [isImportOpen, setIsImportOpen] = useState(false)
     const [editingAccount, setEditingAccount] = useState<Account | null>(null)
     const [advancedMode, setAdvancedMode] = useState(false)
     const [error, setError] = useState('')
@@ -238,6 +115,12 @@ export default function Cuentas() {
 
         return buildTree(filtered)
     }, [allAccounts, searchQuery, filterKind])
+
+    // Calculate max level for KPI
+    const maxLevel = useMemo(() => {
+        if (!allAccounts || allAccounts.length === 0) return 0
+        return Math.max(...allAccounts.map(a => a.level)) + 1
+    }, [allAccounts])
 
     // Auto-expand level 1 nodes (root accounts) on initial load
     useEffect(() => {
@@ -402,97 +285,48 @@ export default function Cuentas() {
         }
     }
 
-
-
     return (
-        <div>
-            <header className="page-header">
-                <h1 className="page-title">Plan de Cuentas</h1>
-                <p className="page-subtitle">
-                    Estructura jerárquica de cuentas. Hacé clic en ▶ para expandir rubros.
-                </p>
-            </header>
+        <div className="accounts-page">
+            {/* Hero Section */}
+            <AccountsHero
+                totalAccounts={allAccounts?.length ?? 0}
+                totalLevels={maxLevel}
+                isBalanced={true}
+                onImport={() => setIsImportOpen(true)}
+                onNewAccount={() => openModal()}
+            />
 
-            <div className="card" style={{ marginBottom: 'var(--space-lg)' }}>
-                <div className="flex-between gap-md" style={{ flexWrap: 'wrap' }}>
-                    <div className="flex gap-md" style={{ flex: 1 }}>
-                        <input
-                            type="text"
-                            className="form-input"
-                            placeholder="Buscar por código o nombre..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            style={{ maxWidth: '300px' }}
-                        />
-                        <select
-                            className="form-select"
-                            value={filterKind}
-                            onChange={(e) => setFilterKind(e.target.value as AccountKind | '')}
-                            style={{ maxWidth: '180px' }}
-                        >
-                            <option value="">Todos los tipos</option>
-                            {KIND_OPTIONS.map((k) => (
-                                <option key={k.value} value={k.value}>
-                                    {k.label}
-                                </option>
-                            ))}
-                        </select>
-                        <button className="btn btn-secondary btn-sm" onClick={expandAll}>
-                            Expandir todo
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={collapseAll}>
-                            Colapsar
-                        </button>
-                    </div>
-                    <button className="btn btn-primary" onClick={() => openModal()}>
-                        + Nueva cuenta
-                    </button>
-                </div>
-            </div>
+            {/* Toolbar */}
+            <AccountsToolbar
+                search={searchQuery}
+                onSearchChange={setSearchQuery}
+                filterKind={filterKind}
+                onFilterChange={setFilterKind}
+                onExpandAll={expandAll}
+                onCollapseAll={collapseAll}
+            />
 
-            <div className="card">
-                <div className="table-container">
-                    <table className="table">
-                        <thead>
-                            <tr>
-                                <th style={{ width: '200px' }}>Código</th>
-                                <th>Nombre</th>
-                                <th style={{ width: '120px' }}>Tipo</th>
-                                <th style={{ width: '120px' }}>Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {tree.length === 0 ? (
-                                <tr>
-                                    <td colSpan={4} className="text-center text-muted" style={{ padding: 'var(--space-xl)' }}>
-                                        No se encontraron cuentas
-                                    </td>
-                                </tr>
-                            ) : (
-                                tree.map((node) => (
-                                    <AccountRow
-                                        key={node.id}
-                                        node={node}
-                                        level={0}
-                                        expandedNodes={expandedNodes}
-                                        toggleExpand={toggleExpand}
-                                        onEdit={openModal}
-                                        onDelete={handleDelete}
-                                    />
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+            {/* Tree Table */}
+            <AccountsTreeTable
+                tree={tree}
+                expandedNodes={expandedNodes}
+                onToggleExpand={toggleExpand}
+                onEdit={openModal}
+                onDelete={handleDelete}
+                totalAccounts={allAccounts?.length ?? 0}
+            />
 
-                {allAccounts && (
-                    <div className="text-muted text-right" style={{ marginTop: 'var(--space-md)', fontSize: 'var(--font-size-sm)' }}>
-                        Total: {allAccounts.length} cuentas
-                    </div>
-                )}
-            </div>
+            {/* Import Wizard */}
+            <ImportWizard
+                isOpen={isImportOpen}
+                onClose={() => setIsImportOpen(false)}
+                accounts={allAccounts ?? []}
+                onComplete={() => {
+                    // Dexie live query auto-refreshes
+                }}
+            />
 
-            {/* Modal */}
+            {/* New/Edit Account Modal */}
             {isModalOpen && (
                 <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
                     <div className="modal" style={{ maxWidth: '550px' }} onClick={(e) => e.stopPropagation()}>
@@ -512,8 +346,6 @@ export default function Cuentas() {
                                         {error}
                                     </div>
                                 )}
-
-
 
                                 <div className="form-group">
                                     <label className="form-label">Cuenta madre (opcional)</label>
