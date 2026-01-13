@@ -11,47 +11,47 @@
 import { useId } from 'react'
 
 interface BrandSwitchProps {
-    label: string
-    checked: boolean
-    onCheckedChange: (checked: boolean) => void
-    id?: string
-    className?: string
+  label: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  id?: string
+  className?: string
 }
 
 export default function BrandSwitch({
-    label,
-    checked,
-    onCheckedChange,
-    id: providedId,
-    className = ''
+  label,
+  checked,
+  onCheckedChange,
+  id: providedId,
+  className = ''
 }: BrandSwitchProps) {
-    const autoId = useId()
-    const id = providedId || autoId
+  const autoId = useId()
+  const id = providedId || autoId
 
-    return (
-        <label
-            htmlFor={id}
-            className={`brand-switch ${checked ? 'on' : ''} ${className}`}
-        >
-            <button
-                id={id}
-                type="button"
-                role="switch"
-                aria-checked={checked}
-                className="brand-switch-track"
-                onClick={() => onCheckedChange(!checked)}
-                onKeyDown={(e) => {
-                    if (e.key === ' ' || e.key === 'Enter') {
-                        e.preventDefault()
-                        onCheckedChange(!checked)
-                    }
-                }}
-            >
-                <span className="brand-switch-thumb" aria-hidden="true" />
-            </button>
-            <span className="brand-switch-label">{label}</span>
+  return (
+    <label
+      htmlFor={id}
+      className={`brand-switch ${checked ? 'on' : ''} ${className}`}
+    >
+      <button
+        id={id}
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        className="brand-switch-track"
+        onClick={() => onCheckedChange(!checked)}
+        onKeyDown={(e) => {
+          if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault()
+            onCheckedChange(!checked)
+          }
+        }}
+      >
+        <span className="brand-switch-thumb" aria-hidden="true" />
+      </button>
+      <span className="brand-switch-label">{label}</span>
 
-            <style>{`
+      <style>{`
         .brand-switch {
           display: inline-flex;
           align-items: center;
@@ -124,6 +124,6 @@ export default function BrandSwitch({
           font-weight: 500;
         }
       `}</style>
-        </label>
-    )
+    </label>
+  )
 }

@@ -10,70 +10,70 @@
 import { useId } from 'react'
 
 interface SegmentedOption {
-    value: string
-    label: string
+  value: string
+  label: string
 }
 
 interface BrandSegmentedToggleProps {
-    options: SegmentedOption[]
-    value: string
-    onChange: (value: string) => void
-    className?: string
+  options: SegmentedOption[]
+  value: string
+  onChange: (value: string) => void
+  className?: string
 }
 
 export default function BrandSegmentedToggle({
-    options,
-    value,
-    onChange,
-    className = ''
+  options,
+  value,
+  onChange,
+  className = ''
 }: BrandSegmentedToggleProps) {
-    const id = useId()
-    const activeIndex = options.findIndex(opt => opt.value === value)
+  const id = useId()
+  const activeIndex = options.findIndex(opt => opt.value === value)
 
-    return (
-        <div
-            className={`brand-segmented-toggle ${className}`}
-            role="radiogroup"
-            aria-label="View mode"
+  return (
+    <div
+      className={`brand-segmented-toggle ${className}`}
+      role="radiogroup"
+      aria-label="View mode"
+    >
+      {/* Sliding pill background */}
+      <div
+        className="brand-segmented-pill"
+        style={{
+          transform: `translateX(${activeIndex * 100}%)`,
+          width: `${100 / options.length}%`
+        }}
+        aria-hidden="true"
+      />
+
+      {/* Option buttons */}
+      {options.map((option, index) => (
+        <button
+          key={option.value}
+          id={`${id}-${option.value}`}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          className={`brand-segmented-option ${value === option.value ? 'active' : ''}`}
+          onClick={() => onChange(option.value)}
+          tabIndex={value === option.value ? 0 : -1}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+              e.preventDefault()
+              const nextIndex = (index + 1) % options.length
+              onChange(options[nextIndex].value)
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+              e.preventDefault()
+              const prevIndex = (index - 1 + options.length) % options.length
+              onChange(options[prevIndex].value)
+            }
+          }}
         >
-            {/* Sliding pill background */}
-            <div
-                className="brand-segmented-pill"
-                style={{
-                    transform: `translateX(${activeIndex * 100}%)`,
-                    width: `${100 / options.length}%`
-                }}
-                aria-hidden="true"
-            />
+          {option.label}
+        </button>
+      ))}
 
-            {/* Option buttons */}
-            {options.map((option, index) => (
-                <button
-                    key={option.value}
-                    id={`${id}-${option.value}`}
-                    type="button"
-                    role="radio"
-                    aria-checked={value === option.value}
-                    className={`brand-segmented-option ${value === option.value ? 'active' : ''}`}
-                    onClick={() => onChange(option.value)}
-                    tabIndex={value === option.value ? 0 : -1}
-                    onKeyDown={(e) => {
-                        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-                            e.preventDefault()
-                            const nextIndex = (index + 1) % options.length
-                            onChange(options[nextIndex].value)
-                        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-                            e.preventDefault()
-                            const prevIndex = (index - 1 + options.length) % options.length
-                            onChange(options[prevIndex].value)
-                        }
-                    }}
-                >
-                    {option.label}
-                </button>
-            ))}
-
-            <style>{`
+      <style>{`
         .brand-segmented-toggle {
           display: inline-flex;
           position: relative;
@@ -151,6 +151,6 @@ export default function BrandSegmentedToggle({
           }
         }
       `}</style>
-        </div>
-    )
+    </div>
+  )
 }

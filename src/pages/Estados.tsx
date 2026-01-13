@@ -6,10 +6,14 @@ import { computeTrialBalance } from '../core/balance'
 import { computeStatements } from '../core/statements'
 import { excludeClosingEntries } from '../utils/resultsStatement'
 import { HelpPanel } from '../ui/HelpPanel'
-import { EquationBar } from './estados/EquationBar'
 import SegmentedTabs from '../ui/SegmentedTabs'
 import { exportElementToPdf } from '../utils/exportPdf'
-import type { StatementSection } from '../core/models'
+import type { StatementSection, BalanceSheet } from '../core/models'
+import {
+    EstadoSituacionPatrimonialGemini,
+    type SectionData,
+    type AccountLine
+} from '../components/Estados/EstadoSituacionPatrimonialGemini'
 
 // Subcomponent for reusable sections
 interface SectionDisplayProps {
@@ -97,6 +101,76 @@ function NetGroupResultRow({ label, amount }: { label: string, amount: number })
             </span>
         </div>
     )
+}
+
+// ============================================
+// Data Adapter: BalanceSheet → Gemini Format
+// ============================================
+function adaptSectionToGemini(section: StatementSection): SectionData {
+    const items: AccountLine[] = section.accounts.map((item, idx) => ({
+        id: item.account.id || `item-${idx}`,
+        label: item.account.name,
+        amount: item.balance,
+        level: 2 as const,
+        isContra: item.isContra
+    }))
+
+    // Add total row
+    if (items.length > 0) {
+        items.push({
+            id: `${section.key}-total`,
+            label: `Total ${section.label}`,
+            amount: section.netTotal,
+            level: 2 as const,
+            isTotal: true
+        })
+    }
+
+    return {
+        title: section.label,
+        items
+    }
+}
+
+function adaptBalanceSheetToGemini(bs: BalanceSheet) {
+    const TOLERANCE = 0.05
+    const diff = bs.totalAssets - (bs.totalLiabilities + bs.totalEquity)
+    const isBalanced = Math.abs(diff) < TOLERANCE
+
+    return {
+        activoSections: [
+            adaptSectionToGemini(bs.currentAssets),
+            adaptSectionToGemini(bs.nonCurrentAssets)
+        ].filter(s => s.items.length > 0),
+        pasivoSections: [
+            adaptSectionToGemini(bs.currentLiabilities),
+            adaptSectionToGemini(bs.nonCurrentLiabilities)
+        ].filter(s => s.items.length > 0),
+        patrimonioNetoSection: {
+            title: 'Patrimonio Neto',
+            items: [
+                ...bs.equity.accounts.map((item, idx): AccountLine => ({
+                    id: item.account.id || `pn-${idx}`,
+                    label: item.account.name,
+                    amount: item.balance,
+                    level: 2,
+                    isContra: item.isContra
+                })),
+                ...(bs.equity.accounts.length > 0 ? [{
+                    id: 'pn-total',
+                    label: 'Total Patrimonio Neto',
+                    amount: bs.totalEquity,
+                    level: 2 as const,
+                    isTotal: true
+                } as AccountLine] : [])
+            ]
+        },
+        totalActivo: bs.totalAssets,
+        totalPasivo: bs.totalLiabilities,
+        totalPN: bs.totalEquity,
+        isBalanced,
+        diff
+    }
 }
 
 export default function Estados() {
@@ -211,84 +285,27 @@ export default function Estados() {
             <div style={{ marginTop: 'var(--space-lg)' }}>
                 {viewMode === 'ESP' && (
                     <div className="animate-slide-up">
-                        {/* 1. PDF Capture Container (Wraps ONLY the statement content) */}
-                        <div ref={espRef} style={{ background: '#f8fafc', padding: '32px', borderRadius: '8px' }}>
-                            <h2 className="text-center text-xl font-bold text-slate-700 mb-8 hidden-print-header" style={{ letterSpacing: '0.05em' }}>Estado de Situación Patrimonial</h2>
-
-                            {/* 2-Column Grid Layout */}
-                            <div className="esp-grid">
-                                {/* Left Column: ACTIVO */}
-                                <div className="esp-column">
-                                    <div className="card h-full">
-                                        <h2 className="section-title text-primary">ACTIVO</h2>
-                                        <div className="esp-section-content">
-                                            <SectionDisplay section={balanceSheet.currentAssets} showNetTotal colorTheme="primary" />
-                                            <SectionDisplay section={balanceSheet.nonCurrentAssets} showNetTotal colorTheme="primary" />
-                                        </div>
-                                        <div className="statement-grand-total mt-auto">
-                                            <span>TOTAL ACTIVO</span>
-                                            <span>${formatAmount(balanceSheet.totalAssets)}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Right Column: PASIVO + PN */}
-                                <div className="esp-column flex flex-col gap-4">
-                                    {/* PASIVO */}
-                                    <div className="card">
-                                        <h2 className="section-title text-error">PASIVO</h2>
-                                        <div className="esp-section-content">
-                                            <SectionDisplay section={balanceSheet.currentLiabilities} showNetTotal colorTheme="error" />
-                                            <SectionDisplay section={balanceSheet.nonCurrentLiabilities} showNetTotal colorTheme="error" />
-                                        </div>
-                                        <div className="statement-grand-total mt-4">
-                                            <span>TOTAL PASIVO</span>
-                                            <span>${formatAmount(balanceSheet.totalLiabilities)}</span>
-                                        </div>
-                                    </div>
-
-                                    {/* PATRIMONIO NETO */}
-                                    <div className="card flex-1">
-                                        <h2 className="section-title text-success">PATRIMONIO NETO</h2>
-                                        <div className="esp-section-content">
-                                            <SectionDisplay section={balanceSheet.equity} showNetTotal colorTheme="success" hideTitle />
-                                        </div>
-                                        <div className="statement-grand-total mt-auto">
-                                            <span>TOTAL PATRIMONIO NETO</span>
-                                            <span>${formatAmount(balanceSheet.totalEquity)}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* 2. Equation Bar (OUTSIDE PDF REF) */}
-                        <EquationBar
-                            totalAssets={balanceSheet.totalAssets}
-                            totalLiabilities={balanceSheet.totalLiabilities}
-                            totalEquity={balanceSheet.totalEquity}
-                        />
-
-                        {/* 3. Download Button (OUTSIDE PDF REF) */}
-                        <div className="flex justify-center mt-10 mb-8">
-                            <button
-                                onClick={handleDownload}
-                                disabled={isExporting}
-                                className="btn-download"
-                            >
-                                {isExporting ? (
-                                    <>
-                                        <span className="animate-spin text-lg">⏳</span>
-                                        <span>Generando PDF...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="text-xl">📥</span>
-                                        <span>Descargar PDF</span>
-                                    </>
-                                )}
-                            </button>
-                        </div>
+                        {(() => {
+                            const geminiData = adaptBalanceSheetToGemini(balanceSheet)
+                            return (
+                                <EstadoSituacionPatrimonialGemini
+                                    loading={false}
+                                    entidad="Mi Empresa S.A."
+                                    fechaCorte={new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                    activoSections={geminiData.activoSections}
+                                    pasivoSections={geminiData.pasivoSections}
+                                    patrimonioNetoSection={geminiData.patrimonioNetoSection}
+                                    totalActivo={geminiData.totalActivo}
+                                    totalPasivo={geminiData.totalPasivo}
+                                    totalPN={geminiData.totalPN}
+                                    isBalanced={geminiData.isBalanced}
+                                    diff={geminiData.diff}
+                                    onExportPdf={handleDownload}
+                                    isExporting={isExporting}
+                                    pdfRef={espRef}
+                                />
+                            )
+                        })()}
                     </div>
                 )}
 

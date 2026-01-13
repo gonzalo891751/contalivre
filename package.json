@@ -14,9 +14,11 @@
   "dependencies": {
     "dexie": "^4.0.10",
     "dexie-react-hooks": "^1.1.7",
+    "framer-motion": "^12.26.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.0.0",
     "jspdf-autotable": "^5.0.7",
+    "lucide-react": "^0.562.0",
     "papaparse": "^5.5.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

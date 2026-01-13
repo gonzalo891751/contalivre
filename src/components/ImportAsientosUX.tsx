@@ -12,12 +12,14 @@ type ImportAsientosUXProps = {
     embed?: boolean
     buttonLabel?: string
     onSuccess?: (count: number) => void
+    autoOpen?: boolean
+    onClose?: () => void
 }
 
 const canUseDOM = () => typeof window !== 'undefined' && typeof document !== 'undefined'
 
-export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar asientos', onSuccess }: ImportAsientosUXProps) {
-    const [open, setOpen] = useState(false)
+export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar asientos', onSuccess, autoOpen, onClose }: ImportAsientosUXProps) {
+    const [open, setOpen] = useState(autoOpen ?? false)
     const [helpOpen, setHelpOpen] = useState(false)
     const [step, setStep] = useState<Step>(1)
     const [file, setFile] = useState<File | null>(null)
@@ -35,12 +37,14 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
     const [importLoading, setImportLoading] = useState(false)
     const [isConfirming, setIsConfirming] = useState(false)
 
-    // Auto-open logic for non-embed mode
+    // Auto-open logic for non-embed mode or autoOpen prop
     useEffect(() => {
-        if (!embed) {
+        if (autoOpen) {
+            setOpen(true)
+        } else if (!embed) {
             setOpen(true)
         }
-    }, [embed])
+    }, [embed, autoOpen])
 
     const fileInputRef = useRef<HTMLInputElement | null>(null)
     const modalRef = useRef<HTMLDivElement | null>(null)
@@ -705,6 +709,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
         setFile(null)
         setRawRows([])
         setValidationStats({ totalSeats: 0, totalLines: 0, warnings: 0 })
+        onClose?.()
     }
 
     const next = () => setStep((s) => (Math.min(4, s + 1) as Step))
