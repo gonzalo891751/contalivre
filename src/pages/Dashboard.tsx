@@ -15,11 +15,10 @@ import {
 } from 'recharts'
 import {
     TrendingUp,
-    ArrowRight,
     Lock,
     CheckCircle,
     Activity,
-    AlertCircle,
+    AlertTriangle,
     FilePlus2,
     RefreshCw,
     Wallet,
@@ -30,6 +29,7 @@ import { useDashboardMetrics } from '../hooks/useDashboardMetrics'
 import { loadSeedDataIfNeeded } from '../storage/seed'
 import { deleteAllAccounts } from '../storage/accounts'
 import { resetExercise } from '../storage/entries'
+import IndicatorsDashboard from '../components/Indicators/IndicatorsDashboard'
 
 // ============================================================================
 // Formatters
@@ -42,68 +42,6 @@ const formatCurrency = (value: number) => {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
     }).format(value)
-}
-
-const formatPercent = (value: number) => {
-    return new Intl.NumberFormat('es-AR', {
-        style: 'percent',
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1,
-    }).format(value)
-}
-
-// ============================================================================
-// Sub-components
-// ============================================================================
-
-/** Tooltip for KPI explanations */
-function InfoTooltip({
-    text,
-    formula,
-    interpretation,
-}: {
-    text: string
-    formula?: string
-    interpretation?: string
-}) {
-    return (
-        <div className="dashboard-info-tooltip-wrapper">
-            <div className="dashboard-info-tooltip-trigger">
-                <AlertCircle size={16} />
-            </div>
-            <div className="dashboard-info-tooltip">
-                <div className="dashboard-info-tooltip-title">{text}</div>
-                {formula && <div className="dashboard-info-tooltip-formula">{formula}</div>}
-                {interpretation && (
-                    <div className="dashboard-info-tooltip-interpretation">💡 {interpretation}</div>
-                )}
-                <div className="dashboard-info-tooltip-arrow"></div>
-            </div>
-        </div>
-    )
-}
-
-/** KPI status badge */
-function KpiStatus({
-    value,
-    thresholds,
-    labels,
-}: {
-    value: number
-    thresholds: [number, number]
-    labels: [string, string, string]
-}) {
-    let status: 'good' | 'warning' | 'bad' = 'warning'
-
-    if (value >= thresholds[1]) status = 'good'
-    else if (value <= thresholds[0]) status = 'bad'
-
-    return (
-        <div className={`dashboard-kpi-status dashboard-kpi-status--${status}`}>
-            <span className="dashboard-kpi-status-dot"></span>
-            {status === 'good' ? labels[0] : status === 'warning' ? labels[1] : labels[2]}
-        </div>
-    )
 }
 
 // ============================================================================
@@ -329,230 +267,222 @@ export default function Dashboard() {
                     </section>
                 )}
 
-                {/* FINANCIAL INSIGHTS SECTION */}
-                <section
-                    className={`dashboard-insights ${!isSetupComplete ? 'dashboard-insights--disabled' : ''
-                        }`}
-                >
+                {/* FINANCIAL INSIGHTS SECTION - New Indicators Dashboard */}
+                <section className={`${!isSetupComplete ? 'opacity-60 pointer-events-none select-none' : ''} mt-6`}>
+                    <IndicatorsDashboard />
+                </section>
+
+                {/* COMPOSICIÓN PATRIMONIO SECTION */}
+                <section className={`dashboard-patrimonio ${!isSetupComplete ? 'dashboard-insights--disabled' : ''}`}>
                     <div className="dashboard-section-header">
-                        <h3 className="dashboard-section-title">Panorama Financiero</h3>
-                        {isSetupComplete && (
-                            <button
-                                onClick={() => navigate('/estados')}
-                                className="dashboard-link-btn"
-                            >
-                                Ver balance completo <ArrowRight size={14} />
-                            </button>
-                        )}
+                        <h3 className="dashboard-section-title">Composición Patrimonio</h3>
                     </div>
 
-                    {/* KPI Cards */}
-                    <div className="dashboard-kpi-grid">
-                        {/* Capital de Trabajo */}
-                        <div className="dashboard-kpi-card">
-                            <div className="dashboard-kpi-header">
-                                <span className="dashboard-kpi-label">Capital de Trabajo</span>
-                                <InfoTooltip
-                                    text="Fondo de Maniobra"
-                                    formula="Activo Corr. - Pasivo Corr."
-                                    interpretation="Dinero disponible para operar a corto plazo sin pedir deuda."
-                                />
-                            </div>
-                            <span className="dashboard-kpi-value">
-                                {formatCurrency(kpis.workingCapital)}
-                            </span>
-                            <KpiStatus
-                                value={kpis.workingCapital}
-                                thresholds={[0, 1000]}
-                                labels={['Positivo', 'Riesgoso', 'Déficit']}
-                            />
+                    {/* Full-width Equation Chart */}
+                    <div className="dashboard-chart-card dashboard-chart-card--full">
+                        <h4 className="dashboard-chart-title">Ecuación Patrimonial Fundamental</h4>
+                        <div className="dashboard-chart-container dashboard-chart-container--equation">
+                            {charts.equation.length > 0 ? (
+                                <ResponsiveContainer width="100%" height={200}>
+                                    <BarChart
+                                        data={charts.equation}
+                                        layout="vertical"
+                                        margin={{ top: 20, right: 30, left: 70, bottom: 5 }}
+                                        barGap={10}
+                                    >
+                                        <CartesianGrid
+                                            strokeDasharray="3 3"
+                                            horizontal={false}
+                                            stroke="var(--border)"
+                                        />
+                                        <XAxis type="number" hide />
+                                        <YAxis
+                                            dataKey="name"
+                                            type="category"
+                                            width={70}
+                                            tick={{ fontSize: 14, fill: 'var(--text-muted)', fontWeight: 500 }}
+                                        />
+                                        <RechartsTooltip
+                                            cursor={{ fill: 'transparent' }}
+                                            contentStyle={{
+                                                borderRadius: '12px',
+                                                border: 'none',
+                                                boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+                                                background: 'var(--surface-1)',
+                                                color: 'var(--text)',
+                                            }}
+                                            content={({ active, payload }) => {
+                                                if (!active || !payload || payload.length === 0) return null
+                                                const data = payload[0].payload
+                                                const isActivo = data.name === 'Activo'
+
+                                                if (isActivo) {
+                                                    const corriente = data.activoCorriente || 0
+                                                    const noCorriente = data.activoNoCorriente || 0
+                                                    const total = corriente + noCorriente
+                                                    return (
+                                                        <div className="dashboard-eq-tooltip">
+                                                            <div className="dashboard-eq-tooltip-title">Activo Total</div>
+                                                            <div className="dashboard-eq-tooltip-row">
+                                                                <span className="dashboard-eq-tooltip-dot" style={{ background: '#3B82F6' }} />
+                                                                <span>Activo Corriente:</span>
+                                                                <span className="dashboard-eq-tooltip-value">{formatCurrency(corriente)}</span>
+                                                            </div>
+                                                            <div className="dashboard-eq-tooltip-row">
+                                                                <span className="dashboard-eq-tooltip-dot" style={{ background: '#60A5FA' }} />
+                                                                <span>Activo No Corriente:</span>
+                                                                <span className="dashboard-eq-tooltip-value">{formatCurrency(noCorriente)}</span>
+                                                            </div>
+                                                            <div className="dashboard-eq-tooltip-total">
+                                                                <span>Total:</span>
+                                                                <span>{formatCurrency(total)}</span>
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                } else {
+                                                    const pCorriente = data.pasivoCorriente || 0
+                                                    const pNoCorriente = data.pasivoNoCorriente || 0
+                                                    const pn = data.pn || 0
+                                                    const total = pCorriente + pNoCorriente + pn
+                                                    return (
+                                                        <div className="dashboard-eq-tooltip">
+                                                            <div className="dashboard-eq-tooltip-title">Origen de Fondos</div>
+                                                            <div className="dashboard-eq-tooltip-row">
+                                                                <span className="dashboard-eq-tooltip-dot" style={{ background: '#EF4444' }} />
+                                                                <span>Pasivo Corriente:</span>
+                                                                <span className="dashboard-eq-tooltip-value">{formatCurrency(pCorriente)}</span>
+                                                            </div>
+                                                            <div className="dashboard-eq-tooltip-row">
+                                                                <span className="dashboard-eq-tooltip-dot" style={{ background: '#F87171' }} />
+                                                                <span>Pasivo No Corriente:</span>
+                                                                <span className="dashboard-eq-tooltip-value">{formatCurrency(pNoCorriente)}</span>
+                                                            </div>
+                                                            <div className="dashboard-eq-tooltip-row">
+                                                                <span className="dashboard-eq-tooltip-dot" style={{ background: '#10B981' }} />
+                                                                <span>Patrimonio Neto:</span>
+                                                                <span className="dashboard-eq-tooltip-value">{formatCurrency(pn)}</span>
+                                                            </div>
+                                                            <div className="dashboard-eq-tooltip-total">
+                                                                <span>Total:</span>
+                                                                <span>{formatCurrency(total)}</span>
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                }
+                                            }}
+                                        />
+                                        <Legend
+                                            verticalAlign="top"
+                                            align="right"
+                                            wrapperStyle={{ fontSize: '12px', paddingBottom: '20px' }}
+                                        />
+                                        {/* Activo segments */}
+                                        <Bar
+                                            name="Activo Corriente"
+                                            dataKey="activoCorriente"
+                                            stackId="activo"
+                                            fill="#3B82F6"
+                                            barSize={40}
+                                        />
+                                        <Bar
+                                            name="Activo No Corriente"
+                                            dataKey="activoNoCorriente"
+                                            stackId="activo"
+                                            fill="#60A5FA"
+                                            radius={[0, 8, 8, 0]}
+                                            barSize={40}
+                                        />
+                                        {/* Origen segments */}
+                                        <Bar
+                                            name="Pasivo Corriente"
+                                            dataKey="pasivoCorriente"
+                                            stackId="origen"
+                                            fill="#EF4444"
+                                            barSize={40}
+                                        />
+                                        <Bar
+                                            name="Pasivo No Corriente"
+                                            dataKey="pasivoNoCorriente"
+                                            stackId="origen"
+                                            fill="#F87171"
+                                            barSize={40}
+                                        />
+                                        <Bar
+                                            name="Patrimonio Neto"
+                                            dataKey="pn"
+                                            stackId="origen"
+                                            fill="#10B981"
+                                            radius={[0, 8, 8, 0]}
+                                            barSize={40}
+                                        />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div className="dashboard-chart-empty">
+                                    <p>Sin datos para mostrar</p>
+                                </div>
+                            )}
                         </div>
 
-                        {/* Liquidez Corriente */}
-                        <div className="dashboard-kpi-card">
-                            <div className="dashboard-kpi-header">
-                                <span className="dashboard-kpi-label">Liquidez Corriente</span>
-                                <InfoTooltip
-                                    text="Ratio de Liquidez"
-                                    formula="Activo Corr. / Pasivo Corr."
-                                    interpretation="Por cada $1 que debés a corto plazo, cuánto tenés para pagar. Ideal > 1.5."
-                                />
-                            </div>
-                            <span className="dashboard-kpi-value">{kpis.currentRatio.toFixed(2)}</span>
-                            <KpiStatus
-                                value={kpis.currentRatio}
-                                thresholds={[1.0, 1.5]}
-                                labels={['Excelente', 'Aceptable', 'Crítico']}
-                            />
-                        </div>
+                        {/* Health Insight */}
+                        {(() => {
+                            const debtShare = totals.assetsTotal > 0 ? totals.liabilitiesTotal / totals.assetsTotal : 0
+                            const liquidityRisk = totals.assetsCurrent < totals.liabilitiesCurrent
+                            const currentRatioLow = kpis.currentRatio > 0 && kpis.currentRatio < 1
 
-                        {/* Prueba Ácida */}
-                        <div className="dashboard-kpi-card dashboard-kpi-card--accent">
-                            <div className="dashboard-kpi-header">
-                                <span className="dashboard-kpi-label">Prueba Ácida</span>
-                                <InfoTooltip
-                                    text="Liquidez Seca"
-                                    formula="(Activo Corr. - Inv) / Pasivo Corr."
-                                    interpretation="¿Podés pagar YA sin vender mercadería? Ideal > 1."
-                                />
-                            </div>
-                            <span className="dashboard-kpi-value">{kpis.acidTest.toFixed(2)}</span>
-                            <KpiStatus
-                                value={kpis.acidTest}
-                                thresholds={[0.5, 1.0]}
-                                labels={['Sólido', 'Justo', 'Riesgo']}
-                            />
-                        </div>
+                            let alertType: 'danger' | 'warning' | 'success' = 'success'
+                            let alertMessages: string[] = []
 
-                        {/* Solvencia Total */}
-                        <div className="dashboard-kpi-card">
-                            <div className="dashboard-kpi-header">
-                                <span className="dashboard-kpi-label">Solvencia Total</span>
-                                <InfoTooltip
-                                    text="Solvencia General"
-                                    formula="Activo Total / Pasivo Total"
-                                    interpretation="Capacidad de cubrir todas las deudas con todos los bienes."
-                                />
-                            </div>
-                            <span className="dashboard-kpi-value">{kpis.solvencyRatio.toFixed(2)}</span>
-                            <KpiStatus
-                                value={kpis.solvencyRatio}
-                                thresholds={[1.0, 1.5]}
-                                labels={['Solvente', 'Estable', 'Insolvente']}
-                            />
-                        </div>
+                            if (debtShare > 0.60) {
+                                alertType = 'danger'
+                                alertMessages.push('El pasivo representa más del 60% del activo. Revisá endeudamiento y plazos.')
+                            }
+                            if (liquidityRisk) {
+                                alertType = alertType === 'success' ? 'warning' : alertType
+                                alertMessages.push('El Activo Corriente no cubre el Pasivo Corriente (riesgo de liquidez).')
+                            }
+                            if (currentRatioLow && !liquidityRisk) {
+                                alertType = alertType === 'success' ? 'warning' : alertType
+                                alertMessages.push('Ratio de liquidez menor a 1 - monitorear flujo de caja.')
+                            }
 
-                        {/* Autonomía Financiera */}
-                        <div className="dashboard-kpi-card">
-                            <div className="dashboard-kpi-header">
-                                <span className="dashboard-kpi-label">Autonomía Fin.</span>
-                                <InfoTooltip
-                                    text="Ratio de Propiedad"
-                                    formula="PN / Activo Total"
-                                    interpretation="% de la empresa que realmente es tuya."
-                                />
-                            </div>
-                            <span className="dashboard-kpi-value">{formatPercent(kpis.equityRatio)}</span>
-                            <KpiStatus
-                                value={kpis.equityRatio}
-                                thresholds={[0.3, 0.5]}
-                                labels={['Alta', 'Media', 'Dependiente']}
-                            />
-                        </div>
+                            if (alertMessages.length === 0) {
+                                alertMessages.push('Salud financiera estable según estructura patrimonial y liquidez.')
+                            }
 
-                        {/* Caja Disponible */}
-                        <div className="dashboard-kpi-card dashboard-kpi-card--highlight">
-                            <div className="dashboard-kpi-header">
-                                <span className="dashboard-kpi-label">Caja Disponible</span>
-                            </div>
-                            <span className="dashboard-kpi-value">{formatCurrency(totals.cash)}</span>
-                            <div className="dashboard-kpi-status dashboard-kpi-status--neutral">
-                                <TrendingUp size={12} /> Actual
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Charts Grid */}
-                    <div className="dashboard-charts-grid">
-                        {/* Ecuación Patrimonial Chart */}
-                        <div className="dashboard-chart-card dashboard-chart-card--wide">
-                            <h4 className="dashboard-chart-title">Ecuación Patrimonial Fundamental</h4>
-                            <div className="dashboard-chart-container dashboard-chart-container--equation">
-                                {charts.equation.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height={200}>
-                                        <BarChart
-                                            data={charts.equation}
-                                            layout="vertical"
-                                            margin={{ top: 20, right: 30, left: 30, bottom: 5 }}
-                                            barGap={10}
-                                        >
-                                            <CartesianGrid
-                                                strokeDasharray="3 3"
-                                                horizontal={false}
-                                                stroke="var(--border)"
-                                            />
-                                            <XAxis type="number" hide />
-                                            <YAxis
-                                                dataKey="name"
-                                                type="category"
-                                                width={80}
-                                                tick={{ fontSize: 14, fill: 'var(--text-muted)', fontWeight: 500 }}
-                                            />
-                                            <RechartsTooltip
-                                                cursor={{ fill: 'transparent' }}
-                                                contentStyle={{
-                                                    borderRadius: '12px',
-                                                    border: 'none',
-                                                    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
-                                                    background: 'var(--surface-1)',
-                                                }}
-                                                formatter={(value, name) => {
-                                                    const numValue = typeof value === 'number' ? value : 0
-                                                    const label =
-                                                        name === 'activo'
-                                                            ? 'Total Activo'
-                                                            : name === 'pasivo'
-                                                                ? 'Pasivo (Deudas)'
-                                                                : 'Patrimonio Neto'
-                                                    return [formatCurrency(numValue), label]
-                                                }}
-                                            />
-                                            <Legend
-                                                verticalAlign="top"
-                                                align="right"
-                                                wrapperStyle={{ fontSize: '12px', paddingBottom: '20px' }}
-                                            />
-                                            <Bar
-                                                name="Activo"
-                                                dataKey="activo"
-                                                fill="#3B82F6"
-                                                radius={[0, 8, 8, 0]}
-                                                barSize={40}
-                                            />
-                                            <Bar
-                                                name="Pasivo (Deudas)"
-                                                dataKey="pasivo"
-                                                stackId="a"
-                                                fill="#EF4444"
-                                                barSize={40}
-                                            />
-                                            <Bar
-                                                name="Patrimonio Neto"
-                                                dataKey="pn"
-                                                stackId="a"
-                                                fill="#10B981"
-                                                radius={[0, 8, 8, 0]}
-                                                barSize={40}
-                                            />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                ) : (
-                                    <div className="dashboard-chart-empty">
-                                        <p>Sin datos para mostrar</p>
+                            return (
+                                <div className={`dashboard-health-insight dashboard-health-insight--${alertType}`}>
+                                    {alertType === 'success' ? (
+                                        <CheckCircle size={18} />
+                                    ) : (
+                                        <AlertTriangle size={18} />
+                                    )}
+                                    <div className="dashboard-health-insight-content">
+                                        {alertMessages.map((msg, i) => (
+                                            <p key={i}>{msg}</p>
+                                        ))}
                                     </div>
-                                )}
-                            </div>
-                            <p className="dashboard-chart-footer">
-                                El <strong className="text-blue">Activo</strong> (lo que tenés) se financia con{' '}
-                                <strong className="text-red">Pasivo</strong> (deuda) y{' '}
-                                <strong className="text-green">Patrimonio</strong> (capital propio).
-                            </p>
-                        </div>
+                                </div>
+                            )
+                        })()}
+                    </div>
 
+                    {/* Donut Charts Grid */}
+                    <div className="dashboard-donuts-grid">
                         {/* Assets Composition */}
                         <div className="dashboard-chart-card">
                             <h4 className="dashboard-chart-title">Composición Activo</h4>
                             <div className="dashboard-chart-container">
                                 {charts.assetsComposition.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height={200}>
+                                    <ResponsiveContainer width="100%" height={220}>
                                         <PieChart>
                                             <Pie
                                                 data={charts.assetsComposition as Array<{ name: string; value: number; color: string }>}
                                                 cx="50%"
-                                                cy="50%"
-                                                innerRadius={50}
-                                                outerRadius={70}
-                                                paddingAngle={5}
+                                                cy="45%"
+                                                innerRadius={55}
+                                                outerRadius={80}
+                                                paddingAngle={4}
                                                 dataKey="value"
                                             >
                                                 {charts.assetsComposition.map((entry, index) => (
@@ -566,14 +496,15 @@ export default function Dashboard() {
                                                     border: 'none',
                                                     boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
                                                     background: 'var(--surface-1)',
+                                                    color: 'var(--text)',
                                                 }}
                                             />
                                             <Legend
                                                 verticalAlign="bottom"
-                                                height={36}
+                                                height={50}
                                                 iconType="circle"
-                                                iconSize={8}
-                                                wrapperStyle={{ fontSize: '10px' }}
+                                                iconSize={10}
+                                                wrapperStyle={{ fontSize: '13px', lineHeight: '1.6' }}
                                             />
                                         </PieChart>
                                     </ResponsiveContainer>
@@ -590,15 +521,15 @@ export default function Dashboard() {
                             <h4 className="dashboard-chart-title">Composición Pasivo</h4>
                             <div className="dashboard-chart-container">
                                 {charts.liabilitiesComposition.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height={200}>
+                                    <ResponsiveContainer width="100%" height={220}>
                                         <PieChart>
                                             <Pie
                                                 data={charts.liabilitiesComposition as Array<{ name: string; value: number; color: string }>}
                                                 cx="50%"
-                                                cy="50%"
-                                                innerRadius={50}
-                                                outerRadius={70}
-                                                paddingAngle={5}
+                                                cy="45%"
+                                                innerRadius={55}
+                                                outerRadius={80}
+                                                paddingAngle={4}
                                                 dataKey="value"
                                             >
                                                 {charts.liabilitiesComposition.map((entry, index) => (
@@ -612,14 +543,15 @@ export default function Dashboard() {
                                                     border: 'none',
                                                     boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
                                                     background: 'var(--surface-1)',
+                                                    color: 'var(--text)',
                                                 }}
                                             />
                                             <Legend
                                                 verticalAlign="bottom"
-                                                height={36}
+                                                height={50}
                                                 iconType="circle"
-                                                iconSize={8}
-                                                wrapperStyle={{ fontSize: '10px' }}
+                                                iconSize={10}
+                                                wrapperStyle={{ fontSize: '13px', lineHeight: '1.6' }}
                                             />
                                         </PieChart>
                                     </ResponsiveContainer>

@@ -6,6 +6,7 @@ import { X, Plus, Trash2, CheckCircle, AlertCircle, ArrowRight } from 'lucide-re
 import { motion, AnimatePresence } from 'framer-motion'
 import type { Account, EntryLine } from '../../core/models'
 import AccountSearchSelect, { AccountSearchSelectRef } from '../../ui/AccountSearchSelect'
+import { evaluateMoneyExpression } from '../../utils/moneyExpression'
 
 interface NewEntryModalProps {
     isOpen: boolean
@@ -42,6 +43,8 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
     const [memo, setMemo] = useState('')
     const [lines, setLines] = useState<EntryLine[]>([createEmptyLine(), createEmptyLine()])
     const [isSaving, setIsSaving] = useState(false)
+    const [inputOverrides, setInputOverrides] = useState<Record<string, string>>({})
+    const [inputErrors, setInputErrors] = useState<Record<string, string>>({})
 
     // Refs for focus management
     const lineRefs = useRef<Array<{
@@ -58,6 +61,8 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
             setMemo('')
             setLines([createEmptyLine(), createEmptyLine()])
             setIsSaving(false)
+            setInputOverrides({})
+            setInputErrors({})
         }
     }, [isOpen, initialDate])
 
@@ -134,6 +139,77 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
         }, 50)
     }
 
+    const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>, index: number, field: 'debit' | 'credit') => {
+        const val = e.target.value
+        const key = `${index}-${field}`
+
+        // If starting a formula or already editing one (or override exists to capture user typing)
+        if (val.startsWith('=') || inputOverrides[key] !== undefined) {
+            setInputOverrides(prev => ({ ...prev, [key]: val }))
+            // Clear errors as soon as user changes input
+            if (inputErrors[key]) {
+                const newErrors = { ...inputErrors }
+                delete newErrors[key]
+                setInputErrors(newErrors)
+            }
+
+            // If user clears the field or removes '=', check if we should exit override mode
+            // Strict rule: if it becomes empty, revert to number mode (0)
+            if (val === '') {
+                setInputOverrides(prev => {
+                    const next = { ...prev }
+                    delete next[key]
+                    return next
+                })
+                updateLine(index, { [field]: 0 })
+            }
+        } else {
+            // Normal numeric input
+            updateLine(index, { [field]: parseARNumber(val) })
+        }
+    }
+
+    const evaluateAndApply = (index: number, field: 'debit' | 'credit'): number | undefined => {
+        const key = `${index}-${field}`
+        const expr = inputOverrides[key]
+
+        if (expr === undefined) return undefined
+
+        if (expr.startsWith('=')) {
+            const result = evaluateMoneyExpression(expr)
+            if (result.value !== null) {
+                updateLine(index, { [field]: result.value })
+                setInputOverrides(prev => {
+                    const next = { ...prev }
+                    delete next[key]
+                    return next
+                })
+                setInputErrors(prev => {
+                    const next = { ...prev }
+                    delete next[key]
+                    return next
+                })
+                return result.value
+            } else {
+                setInputErrors(prev => ({ ...prev, [key]: 'Fórmula inválida' }))
+                return undefined
+            }
+        } else {
+            const val = parseARNumber(expr)
+            updateLine(index, { [field]: val })
+            setInputOverrides(prev => {
+                const next = { ...prev }
+                delete next[key]
+                return next
+            })
+            return val
+        }
+    }
+
+    const handleAmountBlur = (index: number, field: 'debit' | 'credit') => {
+        evaluateAndApply(index, field)
+    }
+
     const handleKeyDown = (
         e: React.KeyboardEvent,
         index: number,
@@ -143,8 +219,15 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
 
         if (e.key === 'Enter') {
             e.preventDefault()
+
+            let evaluatedVal: number | undefined
+            if (field === 'debit' || field === 'credit') {
+                evaluatedVal = evaluateAndApply(index, field)
+            }
+
             if (field === 'debit') {
-                const val = lines[index].debit
+                // Use evaluated value if available, otherwise current state
+                const val = evaluatedVal !== undefined ? evaluatedVal : lines[index].debit
                 if (val > 0) {
                     lineRefs.current[index]?.description?.focus()
                 } else {
@@ -162,9 +245,33 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
         }
 
         if (e.key === 'Tab' && !e.shiftKey) {
-            if (field === 'debit' && lines[index].debit > 0) {
-                e.preventDefault()
-                lineRefs.current[index]?.description?.focus()
+            if (field === 'debit') {
+                // Check if we need to evaluate first to decide navigation
+                // Note: Tab doesn't trigger our evaluateAndApply manually here because onBlur will do it.
+                // But checks rely on 'val'. If we rely on onBlur, it happens AFTER onKeyDown? 
+                // Usually yes. So we need to peek at the value.
+
+                let val = lines[index].debit
+                const key = `${index}-debit`
+                if (inputOverrides[key]) {
+                    // Peek evaluation
+                    const expr = inputOverrides[key]
+                    if (expr.startsWith('=')) {
+                        const res = evaluateMoneyExpression(expr)
+                        if (res.value !== null) val = res.value
+                    } else {
+                        val = parseARNumber(expr)
+                    }
+                }
+
+                if (val > 0) {
+                    e.preventDefault()
+                    // Manually move to description, skipping credit
+                    // We must ensure onBlur triggers before or we trigger it manually?
+                    // If we preventDefault, blur might NOT happen on the original element? 
+                    // No, focus change causes blur.
+                    lineRefs.current[index]?.description?.focus()
+                }
             } else if (field === 'description' && isLastLine) {
                 e.preventDefault()
                 addLine()
@@ -266,40 +373,54 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
                                                     />
                                                 </td>
                                                 <td className="journal-modal-td-amount">
-                                                    <input
-                                                        ref={(el) => {
-                                                            if (!lineRefs.current[index]) {
-                                                                lineRefs.current[index] = { account: null, debit: null, credit: null, description: null }
-                                                            }
-                                                            lineRefs.current[index].debit = el
-                                                        }}
-                                                        type="text"
-                                                        inputMode="numeric"
-                                                        placeholder="0,00"
-                                                        value={line.debit > 0 ? formatARNumber(line.debit) : ''}
-                                                        onChange={(e) => updateLine(index, { debit: parseARNumber(e.target.value) })}
-                                                        onKeyDown={(e) => handleKeyDown(e, index, 'debit')}
-                                                        disabled={line.credit > 0}
-                                                        className="journal-modal-input-amount"
-                                                    />
+                                                    <div className="flex flex-col">
+                                                        <input
+                                                            ref={(el) => {
+                                                                if (!lineRefs.current[index]) {
+                                                                    lineRefs.current[index] = { account: null, debit: null, credit: null, description: null }
+                                                                }
+                                                                lineRefs.current[index].debit = el
+                                                            }}
+                                                            type="text"
+                                                            inputMode="text"
+                                                            placeholder="0,00"
+                                                            title="Podés usar fórmulas, ej: =50*1000"
+                                                            value={inputOverrides[`${index}-debit`] ?? (line.debit > 0 ? formatARNumber(line.debit) : '')}
+                                                            onChange={(e) => handleAmountChange(e, index, 'debit')}
+                                                            onBlur={() => handleAmountBlur(index, 'debit')}
+                                                            onKeyDown={(e) => handleKeyDown(e, index, 'debit')}
+                                                            disabled={line.credit > 0}
+                                                            className={`journal-modal-input-amount ${inputErrors[`${index}-debit`] ? 'border-red-500 text-red-600' : ''}`}
+                                                        />
+                                                        {inputErrors[`${index}-debit`] && (
+                                                            <span className="text-[10px] text-red-500 leading-none mt-0.5 ml-1">Error en fórmula</span>
+                                                        )}
+                                                    </div>
                                                 </td>
                                                 <td className="journal-modal-td-amount">
-                                                    <input
-                                                        ref={(el) => {
-                                                            if (!lineRefs.current[index]) {
-                                                                lineRefs.current[index] = { account: null, debit: null, credit: null, description: null }
-                                                            }
-                                                            lineRefs.current[index].credit = el
-                                                        }}
-                                                        type="text"
-                                                        inputMode="numeric"
-                                                        placeholder="0,00"
-                                                        value={line.credit > 0 ? formatARNumber(line.credit) : ''}
-                                                        onChange={(e) => updateLine(index, { credit: parseARNumber(e.target.value) })}
-                                                        onKeyDown={(e) => handleKeyDown(e, index, 'credit')}
-                                                        disabled={line.debit > 0}
-                                                        className="journal-modal-input-amount"
-                                                    />
+                                                    <div className="flex flex-col">
+                                                        <input
+                                                            ref={(el) => {
+                                                                if (!lineRefs.current[index]) {
+                                                                    lineRefs.current[index] = { account: null, debit: null, credit: null, description: null }
+                                                                }
+                                                                lineRefs.current[index].credit = el
+                                                            }}
+                                                            type="text"
+                                                            inputMode="text"
+                                                            placeholder="0,00"
+                                                            title="Podés usar fórmulas, ej: =50*1000"
+                                                            value={inputOverrides[`${index}-credit`] ?? (line.credit > 0 ? formatARNumber(line.credit) : '')}
+                                                            onChange={(e) => handleAmountChange(e, index, 'credit')}
+                                                            onBlur={() => handleAmountBlur(index, 'credit')}
+                                                            onKeyDown={(e) => handleKeyDown(e, index, 'credit')}
+                                                            disabled={line.debit > 0}
+                                                            className={`journal-modal-input-amount ${inputErrors[`${index}-credit`] ? 'border-red-500 text-red-600' : ''}`}
+                                                        />
+                                                        {inputErrors[`${index}-credit`] && (
+                                                            <span className="text-[10px] text-red-500 leading-none mt-0.5 ml-1">Error en fórmula</span>
+                                                        )}
+                                                    </div>
                                                 </td>
                                                 <td className="journal-modal-td-detail">
                                                     <input

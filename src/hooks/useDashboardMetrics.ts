@@ -44,8 +44,10 @@ export interface DashboardMetrics {
         cash: number
         inventories: number
         assetsCurrent: number
+        assetsNonCurrent: number
         assetsTotal: number
         liabilitiesCurrent: number
+        liabilitiesNonCurrent: number
         liabilitiesTotal: number
         equity: number
     }
@@ -61,7 +63,14 @@ export interface DashboardMetrics {
 
     // Chart data
     charts: {
-        equation: Array<{ name: string; activo: number; pasivo: number; pn: number }>
+        equation: Array<{
+            name: string
+            activoCorriente: number
+            activoNoCorriente: number
+            pasivoCorriente: number
+            pasivoNoCorriente: number
+            pn: number
+        }>
         assetsComposition: ChartDataPoint[]
         liabilitiesComposition: ChartDataPoint[]
     }
@@ -176,8 +185,10 @@ export function useDashboardMetrics(): DashboardMetrics {
                     cash: 0,
                     inventories: 0,
                     assetsCurrent: 0,
+                    assetsNonCurrent: 0,
                     assetsTotal: 0,
                     liabilitiesCurrent: 0,
+                    liabilitiesNonCurrent: 0,
                     liabilitiesTotal: 0,
                     equity: 0,
                 },
@@ -208,14 +219,23 @@ export function useDashboardMetrics(): DashboardMetrics {
             cash: 0,
             inventories: 0,
             assetsCurrent: 0,
+            assetsNonCurrent: 0,
             assetsTotal: 0,
             liabilitiesCurrent: 0,
+            liabilitiesNonCurrent: 0,
             liabilitiesTotal: 0,
             equity: 0,
         }
 
         let charts = {
-            equation: [] as Array<{ name: string; activo: number; pasivo: number; pn: number }>,
+            equation: [] as Array<{
+                name: string
+                activoCorriente: number
+                activoNoCorriente: number
+                pasivoCorriente: number
+                pasivoNoCorriente: number
+                pn: number
+            }>,
             assetsComposition: [] as ChartDataPoint[],
             liabilitiesComposition: [] as ChartDataPoint[],
         }
@@ -227,20 +247,39 @@ export function useDashboardMetrics(): DashboardMetrics {
             const { balanceSheet } = statements
 
             // Extract totals
+            const assetsNonCurrent = balanceSheet.nonCurrentAssets.netTotal
+            const liabilitiesNonCurrent = balanceSheet.nonCurrentLiabilities.netTotal
+
             totals = {
                 cash: extractByGroup(balanceSheet.currentAssets, 'CASH_AND_BANKS'),
                 inventories: extractByGroup(balanceSheet.currentAssets, 'INVENTORIES'),
                 assetsCurrent: balanceSheet.currentAssets.netTotal,
+                assetsNonCurrent,
                 assetsTotal: balanceSheet.totalAssets,
                 liabilitiesCurrent: balanceSheet.currentLiabilities.netTotal,
+                liabilitiesNonCurrent,
                 liabilitiesTotal: balanceSheet.totalLiabilities,
                 equity: balanceSheet.totalEquity,
             }
 
-            // Equation chart data (for stacked bar)
+            // Equation chart data (for segmented stacked bar)
             charts.equation = [
-                { name: 'Activo', activo: totals.assetsTotal, pasivo: 0, pn: 0 },
-                { name: 'Origen', activo: 0, pasivo: totals.liabilitiesTotal, pn: totals.equity },
+                {
+                    name: 'Activo',
+                    activoCorriente: totals.assetsCurrent,
+                    activoNoCorriente: assetsNonCurrent,
+                    pasivoCorriente: 0,
+                    pasivoNoCorriente: 0,
+                    pn: 0,
+                },
+                {
+                    name: 'Origen',
+                    activoCorriente: 0,
+                    activoNoCorriente: 0,
+                    pasivoCorriente: totals.liabilitiesCurrent,
+                    pasivoNoCorriente: liabilitiesNonCurrent,
+                    pn: totals.equity,
+                },
             ]
 
             // Composition charts
