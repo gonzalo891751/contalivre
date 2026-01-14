@@ -22,19 +22,34 @@ export interface KPIConfig {
 }
 
 // Helpers
-export const safeDiv = (n: number, d: number): number => (d === 0 ? 0 : n / d);
+export const safeDiv = (n: number, d: number): number | null => {
+    if (d === 0) return n === 0 ? null : Infinity;
+    return n / d;
+};
 
-export const formatCurrency = (val: number) =>
-    new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(val);
+export const formatCurrency = (val: number | null) => {
+    if (val === null) return 'N/D';
+    if (!isFinite(val)) return '∞';
+    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(val);
+};
 
-export const formatNumber = (val: number) =>
-    new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+export const formatNumber = (val: number | null) => {
+    if (val === null) return 'N/D';
+    if (!isFinite(val)) return '∞';
+    return new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+};
 
-export const formatPercent = (val: number) =>
-    new Intl.NumberFormat('es-AR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(val);
+export const formatPercent = (val: number | null) => {
+    if (val === null) return 'N/D';
+    if (!isFinite(val)) return '∞';
+    return new Intl.NumberFormat('es-AR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(val);
+};
 
-export const formatDays = (val: number) =>
-    `${Math.round(val)}d`;
+export const formatDays = (val: number | null) => {
+    if (val === null) return 'N/D';
+    if (!isFinite(val)) return '∞';
+    return `${Math.round(val)}d`;
+};
 
 /**
  * Calculates status based on thresholds
@@ -71,22 +86,22 @@ export const getStatus = (
 
 export interface KPIMetrics {
     // Financial
-    workingCapital: number;
-    currentRatio: number; // Liquidez Corriente
-    acidTest: number; // Prueba Ácida
-    cashRatio: number; // Liquidez Caja
+    workingCapital: number | null;
+    currentRatio: number | null; // Liquidez Corriente
+    acidTest: number | null; // Prueba Ácida
+    cashRatio: number | null; // Liquidez Caja
 
     // Activity (Days) - Requires averages, using snapshots for now
-    daysReceivable: number; // Plazo Cobro
-    daysPayable: number; // Plazo Pago
+    daysReceivable: number | null; // Plazo Cobro
+    daysPayable: number | null; // Plazo Pago
 
     // Solvency / Patrimonial
-    debtRatio: number; // Endeudamiento
-    solvencyTotal: number; // Solvencia Total
-    autonomy: number; // Autonomía
-    leverage: number; // Apalancamiento
-    shortTermDebtProfile: number; // % Deuda CP
-    immobilization: number; // Inmovilidad
+    debtRatio: number | null; // Endeudamiento
+    solvencyTotal: number | null; // Solvencia Total
+    autonomy: number | null; // Autonomía
+    leverage: number | null; // Apalancamiento
+    shortTermDebtProfile: number | null; // % Deuda CP
+    immobilization: number | null; // Inmovilidad
 
     // Economic
     grossMargin: number | null;

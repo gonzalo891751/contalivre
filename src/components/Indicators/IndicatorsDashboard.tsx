@@ -132,12 +132,12 @@ const IndicatorCard = ({ data }: { data: IndicatorResult }) => {
             <div className={styles.cardFooter}>
                 <div className={styles.valueGroup}>
                     <span className={`${styles.value} ${isND ? styles.valueND : ''}`}>
-                        {isND ? '—' : data.formattedValue}
+                        {data.formattedValue}
                     </span>
 
                     {/* Status Label Pill */}
                     <span className={`${styles.pill} ${textStatusColor}`}>
-                        {isND ? 'Requiere ER' : data.statusLabel}
+                        {data.statusLabel}
                     </span>
                 </div>
 
@@ -245,26 +245,36 @@ export default function IndicatorsDashboard() {
 
     // --- CALCULATION ENGINE ---
     const indicators: IndicatorResult[] = useMemo(() => {
-        if (!data) return []; // Skeleton handling handled by parent or empty state? For now empty list.
+        if (!data) return [];
 
         const list: IndicatorResult[] = [];
 
-        // --- A. FINANCIEROS ---
-        const ct = data.activoCorriente - data.pasivoCorriente;
-        const lc = safeDiv(data.activoCorriente, data.pasivoCorriente);
-        const pa = safeDiv(data.activoCorriente - data.inventarios, data.pasivoCorriente);
-        const cash = safeDiv(data.disponibilidades, data.pasivoCorriente);
+        // --- HELPERS FOR COMPONENT SPECIFIC LOGIC ---
+        // We override getStatus defaults to handle specific "Reasons" for N/D
+        const resolveStatus = (
+            val: number | null,
+            min: number,
+            max: number,
+            labels: { good: string, mid: string, bad: string },
+            inverted = false,
+            missingReason: string = 'N/D'
+        ) => {
+            const base = getStatus(val, min, max, labels, inverted);
+            if (base.statusLabel === 'N/D') {
+                return { ...base, statusLabel: missingReason };
+            }
+            return base;
+        };
 
-        // Mocks para supuestos (Activity Ratios require temporal data not yet in hook)
-        // Keep hardcoded or safe defaults for now as requested by user "Primary: use existing account metadata... Fallback: if not available return nulls"
-        // But the previous mock had hardcoded logic. I'll keep the hardcoded logic for Activity Ratios as placeholders
-        // OR better, mark them as N/D if we can't compute them real.
-        // User said: "Connect IndicatorsDashboard to real ContaLivre accounting data... remove all mock/demo numbers".
-        // If I can't compute them, I should probably return null?
-        // But pprac/ppepc require "Purchases" and "Average Balances". We only have "Entries".
-        // Calculating averages is heavy. I'll mock them with a fixed "N/D" or keep the "Estimated" suffix if I can't do it.
-        // Actually, for "Plazo Cobro", I need Sales.
-        // I'll set them to null (N/D) for now to be honest to the data principle.
+        // --- A. FINANCIEROS ---
+        const ct = safeDiv(data.activoCorriente - data.pasivoCorriente, 1); // safe math
+        const lc = safeDiv(data.activoCorriente, data.pasivoCorriente);
+
+        // Pa & Cash require VALID mappings. If data is null, ratio is null.
+        const pa = (data.inventarios === null) ? null : safeDiv(data.activoCorriente - data.inventarios, data.pasivoCorriente);
+        const cash = (data.disponibilidades === null) ? null : safeDiv(data.disponibilidades, data.pasivoCorriente);
+
+        // Placeholders
         const pprac = null;
         const ppepc = null;
         const lcn = null;
@@ -274,27 +284,27 @@ export default function IndicatorsDashboard() {
         list.push(
             {
                 id: 'ct', group: 'financiero', title: 'Capital de Trabajo', value: ct, formattedValue: formatCurrency(ct),
-                ...getStatus(ct, 0, Infinity, { good: 'Positivo', mid: 'Ajustado', bad: 'Déficit' }),
+                ...resolveStatus(ct, 0, Infinity, { good: 'Positivo', mid: 'Ajustado', bad: 'Déficit' }),
                 formula: 'AC - PC', explanation: 'Fondo de maniobra operativo.', interpretation: 'Debe ser > 0.', chartType: 'none'
             },
 
             {
                 id: 'lc', group: 'financiero', title: 'Liquidez Corriente', value: lc, formattedValue: formatNumber(lc),
-                ...getStatus(lc, 1.5, 2.0, { good: 'Sólido', mid: 'Aceptable', bad: 'Riesgo' }),
+                ...resolveStatus(lc, 1.5, 2.0, { good: 'Sólido', mid: 'Aceptable', bad: 'Riesgo' }),
                 chartType: 'gauge', thresholdMin: 1, thresholdMax: 2.5,
                 formula: 'AC / PC', explanation: 'Capacidad de pago CP.', interpretation: 'Ideal 1.5 - 2.0.'
             },
 
             {
                 id: 'pa', group: 'financiero', title: 'Prueba Ácida', value: pa, formattedValue: formatNumber(pa),
-                ...getStatus(pa, 1.0, 1.5, { good: 'Excelente', mid: 'Bueno', bad: 'Bajo' }),
+                ...resolveStatus(pa, 1.0, 1.5, { good: 'Excelente', mid: 'Bueno', bad: 'Bajo' }, false, 'Requiere Mapeo'),
                 chartType: 'gauge', thresholdMin: 0.8, thresholdMax: 1.5,
                 formula: '(AC - Inv) / PC', explanation: 'Liquidez ácida.', interpretation: 'Ideal > 1.0.'
             },
 
             {
                 id: 'cash', group: 'financiero', title: 'Liquidez Caja', value: cash, formattedValue: formatNumber(cash),
-                ...getStatus(cash, 0.1, 0.3, { good: 'Óptimo', mid: 'Bajo', bad: 'Crítico' }),
+                ...resolveStatus(cash, 0.1, 0.3, { good: 'Óptimo', mid: 'Bajo', bad: 'Crítico' }, false, 'Requiere Mapeo'),
                 chartType: 'bar',
                 formula: 'Disp / PC', explanation: 'Efectivo inmediato.', interpretation: '0.1 - 0.3 recomendado.'
             },
@@ -332,6 +342,8 @@ export default function IndicatorsDashboard() {
         );
 
         // --- B. PATRIMONIALES ---
+        // For ratios where we divide by Total Assets/Liabilities/Equity, we need to be safe if they are 0.
+        // safeDiv handles 0 denominator.
         const end = safeDiv(data.pasivoTotal, data.activoTotal);
         const solv = safeDiv(data.activoTotal, data.pasivoTotal);
         const aut = safeDiv(data.patrimonioNeto, data.activoTotal);
@@ -342,28 +354,28 @@ export default function IndicatorsDashboard() {
         list.push(
             {
                 id: 'end', group: 'patrimonial', title: 'Endeudamiento', value: end, formattedValue: formatPercent(end),
-                ...getStatus(end, 0.4, 0.6, { good: 'Equilibrado', mid: 'Alto', bad: 'Excesivo' }, true),
+                ...resolveStatus(end, 0.4, 0.6, { good: 'Equilibrado', mid: 'Alto', bad: 'Excesivo' }, true),
                 chartType: 'gauge', thresholdMin: 0, thresholdMax: 1,
                 formula: 'PT / AT', explanation: 'Dependencia de terceros.', interpretation: '< 60% recomendado.'
             },
 
             {
                 id: 'solv', group: 'patrimonial', title: 'Solvencia Total', value: solv, formattedValue: formatNumber(solv),
-                ...getStatus(solv, 1.5, 2.0, { good: 'Sólido', mid: 'Suficiente', bad: 'Débil' }),
+                ...resolveStatus(solv, 1.5, 2.0, { good: 'Sólido', mid: 'Suficiente', bad: 'Débil' }),
                 chartType: 'gauge', thresholdMin: 1, thresholdMax: 3,
                 formula: 'AT / PT', explanation: 'Garantía total.', interpretation: '> 1.5 ideal.'
             },
 
             {
                 id: 'aut', group: 'patrimonial', title: 'Autonomía', value: aut, formattedValue: formatPercent(aut),
-                ...getStatus(aut, 0.4, 0.8, { good: 'Alto', mid: 'Medio', bad: 'Bajo' }),
+                ...resolveStatus(aut, 0.4, 0.8, { good: 'Alto', mid: 'Medio', bad: 'Bajo' }),
                 chartType: 'gauge', thresholdMin: 0, thresholdMax: 1,
                 formula: 'PN / AT', explanation: 'Independencia financiera.', interpretation: 'Mayor es mejor.'
             },
 
             {
                 id: 'lev', group: 'patrimonial', title: 'Apalancamiento', value: lev, formattedValue: formatNumber(lev),
-                ...getStatus(lev, 0.5, 1.5, { good: 'Moderado', mid: 'Alto', bad: 'Arriesgado' }, true),
+                ...resolveStatus(lev, 0.5, 1.5, { good: 'Moderado', mid: 'Alto', bad: 'Arriesgado' }, true),
                 chartType: 'none', formula: 'PT / PN', explanation: 'Deuda sobre capital.', interpretation: '< 1.0 conservador.'
             },
 
@@ -385,23 +397,15 @@ export default function IndicatorsDashboard() {
         const cogs = data.costoVentas; // absolute value usually
         const netIncome = data.resultadoNeto;
 
+        // REASON: If sales/cogs/income are null, it means no ER data -> "Requiere ER"
+        const erReason = 'Requiere ER';
+
         let marginGross: number | null = null;
         let marginNet: number | null = null;
         let roe: number | null = null;
 
         if (sales !== null && sales !== 0) {
-            // Gross Profit = Sales - COGS. If COGS comes as expense (positive number in accounting logic for expense), subtract.
-            // But statements logic relies on signed values?
-            // "data.costoVentas" comes from "computeStatements".
-            // Expenses in DB are usually same sign logic.
-            // Let's assume Gross Profit is computed if possible?
-            // We only have Sales and Cogs.
-            // If we prefer, we can rely on netIncome for Net Margin.
-            // For Gross Margin:
             if (cogs !== null) {
-                // Warning: simplistic assumption.
-                // Gross Margin = (Sales - |COGS|) / Sales
-                // Assuming Sales > 0.
                 marginGross = (sales - Math.abs(cogs)) / sales;
             }
             if (netIncome !== null) {
@@ -416,19 +420,19 @@ export default function IndicatorsDashboard() {
         list.push(
             {
                 id: 'mgbr', group: 'economico', title: 'Margen Bruto', value: marginGross, formattedValue: marginGross !== null ? formatPercent(marginGross) : 'N/D',
-                ...getStatus(marginGross, 0.2, 0.4, { good: 'Alto', mid: 'Medio', bad: 'Bajo' }),
+                ...resolveStatus(marginGross, 0.2, 0.4, { good: 'Alto', mid: 'Medio', bad: 'Bajo' }, false, erReason),
                 chartType: 'none',
                 formula: '(Vtas-Cost)/Vtas', explanation: 'Rentabilidad producto.', interpretation: 'Alto es mejor.'
             },
             {
                 id: 'mgnt', group: 'economico', title: 'Margen Neto', value: marginNet, formattedValue: marginNet !== null ? formatPercent(marginNet) : 'N/D',
-                ...getStatus(marginNet, 0.05, 0.15, { good: 'Excelente', mid: 'Bueno', bad: 'Bajo' }),
+                ...resolveStatus(marginNet, 0.05, 0.15, { good: 'Excelente', mid: 'Bueno', bad: 'Bajo' }, false, erReason),
                 chartType: 'none',
                 formula: 'R.Neto / Vtas', explanation: 'Ganancia final.', interpretation: 'Positivo es ganancia.'
             },
             {
                 id: 'roe', group: 'economico', title: 'ROE', value: roe, formattedValue: roe !== null ? formatPercent(roe) : 'N/D',
-                ...getStatus(roe, 0.15, 0.25, { good: 'Excelente', mid: 'Bueno', bad: 'Bajo' }),
+                ...resolveStatus(roe, 0.15, 0.25, { good: 'Excelente', mid: 'Bueno', bad: 'Bajo' }, false, erReason),
                 chartType: 'none',
                 formula: 'R.Neto / PN', explanation: 'Retorno inversión.', interpretation: 'Clave accionistas.'
             }
@@ -501,47 +505,67 @@ export default function IndicatorsDashboard() {
                 </p>
             </div>
 
-            {/* 2. Tabs */}
-            <div className={styles.tabsContainer}>
-                <div className={styles.tabsList}>
-                    {[
-                        { id: 'financiero', label: 'Financieros', icon: Coins },
-                        { id: 'patrimonial', label: 'Patrimoniales', icon: Landmark },
-                        { id: 'economico', label: 'Económicos', icon: TrendingUp }
-                    ].map(tab => {
-                        const isActive = activeTab === tab.id;
-                        const Icon = tab.icon;
-                        return (
-                            <button
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id as GroupId)}
-                                className={`${styles.tabBtn} ${isActive ? styles.tabActive : styles.tabInactive}`}
-                            >
-                                <Icon size={18} />
-                                {tab.label}
-                                <span className={`${styles.tabBadge} ${isActive ? styles.badgeActive : styles.badgeInactive}`}>
-                                    {counts[tab.id as GroupId]}
-                                </span>
-                                {isActive && <div className={styles.activeLine}></div>}
-                            </button>
-                        )
-                    })}
+            {/* 2. Empty State (Visible only if totals are 0 and no data) */}
+            {data && data.activoTotal === 0 && data.pasivoTotal === 0 && data.entriesCount !== 0 ? (
+                // Logic subtlety: If we have entries but they are closing, or just no effect? 
+                // The hook returns 0s for empty set.
+                // Let's assume if ALL totals are 0, it's empty.
+                // But wait, hook might return 0 if there are entries but they cancel out? unlikely.
+                // Let's just use the totals = 0 check for now.
+                <div className="w-full py-12 flex flex-col items-center justify-center text-center opacity-70">
+                    <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
+                        <Info className="text-blue-400" size={32} />
+                    </div>
+                    <h3 className="text-lg font-medium text-slate-700 mb-1">Sin datos suficientes</h3>
+                    <p className="text-slate-500 max-w-sm">
+                        Cargá tu primer asiento contable para activar el tablero de indicadores.
+                    </p>
                 </div>
-            </div>
-
-            {/* 3. Grid Content */}
-            <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-                <div className={styles.grid}>
-                    {activeIndicators.map(ind => (
-                        <div key={ind.id} className={styles.cardWrapper}>
-                            <IndicatorCard data={ind} />
+            ) : (
+                <>
+                    {/* 3. Tabs */}
+                    <div className={styles.tabsContainer}>
+                        <div className={styles.tabsList}>
+                            {[
+                                { id: 'financiero', label: 'Financieros', icon: Coins },
+                                { id: 'patrimonial', label: 'Patrimoniales', icon: Landmark },
+                                { id: 'economico', label: 'Económicos', icon: TrendingUp }
+                            ].map(tab => {
+                                const isActive = activeTab === tab.id;
+                                const Icon = tab.icon;
+                                return (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id as GroupId)}
+                                        className={`${styles.tabBtn} ${isActive ? styles.tabActive : styles.tabInactive}`}
+                                    >
+                                        <Icon size={18} />
+                                        {tab.label}
+                                        <span className={`${styles.tabBadge} ${isActive ? styles.badgeActive : styles.badgeInactive}`}>
+                                            {counts[tab.id as GroupId]}
+                                        </span>
+                                        {isActive && <div className={styles.activeLine}></div>}
+                                    </button>
+                                )
+                            })}
                         </div>
-                    ))}
-                </div>
+                    </div>
 
-                {/* 4. Integral Evaluation (Always Visible at bottom of tab) */}
-                <IntegralScoreCard scores={scores} />
-            </div>
+                    {/* 3. Grid Content */}
+                    <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+                        <div className={styles.grid}>
+                            {activeIndicators.map(ind => (
+                                <div key={ind.id} className={styles.cardWrapper}>
+                                    <IndicatorCard data={ind} />
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* 4. Integral Evaluation (Always Visible at bottom of tab) */}
+                        <IntegralScoreCard scores={scores} />
+                    </div>
+                </>
+            )}
 
         </div>
     );
