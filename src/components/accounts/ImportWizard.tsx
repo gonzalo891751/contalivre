@@ -53,7 +53,8 @@ export default function ImportWizard({
     const [mapping, setMapping] = useState<ColumnMapping>({
         code: null,
         name: null,
-        type: null,
+        kind: null,
+        section: null,
         parentCode: null,
     })
     const [detectedColumns, setDetectedColumns] = useState<string[]>([])
@@ -115,6 +116,7 @@ export default function ImportWizard({
             case 1:
                 return file !== null && rawRows.length > 0
             case 2:
+                // Require code and name mapping minimally
                 return mapping.code !== null && mapping.name !== null
             case 3:
                 return validationResult !== null && validationResult.valid.length > 0
@@ -202,7 +204,7 @@ export default function ImportWizard({
         setFile(null)
         setRawRows([])
         setImportMode('merge')
-        setMapping({ code: null, name: null, type: null, parentCode: null })
+        setMapping({ code: null, name: null, kind: null, section: null, parentCode: null })
         setDetectedColumns([])
         setValidationResult(null)
         setImportSummary(null)
@@ -271,6 +273,7 @@ export default function ImportWizard({
                 )
 
             case 2:
+                // Mapping & Mode Step
                 return (
                     <div className="space-y-6">
                         {/* Info Banner */}
@@ -379,16 +382,36 @@ export default function ImportWizard({
 
                             <div className="import-mapping-row">
                                 <div className="import-mapping-field">
-                                    <span className="import-mapping-field-label">Tipo</span>
-                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Opcional (inferido del código)</span>
+                                    <span className="import-mapping-field-label">Clase (Kind)</span>
+                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Opcional (Activo, Pasivo...)</span>
                                 </div>
                                 <ArrowRight className="import-mapping-arrow" size={16} />
                                 <select
                                     className="import-mapping-select"
-                                    value={mapping.type ?? ''}
-                                    onChange={(e) => setMapping({ ...mapping, type: e.target.value ? Number(e.target.value) : null })}
+                                    value={mapping.kind ?? ''}
+                                    onChange={(e) => setMapping({ ...mapping, kind: e.target.value ? Number(e.target.value) : null })}
                                 >
-                                    <option value="">No mapear</option>
+                                    <option value="">Inferir automáticamente</option>
+                                    {detectedColumns.map((col, i) => (
+                                        <option key={i} value={i}>
+                                            {col || `Columna ${i + 1}`}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="import-mapping-row">
+                                <div className="import-mapping-field">
+                                    <span className="import-mapping-field-label">Subclase (Section)</span>
+                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Opcional (Corriente, Operativo...)</span>
+                                </div>
+                                <ArrowRight className="import-mapping-arrow" size={16} />
+                                <select
+                                    className="import-mapping-select"
+                                    value={mapping.section ?? ''}
+                                    onChange={(e) => setMapping({ ...mapping, section: e.target.value ? Number(e.target.value) : null })}
+                                >
+                                    <option value="">Inferir automáticamente</option>
                                     {detectedColumns.map((col, i) => (
                                         <option key={i} value={i}>
                                             {col || `Columna ${i + 1}`}
@@ -398,27 +421,63 @@ export default function ImportWizard({
                             </div>
                         </div>
 
+                        <div className="alert alert-info" style={{ marginTop: '1rem', fontSize: '0.85rem' }}>
+                            <p>
+                                <strong>💡 Tip de importación:</strong> Si no asignás Clase ni Subclase, intentaremos detectarlas
+                                automáticamente por el código de cuenta (ej: 1.x → Activo) o palabras clave del nombre.
+                            </p>
+                        </div>
+
                         {/* Preview Table */}
                         {rawRows.length > 1 && (
                             <div>
                                 <p className="import-preview-label">Vista Previa (Primeras 10 filas)</p>
+
+                                {/* Simulated Rows */}
+                                {mapping.code !== null && mapping.name !== null && (
+                                    <div className="alert alert-info" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem' }}>
+                                        <Bot size={16} />
+                                        <span style={{ fontSize: '0.8rem' }}>
+                                            Simulación de importación basada en tus reglas.
+                                        </span>
+                                    </div>
+                                )}
+
                                 <div className="import-preview-table">
                                     <table>
                                         <thead>
                                             <tr>
-                                                {detectedColumns.map((col, i) => (
-                                                    <th key={i}>{col || `Col ${i + 1}`}</th>
-                                                ))}
+                                                <th>Fila</th>
+                                                <th>Código</th>
+                                                <th>Nombre</th>
+                                                <th>Clasificación Detectada</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {rawRows.slice(1, 11).map((row, i) => (
-                                                <tr key={i}>
-                                                    {row.map((cell, j) => (
-                                                        <td key={j}>{cell}</td>
-                                                    ))}
-                                                </tr>
-                                            ))}
+                                            {/* We simulate the first 10 rows (skipping header) */}
+                                            {mapRowsToImportedRows(rawRows.slice(0, 11), mapping)
+                                                .map((row, i) => (
+                                                    <tr key={i}>
+                                                        <td>{i + 1}</td>
+                                                        <td>{row.code}</td>
+                                                        <td>{row.name}</td>
+                                                        <td>
+                                                            <span className={`badge badge-sm ${row.kind === 'ASSET' ? 'badge-success' :
+                                                                    row.kind === 'LIABILITY' ? 'badge-warning' :
+                                                                        row.kind === 'EQUITY' ? 'badge-info' :
+                                                                            'badge-secondary'
+                                                                }`}>
+                                                                {row.kind}
+                                                            </span>
+                                                            <span className="text-muted" style={{ fontSize: '0.7em', marginLeft: '4px' }}>
+                                                                {row.section}
+                                                            </span>
+                                                            {row.isDefaultKind && (
+                                                                <span title="Clasificación por defecto (no se pudo inferir)" style={{ marginLeft: '4px', cursor: 'help' }}>⚠️</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
                                         </tbody>
                                     </table>
                                 </div>
