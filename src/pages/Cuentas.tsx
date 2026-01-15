@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
 import {
@@ -18,6 +19,7 @@ import {
     ImportWizard,
     type TreeNode,
 } from '../components/accounts'
+import MappingWizardModal from '../components/mapping/MappingWizardModal'
 
 const KIND_OPTIONS: { value: AccountKind; label: string }[] = [
     { value: 'ASSET', label: 'Activo' },
@@ -82,9 +84,22 @@ export default function Cuentas() {
     const [initialExpansionDone, setInitialExpansionDone] = useState(false)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [isImportOpen, setIsImportOpen] = useState(false)
+    const [showMappingWizard, setShowMappingWizard] = useState(false)
     const [editingAccount, setEditingAccount] = useState<Account | null>(null)
     const [advancedMode, setAdvancedMode] = useState(false)
     const [error, setError] = useState('')
+
+    const location = useLocation()
+    const navigate = useNavigate()
+
+    // Handle ?import=1 query param
+    useEffect(() => {
+        const params = new URLSearchParams(location.search)
+        if (params.get('import') === '1') {
+            setIsImportOpen(true)
+            navigate('/cuentas', { replace: true })
+        }
+    }, [location.search, navigate])
 
     // Form state
     const [formParentId, setFormParentId] = useState<string | null>(null)
@@ -294,6 +309,7 @@ export default function Cuentas() {
                 isBalanced={true}
                 onImport={() => setIsImportOpen(true)}
                 onNewAccount={() => openModal()}
+                onMapping={() => setShowMappingWizard(true)}
             />
 
             {/* Toolbar */}
@@ -490,6 +506,12 @@ export default function Cuentas() {
                     </div>
                 </div>
             )}
+
+            {/* Mapping Wizard Modal */}
+            <MappingWizardModal
+                isOpen={showMappingWizard}
+                onClose={() => setShowMappingWizard(false)}
+            />
         </div>
     )
 }

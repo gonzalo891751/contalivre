@@ -23,13 +23,16 @@ import {
     RefreshCw,
     Wallet,
     UploadCloud,
+    Wand2,
 } from 'lucide-react'
 
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics'
 import { loadSeedDataIfNeeded } from '../storage/seed'
 import { deleteAllAccounts } from '../storage/accounts'
 import { resetExercise } from '../storage/entries'
+import { clearMapping } from '../domain/mapping/mappingStorage'
 import IndicatorsDashboard from '../components/Indicators/IndicatorsDashboard'
+import MappingWizardModal from '../components/mapping/MappingWizardModal'
 
 // ============================================================================
 // Formatters
@@ -55,6 +58,7 @@ export default function Dashboard() {
     // Modal states
     const [showImportModal, setShowImportModal] = useState(false)
     const [showResetModal, setShowResetModal] = useState(false)
+    const [showMappingWizard, setShowMappingWizard] = useState(false)
     const [deleteConfirmText, setDeleteConfirmText] = useState('')
     const [isResetting, setIsResetting] = useState(false)
 
@@ -94,6 +98,8 @@ export default function Dashboard() {
             await resetExercise()
             // Then delete all accounts
             await deleteAllAccounts()
+            // Clear mapping configuration
+            clearMapping()
 
             setShowResetModal(false)
             setDeleteConfirmText('')
@@ -145,6 +151,14 @@ export default function Dashboard() {
                     </div>
 
                     <div className="dashboard-header-right">
+                        <button
+                            onClick={() => setShowMappingWizard(true)}
+                            className="dashboard-header-btn"
+                        >
+                            <Wand2 size={16} />
+                            <span className="dashboard-header-btn-text">Asistente de Mapeo</span>
+                        </button>
+
                         <button
                             onClick={() => setShowResetModal(true)}
                             className="dashboard-header-btn"
@@ -700,6 +714,12 @@ export default function Dashboard() {
                     </div>
                 </div>
             )}
+
+            {/* MAPPING WIZARD MODAL */}
+            <MappingWizardModal
+                isOpen={showMappingWizard}
+                onClose={() => setShowMappingWizard(false)}
+            />
         </div>
     )
 }

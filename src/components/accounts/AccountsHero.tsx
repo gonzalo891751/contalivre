@@ -1,4 +1,4 @@
-import { Upload, Plus } from 'lucide-react'
+import { Upload, Plus, Wand2 } from 'lucide-react'
 
 interface AccountsHeroProps {
     totalAccounts: number
@@ -6,6 +6,7 @@ interface AccountsHeroProps {
     isBalanced: boolean
     onImport: () => void
     onNewAccount: () => void
+    onMapping?: () => void
 }
 
 export default function AccountsHero({
@@ -14,6 +15,7 @@ export default function AccountsHero({
     isBalanced,
     onImport,
     onNewAccount,
+    onMapping,
 }: AccountsHeroProps) {
     return (
         <header className="accounts-hero">
@@ -31,6 +33,15 @@ export default function AccountsHero({
                 </div>
 
                 <div className="accounts-hero-actions">
+                    {onMapping && (
+                        <button
+                            className="btn-premium btn-premium-primary"
+                            onClick={onMapping}
+                        >
+                            <Wand2 size={16} />
+                            Asistente de Mapeo
+                        </button>
+                    )}
                     <button
                         className="btn-premium btn-premium-secondary"
                         onClick={onImport}
@@ -39,7 +50,7 @@ export default function AccountsHero({
                         Importar
                     </button>
                     <button
-                        className="btn-premium btn-premium-primary"
+                        className="btn-premium btn-premium-secondary"
                         onClick={onNewAccount}
                     >
                         <Plus size={16} />
