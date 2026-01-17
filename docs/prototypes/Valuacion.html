@@ -1,0 +1,1099 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  Calculator, 
+  Calendar, 
+  ArrowRight, 
+  FileText, 
+  Save, 
+  TrendingUp, 
+  DollarSign, 
+  AlertCircle, 
+  CheckCircle2, 
+  Download,
+  Info,
+  Copy,
+  Plus,
+  Edit2,
+  Trash2,
+  X,
+  ChevronDown,
+  HelpCircle,
+  Database
+} from 'lucide-react';
+
+/**
+ * UTILS & TOKENS
+ * Brand Book styles and helper functions.
+ */
+const BRAND = {
+  gradient: "bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-700 hover:to-emerald-600 transition-all",
+  textGradient: "bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-emerald-500",
+  mono: "font-mono tracking-tight",
+  display: "font-sans font-bold tracking-tight", // Simulates Outfit
+  input: "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all",
+  label: "block text-xs font-semibold text-slate-500 uppercase mb-1.5",
+  card: "bg-white rounded-xl border border-slate-200 shadow-sm",
+};
+
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('es-AR', {
+    style: 'currency',
+    currency: 'ARS',
+    minimumFractionDigits: 2
+  }).format(value);
+};
+
+const formatNumber = (value: number, decimals = 2) => {
+  return new Intl.NumberFormat('es-AR', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  }).format(value);
+};
+
+// Date Helpers
+const getPeriodFromDate = (dateStr: string) => dateStr.substring(0, 7); // YYYY-MM
+const formatDateDisplay = (dateStr: string) => {
+  if (!dateStr) return '-';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+};
+
+// --- TYPES ---
+type TabId = 'indices' | 'reexpresion' | 'valuacion' | 'asientos';
+type RubroType = 'Mercaderias' | 'BienesUso' | 'Capital' | 'Otros';
+type RT17Type = 'USD' | 'Otros';
+
+interface IndexRow {
+  period: string; // YYYY-MM
+  value: number;
+}
+
+// Model for RT6 (Reexpresión)
+interface LotRT6 {
+  id: string;
+  fechaOrigen: string; // YYYY-MM-DD
+  importeBase: number;
+  notas?: string;
+}
+
+interface PartidaRT6 {
+  id: string;
+  rubro: RubroType;
+  cuentaCodigo: string;
+  cuentaNombre: string;
+  // Some rubros have multiple lots (Mercaderias), others single (BienesUso)
+  // We unify by always using an array of lots, even if it's just one.
+  items: LotRT6[]; 
+}
+
+// Model for RT17 (Valuación)
+interface LotUSD {
+  id: string;
+  fechaIngreso: string;
+  usd: number;
+  tcOrigen?: number;
+  baseArs: number; // calculated or manual
+  tcCierre: number;
+}
+
+interface PartidaRT17 {
+  id: string;
+  type: RT17Type;
+  cuentaCodigo: string;
+  cuentaNombre: string;
+  // Union type for flexibility
+  usdItems?: LotUSD[];
+  manualCurrentValue?: number;
+  manualReference?: string;
+  linkedRT6Id?: string; // To fetch Homog value for comparison
+}
+
+// --- MOCK DATA ---
+const INITIAL_INDICES: IndexRow[] = [
+  { period: '2024-12', value: 1250.50 },
+  { period: '2025-01', value: 1400.20 },
+  { period: '2025-02', value: 1580.90 },
+  { period: '2025-03', value: 1720.00 },
+];
+
+const MOCK_PARTIDAS_RT6: PartidaRT6[] = [
+  { 
+    id: 'p1', 
+    rubro: 'Mercaderias', 
+    cuentaCodigo: '1.2.05.01', 
+    cuentaNombre: 'Mercaderías (Stock)', 
+    items: [
+      { id: 'l1', fechaOrigen: '2025-01-15', importeBase: 800000, notas: 'Compra Lote A' },
+      { id: 'l2', fechaOrigen: '2025-02-10', importeBase: 700000, notas: 'Compra Lote B' }
+    ]
+  },
+  { 
+    id: 'p2', 
+    rubro: 'Capital', 
+    cuentaCodigo: '3.1.01.01', 
+    cuentaNombre: 'Capital Social', 
+    items: [
+      { id: 'l3', fechaOrigen: '2024-12-01', importeBase: 100000 }
+    ]
+  }
+];
+
+const MOCK_PARTIDAS_RT17: PartidaRT17[] = [
+  {
+    id: 'v1',
+    type: 'USD',
+    cuentaCodigo: '1.1.02.01',
+    cuentaNombre: 'Caja Moneda Extranjera',
+    usdItems: [
+      { id: 'u1', fechaIngreso: '2025-01-20', usd: 1000, tcOrigen: 980, baseArs: 980000, tcCierre: 1100 }
+    ]
+  }
+];
+
+// --- COMPONENTS ---
+
+const KpiCard = ({ label, value, subtext, highlight = false }: { label: string, value: string, subtext?: string, highlight?: boolean }) => (
+  <div className={`p-4 rounded-xl border ${highlight ? 'bg-white border-blue-200 shadow-md ring-1 ring-blue-50' : 'bg-slate-50 border-slate-100'}`}>
+    <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">{label}</div>
+    <div className={`text-2xl font-bold ${highlight ? 'text-blue-600' : 'text-slate-800'} ${BRAND.mono}`}>
+      {value}
+    </div>
+    {subtext && <div className="text-xs text-slate-400 mt-1">{subtext}</div>}
+  </div>
+);
+
+const Badge = ({ children, type }: { children: React.ReactNode, type: 'success' | 'warning' | 'error' | 'neutral' | 'info' }) => {
+  const styles = {
+    success: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    warning: 'bg-amber-50 text-amber-700 border-amber-100',
+    error: 'bg-red-50 text-red-700 border-red-100',
+    neutral: 'bg-slate-100 text-slate-600 border-slate-200',
+    info: 'bg-blue-50 text-blue-700 border-blue-100'
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded-md text-[10px] uppercase font-bold border ${styles[type]}`}>
+      {children}
+    </span>
+  );
+};
+
+// --- DRAWER COMPONENT ---
+const Drawer = ({ 
+  isOpen, 
+  onClose, 
+  title, 
+  children,
+  footer
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  title: string; 
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm transition-opacity" onClick={onClose} />
+      
+      {/* Drawer Panel */}
+      <div className="relative w-full max-w-xl bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <h3 className={`text-lg text-slate-800 ${BRAND.display}`}>{title}</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6">
+          {children}
+        </div>
+        {footer && (
+          <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- MAIN PAGE COMPONENT ---
+
+export default function CierreValuacionPage() {
+  // State
+  const [activeTab, setActiveTab] = useState<TabId>('reexpresion');
+  const [closingDate, setClosingDate] = useState('2025-03-31');
+  const [indices, setIndices] = useState<IndexRow[]>(INITIAL_INDICES);
+  
+  // Data State
+  const [partidasRT6, setPartidasRT6] = useState<PartidaRT6[]>(MOCK_PARTIDAS_RT6);
+  const [partidasRT17, setPartidasRT17] = useState<PartidaRT17[]>(MOCK_PARTIDAS_RT17);
+  
+  // RECPAM Estimator State
+  const [recpamInputs, setRecpamInputs] = useState({ activeMon: 0, passiveMon: 0 });
+
+  // UI State (Drawers)
+  const [isRT6DrawerOpen, setRT6DrawerOpen] = useState(false);
+  const [editingRT6Id, setEditingRT6Id] = useState<string | null>(null);
+  
+  const [isRT17DrawerOpen, setRT17DrawerOpen] = useState(false);
+  const [editingRT17Id, setEditingRT17Id] = useState<string | null>(null);
+
+  // Form Temp State (for Drawer)
+  const [tempRT6, setTempRT6] = useState<PartidaRT6 | null>(null);
+  const [tempRT17, setTempRT17] = useState<PartidaRT17 | null>(null);
+
+  // --- LOGIC & HELPERS ---
+
+  // Derive Period from Date
+  const closingPeriod = useMemo(() => getPeriodFromDate(closingDate), [closingDate]);
+  
+  const getIndex = (period: string) => indices.find(i => i.period === period)?.value;
+  const closingIndexValue = getIndex(closingPeriod);
+  const isMissingClosingIndex = !closingIndexValue;
+
+  const calculateCoef = (originDate: string) => {
+    const originPeriod = getPeriodFromDate(originDate);
+    const originIdx = getIndex(originPeriod);
+    const closingIdx = closingIndexValue;
+    
+    if (!originIdx || !closingIdx) return 1;
+    return closingIdx / originIdx;
+  };
+
+  // --- COMPUTED DATA (RT6) ---
+  const computedPartidasRT6 = useMemo(() => {
+    return partidasRT6.map(p => {
+      let totalBase = 0;
+      let totalHomog = 0;
+      let status: 'ok' | 'warning' | 'error' = 'ok';
+
+      const itemsComputed = p.items.map(item => {
+        const coef = calculateCoef(item.fechaOrigen);
+        const homog = item.importeBase * coef;
+        
+        // Status checks
+        if (!getIndex(getPeriodFromDate(item.fechaOrigen))) status = 'warning';
+        
+        return { ...item, coef, homog };
+      });
+
+      totalBase = itemsComputed.reduce((sum, i) => sum + i.importeBase, 0);
+      totalHomog = itemsComputed.reduce((sum, i) => sum + i.homog, 0);
+      
+      if (isMissingClosingIndex) status = 'error';
+
+      return {
+        ...p,
+        itemsComputed,
+        totalBase,
+        totalHomog,
+        totalRecpam: totalHomog - totalBase,
+        status
+      };
+    });
+  }, [partidasRT6, closingDate, indices]);
+
+  // --- COMPUTED DATA (RT17) ---
+  const computedPartidasRT17 = useMemo(() => {
+    return partidasRT17.map(p => {
+      let valCorriente = 0;
+      let resTenencia = 0;
+      let baseReference = 0; // Can be historical or homog depending on data avail
+
+      if (p.type === 'USD' && p.usdItems) {
+        p.usdItems.forEach(item => {
+           const currentItemVal = item.usd * item.tcCierre;
+           valCorriente += currentItemVal;
+           
+           // Ideal: Compare vs Homog. For prototype, we compare vs Base Historical if not linked
+           // In a full app, we would link this to an RT6 item to get the proper Homog value.
+           // Here, we simulate we compare vs Base (simplified)
+           baseReference += item.baseArs;
+        });
+        resTenencia = valCorriente - baseReference;
+      } else if (p.type === 'Otros' && p.manualCurrentValue) {
+        valCorriente = p.manualCurrentValue;
+        // Mock base for others
+        baseReference = valCorriente * 0.9; 
+        resTenencia = valCorriente - baseReference;
+      }
+
+      return {
+        ...p,
+        valCorriente,
+        resTenencia,
+        baseReference
+      };
+    });
+  }, [partidasRT17]);
+
+  // Global Totals
+  const totalBaseRT6 = computedPartidasRT6.reduce((s, p) => s + p.totalBase, 0);
+  const totalHomogRT6 = computedPartidasRT6.reduce((s, p) => s + p.totalHomog, 0);
+  const totalRecpamRT6 = computedPartidasRT6.reduce((s, p) => s + p.totalRecpam, 0);
+  
+  const totalResTenencia = computedPartidasRT17.reduce((s, p) => s + p.resTenencia, 0);
+
+  // RECPAM Global
+  const recpamCoef = closingIndexValue && indices.length > 0 ? (closingIndexValue / indices[0].value) : 1; 
+  const pmn = recpamInputs.activeMon - recpamInputs.passiveMon;
+  const recpamEstimado = pmn * (recpamCoef - 1) * -1;
+
+  // --- HANDLERS ---
+
+  const handleOpenRT6Drawer = (id?: string) => {
+    if (id) {
+      const existing = partidasRT6.find(p => p.id === id);
+      if (existing) {
+        setTempRT6(JSON.parse(JSON.stringify(existing))); // Deep copy
+        setEditingRT6Id(id);
+      }
+    } else {
+      // New
+      setTempRT6({
+        id: crypto.randomUUID(),
+        rubro: 'Mercaderias',
+        cuentaCodigo: '',
+        cuentaNombre: '',
+        items: []
+      });
+      setEditingRT6Id(null);
+    }
+    setRT6DrawerOpen(true);
+  };
+
+  const handleSaveRT6 = () => {
+    if (!tempRT6) return;
+    if (editingRT6Id) {
+      setPartidasRT6(prev => prev.map(p => p.id === editingRT6Id ? tempRT6 : p));
+    } else {
+      setPartidasRT6(prev => [...prev, tempRT6]);
+    }
+    setRT6DrawerOpen(false);
+  };
+
+  const handleOpenRT17Drawer = (id?: string) => {
+    if (id) {
+      const existing = partidasRT17.find(p => p.id === id);
+      if (existing) {
+        setTempRT17(JSON.parse(JSON.stringify(existing)));
+        setEditingRT17Id(id);
+      }
+    } else {
+      setTempRT17({
+        id: crypto.randomUUID(),
+        type: 'USD',
+        cuentaCodigo: '',
+        cuentaNombre: '',
+        usdItems: []
+      });
+      setEditingRT17Id(null);
+    }
+    setRT17DrawerOpen(true);
+  };
+
+  const handleSaveRT17 = () => {
+    if (!tempRT17) return;
+    if (editingRT17Id) {
+      setPartidasRT17(prev => prev.map(p => p.id === editingRT17Id ? tempRT17 : p));
+    } else {
+      setPartidasRT17(prev => [...prev, tempRT17]);
+    }
+    setRT17DrawerOpen(false);
+  };
+
+  // --- RENDERERS ---
+
+  return (
+    <div className="min-h-screen bg-[#F8FAFC] font-sans pb-20">
+      
+      {/* HEADER */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
+                <FileText size={16} /> Planillas Complementarias / Cierre
+              </div>
+              <h1 className={`text-2xl text-slate-900 ${BRAND.display}`}>
+                Cierre: AxI + Valuación
+              </h1>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 shadow-sm hover:border-blue-300 transition-colors">
+                <Calendar size={16} className="text-slate-500" />
+                <span className="text-xs font-semibold text-slate-500 uppercase mr-2">Fecha Cierre</span>
+                <input 
+                  type="date" 
+                  value={closingDate}
+                  onChange={(e) => setClosingDate(e.target.value)}
+                  className="bg-transparent text-slate-900 font-medium focus:outline-none text-sm font-mono cursor-pointer"
+                />
+              </div>
+
+              {isMissingClosingIndex && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg text-xs font-semibold border border-amber-200 animate-pulse">
+                  <AlertCircle size={14} />
+                  Falta índice {closingPeriod}
+                </div>
+              )}
+
+              <div className="h-8 w-px bg-slate-200 mx-1 hidden md:block"></div>
+
+              <button 
+                className={`${BRAND.gradient} text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-lg shadow-blue-500/20 flex items-center gap-2`}
+                onClick={() => setActiveTab('asientos')}
+              >
+                <CheckCircle2 size={16} weight="bold" /> Generar Asientos
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        
+        {/* KPI SUMMARY */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <KpiCard label="Activo Base" value={formatCurrency(totalBaseRT6)} subtext="Valores históricos" />
+          <KpiCard 
+            label="Ajustado (RT6)" 
+            value={formatCurrency(totalHomogRT6)} 
+            subtext={`Coef. cierre: ${closingIndexValue ? (closingIndexValue/indices[0].value).toFixed(2) : '-'}`} 
+            highlight 
+          />
+          <KpiCard 
+            label="Impacto RECPAM" 
+            value={formatCurrency(totalRecpamRT6 + recpamEstimado)} 
+            subtext="RT6 Partidas + PMN" 
+          />
+           <div className="p-4 rounded-xl bg-slate-800 text-white flex flex-col justify-between shadow-lg">
+            <div className="flex justify-between items-start">
+              <span className="text-xs font-semibold uppercase opacity-70">Valuación</span>
+              <div className="p-1.5 bg-white/10 rounded-lg"><DollarSign size={16} /></div>
+            </div>
+            <div className="mt-2">
+               <div className="text-2xl font-bold font-mono text-emerald-400">
+                  {formatCurrency(totalResTenencia)}
+               </div>
+               <div className="text-xs text-slate-400 mt-1">Resultado x Tenencia</div>
+            </div>
+          </div>
+        </div>
+
+        {/* TABS */}
+        <div className="flex gap-6 border-b border-slate-200 mb-6">
+          {[
+            { id: 'indices', label: '1. Índices (RT6)', icon: TrendingUp },
+            { id: 'reexpresion', label: '2. Reexpresión (RT6)', icon: Calculator },
+            { id: 'valuacion', label: '3. Valuación (RT17)', icon: DollarSign },
+            { id: 'asientos', label: '4. Asientos Sugeridos', icon: FileText },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as TabId)}
+              className={`pb-3 flex items-center gap-2 text-sm font-semibold transition-all relative ${
+                activeTab === tab.id 
+                  ? 'text-blue-600' 
+                  : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <tab.icon size={18} />
+              {tab.label}
+              {activeTab === tab.id && (
+                <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600 rounded-t-full"></div>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* CONTENT */}
+        <div className="animate-in fade-in duration-300">
+          
+          {/* --- TAB 1: INDICES --- */}
+          {activeTab === 'indices' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                  <div>
+                    <h3 className="font-semibold text-slate-800">Tabla de Índices (FACPCE)</h3>
+                    <p className="text-xs text-slate-500">Periodo de cierre seleccionado: <strong>{closingPeriod}</strong></p>
+                  </div>
+                  <button className="text-blue-600 text-sm font-medium hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1">
+                    <Download size={14} /> Importar CSV
+                  </button>
+                </div>
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-xs">
+                    <tr>
+                      <th className="px-4 py-3">Período</th>
+                      <th className="px-4 py-3 text-right">Índice</th>
+                      <th className="px-4 py-3 text-right">Coef. al Cierre</th>
+                      <th className="px-4 py-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {indices.map((idx) => {
+                      const isClosing = idx.period === closingPeriod;
+                      const coef = closingIndexValue ? closingIndexValue / idx.value : 0;
+                      return (
+                        <tr key={idx.period} className={`hover:bg-slate-50/80 ${isClosing ? 'bg-blue-50/30' : ''}`}>
+                          <td className="px-4 py-3 font-medium text-slate-700">
+                            {idx.period} 
+                            {isClosing && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold uppercase">Cierre</span>}
+                          </td>
+                          <td className={`px-4 py-3 text-right ${BRAND.mono}`}>{idx.value.toFixed(2)}</td>
+                          <td className={`px-4 py-3 text-right ${BRAND.mono} text-slate-500`}>
+                            {coef > 0 ? coef.toFixed(4) : '-'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <button className="text-slate-400 hover:text-blue-600 p-1">Editar</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* --- TAB 2: REEXPRESION --- */}
+          {activeTab === 'reexpresion' && (
+            <div className="flex flex-col gap-6">
+              
+              {/* Educational Callout (No more Toggle) */}
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
+                 <HelpCircle className="text-blue-600 mt-0.5" size={20} />
+                 <div className="text-sm text-slate-600">
+                    <p className="font-semibold text-blue-800 mb-1">Guía rápida RT6</p>
+                    <ul className="list-disc pl-4 space-y-1">
+                      <li>Las <strong>partidas no monetarias</strong> (Bienes de Uso, Stock) se reexpresan aplicando coeficiente desde fecha de origen.</li>
+                      <li>Las <strong>partidas monetarias</strong> (Caja, Deudas en ARS) generan RECPAM por su exposición. Usá la calculadora de abajo para estimarlo globalmente.</li>
+                    </ul>
+                 </div>
+              </div>
+
+              {/* RECPAM ESTIMATOR (Papel de trabajo) */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+                  <div className="flex justify-between items-center mb-4">
+                     <h4 className="font-semibold text-slate-800 flex items-center gap-2">
+                        <Calculator size={18} className="text-slate-500" />
+                        Papel de trabajo: Estimación RECPAM (Monetarios)
+                      </h4>
+                      <Badge type="neutral">Estimación</Badge>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-4">
+                      <div>
+                        <label className={BRAND.label}>Activos Monetarios</label>
+                        <input type="number" 
+                          className={BRAND.input} 
+                          placeholder="0.00"
+                          onChange={(e) => setRecpamInputs(p => ({ ...p, activeMon: Number(e.target.value) }))}
+                        />
+                      </div>
+                      <div>
+                        <label className={BRAND.label}>Pasivos Monetarios</label>
+                        <input type="number" 
+                          className={BRAND.input} 
+                          placeholder="0.00"
+                          onChange={(e) => setRecpamInputs(p => ({ ...p, passiveMon: Number(e.target.value) }))}
+                        />
+                      </div>
+                      <div className="px-4 py-2 bg-white rounded-lg border border-slate-200 ml-auto">
+                        <div className="text-xs text-slate-500">RECPAM Global Estimado</div>
+                        <div className={`text-lg font-bold ${BRAND.mono} ${recpamEstimado > 0 ? 'text-emerald-600' : 'text-slate-700'}`}>
+                          {formatCurrency(recpamEstimado)}
+                        </div>
+                      </div>
+                  </div>
+              </div>
+
+              {/* MAIN TABLE RT6 */}
+              <div className={BRAND.card}>
+                 <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
+                    <h3 className="font-semibold text-slate-800">Partidas No Monetarias</h3>
+                    <button 
+                      onClick={() => handleOpenRT6Drawer()}
+                      className="text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 shadow-sm shadow-blue-500/30"
+                    >
+                      <Plus size={16} /> Agregar Partida
+                    </button>
+                 </div>
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-sm text-left">
+                     <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-xs whitespace-nowrap">
+                       <tr>
+                         <th className="px-4 py-3">Cuenta / Rubro</th>
+                         <th className="px-4 py-3 text-right">Valor Origen</th>
+                         <th className="px-4 py-3 text-right bg-blue-50/30 text-blue-700">Valor Homogéneo</th>
+                         <th className="px-4 py-3 text-right flex items-center justify-end gap-1">
+                            RECPAM (RT6)
+                            <Info size={12} className="text-slate-400 cursor-help" title="Valor Homogéneo - Valor Origen" />
+                         </th>
+                         <th className="px-4 py-3 text-center">Estado</th>
+                         <th className="px-4 py-3 text-center w-10"></th>
+                       </tr>
+                     </thead>
+                     <tbody className="divide-y divide-slate-100">
+                       {computedPartidasRT6.map((row) => (
+                         <tr 
+                            key={row.id} 
+                            onClick={() => handleOpenRT6Drawer(row.id)}
+                            className="hover:bg-slate-50 group cursor-pointer transition-colors"
+                          >
+                           <td className="px-4 py-3">
+                              <div className="font-medium text-slate-800">{row.cuentaNombre}</div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className={`text-xs text-slate-400 ${BRAND.mono}`}>{row.cuentaCodigo}</span>
+                                <Badge type="neutral">{row.rubro}</Badge>
+                              </div>
+                           </td>
+                           <td className={`px-4 py-3 text-right ${BRAND.mono} text-slate-600`}>{formatNumber(row.totalBase)}</td>
+                           <td className={`px-4 py-3 text-right font-bold bg-blue-50/10 group-hover:bg-blue-50/30 ${BRAND.mono} text-slate-800`}>
+                              {formatNumber(row.totalHomog)}
+                           </td>
+                           <td className={`px-4 py-3 text-right font-medium ${BRAND.mono} text-emerald-600`}>
+                              +{formatNumber(row.totalRecpam)}
+                           </td>
+                           <td className="px-4 py-3 text-center">
+                              {row.status === 'ok' ? (
+                                <span className="inline-flex w-2 h-2 rounded-full bg-emerald-500" title="OK" />
+                              ) : (
+                                <Badge type="error">Revisar</Badge>
+                              )}
+                           </td>
+                           <td className="px-4 py-3 text-center">
+                              <div className="p-1 text-slate-300 group-hover:text-blue-500">
+                                <Edit2 size={14} />
+                              </div>
+                           </td>
+                         </tr>
+                       ))}
+                       {computedPartidasRT6.length === 0 && (
+                         <tr>
+                           <td colSpan={6} className="py-8 text-center text-slate-400 text-sm">
+                             No hay partidas cargadas. Hacé clic en "Agregar Partida".
+                           </td>
+                         </tr>
+                       )}
+                     </tbody>
+                   </table>
+                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- TAB 3: VALUACION --- */}
+          {activeTab === 'valuacion' && (
+            <div className="space-y-6">
+               <div className={BRAND.card}>
+                 <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
+                    <div>
+                      <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                        <DollarSign size={18} className="text-emerald-500" /> 
+                        Valuación a Valores Corrientes (RT17)
+                      </h3>
+                    </div>
+                    <button 
+                      onClick={() => handleOpenRT17Drawer()}
+                      className="text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 shadow-sm shadow-blue-500/30"
+                    >
+                      <Plus size={16} /> Agregar Partida
+                    </button>
+                 </div>
+                 <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-xs">
+                        <tr>
+                           <th className="px-4 py-3">Cuenta</th>
+                           <th className="px-4 py-3">Tipo</th>
+                           <th className="px-4 py-3 text-right">Valor Corriente</th>
+                           <th className="px-4 py-3 text-right">Base Comparativa</th>
+                           <th className="px-4 py-3 text-right text-blue-600">R.x.T.</th>
+                           <th className="px-4 py-3 text-center w-10"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {computedPartidasRT17.map(p => (
+                          <tr 
+                            key={p.id} 
+                            onClick={() => handleOpenRT17Drawer(p.id)}
+                            className="hover:bg-slate-50 group cursor-pointer"
+                          >
+                             <td className="px-4 py-3 font-medium text-slate-800">{p.cuentaNombre}</td>
+                             <td className="px-4 py-3"><Badge type={p.type === 'USD' ? 'info' : 'neutral'}>{p.type}</Badge></td>
+                             <td className={`px-4 py-3 text-right font-bold ${BRAND.mono}`}>{formatNumber(p.valCorriente)}</td>
+                             <td className={`px-4 py-3 text-right text-slate-400 ${BRAND.mono}`}>{formatNumber(p.baseReference)}</td>
+                             <td className={`px-4 py-3 text-right font-bold text-blue-600 ${BRAND.mono}`}>
+                               {p.resTenencia > 0 ? '+' : ''}{formatNumber(p.resTenencia)}
+                             </td>
+                             <td className="px-4 py-3 text-center">
+                                <div className="p-1 text-slate-300 group-hover:text-blue-500">
+                                  <Edit2 size={14} />
+                                </div>
+                             </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                 </div>
+               </div>
+            </div>
+          )}
+
+          {/* --- TAB 4: ASIENTOS --- */}
+          {activeTab === 'asientos' && (
+            <div className="max-w-3xl mx-auto space-y-6">
+              
+              {/* Asiento 1 */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="bg-slate-50 px-6 py-3 border-b border-slate-200 flex justify-between items-center">
+                   <div className="flex items-center gap-2">
+                     <span className="font-bold text-slate-700 text-sm">ASIENTO #1</span>
+                     <span className="text-sm text-slate-600">Ajuste por Inflación (RT6)</span>
+                   </div>
+                   <Badge type="warning">Borrador</Badge>
+                </div>
+                <div className="p-6">
+                   <table className="w-full text-sm">
+                      <thead className="text-xs uppercase text-slate-400 font-semibold border-b border-slate-100">
+                         <tr>
+                            <th className="text-left pb-2">Cuenta</th>
+                            <th className="text-right pb-2 w-32">Debe</th>
+                            <th className="text-right pb-2 w-32">Haber</th>
+                         </tr>
+                      </thead>
+                      <tbody className={`divide-y divide-slate-50 ${BRAND.mono}`}>
+                         {computedPartidasRT6.map(p => (
+                           <tr key={p.id}>
+                              <td className="py-3 font-medium text-slate-700">Ajuste por Inf. — {p.cuentaNombre}</td>
+                              <td className="py-3 text-right">{formatNumber(p.totalRecpam)}</td>
+                              <td className="py-3 text-right text-slate-300">-</td>
+                           </tr>
+                         ))}
+                         {/* Contrapartida RECPAM global simplificada para el ejemplo */}
+                         <tr>
+                            <td className="py-3 font-medium text-slate-700">RECPAM</td>
+                            <td className="py-3 text-right text-slate-300">-</td>
+                            <td className="py-3 text-right">{formatNumber(totalRecpamRT6)}</td>
+                         </tr>
+                      </tbody>
+                   </table>
+                </div>
+                <div className="bg-slate-50 px-6 py-3 border-t border-slate-100 flex justify-end">
+                   <button disabled className="text-xs font-semibold text-slate-400 flex items-center gap-1 uppercase tracking-wide cursor-not-allowed" title="Próximamente">
+                      <Save size={14} /> Enviar a Libro Diario
+                   </button>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+        </div>
+      </main>
+
+      {/* --- DRAWERS --- */}
+
+      {/* DRAWER RT6 */}
+      <Drawer
+        isOpen={isRT6DrawerOpen}
+        onClose={() => setRT6DrawerOpen(false)}
+        title={editingRT6Id ? "Editar Partida (RT6)" : "Nueva Partida (RT6)"}
+        footer={
+          <>
+            <button onClick={() => setRT6DrawerOpen(false)} className="px-4 py-2 text-sm text-slate-600 font-medium hover:bg-slate-100 rounded-lg">Cancelar</button>
+            <button onClick={handleSaveRT6} className="px-4 py-2 text-sm text-white bg-blue-600 font-medium hover:bg-blue-700 rounded-lg shadow-sm">Guardar Partida</button>
+          </>
+        }
+      >
+        {tempRT6 && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+               <div>
+                  <label className={BRAND.label}>Rubro</label>
+                  <div className="relative">
+                    <select 
+                      value={tempRT6.rubro}
+                      onChange={(e) => setTempRT6({...tempRT6, rubro: e.target.value as RubroType})}
+                      className={`${BRAND.input} appearance-none`}
+                    >
+                      <option value="Mercaderias">Mercaderías (Stock)</option>
+                      <option value="BienesUso">Bienes de Uso</option>
+                      <option value="Capital">Capital / Aportes</option>
+                      <option value="Otros">Otros (Manual)</option>
+                    </select>
+                    <ChevronDown size={16} className="absolute right-3 top-3 text-slate-400 pointer-events-none" />
+                  </div>
+               </div>
+               <div>
+                  <label className={BRAND.label}>Cuenta Contable</label>
+                  <input 
+                    type="text" 
+                    value={tempRT6.cuentaNombre}
+                    onChange={(e) => setTempRT6({...tempRT6, cuentaNombre: e.target.value})}
+                    placeholder="Ej: Rodados"
+                    className={BRAND.input}
+                  />
+               </div>
+            </div>
+
+            {/* Subforms based on Rubro */}
+            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+               {tempRT6.rubro === 'Mercaderias' && (
+                 <div>
+                    <div className="flex gap-4 mb-4 border-b border-slate-200 pb-2">
+                       <button className="text-sm font-semibold text-blue-600 border-b-2 border-blue-600 pb-2 -mb-2.5">Manual</button>
+                       <button className="text-sm font-semibold text-slate-400 cursor-not-allowed pb-2 flex items-center gap-1">
+                          <Database size={14} /> Inventario
+                       </button>
+                    </div>
+                    <div className="space-y-3">
+                       <div className="text-xs text-slate-500 mb-2">Cargá los lotes de compra históricos:</div>
+                       {tempRT6.items.map((item, idx) => (
+                         <div key={item.id} className="flex gap-2 items-start">
+                            <input type="date" value={item.fechaOrigen} 
+                              onChange={(e) => {
+                                const newItems = [...tempRT6.items];
+                                newItems[idx].fechaOrigen = e.target.value;
+                                setTempRT6({...tempRT6, items: newItems});
+                              }}
+                              className={`${BRAND.input} w-32`} 
+                            />
+                            <input type="number" value={item.importeBase} 
+                              onChange={(e) => {
+                                const newItems = [...tempRT6.items];
+                                newItems[idx].importeBase = Number(e.target.value);
+                                setTempRT6({...tempRT6, items: newItems});
+                              }}
+                              className={`${BRAND.input} flex-1`} placeholder="Importe base" 
+                            />
+                            <button 
+                              onClick={() => {
+                                const newItems = tempRT6.items.filter((_, i) => i !== idx);
+                                setTempRT6({...tempRT6, items: newItems});
+                              }}
+                              className="p-2 text-slate-400 hover:text-red-500"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                         </div>
+                       ))}
+                       <button 
+                         onClick={() => setTempRT6({...tempRT6, items: [...tempRT6.items, { id: crypto.randomUUID(), fechaOrigen: '', importeBase: 0 }]})}
+                         className="text-sm text-blue-600 font-medium hover:underline flex items-center gap-1"
+                       >
+                         + Agregar Lote
+                       </button>
+                    </div>
+                 </div>
+               )}
+
+               {['BienesUso', 'Capital', 'Otros'].includes(tempRT6.rubro) && (
+                 <div className="space-y-4">
+                    <p className="text-xs text-slate-500">Datos de la partida:</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className={BRAND.label}>Fecha Origen</label>
+                        <input 
+                          type="date"
+                          value={tempRT6.items[0]?.fechaOrigen || ''}
+                          onChange={(e) => {
+                             // Ensure at least one item exists
+                             const newItem = { id: tempRT6.items[0]?.id || 'new', fechaOrigen: e.target.value, importeBase: tempRT6.items[0]?.importeBase || 0 };
+                             setTempRT6({...tempRT6, items: [newItem]});
+                          }}
+                          className={BRAND.input}
+                        />
+                      </div>
+                      <div>
+                        <label className={BRAND.label}>Valor Origen (ARS)</label>
+                        <input 
+                          type="number"
+                          value={tempRT6.items[0]?.importeBase || ''}
+                          onChange={(e) => {
+                             const newItem = { id: tempRT6.items[0]?.id || 'new', fechaOrigen: tempRT6.items[0]?.fechaOrigen || '', importeBase: Number(e.target.value) };
+                             setTempRT6({...tempRT6, items: [newItem]});
+                          }}
+                          className={BRAND.input}
+                        />
+                      </div>
+                    </div>
+                 </div>
+               )}
+            </div>
+
+            {/* Live Preview of Calculation */}
+            {tempRT6.items.length > 0 && (
+               <div className="bg-emerald-50 rounded-lg p-3 text-sm flex justify-between items-center text-emerald-800 border border-emerald-100">
+                  <span>Total Base: {formatNumber(tempRT6.items.reduce((a,b)=>a+b.importeBase,0))}</span>
+                  <span className="font-bold">→ Se calculará Ajuste según índices</span>
+               </div>
+            )}
+          </div>
+        )}
+      </Drawer>
+
+      {/* DRAWER RT17 */}
+      <Drawer
+        isOpen={isRT17DrawerOpen}
+        onClose={() => setRT17DrawerOpen(false)}
+        title={editingRT17Id ? "Editar Valuación (RT17)" : "Nueva Valuación (RT17)"}
+        footer={
+          <>
+            <button onClick={() => setRT17DrawerOpen(false)} className="px-4 py-2 text-sm text-slate-600 font-medium hover:bg-slate-100 rounded-lg">Cancelar</button>
+            <button onClick={handleSaveRT17} className="px-4 py-2 text-sm text-white bg-blue-600 font-medium hover:bg-blue-700 rounded-lg shadow-sm">Guardar Valuación</button>
+          </>
+        }
+      >
+         {tempRT17 && (
+            <div className="space-y-6">
+               <div className="grid grid-cols-2 gap-4">
+                  <div>
+                      <label className={BRAND.label}>Tipo Valuación</label>
+                      <div className="relative">
+                        <select 
+                          value={tempRT17.type}
+                          onChange={(e) => setTempRT17({...tempRT17, type: e.target.value as RT17Type})}
+                          className={`${BRAND.input} appearance-none`}
+                        >
+                          <option value="USD">Moneda Extranjera (USD)</option>
+                          <option value="Otros">Otros (Manual)</option>
+                        </select>
+                        <ChevronDown size={16} className="absolute right-3 top-3 text-slate-400 pointer-events-none" />
+                      </div>
+                  </div>
+                  <div>
+                      <label className={BRAND.label}>Cuenta</label>
+                      <input 
+                        type="text" 
+                        value={tempRT17.cuentaNombre}
+                        onChange={(e) => setTempRT17({...tempRT17, cuentaNombre: e.target.value})}
+                        className={BRAND.input}
+                        placeholder="Ej: Caja USD"
+                      />
+                  </div>
+               </div>
+
+               <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                  {tempRT17.type === 'USD' && (
+                     <div className="space-y-4">
+                        <p className="text-xs text-slate-500">Lotes de moneda extranjera:</p>
+                        {tempRT17.usdItems?.map((item, idx) => (
+                           <div key={item.id} className="grid grid-cols-2 gap-3 pb-4 border-b border-slate-200 last:border-0">
+                              <div>
+                                 <label className="text-[10px] text-slate-400">Fecha Ingreso</label>
+                                 <input type="date" value={item.fechaIngreso} 
+                                   onChange={(e) => {
+                                      const newItems = [...(tempRT17.usdItems || [])];
+                                      newItems[idx].fechaIngreso = e.target.value;
+                                      setTempRT17({...tempRT17, usdItems: newItems});
+                                   }}
+                                   className={BRAND.input} 
+                                 />
+                              </div>
+                              <div>
+                                 <label className="text-[10px] text-slate-400">Cantidad USD</label>
+                                 <input type="number" value={item.usd} 
+                                   onChange={(e) => {
+                                      const newItems = [...(tempRT17.usdItems || [])];
+                                      newItems[idx].usd = Number(e.target.value);
+                                      setTempRT17({...tempRT17, usdItems: newItems});
+                                   }}
+                                   className={BRAND.input} 
+                                 />
+                              </div>
+                              <div>
+                                 <label className="text-[10px] text-slate-400">TC Cierre</label>
+                                 <input type="number" value={item.tcCierre} 
+                                   onChange={(e) => {
+                                      const newItems = [...(tempRT17.usdItems || [])];
+                                      newItems[idx].tcCierre = Number(e.target.value);
+                                      setTempRT17({...tempRT17, usdItems: newItems});
+                                   }}
+                                   className={`${BRAND.input} border-emerald-300 bg-emerald-50/30`} 
+                                 />
+                              </div>
+                              <div className="flex items-end justify-between">
+                                 <div>
+                                    <label className="text-[10px] text-slate-400">Base Histórica (ARS)</label>
+                                    <input type="number" value={item.baseArs} 
+                                      onChange={(e) => {
+                                          const newItems = [...(tempRT17.usdItems || [])];
+                                          newItems[idx].baseArs = Number(e.target.value);
+                                          setTempRT17({...tempRT17, usdItems: newItems});
+                                      }}
+                                      className={BRAND.input} 
+                                    />
+                                 </div>
+                                 <button onClick={() => {
+                                    const newItems = tempRT17.usdItems?.filter((_, i) => i !== idx);
+                                    setTempRT17({...tempRT17, usdItems: newItems});
+                                 }} className="p-2 text-red-400 hover:bg-red-50 rounded"><Trash2 size={16} /></button>
+                              </div>
+                           </div>
+                        ))}
+                        <button 
+                           onClick={() => setTempRT17({
+                              ...tempRT17, 
+                              usdItems: [...(tempRT17.usdItems || []), { id: crypto.randomUUID(), fechaIngreso: '', usd: 0, tcCierre: 0, baseArs: 0 }]
+                           })}
+                           className="text-sm text-blue-600 font-medium hover:underline"
+                        >
+                           + Agregar Lote USD
+                        </button>
+                     </div>
+                  )}
+
+                  {tempRT17.type === 'Otros' && (
+                     <div className="space-y-4">
+                        <div>
+                           <label className={BRAND.label}>Valor Corriente (ARS)</label>
+                           <input type="number" 
+                              value={tempRT17.manualCurrentValue || ''}
+                              onChange={(e) => setTempRT17({...tempRT17, manualCurrentValue: Number(e.target.value)})}
+                              className={BRAND.input}
+                              placeholder="Valor de mercado / VNR"
+                           />
+                        </div>
+                        <div className="bg-blue-50 p-3 rounded text-xs text-blue-700">
+                           Se comparará contra la base histórica o ajustada (si existe) para determinar el Resultado por Tenencia.
+                        </div>
+                     </div>
+                  )}
+               </div>
+            </div>
+         )}
+      </Drawer>
+
+    </div>
+  );
+}
+
+// --- ENTRY POINT CARD ---
+export const CierreEntryPointCard = () => {
+  return (
+    <div className="group bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-lg hover:border-blue-200 transition-all cursor-pointer relative overflow-hidden">
+      <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+        <Calculator size={80} className="text-blue-600" />
+      </div>
+      
+      <div className="mb-4">
+        <Badge type="info">Cierre 2025</Badge>
+      </div>
+      
+      <h3 className={`text-xl text-slate-900 mb-2 ${BRAND.display}`}>Cierre: AxI + Valuación</h3>
+      <p className="text-slate-500 text-sm leading-relaxed mb-6">
+        Asistente integral para el Ajuste por Inflación (RT6) y Valuación a valores corrientes (RT17).
+      </p>
+
+      <button className="text-sm font-semibold text-blue-600 group-hover:text-blue-700 flex items-center gap-2 group-hover:gap-3 transition-all">
+        Abrir Herramienta <ArrowRight size={16} />
+      </button>
+    </div>
+  );
+};

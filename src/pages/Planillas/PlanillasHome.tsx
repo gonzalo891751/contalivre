@@ -67,23 +67,24 @@ export default function PlanillasHome() {
                     </div>
                 </div>
 
-                {/* Card 3: Próximamente */}
-                <div className="card planillas-card disabled opacity-60">
+                {/* Card 4: Cierre AxI + Valuación */}
+                <div className="card planillas-card">
                     <div className="card-header">
                         <div className="flex items-center justify-between width-100">
                             <div className="flex items-center gap-md">
-                                <span className="text-2xl">🚧</span>
-                                <h3 className="card-title">Próximamente</h3>
+                                <span className="text-2xl">🧮</span>
+                                <h3 className="card-title">Cierre: AxI + Valuación</h3>
                             </div>
+                            <span className="badge badge-orange">CIERRE</span>
                         </div>
                     </div>
                     <div className="card-body">
                         <p className="text-secondary mb-lg">
-                            Nueva herramienta en desarrollo.
+                            Ajuste por inflación (RT 6) + Valuación (RT 17) + Asientos sugeridos
                         </p>
-                        <button className="btn btn-secondary width-100" disabled>
-                            No disponible
-                        </button>
+                        <Link to="/planillas/cierre-valuacion" className="btn btn-primary width-100">
+                            Abrir
+                        </Link>
                     </div>
                 </div>
             </div>
@@ -117,6 +118,7 @@ export default function PlanillasHome() {
                 .badge-blue { background-color: #e3f2fd; color: #1976d2; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
                 .badge-green { background-color: #e8f5e9; color: #2e7d32; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
                 .badge-purple { background-color: #f3e5f5; color: #7b1fa2; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+                .badge-orange { background-color: #FEF3C7; color: #D97706; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
                 .opacity-60 { opacity: 0.6; }
                 .gap-md { gap: var(--space-md); }
                 .mb-lg { margin-bottom: var(--space-lg); }

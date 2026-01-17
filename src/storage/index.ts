@@ -68,3 +68,11 @@ export {
     getAccountIdByCode,
     clearAllInventoryData,
 } from './inventario'
+
+// Cierre Valuación
+export {
+    loadCierreValuacionState,
+    saveCierreValuacionState,
+    clearCierreValuacionState,
+} from './cierre-valuacion'
+

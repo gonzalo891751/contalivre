@@ -12,6 +12,8 @@ export default function PlanillasLayout() {
         subtitle = 'Herramientas de cálculo'
     } else if (location.pathname.includes('/conciliaciones')) {
         subtitle = 'Conciliación y arqueo'
+    } else if (location.pathname.includes('/cierre-valuacion')) {
+        subtitle = 'Ajuste por Inflación + Valuación'
     }
 
     return (

@@ -9,6 +9,7 @@ import Estados from './pages/Estados'
 import AmortizacionesPage from './pages/Planillas/AmortizacionesPage'
 import InventarioPage from './pages/Planillas/InventarioPage'
 import ConciliacionesPage from './pages/Planillas/Conciliaciones/ConciliacionesPage'
+import CierreValuacionPage from './pages/Planillas/CierreValuacionPage'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
 import PlanillasHome from './pages/Planillas/PlanillasHome'
 
@@ -28,6 +29,7 @@ function App() {
                     <Route path="inventario" element={<InventarioPage />} />
                     <Route path="conciliaciones" element={<ConciliacionesPage />} />
                     <Route path="amortizaciones" element={<AmortizacionesPage />} />
+                    <Route path="cierre-valuacion" element={<CierreValuacionPage />} />
                 </Route>
             </Routes>
         </MainLayout>

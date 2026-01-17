@@ -29,6 +29,9 @@ class ContableDatabase extends Dexie {
     inventoryMovements!: EntityTable<InventoryMovement, 'id'>
     inventoryClosings!: EntityTable<InventoryClosing, 'id'>
     inventoryConfig!: EntityTable<InventoryConfig, 'id'>
+    // Cierre Valuación module
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cierreValuacionState!: EntityTable<any, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -92,6 +95,19 @@ class ContableDatabase extends Dexie {
             inventoryMovements: 'id, date, productId, type',
             inventoryClosings: 'id, periodEnd, status',
             inventoryConfig: 'id',
+        })
+
+        // Version 5: Cierre Valuación module
+        this.version(5).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
         })
     }
 }
