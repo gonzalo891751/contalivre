@@ -22,6 +22,8 @@ import {
     formatCurrencyARS,
     formatNumber,
     formatCoef,
+    syncRt17Shells,
+    canGenerateAsientos,
 } from '../../core/cierre-valuacion';
 import {
     loadCierreValuacionState,
@@ -30,6 +32,8 @@ import {
 import { RT6Drawer } from './components/RT6Drawer';
 import { RT17Drawer } from './components/RT17Drawer';
 import { IndicesImportWizard } from './components/IndicesImportWizard';
+import { Step2RT6Panel } from './components/Step2RT6Panel';
+import { Step3RT17Panel } from './components/Step3RT17Panel';
 
 // Icons (using emoji for simplicity - can be replaced with lucide-react)
 const ICONS = {
@@ -64,9 +68,13 @@ export default function CierreValuacionPage() {
     // Import wizard and edit modal state
     const [isImportWizardOpen, setImportWizardOpen] = useState(false);
     const [editingIndex, setEditingIndex] = useState<{ period: string; value: number } | null>(null);
-    // TODO: Grouped tables feature - uncomment when implementing D and E
-    // const [expandedRT6, setExpandedRT6] = useState<Set<string>>(new Set());
-    // const [expandedRT17, setExpandedRT17] = useState<Set<string>>(new Set());
+
+    // Tab 1 Pagination state
+    const [indicesPage, setIndicesPage] = useState(1);
+    const [indicesPageSize] = useState(20);
+
+    // Delete confirmation state
+    const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'RT6' | 'RT17'; id: string } | null>(null);
 
     // Refs
     const saveTimeoutRef = useRef<number | null>(null);
@@ -114,6 +122,25 @@ export default function CierreValuacionPage() {
     const closingIndexValue = getIndexForPeriod(indices, closingPeriod);
     const isMissingClosingIndex = !closingIndexValue;
 
+    // Sort indices by period DESC (newest first)
+    const sortedIndices = useMemo(() => {
+        return [...indices].sort((a, b) => {
+            // Parse YYYY-MM to numeric for comparison
+            const [yearA, monthA] = a.period.split('-').map(Number);
+            const [yearB, monthB] = b.period.split('-').map(Number);
+            const numA = yearA * 100 + monthA;
+            const numB = yearB * 100 + monthB;
+            return numB - numA; // DESC
+        });
+    }, [indices]);
+
+    // Paginate indices
+    const totalIndicesPages = Math.ceil(sortedIndices.length / indicesPageSize);
+    const paginatedIndices = useMemo(() => {
+        const start = (indicesPage - 1) * indicesPageSize;
+        return sortedIndices.slice(start, start + indicesPageSize);
+    }, [sortedIndices, indicesPage, indicesPageSize]);
+
     // Computed partidas
     const computedRT6 = useMemo(
         () => computeAllRT6Partidas(state?.partidasRT6 || [], indices, closingPeriod),
@@ -124,6 +151,22 @@ export default function CierreValuacionPage() {
         () => computeAllRT17Partidas(state?.partidasRT17 || [], computedRT6),
         [state?.partidasRT17, computedRT6]
     );
+
+    // Auto-sync RT17 shells when RT6 changes
+    useEffect(() => {
+        if (!state) return;
+        const synced = syncRt17Shells(state.partidasRT17, state.partidasRT6);
+        // Update if length changed (orphans removed OR new shells added)
+        // Note: This covers most cases. For a strict ID check we'd need more logic, 
+        // but since we only ever add/remove based on RT6, length diff is the primary signal.
+        if (synced.length !== state.partidasRT17.length) {
+            updateState((prev) => ({
+                ...prev,
+                partidasRT17: syncRt17Shells(prev.partidasRT17, prev.partidasRT6),
+            }));
+        }
+    }, [state?.partidasRT6.length, state?.partidasRT17.length, updateState]); // Check lengths change
+
 
     // Totals
     const rt6Totals = useMemo(() => calculateRT6Totals(computedRT6), [computedRT6]);
@@ -138,6 +181,29 @@ export default function CierreValuacionPage() {
 
     // Draft asientos
     const asientoRT6 = useMemo(() => generateAsientoRT6(computedRT6), [computedRT6]);
+
+    // Helper to get RT6 data for bridge logic
+    const getRT6DataForRT17 = useCallback((rt17Id: string | null) => {
+        if (!rt17Id) return undefined;
+        const p17 = state?.partidasRT17.find(p => p.id === rt17Id);
+        if (p17 && p17.sourcePartidaId) {
+            const p6 = computedRT6.find(p => p.id === p17.sourcePartidaId);
+            if (p6) {
+                // Use total USD amount from profile if available
+                const usdAmount = p6.usdAmount || 0;
+                return {
+                    baselineHomog: p6.totalHomog,
+                    profileType: p6.profileType,
+                    sourceUsdAmount: usdAmount
+                };
+            }
+        }
+        return undefined;
+    }, [state?.partidasRT17, computedRT6]);
+
+
+
+
 
     // =============================================
     // Handlers
@@ -233,6 +299,14 @@ export default function CierreValuacionPage() {
         showToast('Valuación guardada');
     };
 
+    const handleDeleteRT17 = (id: string) => {
+        updateState((prev) => ({
+            ...prev,
+            partidasRT17: prev.partidasRT17.filter((p) => p.id !== id),
+        }));
+        showToast('Valuación eliminada');
+    };
+
     // RECPAM handlers
     const handleRecpamChange = (field: 'activeMon' | 'passiveMon', value: number) => {
         updateState((prev) => ({
@@ -290,7 +364,12 @@ export default function CierreValuacionPage() {
                         </div>
                     )}
 
-                    <button className="btn btn-primary" onClick={handleGenerarAsientos}>
+                    <button
+                        className="btn btn-primary"
+                        onClick={handleGenerarAsientos}
+                        disabled={!canGenerateAsientos(computedRT17)}
+                        title={!canGenerateAsientos(computedRT17) ? "Completá todas las valuaciones pendientes para generar asientos" : ""}
+                    >
                         {ICONS.check} Generar Asientos
                     </button>
                 </div>
@@ -378,7 +457,7 @@ export default function CierreValuacionPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {indices.map((idx) => {
+                                    {paginatedIndices.map((idx) => {
                                         const isClosing = idx.period === closingPeriod;
                                         const coef = closingIndexValue
                                             ? closingIndexValue / idx.value
@@ -419,6 +498,28 @@ export default function CierreValuacionPage() {
                                 </tbody>
                             </table>
                         </div>
+                        {/* Pagination Controls */}
+                        {totalIndicesPages > 1 && (
+                            <div className="cierre-pagination">
+                                <button
+                                    className="btn btn-sm btn-secondary"
+                                    disabled={indicesPage <= 1}
+                                    onClick={() => setIndicesPage((p) => Math.max(1, p - 1))}
+                                >
+                                    ← Anterior
+                                </button>
+                                <span className="cierre-pagination-info">
+                                    Página {indicesPage} de {totalIndicesPages} ({sortedIndices.length} índices)
+                                </span>
+                                <button
+                                    className="btn btn-sm btn-secondary"
+                                    disabled={indicesPage >= totalIndicesPages}
+                                    onClick={() => setIndicesPage((p) => Math.min(totalIndicesPages, p + 1))}
+                                >
+                                    Siguiente →
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -431,14 +532,8 @@ export default function CierreValuacionPage() {
                             <div>
                                 <strong>Guía rápida RT6</strong>
                                 <ul>
-                                    <li>
-                                        Las <strong>partidas no monetarias</strong> se reexpresan
-                                        con coeficiente desde fecha de origen.
-                                    </li>
-                                    <li>
-                                        Las <strong>partidas monetarias</strong> generan RECPAM.
-                                        Usá la calculadora de abajo.
-                                    </li>
+                                    <li>Las <strong>partidas no monetarias</strong> se reexpresan con coeficiente desde fecha de origen.</li>
+                                    <li>Las <strong>partidas monetarias</strong> generan RECPAM. Usá la calculadora de abajo.</li>
                                 </ul>
                             </div>
                         </div>
@@ -446,9 +541,7 @@ export default function CierreValuacionPage() {
                         {/* RECPAM Calculator */}
                         <div className="card cierre-recpam-card">
                             <div className="card-header">
-                                <h4>
-                                    {ICONS.calculator} Papel de trabajo: Estimación RECPAM
-                                </h4>
+                                <h4>{ICONS.calculator} Papel de trabajo: Estimación RECPAM</h4>
                                 <span className="badge">Estimación</span>
                             </div>
                             <div className="cierre-recpam-grid">
@@ -458,9 +551,7 @@ export default function CierreValuacionPage() {
                                         type="number"
                                         className="form-input"
                                         value={recpamInputs.activeMon || ''}
-                                        onChange={(e) =>
-                                            handleRecpamChange('activeMon', Number(e.target.value))
-                                        }
+                                        onChange={(e) => handleRecpamChange('activeMon', Number(e.target.value))}
                                         placeholder="0.00"
                                     />
                                 </div>
@@ -470,180 +561,37 @@ export default function CierreValuacionPage() {
                                         type="number"
                                         className="form-input"
                                         value={recpamInputs.passiveMon || ''}
-                                        onChange={(e) =>
-                                            handleRecpamChange('passiveMon', Number(e.target.value))
-                                        }
+                                        onChange={(e) => handleRecpamChange('passiveMon', Number(e.target.value))}
                                         placeholder="0.00"
                                     />
                                 </div>
                                 <div className="cierre-recpam-result">
                                     <div className="cierre-recpam-label">RECPAM Estimado</div>
-                                    <div
-                                        className={`cierre-recpam-value ${recpamEstimado > 0 ? 'positive' : ''
-                                            }`}
-                                    >
+                                    <div className={`cierre-recpam-value ${recpamEstimado > 0 ? 'positive' : ''}`}>
                                         {formatCurrencyARS(recpamEstimado)}
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        {/* RT6 Table */}
-                        <div className="card">
-                            <div className="card-header">
-                                <h3 className="card-title">Partidas No Monetarias</h3>
-                                <button
-                                    className="btn btn-primary"
-                                    onClick={() => handleOpenRT6Drawer()}
-                                >
-                                    {ICONS.plus} Agregar Partida
-                                </button>
-                            </div>
-                            <div className="table-container">
-                                <table className="table">
-                                    <thead>
-                                        <tr>
-                                            <th>Cuenta / Rubro</th>
-                                            <th className="text-right">Valor Origen</th>
-                                            <th className="text-right cierre-col-highlight">
-                                                Valor Homogéneo
-                                            </th>
-                                            <th className="text-right">
-                                                RECPAM (RT6)
-                                                <span
-                                                    className="cierre-tooltip"
-                                                    title="Valor Homogéneo − Valor Base"
-                                                >
-                                                    {ICONS.info}
-                                                </span>
-                                            </th>
-                                            <th className="text-center">Estado</th>
-                                            <th className="text-center" style={{ width: 40 }}></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {computedRT6.map((row) => (
-                                            <tr
-                                                key={row.id}
-                                                className="cursor-pointer hover-row"
-                                                onClick={() => handleOpenRT6Drawer(row.id)}
-                                            >
-                                                <td>
-                                                    <div className="font-medium">{row.cuentaNombre}</div>
-                                                    <div className="text-muted text-sm">
-                                                        {row.cuentaCodigo}{' '}
-                                                        <span className="badge badge-sm">
-                                                            {row.rubro}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td className="text-right font-mono">
-                                                    {formatNumber(row.totalBase)}
-                                                </td>
-                                                <td className="text-right font-mono font-bold cierre-col-highlight">
-                                                    {formatNumber(row.totalHomog)}
-                                                </td>
-                                                <td className="text-right font-mono text-success">
-                                                    +{formatNumber(row.totalRecpam)}
-                                                </td>
-                                                <td className="text-center">
-                                                    {row.status === 'ok' ? (
-                                                        <span className="status-dot status-ok"></span>
-                                                    ) : (
-                                                        <span className="badge badge-red">
-                                                            Revisar
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="text-center">
-                                                    <span className="text-muted">{ICONS.edit}</span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                        {computedRT6.length === 0 && (
-                                            <tr>
-                                                <td colSpan={6} className="text-center text-muted py-lg">
-                                                    No hay partidas. Hacé clic en "Agregar Partida".
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
+                        <Step2RT6Panel
+                            computedRT6={computedRT6}
+                            onAddPartida={() => handleOpenRT6Drawer()}
+                            onEditPartida={(id) => handleOpenRT6Drawer(id)}
+                            onDeletePartida={(id) => setDeleteConfirm({ type: 'RT6', id })}
+                        />
                     </div>
                 )}
 
                 {/* TAB 3: VALUACION */}
+                {/* TAB 3: VALUACION */}
                 {activeTab === 'valuacion' && (
-                    <div className="card">
-                        <div className="card-header">
-                            <div>
-                                <h3 className="card-title">
-                                    {ICONS.dollar} Valuación a Valores Corrientes (RT17)
-                                </h3>
-                            </div>
-                            <button
-                                className="btn btn-primary"
-                                onClick={() => handleOpenRT17Drawer()}
-                            >
-                                {ICONS.plus} Agregar Partida
-                            </button>
-                        </div>
-                        <div className="table-container">
-                            <table className="table">
-                                <thead>
-                                    <tr>
-                                        <th>Cuenta</th>
-                                        <th>Tipo</th>
-                                        <th className="text-right">Valor Corriente</th>
-                                        <th className="text-right">Base Comparativa</th>
-                                        <th className="text-right text-primary">R.x.T.</th>
-                                        <th className="text-center" style={{ width: 40 }}></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {computedRT17.map((p) => (
-                                        <tr
-                                            key={p.id}
-                                            className="cursor-pointer hover-row"
-                                            onClick={() => handleOpenRT17Drawer(p.id)}
-                                        >
-                                            <td className="font-medium">{p.cuentaNombre}</td>
-                                            <td>
-                                                <span
-                                                    className={`badge ${p.type === 'USD' ? 'badge-blue' : ''
-                                                        }`}
-                                                >
-                                                    {p.type}
-                                                </span>
-                                            </td>
-                                            <td className="text-right font-mono font-bold">
-                                                {formatNumber(p.valCorriente)}
-                                            </td>
-                                            <td className="text-right font-mono text-muted">
-                                                {formatNumber(p.baseReference)}
-                                            </td>
-                                            <td className="text-right font-mono font-bold text-primary">
-                                                {p.resTenencia > 0 ? '+' : ''}
-                                                {formatNumber(p.resTenencia)}
-                                            </td>
-                                            <td className="text-center">
-                                                <span className="text-muted">{ICONS.edit}</span>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {computedRT17.length === 0 && (
-                                        <tr>
-                                            <td colSpan={6} className="text-center text-muted py-lg">
-                                                No hay partidas. Hacé clic en "Agregar Partida".
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
+                    <Step3RT17Panel
+                        computedRT17={computedRT17}
+                        computedRT6={computedRT6}
+                        onCompleteValuation={handleOpenRT17Drawer}
+                        onGoToStep2={() => setActiveTab('reexpresion')}
+                    />
                 )}
 
                 {/* TAB 4: ASIENTOS */}
@@ -728,9 +676,11 @@ export default function CierreValuacionPage() {
                 editingId={editingRT17Id}
                 partidas={state.partidasRT17}
                 onSave={handleSaveRT17}
+                baselineHomog={getRT6DataForRT17(editingRT17Id)?.baselineHomog}
+                profileType={getRT6DataForRT17(editingRT17Id)?.profileType}
+                sourceUsdAmount={getRT6DataForRT17(editingRT17Id)?.sourceUsdAmount}
             />
 
-            {/* IMPORT WIZARD */}
             <IndicesImportWizard
                 isOpen={isImportWizardOpen}
                 onClose={() => setImportWizardOpen(false)}
@@ -738,42 +688,81 @@ export default function CierreValuacionPage() {
             />
 
             {/* INDEX EDIT MODAL */}
-            {editingIndex && (
-                <div className="cierre-edit-modal-overlay" onClick={() => setEditingIndex(null)}>
-                    <div className="cierre-edit-modal" onClick={e => e.stopPropagation()}>
-                        <h4>Editar Índice</h4>
-                        <div className="form-group">
-                            <label className="form-label">Período</label>
-                            <input type="text" className="form-input" value={editingIndex.period} disabled />
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">Índice</label>
-                            <input
-                                type="number"
-                                className="form-input"
-                                value={editingIndex.value}
-                                onChange={(e) => setEditingIndex({ ...editingIndex, value: Number(e.target.value) })}
-                                step="0.01"
-                            />
-                        </div>
-                        <div className="cierre-edit-modal-footer">
-                            <button className="btn btn-secondary" onClick={() => setEditingIndex(null)}>
-                                Cancelar
-                            </button>
-                            <button
-                                className="btn btn-primary"
-                                onClick={() => {
-                                    handleUpdateIndex(editingIndex.period, editingIndex.value);
-                                    setEditingIndex(null);
-                                    showToast('Índice actualizado');
-                                }}
-                            >
-                                Guardar
-                            </button>
+            {
+                editingIndex && (
+                    <div className="cierre-edit-modal-overlay" onClick={() => setEditingIndex(null)}>
+                        <div className="cierre-edit-modal" onClick={e => e.stopPropagation()}>
+                            <h4>Editar Índice</h4>
+                            <div className="form-group">
+                                <label className="form-label">Período</label>
+                                <input type="text" className="form-input" value={editingIndex.period} disabled />
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Índice</label>
+                                <input
+                                    type="number"
+                                    className="form-input"
+                                    value={editingIndex.value}
+                                    onChange={(e) => {
+                                        const val = Number(e.target.value);
+                                        setEditingIndex((prev) => prev ? { ...prev, value: val } : null);
+                                    }}
+                                    step="0.01"
+                                />
+                            </div>
+                            <div className="cierre-edit-modal-footer">
+                                <button className="btn btn-secondary" onClick={() => setEditingIndex(null)}>
+                                    Cancelar
+                                </button>
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={() => {
+                                        if (editingIndex) {
+                                            handleUpdateIndex(editingIndex.period, editingIndex.value);
+                                            setEditingIndex(null);
+                                            showToast('Índice actualizado');
+                                        }
+                                    }}
+                                >
+                                    Guardar
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
+
+            {/* DELETE CONFIRMATION MODAL */}
+            {
+                deleteConfirm && (
+                    <div className="cierre-edit-modal-overlay" onClick={() => setDeleteConfirm(null)}>
+                        <div className="cierre-edit-modal" onClick={e => e.stopPropagation()}>
+                            <h4>Confirmar eliminación</h4>
+                            <p className="text-muted">¿Estás seguro de que querés eliminar esta {deleteConfirm.type === 'RT6' ? 'partida' : 'valuación'}?</p>
+                            <div className="cierre-edit-modal-footer">
+                                <button className="btn btn-secondary" onClick={() => setDeleteConfirm(null)}>
+                                    Cancelar
+                                </button>
+                                <button
+                                    className="btn btn-danger"
+                                    onClick={() => {
+                                        if (deleteConfirm) {
+                                            if (deleteConfirm.type === 'RT6') {
+                                                handleDeleteRT6(deleteConfirm.id);
+                                            } else {
+                                                handleDeleteRT17(deleteConfirm.id);
+                                            }
+                                            setDeleteConfirm(null);
+                                        }
+                                    }}
+                                >
+                                    Eliminar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
 
             {/* TOAST */}
             {toast && <div className="cierre-toast">{toast}</div>}
@@ -956,6 +945,90 @@ export default function CierreValuacionPage() {
                     gap: var(--space-sm);
                     margin-top: var(--space-md);
                 }
+                /* Pagination */
+                .cierre-pagination {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: var(--space-md);
+                    padding: var(--space-md);
+                    border-top: 1px solid var(--color-border);
+                }
+                .cierre-pagination-info {
+                    font-size: var(--font-size-sm);
+                    color: var(--color-text-secondary);
+                }
+                /* Grouped sections (RT6/RT17) */
+                .cierre-grouped-sections {
+                    padding: var(--space-md);
+                }
+                .cierre-grupo-section {
+                    margin-bottom: var(--space-lg);
+                }
+                .cierre-grupo-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: var(--space-sm) var(--space-md);
+                    background: var(--surface-2);
+                    border-radius: var(--radius-md);
+                    margin-bottom: var(--space-sm);
+                }
+                .cierre-grupo-header h4 {
+                    margin: 0;
+                    font-size: var(--font-size-md);
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }
+                .cierre-grupo-totals {
+                    display: flex;
+                    gap: var(--space-sm);
+                    align-items: center;
+                }
+                .cierre-rubro-block {
+                    background: var(--surface-1);
+                    border: 1px solid var(--color-border);
+                    border-radius: var(--radius-md);
+                    margin-bottom: var(--space-sm);
+                    overflow: hidden;
+                }
+                .cierre-rubro-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: var(--space-sm) var(--space-md);
+                    background: var(--surface-2);
+                    border-bottom: 1px solid var(--color-border);
+                }
+                .cierre-rubro-title {
+                    font-weight: 600;
+                    font-size: var(--font-size-sm);
+                }
+                .cierre-rubro-actions {
+                    display: flex;
+                    gap: var(--space-xs);
+                }
+                .cierre-lot-table {
+                    margin: 0;
+                    border: none;
+                    font-size: var(--font-size-sm);
+                }
+                .cierre-lot-table th {
+                    font-size: var(--font-size-xs);
+                    padding: var(--space-xs) var(--space-sm);
+                    background: transparent;
+                }
+                .cierre-lot-table td {
+                    padding: var(--space-xs) var(--space-sm);
+                }
+                .cierre-totals-row {
+                    background: var(--surface-2);
+                    border-top: 1px solid var(--color-border);
+                }
+                .cierre-totals-row td {
+                    padding: var(--space-sm);
+                }
                 .cierre-tabs {
                     display: flex;
                     gap: var(--space-lg);
@@ -1112,6 +1185,6 @@ export default function CierreValuacionPage() {
                 }
                 .btn-ghost:hover { text-decoration: underline; }
             `}</style>
-        </div>
+        </div >
     );
 }

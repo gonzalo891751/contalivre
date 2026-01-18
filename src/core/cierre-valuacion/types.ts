@@ -8,11 +8,20 @@
 // Enums & Basic Types
 // ============================================
 
-/** Rubro types for RT6 */
+/** Rubro types for RT6 (legacy, kept for compatibility) */
 export type RubroType = 'Mercaderias' | 'BienesUso' | 'Capital' | 'Otros';
+
+/** Grupo contable for ACTIVO/PASIVO/PN classification */
+export type GrupoContable = 'ACTIVO' | 'PASIVO' | 'PN';
 
 /** RT17 valuation types */
 export type RT17Type = 'USD' | 'Otros';
+
+/** RT17 valuation status for bridge workflow */
+export type ValuacionStatus = 'pending' | 'done' | 'na';
+
+/** RT6 profile types for different input forms */
+export type RT6ProfileType = 'mercaderias' | 'moneda_extranjera' | 'generic';
 
 /** Tab identifiers */
 export type TabId = 'indices' | 'reexpresion' | 'valuacion' | 'asientos';
@@ -50,8 +59,12 @@ export interface LotRT6 {
 /** RT6 partida (non-monetary item) */
 export interface PartidaRT6 {
     id: string;
-    /** Rubro type */
+    /** Rubro type (legacy enum) */
     rubro: RubroType;
+    /** Grupo contable: ACTIVO/PASIVO/PN */
+    grupo: GrupoContable;
+    /** Rubro label for display (e.g., "Mercaderías", "Bienes de uso") */
+    rubroLabel: string;
     /** Account code */
     cuentaCodigo: string;
     /** Account name */
@@ -61,6 +74,12 @@ export interface PartidaRT6 {
      * Using array for unified handling
      */
     items: LotRT6[];
+    /** Profile type for input form selection */
+    profileType?: RT6ProfileType;
+    /** For moneda extranjera profile: total USD amount */
+    usdAmount?: number;
+    /** For moneda extranjera profile: exchange rate at ingreso */
+    tcIngreso?: number;
 }
 
 /** Computed lot with calculated values */
@@ -109,6 +128,10 @@ export interface PartidaRT17 {
     id: string;
     /** Valuation type */
     type: RT17Type;
+    /** Grupo contable: ACTIVO/PASIVO/PN (optional, defaults to ACTIVO) */
+    grupo?: GrupoContable;
+    /** Rubro label for display */
+    rubroLabel?: string;
     /** Account code */
     cuentaCodigo: string;
     /** Account name */
@@ -119,8 +142,17 @@ export interface PartidaRT17 {
     manualCurrentValue?: number;
     /** Reference for manual value */
     manualReference?: string;
-    /** Link to RT6 item for homogeneous base comparison */
-    linkedRT6Id?: string;
+    /** 
+     * ID of the source RT6 partida.
+     * If present, baseReference is derived from that RT6 item.
+     */
+    sourcePartidaId?: string;
+    /** Valuation status for bridge workflow */
+    valuationStatus?: ValuacionStatus;
+    /** Profile type inherited from RT6 for appropriate input form */
+    profileType?: RT6ProfileType;
+    /** TC Cierre for moneda extranjera (single value for all USD) */
+    tcCierre?: number;
 }
 
 /** Fully computed RT17 partida */
@@ -219,6 +251,8 @@ export const MOCK_PARTIDAS_RT6: PartidaRT6[] = [
     {
         id: 'p1',
         rubro: 'Mercaderias',
+        grupo: 'ACTIVO',
+        rubroLabel: 'Mercaderías',
         cuentaCodigo: '1.2.05.01',
         cuentaNombre: 'Mercaderías (Stock)',
         items: [
@@ -229,6 +263,8 @@ export const MOCK_PARTIDAS_RT6: PartidaRT6[] = [
     {
         id: 'p2',
         rubro: 'Capital',
+        grupo: 'PN',
+        rubroLabel: 'Capital social',
         cuentaCodigo: '3.1.01.01',
         cuentaNombre: 'Capital Social',
         items: [{ id: 'l3', fechaOrigen: '2024-12-01', importeBase: 100000 }],
@@ -258,10 +294,10 @@ export const MOCK_PARTIDAS_RT17: PartidaRT17[] = [
 /** Create initial state */
 export function createInitialState(): CierreValuacionState {
     return {
-        closingDate: '2025-12-31',
+        closingDate: new Date().toISOString().split('T')[0],
         indices: INITIAL_INDICES,
-        partidasRT6: MOCK_PARTIDAS_RT6,
-        partidasRT17: MOCK_PARTIDAS_RT17,
+        partidasRT6: [],
+        partidasRT17: [],
         recpamInputs: { activeMon: 0, passiveMon: 0 },
     };
 }
@@ -275,7 +311,9 @@ export function generateId(): string {
 export function createDefaultPartidaRT6(): PartidaRT6 {
     return {
         id: generateId(),
-        rubro: 'Mercaderias',
+        rubro: 'Otros',
+        grupo: 'ACTIVO',
+        rubroLabel: '',
         cuentaCodigo: '',
         cuentaNombre: '',
         items: [],

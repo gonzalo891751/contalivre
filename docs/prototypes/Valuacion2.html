@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="es" class="antialiased">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cierre: AxI + Valuación | ContaLivre</title>
+    
+    <!-- BRAND BOOK FONTS -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- ICONS -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- TAILWIND (CDN for Prototype) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- TAILWIND CONFIG LINKED TO BRAND BOOK -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',   /* Electric Blue */
+                            secondary: '#10B981', /* Growth Teal */
+                            dark: '#0F172A',      /* Slate 900 */
+                            light: '#F8FAFC',     /* Slate 50 */
+                        },
+                        slate: {
+                            850: '#1e293b', /* Custom dark surface */
+                        }
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+                        'glow': '0 0 15px rgba(59, 130, 246, 0.3)',
+                    },
+                    backgroundImage: {
+                        'brand-gradient': 'linear-gradient(135deg, #2563EB 0%, #10B981 100%)',
+                        'brand-gradient-hover': 'linear-gradient(135deg, #1D4ED8 0%, #059669 100%)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* BRAND UTILS */
+        .tabular-nums { font-variant-numeric: tabular-nums; }
+        
+        /* Custom Scrollbar for Tables */
+        .custom-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .dark .custom-scroll::-webkit-scrollbar-thumb { background: #475569; }
+
+        /* Smooth Transitions */
+        .transition-all-300 { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        
+        /* Drawer Animation */
+        .drawer-overlay { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+        .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+        .drawer-panel { transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .drawer-overlay.open .drawer-panel { transform: translateX(0); }
+    </style>
+</head>
+<body class="bg-brand-light text-slate-900 dark:bg-slate-900 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-300 selection:bg-brand-primary selection:text-white">
+
+    <!-- TOP NAVIGATION (Context) -->
+    <nav class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center gap-4">
+                    <!-- Logo Mock -->
+                    <div class="flex items-center gap-2 font-display font-bold text-xl tracking-tight text-slate-900 dark:text-white">
+                        <div class="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center text-white shadow-lg">
+                            <i class="ph-bold ph-robot"></i>
+                        </div>
+                        ContaLivre
+                    </div>
+                    <div class="h-6 w-px bg-slate-300 dark:bg-slate-600 mx-2"></div>
+                    <!-- Breadcrumbs -->
+                    <div class="flex flex-col">
+                        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Planillas complementarias</span>
+                        <div class="flex items-center gap-2 text-sm font-medium">
+                            <span class="text-slate-500">Cierre</span>
+                            <i class="ph-bold ph-caret-right text-xs text-slate-400"></i>
+                            <span class="text-brand-primary">AxI + Valuación</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-4">
+                    <!-- Dark Mode Toggle -->
+                    <button onclick="toggleTheme()" class="p-2 rounded-full text-slate-400 hover:text-brand-primary hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                        <i class="ph-fill ph-moon dark:hidden"></i>
+                        <i class="ph-fill ph-sun hidden dark:block"></i>
+                    </button>
+                    
+                    <!-- Date Picker Mock -->
+                    <div class="relative group">
+                        <label class="absolute -top-2 left-3 bg-white dark:bg-slate-800 px-1 text-[10px] font-bold text-slate-500 uppercase">Fecha Cierre</label>
+                        <div class="flex items-center gap-2 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-800 cursor-pointer hover:border-brand-primary transition-colors">
+                            <i class="ph-duotone ph-calendar text-brand-primary text-lg"></i>
+                            <span class="font-mono">31/12/2025</span>
+                        </div>
+                    </div>
+
+                    <!-- Main Action -->
+                    <button id="btnGenerarMain" disabled class="group relative px-5 py-2.5 rounded-lg bg-brand-gradient text-white font-semibold shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all-300 flex items-center gap-2 overflow-hidden">
+                        <span class="relative z-10 flex items-center gap-2">
+                            <i class="ph-bold ph-magic-wand"></i>
+                            Generar Asientos
+                        </span>
+                        <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 z-0"></div>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- HEADER & TABS -->
+        <div class="mb-8">
+            <h1 class="font-display text-4xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
+                Cierre <span class="text-transparent bg-clip-text bg-brand-gradient">2025</span>
+            </h1>
+            <p class="text-slate-500 dark:text-slate-400 max-w-2xl text-lg">
+                Gestioná el ajuste por inflación y la valuación de tus activos en un solo flujo.
+            </p>
+
+            <!-- Steps / Tabs -->
+            <div class="mt-8 border-b border-slate-200 dark:border-slate-700 flex gap-8 relative">
+                <button class="pb-4 text-sm font-medium text-slate-400 hover:text-slate-600 transition-colors relative group">
+                    <span class="flex items-center gap-2">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full border border-slate-300 text-slate-400 text-xs">1</span>
+                        Índices (RT6)
+                    </span>
+                </button>
+                
+                <button onclick="switchTab(2)" id="tab2" class="pb-4 text-sm font-semibold text-brand-primary border-b-2 border-brand-primary transition-colors relative">
+                    <span class="flex items-center gap-2">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-brand-primary text-white text-xs shadow-glow">2</span>
+                        Reexpresión
+                    </span>
+                </button>
+
+                <button onclick="switchTab(3)" id="tab3" class="pb-4 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-brand-primary transition-colors relative">
+                    <span class="flex items-center gap-2">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full border border-slate-300 dark:border-slate-600 text-slate-500 text-xs transition-colors" id="badge3">3</span>
+                        Valuación (RT17)
+                    </span>
+                </button>
+
+                <button class="pb-4 text-sm font-medium text-slate-400 cursor-not-allowed">
+                    <span class="flex items-center gap-2">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full border border-slate-300 text-slate-400 text-xs">4</span>
+                        Asientos
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <!-- STEP 2: REEXPRESIÓN RT6 -->
+        <div id="step2-container" class="space-y-6 animate-fade-in">
+            <!-- Info Banner -->
+            <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl p-4 flex items-start gap-3">
+                <i class="ph-fill ph-info text-brand-primary text-xl mt-0.5"></i>
+                <div class="text-sm text-slate-600 dark:text-slate-300">
+                    <strong class="text-brand-primary block mb-1 font-display">Guía Rápida RT6</strong>
+                    Cargá las partidas no monetarias. El sistema calculará automáticamente el coeficiente según la fecha de origen y el RECPAM.
+                </div>
+                <button class="ml-auto text-slate-400 hover:text-brand-primary"><i class="ph-bold ph-x"></i></button>
+            </div>
+
+            <!-- Main Card -->
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-slate-100 dark:border-slate-700 overflow-hidden">
+                <div class="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800">
+                    <div>
+                        <h2 class="text-xl font-display font-bold text-slate-900 dark:text-white">Partidas No Monetarias</h2>
+                        <p class="text-sm text-slate-500">Detalle de cuentas ajustables por inflación</p>
+                    </div>
+                    <button onclick="openDrawer('new')" class="btn-secondary text-sm flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 font-medium transition-all">
+                        <i class="ph-bold ph-plus text-brand-primary"></i> Agregar Partida
+                    </button>
+                </div>
+
+                <div id="step2-content" class="p-6 space-y-8">
+                    <!-- Content injected by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 3: VALUACIÓN RT17 -->
+        <div id="step3-container" class="space-y-6 hidden animate-fade-in">
+             <!-- Progress & Guidance -->
+             <div class="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-soft border border-slate-100 dark:border-slate-700 flex flex-col md:flex-row items-center justify-between gap-6">
+                <div class="flex items-center gap-4 w-full md:w-auto">
+                    <div class="w-12 h-12 rounded-full bg-teal-50 dark:bg-teal-900/30 flex items-center justify-center text-brand-secondary">
+                        <i class="ph-duotone ph-scales text-2xl"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-lg font-display font-bold text-slate-900 dark:text-white">Valuación a Valores Corrientes</h2>
+                        <p class="text-sm text-slate-500">Definí el valor de cierre para calcular el Resultado por Tenencia.</p>
+                    </div>
+                </div>
+                
+                <!-- Progress Component -->
+                <div class="w-full md:w-1/3 bg-slate-50 dark:bg-slate-900 rounded-lg p-4 border border-slate-100 dark:border-slate-700">
+                    <div class="flex justify-between items-end mb-2">
+                        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Progreso</span>
+                        <span class="font-mono font-bold text-brand-primary" id="progress-text">1/2 Completado</span>
+                    </div>
+                    <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                        <div id="progress-bar" class="bg-brand-secondary h-2 rounded-full transition-all duration-500" style="width: 50%"></div>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                        <i class="ph-fill ph-info"></i> Solo las cuentas pendientes requieren tu acción.
+                    </p>
+                </div>
+             </div>
+
+             <!-- Main Valuation List -->
+             <div id="step3-content" class="space-y-4">
+                 <!-- Content injected by JS -->
+             </div>
+        </div>
+
+    </main>
+
+    <!-- DRAWER COMPONENT (Generic) -->
+    <div id="drawer-overlay" class="drawer-overlay fixed inset-0 z-50 bg-slate-900/20 dark:bg-black/50 backdrop-blur-sm flex justify-end">
+        <div class="drawer-panel w-full max-w-md h-full bg-white dark:bg-slate-800 shadow-2xl flex flex-col border-l border-slate-200 dark:border-slate-700">
+            <!-- Header -->
+            <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800">
+                <h3 id="drawer-title" class="font-display font-bold text-xl text-slate-900 dark:text-white">Editar Partida</h3>
+                <button onclick="closeDrawer()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                    <i class="ph-bold ph-x text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Content Area (Scrollable) -->
+            <div id="drawer-body" class="flex-1 overflow-y-auto custom-scroll p-6 space-y-6">
+                <!-- Dynamic Form Fields -->
+            </div>
+
+            <!-- Footer Actions -->
+            <div class="p-6 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex justify-end gap-3">
+                <button onclick="closeDrawer()" class="px-4 py-2 rounded-lg text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors text-sm">
+                    Cancelar
+                </button>
+                <button onclick="saveDrawer()" class="px-6 py-2 rounded-lg bg-brand-gradient text-white font-semibold shadow-lg shadow-blue-500/20 hover:shadow-blue-500/30 transition-all text-sm flex items-center gap-2">
+                    <i class="ph-bold ph-check"></i>
+                    Guardar Cambios
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // --- STATE MOCK ---
+        const state = {
+            partidas: [
+                {
+                    id: 1,
+                    group: 'ACTIVO',
+                    rubro: 'Mercaderías',
+                    cuenta: 'Mercaderías (Stock)',
+                    movements: [
+                        { date: '2025-01-15', base: 800000, coef: 1.2870 },
+                        { date: '2025-02-10', base: 700000, coef: 1.2568 }
+                    ],
+                    method: 'Costo de Reposición',
+                    valuationData: { inputName: 'Costo Reposición Total', value: null }, // Value null = pending
+                    type: 'goods'
+                },
+                {
+                    id: 2,
+                    group: 'ACTIVO',
+                    rubro: 'Caja y Bancos',
+                    cuenta: 'Caja Moneda Extranjera (USD)',
+                    movements: [
+                        { date: '2025-01-20', base: 980000, coef: 1.3554, originalUSD: 1000, tc: 980 }
+                    ],
+                    method: 'Cotización Cierre',
+                    valuationData: { inputName: 'Tipo de Cambio Cierre', value: null },
+                    type: 'fx'
+                },
+                {
+                    id: 3,
+                    group: 'PATRIMONIO NETO',
+                    rubro: 'Capital',
+                    cuenta: 'Capital Social',
+                    movements: [
+                        { date: '2024-01-01', base: 100000, coef: 1.3155 }
+                    ],
+                    method: 'No aplica (RT17)',
+                    valuationData: { inputName: null, value: 0 }, // 0 or ignored, but considered "complete"
+                    type: 'equity'
+                }
+            ],
+            ui: {
+                currentTab: 2,
+                drawerMode: null, // 'step2_new' | 'step3_edit'
+                activePartidaId: null
+            }
+        };
+
+        // --- FORMATTERS ---
+        const fmtMoney = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2 });
+        const fmtNum = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2 });
+        const fmtCoef = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 4 });
+
+        // --- HELPERS ---
+        const getHomog = (m) => m.base * m.coef;
+        const getTotalHomog = (p) => p.movements.reduce((sum, m) => sum + getHomog(m), 0);
+        const getTotalBase = (p) => p.movements.reduce((sum, m) => sum + m.base, 0);
+        
+        // --- RENDER ENGINE ---
+
+        function init() {
+            renderStep2();
+            renderStep3();
+            updateProgress();
+        }
+
+        function switchTab(tabId) {
+            state.ui.currentTab = tabId;
+            
+            // UI Toggle
+            document.getElementById('step2-container').classList.add('hidden');
+            document.getElementById('step3-container').classList.add('hidden');
+            document.getElementById('tab2').classList.replace('text-brand-primary', 'text-slate-500');
+            document.getElementById('tab2').classList.replace('border-brand-primary', 'border-transparent');
+            document.getElementById('tab3').classList.replace('text-brand-primary', 'text-slate-500');
+            document.getElementById('tab3').classList.replace('border-brand-primary', 'border-transparent');
+
+            // Badge styling logic
+            const badge2 = document.querySelector('#tab2 span span');
+            const badge3 = document.querySelector('#tab3 span span');
+
+            if (tabId === 2) {
+                document.getElementById('step2-container').classList.remove('hidden');
+                const btn = document.getElementById('tab2');
+                btn.classList.replace('text-slate-500', 'text-brand-primary');
+                btn.classList.replace('border-transparent', 'border-brand-primary');
+                
+                badge2.className = "flex items-center justify-center w-6 h-6 rounded-full bg-brand-primary text-white text-xs shadow-glow";
+                badge3.className = "flex items-center justify-center w-6 h-6 rounded-full border border-slate-300 dark:border-slate-600 text-slate-500 text-xs transition-colors";
+            } else if (tabId === 3) {
+                document.getElementById('step3-container').classList.remove('hidden');
+                const btn = document.getElementById('tab3');
+                btn.classList.replace('text-slate-500', 'text-brand-primary');
+                btn.classList.replace('border-transparent', 'border-brand-primary');
+
+                badge2.className = "flex items-center justify-center w-6 h-6 rounded-full bg-brand-secondary text-white text-xs"; // Completed Step 2 style
+                badge2.innerHTML = '<i class="ph-bold ph-check"></i>';
+                badge3.className = "flex items-center justify-center w-6 h-6 rounded-full bg-brand-primary text-white text-xs shadow-glow";
+            }
+        }
+
+        // STEP 2 RENDER
+        function renderStep2() {
+            const container = document.getElementById('step2-content');
+            container.innerHTML = '';
+
+            const groups = ['ACTIVO', 'PASIVO', 'PATRIMONIO NETO', 'RESULTADOS'];
+            
+            groups.forEach(groupName => {
+                const groupItems = state.partidas.filter(p => p.group === groupName);
+                if (groupItems.length === 0) return;
+
+                // Group Total RECPAM Calc
+                let groupRecpam = 0;
+                groupItems.forEach(p => {
+                    p.movements.forEach(m => groupRecpam += (getHomog(m) - m.base));
+                });
+
+                const groupHtml = `
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
+                            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600"></span> ${groupName}
+                            </h3>
+                            <div class="text-xs font-mono text-slate-500">
+                                RECPAM Grupo: <span class="${groupRecpam >= 0 ? 'text-brand-secondary' : 'text-brand-primary'} font-bold">${fmtMoney.format(groupRecpam)}</span>
+                            </div>
+                        </div>
+                        ${groupItems.map(item => renderRubroCardStep2(item)).join('')}
+                    </div>
+                `;
+                container.innerHTML += groupHtml;
+            });
+        }
+
+        function renderRubroCardStep2(item) {
+            const totalBase = getTotalBase(item);
+            const totalHomog = getTotalHomog(item);
+            const totalRecpam = totalHomog - totalBase;
+
+            const rows = item.movements.map(m => `
+                <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group">
+                    <td class="py-3 px-4 text-slate-600 dark:text-slate-400 font-mono text-xs">${m.date.split('-').reverse().join('/')}</td>
+                    <td class="py-3 px-4 text-slate-800 dark:text-slate-200 text-sm font-medium">${item.cuenta}</td>
+                    <td class="py-3 px-4 text-right font-mono text-sm tabular-nums text-slate-600 dark:text-slate-400">${fmtNum.format(m.base)}</td>
+                    <td class="py-3 px-4 text-right font-mono text-xs tabular-nums text-brand-primary bg-blue-50/50 dark:bg-blue-900/10 rounded">${fmtCoef.format(m.coef)}</td>
+                    <td class="py-3 px-4 text-right font-mono text-sm tabular-nums font-semibold text-slate-900 dark:text-white">${fmtNum.format(getHomog(m))}</td>
+                    <td class="py-3 px-4 text-right font-mono text-sm tabular-nums text-brand-secondary">${fmtNum.format(getHomog(m) - m.base)}</td>
+                    <td class="py-3 px-4 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button class="text-slate-400 hover:text-brand-primary"><i class="ph-bold ph-pencil-simple"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+
+            return `
+                <div class="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden mb-4">
+                    <div class="bg-slate-50 dark:bg-slate-800/50 px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                        <span class="text-sm font-bold text-slate-700 dark:text-slate-300">${item.rubro}</span>
+                        <span class="text-xs text-slate-500 font-mono">Total Rubro: ${fmtNum.format(totalHomog)}</span>
+                    </div>
+                    <div class="overflow-x-auto custom-scroll">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700">
+                                <tr>
+                                    <th class="py-2 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Origen</th>
+                                    <th class="py-2 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cuenta</th>
+                                    <th class="py-2 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">V. Origen</th>
+                                    <th class="py-2 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Coef.</th>
+                                    <th class="py-2 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">V. Homog.</th>
+                                    <th class="py-2 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">RECPAM</th>
+                                    <th class="w-10"></th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-800">
+                                ${rows}
+                                <!-- Total Row -->
+                                <tr class="bg-slate-50/80 dark:bg-slate-700/30 font-semibold">
+                                    <td colspan="2" class="py-2 px-4 text-right text-xs text-slate-500 uppercase">Subtotal</td>
+                                    <td class="py-2 px-4 text-right font-mono text-xs tabular-nums text-slate-500">${fmtNum.format(totalBase)}</td>
+                                    <td class="py-2 px-4"></td>
+                                    <td class="py-2 px-4 text-right font-mono text-xs tabular-nums text-slate-900 dark:text-white">${fmtNum.format(totalHomog)}</td>
+                                    <td class="py-2 px-4 text-right font-mono text-xs tabular-nums text-brand-secondary">${fmtNum.format(totalRecpam)}</td>
+                                    <td></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // STEP 3 RENDER (THE BRIDGE)
+        function renderStep3() {
+            const container = document.getElementById('step3-content');
+            container.innerHTML = '';
+            
+            // Re-use grouping logic but flat map to cards
+            state.partidas.forEach(item => {
+                const totalHomog = getTotalHomog(item);
+                const isEquity = item.type === 'equity';
+                const isComplete = isEquity || item.valuationData.value !== null;
+                
+                // Calculate logic for Display
+                let currentValDisplay = '-';
+                let rxtDisplay = '-';
+                
+                if (isComplete && !isEquity) {
+                    // Logic based on type
+                    if (item.type === 'fx') {
+                        // Value = USD * TC Cierre
+                        // Assuming 1 movement for simplicity of demo math or sum of USD
+                        const totalUSD = item.movements.reduce((acc, m) => acc + (m.originalUSD || 0), 0);
+                        const valCorriente = totalUSD * item.valuationData.value;
+                        currentValDisplay = fmtMoney.format(valCorriente);
+                        rxtDisplay = fmtMoney.format(valCorriente - totalHomog);
+                    } else {
+                        // Direct Value input
+                        const valCorriente = parseFloat(item.valuationData.value);
+                        currentValDisplay = fmtMoney.format(valCorriente);
+                        rxtDisplay = fmtMoney.format(valCorriente - totalHomog);
+                    }
+                } else if (isEquity) {
+                    currentValDisplay = 'N/A';
+                    rxtDisplay = '0,00';
+                }
+
+                const statusBadge = isComplete 
+                    ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-teal-50 dark:bg-teal-900/30 text-brand-secondary text-xs font-bold border border-teal-100 dark:border-teal-800"><i class="ph-fill ph-check-circle"></i> Listo</span>`
+                    : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-xs font-bold border border-amber-100 dark:border-amber-800"><i class="ph-fill ph-clock"></i> Pendiente</span>`;
+
+                const actionBtn = isEquity 
+                    ? `<span class="text-xs text-slate-400 italic">No requiere acción</span>`
+                    : `<button onclick="openValuationDrawer(${item.id})" class="btn-sm flex items-center justify-center gap-2 px-4 py-2 w-full rounded-lg text-sm font-semibold transition-all ${isComplete ? 'bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-brand-primary' : 'bg-brand-primary text-white shadow-md hover:bg-blue-600'}">
+                        ${isComplete ? '<i class="ph-bold ph-pencil-simple"></i> Editar' : 'Completar Valuación'}
+                       </button>`;
+
+                const html = `
+                    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-soft border border-slate-200 dark:border-slate-700 p-5 flex flex-col md:flex-row items-center gap-6 relative overflow-hidden group">
+                        <!-- Status Stripe -->
+                        <div class="absolute left-0 top-0 bottom-0 w-1 ${isComplete ? 'bg-brand-secondary' : 'bg-amber-400'}"></div>
+                        
+                        <!-- Account Info -->
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-3 mb-1">
+                                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">${item.group}</span>
+                                ${statusBadge}
+                            </div>
+                            <h3 class="text-lg font-bold text-slate-900 dark:text-white truncate">${item.cuenta}</h3>
+                            <div class="flex items-center gap-4 mt-2 text-sm text-slate-500">
+                                <span>V. Homogéneo: <strong class="font-mono text-slate-700 dark:text-slate-300">${fmtNum.format(totalHomog)}</strong></span>
+                                <span class="text-slate-300">|</span>
+                                <span>Método: <span class="text-brand-primary font-medium">${item.method}</span></span>
+                            </div>
+                        </div>
+
+                        <!-- Results Block -->
+                        <div class="flex gap-8 items-center bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700">
+                            <div class="text-right">
+                                <div class="text-[10px] uppercase text-slate-400 font-bold">Valor Corriente</div>
+                                <div class="font-mono text-sm font-bold ${isComplete ? 'text-slate-900 dark:text-white' : 'text-slate-300'}">${currentValDisplay}</div>
+                            </div>
+                            <div class="h-8 w-px bg-slate-200 dark:bg-slate-600"></div>
+                            <div class="text-right">
+                                <div class="text-[10px] uppercase text-slate-400 font-bold">RxT (Resultado)</div>
+                                <div class="font-mono text-sm font-bold ${isComplete ? (parseFloat(rxtDisplay.replace('.','').replace(',','.')) >= 0 ? 'text-brand-secondary' : 'text-amber-500') : 'text-slate-300'}">${rxtDisplay}</div>
+                            </div>
+                        </div>
+
+                        <!-- Action -->
+                        <div class="w-full md:w-48">
+                            ${actionBtn}
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += html;
+            });
+        }
+
+        function updateProgress() {
+            // Filter out Equity as it's auto-complete
+            const actionableItems = state.partidas.filter(p => p.type !== 'equity');
+            const completedItems = actionableItems.filter(p => p.valuationData.value !== null);
+            
+            const total = actionableItems.length;
+            const done = completedItems.length;
+            const pct = Math.round((done / total) * 100);
+
+            document.getElementById('progress-bar').style.width = `${pct}%`;
+            document.getElementById('progress-text').innerText = `${done}/${total} Completado`;
+
+            // Bridge to Header Button
+            const mainBtn = document.getElementById('btnGenerarMain');
+            if (done === total) {
+                mainBtn.disabled = false;
+                mainBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                // Optional: visual celebration
+                document.getElementById('progress-bar').classList.add('bg-brand-secondary');
+            } else {
+                mainBtn.disabled = true;
+            }
+        }
+
+        // --- DRAWER LOGIC ---
+
+        function openDrawer(mode) {
+            const overlay = document.getElementById('drawer-overlay');
+            const body = document.getElementById('drawer-body');
+            const title = document.getElementById('drawer-title');
+            
+            overlay.classList.remove('hidden'); // Ensure displayed block before anim
+            requestAnimationFrame(() => overlay.classList.add('open'));
+
+            if (mode === 'new') {
+                title.innerText = "Nueva Partida (RT6)";
+                state.ui.drawerMode = 'step2_new';
+                body.innerHTML = renderStep2Form();
+            }
+        }
+
+        function openValuationDrawer(id) {
+            const item = state.partidas.find(p => p.id === id);
+            if(!item) return;
+
+            state.ui.activePartidaId = id;
+            state.ui.drawerMode = 'step3_edit';
+
+            const overlay = document.getElementById('drawer-overlay');
+            const body = document.getElementById('drawer-body');
+            const title = document.getElementById('drawer-title');
+
+            title.innerText = `Valuación: ${item.cuenta}`;
+            body.innerHTML = renderValuationForm(item);
+            
+            overlay.classList.remove('hidden');
+            requestAnimationFrame(() => overlay.classList.add('open'));
+        }
+
+        function closeDrawer() {
+            const overlay = document.getElementById('drawer-overlay');
+            overlay.classList.remove('open');
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+                state.ui.drawerMode = null;
+            }, 300);
+        }
+
+        function saveDrawer() {
+            if (state.ui.drawerMode === 'step3_edit') {
+                const item = state.partidas.find(p => p.id === state.ui.activePartidaId);
+                const input = document.getElementById('valInput');
+                if (input && input.value) {
+                    item.valuationData.value = parseFloat(input.value);
+                    renderStep3();
+                    updateProgress();
+                    closeDrawer();
+                } else {
+                    // Simple shake error or border red
+                    input.classList.add('border-red-500');
+                }
+            } else {
+                // Mock Step 2 Save
+                closeDrawer();
+                alert("En este prototipo, el guardado de Step 2 es simulado. Probá la valuación en el Paso 3.");
+            }
+        }
+
+        // --- FORM TEMPLATES ---
+
+        function renderStep2Form() {
+            return `
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Grupo</label>
+                        <select class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm focus:border-brand-primary outline-none">
+                            <option>ACTIVO</option>
+                            <option>PASIVO</option>
+                            <option>PATRIMONIO NETO</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Cuenta Contable</label>
+                        <input type="text" class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm focus:border-brand-primary outline-none" placeholder="Buscar cuenta...">
+                    </div>
+                    
+                    <div class="pt-4 border-t border-slate-100 dark:border-slate-700">
+                        <h4 class="text-sm font-bold text-brand-primary mb-3">Movimientos / Capas</h4>
+                        <div class="bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700 space-y-3">
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="text-[10px] text-slate-400 uppercase font-bold">Fecha Origen</label>
+                                    <input type="date" class="w-full p-2 text-sm border border-slate-300 dark:border-slate-600 rounded">
+                                </div>
+                                <div>
+                                    <label class="text-[10px] text-slate-400 uppercase font-bold">Importe Histórico</label>
+                                    <input type="number" class="w-full p-2 text-sm border border-slate-300 dark:border-slate-600 rounded text-right font-mono" placeholder="0.00">
+                                </div>
+                            </div>
+                            <button class="w-full py-1.5 text-xs font-bold text-brand-primary border border-dashed border-brand-primary rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">+ Agregar Capa</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderValuationForm(item) {
+            const totalHomog = getTotalHomog(item);
+            let inputLabel = item.valuationData.inputName;
+            let helperText = "";
+            let prefix = "$";
+
+            if (item.type === 'fx') {
+                helperText = `Ingresá la cotización de cierre. Se multiplicará por los USD cargados en origen.`;
+                prefix = "TC";
+            } else if (item.type === 'goods') {
+                helperText = `Ingresá el Costo de Reposición total para este stock.`;
+            }
+
+            return `
+                <div class="space-y-6">
+                    <!-- Read Only Context -->
+                    <div class="bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                        <div class="text-xs text-slate-500 uppercase font-bold mb-1">Valor Homogéneo (AxI)</div>
+                        <div class="text-2xl font-mono font-bold text-slate-800 dark:text-slate-100">${fmtMoney.format(totalHomog)}</div>
+                        <div class="mt-2 text-xs text-slate-400 flex items-center gap-1">
+                            <i class="ph-fill ph-lock-key"></i> Calculado en Paso 2
+                        </div>
+                    </div>
+
+                    <!-- Input Area -->
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1">${inputLabel} <span class="text-red-500">*</span></label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <span class="text-slate-400 font-mono text-sm">${prefix}</span>
+                            </div>
+                            <input id="valInput" type="number" step="0.01" value="${item.valuationData.value || ''}" class="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-brand-primary focus:border-transparent outline-none font-mono text-lg bg-white dark:bg-slate-700 dark:text-white" placeholder="0.00">
+                        </div>
+                        <p class="mt-2 text-xs text-slate-500 leading-relaxed">
+                            ${helperText}
+                        </p>
+                    </div>
+
+                    <!-- Live Calc Preview (Mock logic) -->
+                    <div class="pt-4 border-t border-slate-100 dark:border-slate-700">
+                         <div class="flex justify-between items-center text-sm">
+                            <span class="text-slate-500">Resultado por Tenencia estimado:</span>
+                            <span class="font-bold font-mono text-slate-900 dark:text-white">--</span>
+                         </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleTheme() {
+            document.documentElement.classList.toggle('dark');
+        }
+
+        // --- INIT ---
+        init();
+
+    </script>
+</body>
+</html>

@@ -14,6 +14,7 @@ import type {
     AsientoBorrador,
     AsientoLine,
     PartidaStatus,
+    GrupoContable,
 } from './types';
 
 // ============================================
@@ -143,35 +144,88 @@ export function computeAllRT6Partidas(
 /**
  * Compute a single RT17 partida with all calculated values
  */
+/**
+ * Baseline data extracted from RT6 for RT17 valuation
+ */
+export interface RT17Baseline {
+    sourcePartidaId: string;
+    grupo: GrupoContable;
+    rubroLabel: string;
+    cuentaCodigo: string;
+    cuentaNombre: string;
+    totalHomog: number;
+    totalBase: number;
+}
+
+/**
+ * Extract baselines from computed RT6 partidas
+ */
+export function getRt17BaselinesFromRt6(computedRT6: ComputedPartidaRT6[]): Map<string, RT17Baseline> {
+    const map = new Map<string, RT17Baseline>();
+    for (const p of computedRT6) {
+        map.set(p.id, {
+            sourcePartidaId: p.id,
+            grupo: p.grupo,
+            rubroLabel: p.rubroLabel,
+            cuentaCodigo: p.cuentaCodigo,
+            cuentaNombre: p.cuentaNombre,
+            totalHomog: p.totalHomog,
+            totalBase: p.totalBase,
+        });
+    }
+    return map;
+}
+
+/**
+ * Compute a single RT17 partida with all calculated values
+ */
 export function computeRT17Partida(
     partida: PartidaRT17,
-    _computedRT6Partidas?: ComputedPartidaRT6[]
+    baselinesMap?: Map<string, RT17Baseline>
 ): ComputedPartidaRT17 {
     let valCorriente = 0;
     let resTenencia = 0;
     let baseReference = 0;
     let useFallbackBase = false;
 
+    // 1. Determine Base Reference (RT6 Homog vs Fallback)
+    const baseline = partida.sourcePartidaId && baselinesMap ? baselinesMap.get(partida.sourcePartidaId) : undefined;
+
+    if (baseline) {
+        baseReference = baseline.totalHomog;
+        useFallbackBase = false;
+    } else {
+        // Fallback or Manual
+        // TODO: In Phase 2 this might need refinement. For now, we rely on what's inside the item or 0.
+        // If it's a legacy item without link, we might calculate historical base from its own lots (if any)
+        if (partida.type === 'USD' && partida.usdItems) {
+            baseReference = partida.usdItems.reduce((acc, item) => acc + item.baseArs, 0);
+        } else if (partida.type === 'Otros' && partida.manualCurrentValue) {
+            // Arbitrary fallback logic from previous code, or just 0
+            baseReference = (partida.manualCurrentValue || 0) * 0.9;
+            useFallbackBase = true;
+        }
+    }
+
+    // 2. Calculate Current Value
     if (partida.type === 'USD' && partida.usdItems) {
         partida.usdItems.forEach((item) => {
             const currentItemVal = item.usd * item.tcCierre;
             valCorriente += currentItemVal;
-
-            // TODO: Phase 2 - Link to RT6 partida for homogeneous base
-            // For now, we use the historical base
-            baseReference += item.baseArs;
         });
-        resTenencia = valCorriente - baseReference;
     } else if (partida.type === 'Otros' && partida.manualCurrentValue) {
         valCorriente = partida.manualCurrentValue;
-        // Mock base for others (in real implementation, would link to RT6)
-        baseReference = valCorriente * 0.9;
-        useFallbackBase = true;
-        resTenencia = valCorriente - baseReference;
     }
+
+    // 3. Result
+    resTenencia = valCorriente - baseReference;
 
     return {
         ...partida,
+        // Inherit metadata from baseline if present (display convenience)
+        grupo: baseline ? baseline.grupo : partida.grupo,
+        rubroLabel: baseline ? baseline.rubroLabel : partida.rubroLabel,
+
         valCorriente,
         resTenencia,
         baseReference,
@@ -184,9 +238,53 @@ export function computeRT17Partida(
  */
 export function computeAllRT17Partidas(
     partidas: PartidaRT17[],
-    computedRT6Partidas?: ComputedPartidaRT6[]
+    computedRT6Partidas: ComputedPartidaRT6[] = []
 ): ComputedPartidaRT17[] {
-    return partidas.map((p) => computeRT17Partida(p, computedRT6Partidas));
+    const baselines = getRt17BaselinesFromRt6(computedRT6Partidas);
+    return partidas.map((p) => computeRT17Partida(p, baselines));
+}
+
+/**
+ * Generate missing RT17 shells for RT6 partidas
+ * Returns a NEW array including existing + new shells
+ */
+export function syncRt17Shells(
+    currentRt17: PartidaRT17[],
+    rt6Partidas: PartidaRT6[]
+): PartidaRT17[] {
+    const rt6Ids = new Set(rt6Partidas.map(p => p.id));
+
+    // 1. Filter out orphans: keep only RT17 items that have a sourceId present in current rt6Partidas
+    const cleanedRt17 = currentRt17.filter(p => {
+        if (p.sourcePartidaId) {
+            return rt6Ids.has(p.sourcePartidaId);
+        }
+        return false; // Remove anything not linked (Strict 1:1 linkage)
+    });
+
+    const result = [...cleanedRt17];
+    const existingSourceIds = new Set(cleanedRt17.map(p => p.sourcePartidaId));
+
+    for (const p6 of rt6Partidas) {
+        if (!existingSourceIds.has(p6.id)) {
+            // Create Shell
+            const newShell: PartidaRT17 = {
+                id: crypto.randomUUID(),
+                sourcePartidaId: p6.id,
+                type: 'Otros', // Default
+                grupo: p6.grupo,
+                rubroLabel: p6.rubroLabel,
+                cuentaCodigo: p6.cuentaCodigo,
+                cuentaNombre: p6.cuentaNombre,
+                // Empty valuation data
+                usdItems: [],
+                manualCurrentValue: 0,
+            };
+            result.push(newShell);
+        }
+    }
+
+    return result;
 }
 
 // ============================================
@@ -240,6 +338,59 @@ export function calculateRT17Totals(partidas: ComputedPartidaRT17[]): RT17Totals
         totalCorriente: partidas.reduce((s, p) => s + p.valCorriente, 0),
         totalResTenencia: partidas.reduce((s, p) => s + p.resTenencia, 0),
     };
+}
+
+// ============================================
+// Valuation Progress Tracking (Step 3 Bridge)
+// ============================================
+
+export interface ValuationProgress {
+    total: number;
+    done: number;
+    pending: number;
+    na: number;
+    percentage: number;
+}
+
+/**
+ * Calculate valuation completion progress for Step 3
+ * Excludes 'na' (PN) items from the actionable count
+ */
+export function getValuationProgress(partidas: ComputedPartidaRT17[]): ValuationProgress {
+    let na = 0;
+    let done = 0;
+    let pending = 0;
+
+    for (const p of partidas) {
+        const status = p.valuationStatus || 'pending';
+        if (status === 'na' || p.grupo === 'PN') {
+            na++;
+        } else if (status === 'done') {
+            done++;
+        } else {
+            pending++;
+        }
+    }
+
+    const actionable = done + pending;
+    const percentage = actionable > 0 ? Math.round((done / actionable) * 100) : 100;
+
+    return {
+        total: partidas.length,
+        done,
+        pending,
+        na,
+        percentage,
+    };
+}
+
+/**
+ * Check if all applicable valuations are complete (gating for "Generar Asientos")
+ * Returns true if all non-PN partidas have status 'done'
+ */
+export function canGenerateAsientos(partidas: ComputedPartidaRT17[]): boolean {
+    const progress = getValuationProgress(partidas);
+    return progress.pending === 0 && progress.done > 0;
 }
 
 // ============================================

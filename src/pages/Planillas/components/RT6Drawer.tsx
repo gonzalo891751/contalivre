@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useMemo } from 'react';
-import type { PartidaRT6, LotRT6, RubroType, IndexRow } from '../../../core/cierre-valuacion';
+import type { PartidaRT6, LotRT6, GrupoContable, IndexRow, RT6ProfileType } from '../../../core/cierre-valuacion';
 import {
     createDefaultPartidaRT6,
     createDefaultLotRT6,
@@ -12,8 +12,14 @@ import {
     calculateCoef,
     formatNumber,
     formatCurrencyARS,
+    getRubrosByGroup,
+    getAccountMetadata,
+    ExtendedGrupo
 } from '../../../core/cierre-valuacion';
+import { Account } from '../../../core/models';
+import { getAllAccounts } from '../../../storage/accounts';
 import { AccountAutocomplete } from './AccountAutocomplete';
+import { RubroAutocomplete } from './RubroAutocomplete';
 
 interface RT6DrawerProps {
     isOpen: boolean;
@@ -26,20 +32,17 @@ interface RT6DrawerProps {
     onDelete: (id: string) => void;
 }
 
-const RUBRO_OPTIONS: { value: RubroType; label: string }[] = [
-    { value: 'Mercaderias', label: 'Mercaderías (Stock)' },
-    { value: 'BienesUso', label: 'Bienes de Uso' },
-    { value: 'Capital', label: 'Capital / Aportes' },
-    { value: 'Otros', label: 'Otros (Manual)' },
+const GRUPO_OPTIONS: { value: GrupoContable; label: string }[] = [
+    { value: 'ACTIVO', label: 'Activo' },
+    { value: 'PASIVO', label: 'Pasivo' },
+    { value: 'PN', label: 'Patrimonio Neto' },
 ];
 
-// Map rubro to filter type
-const RUBRO_FILTER_MAP: Record<RubroType, RubroType | undefined> = {
-    Mercaderias: 'Mercaderias',
-    BienesUso: 'BienesUso',
-    Capital: 'Capital',
-    Otros: undefined,
-};
+const PROFILE_OPTIONS: { value: RT6ProfileType; label: string; description: string }[] = [
+    { value: 'mercaderias', label: 'Mercaderías (Stock)', description: 'Múltiples lotes de compra con fechas distintas' },
+    { value: 'moneda_extranjera', label: 'Moneda Extranjera', description: 'USD con tipo de cambio de ingreso' },
+    { value: 'generic', label: 'Genérico', description: 'Fecha origen + Base histórica ARS' },
+];
 
 export function RT6Drawer({
     isOpen,
@@ -52,22 +55,108 @@ export function RT6Drawer({
     onDelete,
 }: RT6DrawerProps) {
     const [temp, setTemp] = useState<PartidaRT6 | null>(null);
+    const [allAccounts, setAllAccounts] = useState<Account[]>([]);
 
-    // Initialize temp state when drawer opens
+    // Dynamic Rubros based on selected Group
+    const [availableRubros, setAvailableRubros] = useState<Account[]>([]);
+    // We store the selected Rubro Code for filtering accounts
+    const [selectedRubroCode, setSelectedRubroCode] = useState<string>('');
+    // Contra warning
+    const [isContra, setIsContra] = useState(false);
+
+    // Load accounts for Rubro lookup
+    useEffect(() => {
+        getAllAccounts().then(setAllAccounts);
+    }, []);
+
+    // Effect: Update available Rubros when Group changes or accounts load
+    useEffect(() => {
+        if (!temp?.grupo || !allAccounts.length) {
+            setAvailableRubros([]);
+            return;
+        }
+
+        const group: ExtendedGrupo = temp.grupo as ExtendedGrupo;
+        const rubros = getRubrosByGroup(group, allAccounts);
+        setAvailableRubros(rubros);
+
+    }, [temp?.grupo, allAccounts]);
+
+    // Initialize temp state when drawer opens (and Repair Legacy Data)
     useEffect(() => {
         if (isOpen) {
             if (editingId) {
                 const existing = partidas.find((p) => p.id === editingId);
                 if (existing) {
-                    setTemp(JSON.parse(JSON.stringify(existing)));
+                    const clone = JSON.parse(JSON.stringify(existing)) as PartidaRT6;
+
+                    // REPAIR / SYNC LOGIC:
+                    // If we have an account code, it is the master source of truth.
+                    // We re-derive group and check if rubro is valid.
+                    if (clone.cuentaCodigo && allAccounts.length > 0) {
+                        const accountObj = allAccounts.find(a => a.code === clone.cuentaCodigo);
+                        const meta = getAccountMetadata(clone.cuentaCodigo, accountObj);
+
+                        // 1. Force Group match
+                        // Ensure compatibility: If meta.group is 'RESULTADOS', it might not effectively be a valid RT6 group 
+                        // depending on business logic, but strict typing requires a check.
+                        // Assuming 'RESULTADOS' is not valid for RT6 items typically (unless CoGS), 
+                        // but if it happens, we cast it. However, strict type 'GrupoContable' excludes 'RESULTADOS'.
+                        // We might need to extend 'GrupoContable' or handle this case.
+                        // For now, only repairing if it is a valid target group.
+                        if (meta.group !== 'RESULTADOS' && clone.grupo !== meta.group) {
+                            console.warn(`[RT6] Fixing group for ${clone.cuentaCodigo}: ${clone.grupo} -> ${meta.group}`);
+                            clone.grupo = meta.group as GrupoContable;
+                        }
+
+                        // 2. Set strict rubro filtering if possible
+                        // If the stored rubroLabel matches a known header, set the code.
+                        // Ideally we should look up the parent of the accountObj if available.
+                        if (accountObj && accountObj.parentId) {
+                            const parent = allAccounts.find(a => a.id === accountObj.parentId);
+                            if (parent) {
+                                setSelectedRubroCode(parent.code);
+                                // Optional: Update label if it was empty/legacy 'Otros'
+                                if (!clone.rubroLabel || clone.rubro === 'Otros') {
+                                    clone.rubroLabel = parent.name;
+                                }
+                            }
+                        } else {
+                            // Fallback: match by label
+                            const rubroHeader = allAccounts.find(a => a.isHeader && a.name === clone.rubroLabel);
+                            if (rubroHeader) {
+                                setSelectedRubroCode(rubroHeader.code);
+                            }
+                        }
+
+                        // Set Contra flag
+                        setIsContra(meta.isContra);
+                    }
+
+                    setTemp(clone);
                 }
             } else {
-                setTemp(createDefaultPartidaRT6());
+                // NEW: Start completely empty (no defaults)
+                setTemp({
+                    ...createDefaultPartidaRT6(),
+                    grupo: 'ACTIVO', // Default group is fine but rubro/account must be empty.
+                    // Actually user wants "Grupo: placeholder Seleccionar...",
+                    // but our PartidaRT6 type enforces GrupoContable enum.
+                    // We'll default to ACTIVO but clear rubro clearly.
+                    rubroLabel: '',
+                    cuentaCodigo: '',
+                    cuentaNombre: '',
+                    profileType: undefined,
+                });
+                setSelectedRubroCode('');
+                setIsContra(false);
             }
         } else {
             setTemp(null);
+            setSelectedRubroCode('');
+            setIsContra(false);
         }
-    }, [isOpen, editingId, partidas]);
+    }, [isOpen, editingId, partidas, allAccounts]); // Depend on allAccounts to run repair
 
     // Index helpers
     const closingIndex = getIndexForPeriod(indices, closingPeriod);
@@ -93,6 +182,50 @@ export function RT6Drawer({
     const totalRecpam = totalHomog - totalBase;
 
     // Handlers
+    const handleGroupChange = (newGroup: GrupoContable) => {
+        if (temp) {
+            setTemp({
+                ...temp,
+                grupo: newGroup,
+                rubroLabel: '',   // Reset rubro
+                cuentaCodigo: '', // Reset account
+                cuentaNombre: '',
+            });
+            setSelectedRubroCode('');
+            setIsContra(false);
+        }
+    };
+
+    const handleRubroChange = (newRubroLabel: string) => {
+        if (temp) {
+            setTemp({ ...temp, rubroLabel: newRubroLabel, cuentaCodigo: '', cuentaNombre: '' });
+            setIsContra(false);
+
+            // Attempt to resolve code for strict filtering
+            const found = availableRubros.find(r => r.name === newRubroLabel);
+            if (found) {
+                setSelectedRubroCode(found.code);
+            } else {
+                setSelectedRubroCode('');
+            }
+        }
+    };
+
+    // Update account handler to check contra
+    const handleAccountChange = (val: { code: string; name: string }) => {
+        if (!temp) return;
+
+        const accountObj = allAccounts.find(a => a.code === val.code);
+        const meta = getAccountMetadata(val.code, accountObj);
+
+        setTemp({
+            ...temp,
+            cuentaCodigo: val.code,
+            cuentaNombre: val.name,
+        });
+        setIsContra(meta.isContra);
+    };
+
     const handleSave = () => {
         if (temp) {
             onSave(temp);
@@ -134,7 +267,15 @@ export function RT6Drawer({
 
     if (!isOpen || !temp) return null;
 
-    const isMercaderias = temp.rubro === 'Mercaderias';
+    // Auto-detect profile from rubro name if not set
+    const effectiveProfile = temp.profileType || (
+        temp.rubroLabel?.toLowerCase().includes('mercader') ? 'mercaderias' :
+            temp.rubroLabel?.toLowerCase().includes('moneda') || temp.rubroLabel?.toLowerCase().includes('caja') ? 'moneda_extranjera' :
+                'generic'
+    );
+
+    // For moneda extranjera, compute base from USD * TC
+    const usdComputedBase = (temp.usdAmount || 0) * (temp.tcIngreso || 0);
 
     return (
         <div className="drawer-overlay" onClick={onClose}>
@@ -147,18 +288,16 @@ export function RT6Drawer({
                 </div>
 
                 <div className="drawer-body">
-                    {/* Rubro & Account */}
-                    <div className="drawer-grid">
-                        <div className="form-group">
-                            <label className="form-label">Rubro</label>
+                    {/* Grupo, Rubro & Account */}
+                    <div className="drawer-form-row">
+                        <div className="form-group" style={{ flex: '0 0 140px' }}>
+                            <label className="form-label">Grupo</label>
                             <select
                                 className="form-select"
-                                value={temp.rubro}
-                                onChange={(e) =>
-                                    setTemp({ ...temp, rubro: e.target.value as RubroType })
-                                }
+                                value={temp.grupo}
+                                onChange={(e) => handleGroupChange(e.target.value as GrupoContable)}
                             >
-                                {RUBRO_OPTIONS.map((opt) => (
+                                {GRUPO_OPTIONS.map((opt) => (
                                     <option key={opt.value} value={opt.value}>
                                         {opt.label}
                                     </option>
@@ -166,23 +305,62 @@ export function RT6Drawer({
                             </select>
                         </div>
                         <div className="form-group">
-                            <label className="form-label">Cuenta Contable</label>
-                            <AccountAutocomplete
-                                value={{ code: temp.cuentaCodigo, name: temp.cuentaNombre }}
-                                onChange={(val) => setTemp({
-                                    ...temp,
-                                    cuentaCodigo: val.code,
-                                    cuentaNombre: val.name,
-                                })}
-                                rubroFilter={RUBRO_FILTER_MAP[temp.rubro]}
-                                placeholder="Buscar cuenta..."
+                            <label className="form-label">Rubro</label>
+                            <RubroAutocomplete
+                                value={temp.rubroLabel || ''}
+                                onChange={handleRubroChange}
+                                options={availableRubros.map(r => ({ code: r.code, name: r.name }))}
+                                placeholder="Seleccionar..."
                             />
+                            <div className="text-xs text-muted mt-1">
+                                {selectedRubroCode ? `Filtro: ${selectedRubroCode}.*` : 'Escriba o seleccione para filtrar'}
+                            </div>
+                        </div>
+
+                        {/* Account Picker */}
+                        <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                            <label className="form-label">
+                                Cuenta Contable
+                                {isContra && <span className="badge badge-orange ml-sm">Regularizadora (R)</span>}
+                            </label>
+                            <AccountAutocomplete
+                                value={{ code: temp.cuentaCodigo || '', name: temp.cuentaNombre }}
+                                onChange={handleAccountChange}
+                                rubroPrefix={selectedRubroCode}
+                                placeholder={selectedRubroCode ? `Buscar en ${temp.rubroLabel}...` : "Buscar cuenta..."}
+                            />
+                            {/* Validation Hint */}
+                            {selectedRubroCode && temp.cuentaCodigo && !temp.cuentaCodigo.startsWith(selectedRubroCode) && (
+                                <div className="text-error text-xs mt-1">
+                                    ⚠️ La cuenta no pertenece al rubro seleccionado.
+                                </div>
+                            )}
                         </div>
                     </div>
 
-                    {/* Subform based on rubro */}
+                    {/* Profile Type Selector */}
+                    <div className="drawer-profile-selector">
+                        <label className="form-label">Tipo de Partida</label>
+                        <div className="profile-options">
+                            {PROFILE_OPTIONS.map((opt) => (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    className={`profile-option ${effectiveProfile === opt.value ? 'active' : ''}`}
+                                    onClick={() => setTemp({ ...temp, profileType: opt.value })}
+                                >
+                                    <span className="profile-option-icon">
+                                        {opt.value === 'mercaderias' ? '📦' : opt.value === 'moneda_extranjera' ? '💵' : '📋'}
+                                    </span>
+                                    <span className="profile-option-label">{opt.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
                     <div className="drawer-section">
-                        {isMercaderias ? (
+                        {/* MERCADERIAS PROFILE */}
+                        {effectiveProfile === 'mercaderias' && (
                             <>
                                 <div className="drawer-section-header">
                                     <span className="drawer-section-title">Lotes de compras</span>
@@ -234,7 +412,88 @@ export function RT6Drawer({
                                     + Agregar Lote
                                 </button>
                             </>
-                        ) : (
+                        )}
+
+                        {/* MONEDA EXTRANJERA PROFILE */}
+                        {effectiveProfile === 'moneda_extranjera' && (
+                            <>
+                                <div className="drawer-section-header">
+                                    <span className="drawer-section-title">💵 Moneda Extranjera</span>
+                                </div>
+                                <p className="text-muted text-sm mb-sm">
+                                    Ingresá el monto en USD y el tipo de cambio de la fecha de ingreso:
+                                </p>
+                                <div className="drawer-grid">
+                                    <div className="form-group">
+                                        <label className="form-label">Fecha Ingreso</label>
+                                        <input
+                                            type="date"
+                                            className="form-input"
+                                            value={temp.items[0]?.fechaOrigen || ''}
+                                            onChange={(e) => {
+                                                const newItem = {
+                                                    id: temp.items[0]?.id || 'new',
+                                                    fechaOrigen: e.target.value,
+                                                    importeBase: usdComputedBase,
+                                                };
+                                                setTemp({ ...temp, items: [newItem] });
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Monto USD</label>
+                                        <div className="input-icon-wrapper">
+                                            <span className="input-prefix">US$</span>
+                                            <input
+                                                type="number"
+                                                className="form-input input-with-prefix"
+                                                value={temp.usdAmount || ''}
+                                                onChange={(e) => {
+                                                    const usd = Number(e.target.value);
+                                                    const base = usd * (temp.tcIngreso || 0);
+                                                    const newItem = {
+                                                        id: temp.items[0]?.id || 'new',
+                                                        fechaOrigen: temp.items[0]?.fechaOrigen || '',
+                                                        importeBase: base,
+                                                    };
+                                                    setTemp({ ...temp, usdAmount: usd, items: [newItem] });
+                                                }}
+                                                placeholder="0.00"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">TC Ingreso ($/USD)</label>
+                                        <input
+                                            type="number"
+                                            className="form-input"
+                                            value={temp.tcIngreso || ''}
+                                            onChange={(e) => {
+                                                const tc = Number(e.target.value);
+                                                const base = (temp.usdAmount || 0) * tc;
+                                                const newItem = {
+                                                    id: temp.items[0]?.id || 'new',
+                                                    fechaOrigen: temp.items[0]?.fechaOrigen || '',
+                                                    importeBase: base,
+                                                };
+                                                setTemp({ ...temp, tcIngreso: tc, items: [newItem] });
+                                            }}
+                                            placeholder="Ej: 950.00"
+                                        />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Base Histórica (ARS)</label>
+                                        <div className="computed-value">
+                                            <span className="font-mono">{formatCurrencyARS(usdComputedBase)}</span>
+                                            <span className="text-xs text-muted">USD × TC</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* GENERIC PROFILE */}
+                        {effectiveProfile === 'generic' && (
                             <>
                                 <p className="text-muted text-sm mb-sm">Datos de la partida:</p>
                                 <div className="drawer-grid">
@@ -479,6 +738,79 @@ export function RT6Drawer({
                 .font-mono { font-family: var(--font-mono); }
                 .font-bold { font-weight: 700; }
                 .mb-sm { margin-bottom: var(--space-sm); }
+
+                /* Profile Selector */
+                .drawer-profile-selector {
+                    margin-bottom: var(--space-md);
+                }
+                .profile-options {
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: var(--space-sm);
+                    margin-top: var(--space-sm);
+                }
+                .profile-option {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: var(--space-xs);
+                    padding: var(--space-md);
+                    background: var(--surface-2);
+                    border: 2px solid var(--color-border);
+                    border-radius: var(--radius-lg);
+                    cursor: pointer;
+                    transition: all 0.15s;
+                }
+                .profile-option:hover {
+                    border-color: var(--brand-primary);
+                    background: rgba(59, 130, 246, 0.05);
+                }
+                .profile-option.active {
+                    border-color: var(--brand-primary);
+                    background: rgba(59, 130, 246, 0.1);
+                    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+                }
+                .profile-option-icon {
+                    font-size: 1.5rem;
+                }
+                .profile-option-label {
+                    font-size: var(--font-size-xs);
+                    font-weight: 600;
+                    text-align: center;
+                }
+
+                /* Computed Value Display */
+                .computed-value {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                    padding: var(--space-sm);
+                    background: var(--surface-1);
+                    border: 1px solid var(--color-border);
+                    border-radius: var(--radius-md);
+                }
+                .computed-value .font-mono {
+                    font-size: var(--font-size-md);
+                    font-weight: 700;
+                    color: var(--brand-primary);
+                }
+
+                /* Input with prefix */
+                .input-icon-wrapper {
+                    position: relative;
+                }
+                .input-prefix {
+                    position: absolute;
+                    left: 10px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    font-size: var(--font-size-sm);
+                    color: var(--color-text-secondary);
+                    font-weight: 600;
+                }
+                .input-with-prefix {
+                    padding-left: 42px;
+                }
             `}</style>
         </div>
     );

@@ -11,6 +11,7 @@ interface AccountAutocompleteProps {
     value: { code: string; name: string; isManual?: boolean };
     onChange: (value: { code: string; name: string; isManual?: boolean }) => void;
     rubroFilter?: RubroType | 'USD';
+    rubroPrefix?: string; // New: strict filtering by code prefix
     placeholder?: string;
     disabled?: boolean;
 }
@@ -26,6 +27,7 @@ export function AccountAutocomplete({
     value,
     onChange,
     rubroFilter,
+    rubroPrefix,
     placeholder = 'Buscar cuenta...',
     disabled = false,
 }: AccountAutocompleteProps) {
@@ -54,13 +56,35 @@ export function AccountAutocomplete({
 
         let finalOptions: AccountOption[] = [];
 
-        if (rubroFilter && !showAll) {
+        // 1. Strict filtering by Rubro Prefix (New Logic)
+        if (rubroPrefix) {
+            // Must start with prefix AND be imputable (getPostableAccounts already filters !isHeader, but standard searchAccounts might not? 
+            // Actually getPostableAccounts returns all imputables. searchAccounts returns all. 
+            // Let's filter safely for !isHeader just in case source varies.
+
+            const filtered = accounts.filter(a =>
+                !a.isHeader &&
+                a.code.startsWith(rubroPrefix)
+            );
+
+            finalOptions = filtered.map(a => ({
+                code: a.code,
+                name: a.name,
+                kind: a.kind,
+                isPrioritized: false
+            }));
+
+        }
+        // 2. Legacy filtering by Rubro Keyword
+        else if (rubroFilter && !showAll) {
             const { prioritized, others } = filterAccountsByRubro(rubroFilter, accounts, query);
             finalOptions = [
                 ...prioritized.map(a => ({ ...a, isPrioritized: true })),
                 ...others.slice(0, 5).map(a => ({ ...a, isPrioritized: false })),
             ];
-        } else {
+        }
+        // 3. No filter
+        else {
             finalOptions = accounts.slice(0, 20).map(a => ({
                 code: a.code,
                 name: a.name,
@@ -71,7 +95,7 @@ export function AccountAutocomplete({
 
         setOptions(finalOptions);
         setHighlightIndex(0);
-    }, [query, rubroFilter, showAll, allAccounts]);
+    }, [query, rubroFilter, rubroPrefix, showAll, allAccounts]);
 
     useEffect(() => {
         if (isOpen) {
@@ -253,6 +277,9 @@ export function AccountAutocomplete({
                     margin: 0;
                     padding: 0;
                     list-style: none;
+                    min-width: 100%;
+                    width: max-content;
+                    max-width: 400px;
                 }
                 .account-autocomplete-option {
                     display: flex;
