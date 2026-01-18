@@ -7,7 +7,8 @@
 import type {
     IndexRow,
     PartidaRT6,
-    PartidaRT17,
+    RT17Valuation,
+    ValuacionStatus,
     ComputedPartidaRT6,
     ComputedPartidaRT17,
     ComputedLotRT6,
@@ -179,112 +180,52 @@ export function getRt17BaselinesFromRt6(computedRT6: ComputedPartidaRT6[]): Map<
 /**
  * Compute a single RT17 partida with all calculated values
  */
-export function computeRT17Partida(
-    partida: PartidaRT17,
-    baselinesMap?: Map<string, RT17Baseline>
-): ComputedPartidaRT17 {
-    let valCorriente = 0;
-    let resTenencia = 0;
-    let baseReference = 0;
-    let useFallbackBase = false;
-
-    // 1. Determine Base Reference (RT6 Homog vs Fallback)
-    const baseline = partida.sourcePartidaId && baselinesMap ? baselinesMap.get(partida.sourcePartidaId) : undefined;
-
-    if (baseline) {
-        baseReference = baseline.totalHomog;
-        useFallbackBase = false;
-    } else {
-        // Fallback or Manual
-        // TODO: In Phase 2 this might need refinement. For now, we rely on what's inside the item or 0.
-        // If it's a legacy item without link, we might calculate historical base from its own lots (if any)
-        if (partida.type === 'USD' && partida.usdItems) {
-            baseReference = partida.usdItems.reduce((acc, item) => acc + item.baseArs, 0);
-        } else if (partida.type === 'Otros' && partida.manualCurrentValue) {
-            // Arbitrary fallback logic from previous code, or just 0
-            baseReference = (partida.manualCurrentValue || 0) * 0.9;
-            useFallbackBase = true;
-        }
-    }
-
-    // 2. Calculate Current Value
-    if (partida.type === 'USD' && partida.usdItems) {
-        partida.usdItems.forEach((item) => {
-            const currentItemVal = item.usd * item.tcCierre;
-            valCorriente += currentItemVal;
-        });
-    } else if (partida.type === 'Otros' && partida.manualCurrentValue) {
-        valCorriente = partida.manualCurrentValue;
-    }
-
-    // 3. Result
-    resTenencia = valCorriente - baseReference;
-
-    return {
-        ...partida,
-        // Inherit metadata from baseline if present (display convenience)
-        grupo: baseline ? baseline.grupo : partida.grupo,
-        rubroLabel: baseline ? baseline.rubroLabel : partida.rubroLabel,
-
-        valCorriente,
-        resTenencia,
-        baseReference,
-        useFallbackBase,
-    };
-}
-
 /**
- * Compute all RT17 partidas
+ * Compute all RT17 partidas from Step 2 items and saved valuations
  */
 export function computeAllRT17Partidas(
-    partidas: PartidaRT17[],
-    computedRT6Partidas: ComputedPartidaRT6[] = []
+    computedRT6: ComputedPartidaRT6[],
+    valuations: Record<string, RT17Valuation>
 ): ComputedPartidaRT17[] {
-    const baselines = getRt17BaselinesFromRt6(computedRT6Partidas);
-    return partidas.map((p) => computeRT17Partida(p, baselines));
-}
+    return computedRT6.map((p6) => {
+        const val = valuations[p6.id];
 
-/**
- * Generate missing RT17 shells for RT6 partidas
- * Returns a NEW array including existing + new shells
- */
-export function syncRt17Shells(
-    currentRt17: PartidaRT17[],
-    rt6Partidas: PartidaRT6[]
-): PartidaRT17[] {
-    const rt6Ids = new Set(rt6Partidas.map(p => p.id));
+        // Base values from Step 2
+        const baseReference = p6.totalHomog;
 
-    // 1. Filter out orphans: keep only RT17 items that have a sourceId present in current rt6Partidas
-    const cleanedRt17 = currentRt17.filter(p => {
-        if (p.sourcePartidaId) {
-            return rt6Ids.has(p.sourcePartidaId);
+        // Calculated/Saved values
+        let valCorriente = baseReference; // default to homog
+        let resTenencia = 0;
+        let status: ValuacionStatus = p6.grupo === 'PN' ? 'na' : 'pending';
+
+        if (val) {
+            valCorriente = val.valCorriente;
+            resTenencia = val.resTenencia;
+            status = val.status;
         }
-        return false; // Remove anything not linked (Strict 1:1 linkage)
+
+        return {
+            id: p6.id, // ID matches RT6 ID for the bridge
+            type: p6.profileType === 'moneda_extranjera' ? 'USD' : 'Otros',
+            grupo: p6.grupo,
+            rubroLabel: p6.rubroLabel,
+            cuentaCodigo: p6.cuentaCodigo,
+            cuentaNombre: p6.cuentaNombre,
+            sourcePartidaId: p6.id,
+            valuationStatus: status,
+            profileType: p6.profileType,
+
+            // Persisted inputs for the drawer
+            tcCierre: val?.tcCierre,
+            manualCurrentValue: val?.manualCurrentValue,
+
+            // Computed values
+            valCorriente,
+            resTenencia,
+            baseReference,
+            sourceUsdAmount: p6.usdAmount,
+        };
     });
-
-    const result = [...cleanedRt17];
-    const existingSourceIds = new Set(cleanedRt17.map(p => p.sourcePartidaId));
-
-    for (const p6 of rt6Partidas) {
-        if (!existingSourceIds.has(p6.id)) {
-            // Create Shell
-            const newShell: PartidaRT17 = {
-                id: crypto.randomUUID(),
-                sourcePartidaId: p6.id,
-                type: 'Otros', // Default
-                grupo: p6.grupo,
-                rubroLabel: p6.rubroLabel,
-                cuentaCodigo: p6.cuentaCodigo,
-                cuentaNombre: p6.cuentaNombre,
-                // Empty valuation data
-                usdItems: [],
-                manualCurrentValue: 0,
-            };
-            result.push(newShell);
-        }
-    }
-
-    return result;
 }
 
 // ============================================

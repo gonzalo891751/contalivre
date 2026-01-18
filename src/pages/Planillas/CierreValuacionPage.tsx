@@ -9,7 +9,7 @@ import {
     type TabId,
     type IndexRow,
     type PartidaRT6,
-    type PartidaRT17,
+    type RT17Valuation,
     type CierreValuacionState,
     getPeriodFromDate,
     getIndexForPeriod,
@@ -22,7 +22,6 @@ import {
     formatCurrencyARS,
     formatNumber,
     formatCoef,
-    syncRt17Shells,
     canGenerateAsientos,
 } from '../../core/cierre-valuacion';
 import {
@@ -148,24 +147,27 @@ export default function CierreValuacionPage() {
     );
 
     const computedRT17 = useMemo(
-        () => computeAllRT17Partidas(state?.partidasRT17 || [], computedRT6),
-        [state?.partidasRT17, computedRT6]
+        () => computeAllRT17Partidas(computedRT6, state?.valuations || {}),
+        [computedRT6, state?.valuations]
     );
 
-    // Auto-sync RT17 shells when RT6 changes
+    // Cleanup valuations if RT6 items are deleted
     useEffect(() => {
-        if (!state) return;
-        const synced = syncRt17Shells(state.partidasRT17, state.partidasRT6);
-        // Update if length changed (orphans removed OR new shells added)
-        // Note: This covers most cases. For a strict ID check we'd need more logic, 
-        // but since we only ever add/remove based on RT6, length diff is the primary signal.
-        if (synced.length !== state.partidasRT17.length) {
-            updateState((prev) => ({
-                ...prev,
-                partidasRT17: syncRt17Shells(prev.partidasRT17, prev.partidasRT6),
-            }));
+        if (!state?.valuations || !state?.partidasRT6) return;
+        const rt6Ids = new Set(state.partidasRT6.map(p => p.id));
+        const currentValuationIds = Object.keys(state.valuations);
+        const needsCleanup = currentValuationIds.some(id => !rt6Ids.has(id));
+
+        if (needsCleanup) {
+            updateState(prev => {
+                const newValuations = { ...prev.valuations };
+                Object.keys(newValuations).forEach(id => {
+                    if (!rt6Ids.has(id)) delete newValuations[id];
+                });
+                return { ...prev, valuations: newValuations };
+            });
         }
-    }, [state?.partidasRT6.length, state?.partidasRT17.length, updateState]); // Check lengths change
+    }, [state?.partidasRT6.length]);
 
 
     // Totals
@@ -181,25 +183,6 @@ export default function CierreValuacionPage() {
 
     // Draft asientos
     const asientoRT6 = useMemo(() => generateAsientoRT6(computedRT6), [computedRT6]);
-
-    // Helper to get RT6 data for bridge logic
-    const getRT6DataForRT17 = useCallback((rt17Id: string | null) => {
-        if (!rt17Id) return undefined;
-        const p17 = state?.partidasRT17.find(p => p.id === rt17Id);
-        if (p17 && p17.sourcePartidaId) {
-            const p6 = computedRT6.find(p => p.id === p17.sourcePartidaId);
-            if (p6) {
-                // Use total USD amount from profile if available
-                const usdAmount = p6.usdAmount || 0;
-                return {
-                    baselineHomog: p6.totalHomog,
-                    profileType: p6.profileType,
-                    sourceUsdAmount: usdAmount
-                };
-            }
-        }
-        return undefined;
-    }, [state?.partidasRT17, computedRT6]);
 
 
 
@@ -284,27 +267,28 @@ export default function CierreValuacionPage() {
         setRT17DrawerOpen(true);
     };
 
-    const handleSaveRT17 = (partida: PartidaRT17) => {
-        updateState((prev) => {
-            const exists = prev.partidasRT17.find((p) => p.id === partida.id);
-            if (exists) {
-                return {
-                    ...prev,
-                    partidasRT17: prev.partidasRT17.map((p) => (p.id === partida.id ? partida : p)),
-                };
-            }
-            return { ...prev, partidasRT17: [...prev.partidasRT17, partida] };
-        });
+    const handleSaveValuation = (valuation: RT17Valuation) => {
+        updateState((prev) => ({
+            ...prev,
+            valuations: {
+                ...prev.valuations,
+                [valuation.rt6ItemId]: valuation,
+            },
+        }));
         setRT17DrawerOpen(false);
         showToast('Valuación guardada');
     };
 
-    const handleDeleteRT17 = (id: string) => {
-        updateState((prev) => ({
-            ...prev,
-            partidasRT17: prev.partidasRT17.filter((p) => p.id !== id),
-        }));
-        showToast('Valuación eliminada');
+    const handleDeleteRT17 = (rt6Id: string) => {
+        updateState((prev) => {
+            const newValuations = { ...prev.valuations };
+            delete newValuations[rt6Id];
+            return {
+                ...prev,
+                valuations: newValuations,
+            };
+        });
+        showToast('Valuación reseteada');
     };
 
     // RECPAM handlers
@@ -673,12 +657,8 @@ export default function CierreValuacionPage() {
             <RT17Drawer
                 isOpen={isRT17DrawerOpen}
                 onClose={() => setRT17DrawerOpen(false)}
-                editingId={editingRT17Id}
-                partidas={state.partidasRT17}
-                onSave={handleSaveRT17}
-                baselineHomog={getRT6DataForRT17(editingRT17Id)?.baselineHomog}
-                profileType={getRT6DataForRT17(editingRT17Id)?.profileType}
-                sourceUsdAmount={getRT6DataForRT17(editingRT17Id)?.sourceUsdAmount}
+                editingPartida={computedRT17.find((p) => p.id === editingRT17Id)}
+                onSave={handleSaveValuation}
             />
 
             <IndicesImportWizard

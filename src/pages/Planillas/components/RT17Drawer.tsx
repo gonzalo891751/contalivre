@@ -3,9 +3,8 @@
  */
 
 import { useState, useEffect } from 'react';
-import type { PartidaRT17, RT6ProfileType } from '../../../core/cierre-valuacion';
+import type { ComputedPartidaRT17, RT17Valuation } from '../../../core/cierre-valuacion';
 import {
-    createDefaultPartidaRT17,
     formatNumber,
     formatCurrencyARS,
 } from '../../../core/cierre-valuacion';
@@ -13,47 +12,49 @@ import {
 interface RT17DrawerProps {
     isOpen: boolean;
     onClose: () => void;
-    editingId: string | null;
-    partidas: PartidaRT17[];
-    onSave: (partida: PartidaRT17) => void;
-    baselineHomog?: number;
-    /** Source partida profile type for method-specific UI */
-    profileType?: RT6ProfileType;
-    /** Source partida USD amount (if moneda_extranjera) */
-    sourceUsdAmount?: number;
+    editingPartida?: ComputedPartidaRT17;
+    onSave: (valuation: RT17Valuation) => void;
 }
 
 export function RT17Drawer({
     isOpen,
     onClose,
-    editingId,
-    partidas,
+    editingPartida,
     onSave,
-    baselineHomog,
-    profileType,
-    sourceUsdAmount,
 }: RT17DrawerProps) {
-    const [temp, setTemp] = useState<PartidaRT17 | null>(null);
+    const [temp, setTemp] = useState<ComputedPartidaRT17 | null>(null);
 
     // Initialize temp state when drawer opens
     useEffect(() => {
-        if (isOpen) {
-            if (editingId) {
-                const existing = partidas.find((p) => p.id === editingId);
-                if (existing) {
-                    setTemp(JSON.parse(JSON.stringify(existing)));
-                }
-            } else {
-                setTemp(createDefaultPartidaRT17());
-            }
+        if (isOpen && editingPartida) {
+            setTemp(JSON.parse(JSON.stringify(editingPartida)));
         } else {
             setTemp(null);
         }
-    }, [isOpen, editingId, partidas]);
+    }, [isOpen, editingPartida]);
 
     const handleSave = () => {
         if (temp) {
-            onSave(temp);
+            // Determine result based on profile
+            let valCorriente = temp.valCorriente;
+            let resTenencia = temp.resTenencia;
+
+            if (temp.profileType === 'moneda_extranjera') {
+                valCorriente = (editingPartida?.sourceUsdAmount || 0) * (temp.tcCierre || 0);
+            } else {
+                valCorriente = temp.manualCurrentValue || 0;
+            }
+
+            resTenencia = valCorriente - (temp.baseReference || 0);
+
+            onSave({
+                rt6ItemId: temp.sourcePartidaId || temp.id,
+                valCorriente,
+                resTenencia,
+                status: 'done',
+                tcCierre: temp.tcCierre,
+                manualCurrentValue: temp.manualCurrentValue,
+            });
         }
     };
 
@@ -84,7 +85,7 @@ export function RT17Drawer({
                                 <span className="axi-locked-badge">Bloqueado</span>
                             </div>
                             <div className="axi-locked-amount font-mono tabular-nums">
-                                {formatCurrencyARS(baselineHomog || 0)}
+                                {formatCurrencyARS(temp.baseReference || 0)}
                             </div>
                             <div className="axi-locked-helper">
                                 Calculado en Paso 2 (Reexpresión). Base comparativa invariable.
@@ -100,8 +101,7 @@ export function RT17Drawer({
                                 <h4>No requiere acción</h4>
                                 <p>Patrimonio Neto no requiere valuación adicional según RT17.</p>
                             </div>
-                        ) : (profileType === 'mercaderias' ? (
-                            /* MERCADERIAS */
+                        ) : temp.profileType === 'mercaderias' ? (
                             <div className="animate-fade-in">
                                 <div className="mb-4">
                                     <label className="form-label">Costo de Reposición Total <span className="text-error">*</span></label>
@@ -132,26 +132,25 @@ export function RT17Drawer({
                                             </div>
                                             <div className="rxt-preview-row">
                                                 <span className="text-muted">(-) Valor Homogéneo:</span>
-                                                <span className="font-mono text-muted">{formatCurrencyARS(baselineHomog || 0)}</span>
+                                                <span className="font-mono text-muted">{formatCurrencyARS(temp.baseReference || 0)}</span>
                                             </div>
                                             <div className="rxt-preview-divider"></div>
                                             <div className="rxt-preview-total">
                                                 <span className="font-bold">Resultado (RxT):</span>
-                                                <span className={`font-mono font-bold tabular-nums ${(temp.manualCurrentValue - (baselineHomog || 0)) >= 0 ? 'text-success' : 'text-error'}`}>
-                                                    {(temp.manualCurrentValue - (baselineHomog || 0)) >= 0 ? '+' : ''}
-                                                    {formatCurrencyARS(temp.manualCurrentValue - (baselineHomog || 0))}
+                                                <span className={`font-mono font-bold tabular-nums ${(temp.manualCurrentValue - (temp.baseReference || 0)) >= 0 ? 'text-success' : 'text-error'}`}>
+                                                    {(temp.manualCurrentValue - (temp.baseReference || 0)) >= 0 ? '+' : ''}
+                                                    {formatCurrencyARS(temp.manualCurrentValue - (temp.baseReference || 0))}
                                                 </span>
                                             </div>
                                         </div>
                                     </div>
                                 ) : null}
                             </div>
-                        ) : (profileType === 'moneda_extranjera' || isUSD) ? (
-                            /* MONEDA EXTRANJERA */
+                        ) : (temp.profileType === 'moneda_extranjera' || isUSD) ? (
                             <div className="animate-fade-in">
                                 <div className="flex items-center justify-between bg-slate-50 rounded p-3 mb-4 border border-slate-200">
                                     <span className="text-sm font-medium text-slate-600">Existencia USD (Origen)</span>
-                                    <span className="font-mono font-bold text-slate-800">US$ {formatNumber(sourceUsdAmount || 0, 2)}</span>
+                                    <span className="font-mono font-bold text-slate-800">US$ {formatNumber(temp.sourceUsdAmount || 0, 2)}</span>
                                 </div>
 
                                 <div className="mb-4">
@@ -177,18 +176,18 @@ export function RT17Drawer({
                                         <div className="rxt-preview-details">
                                             <div className="rxt-preview-row">
                                                 <span className="text-muted">Valor Corriente (USD × TC):</span>
-                                                <span className="font-mono">{formatCurrencyARS((sourceUsdAmount || 0) * temp.tcCierre)}</span>
+                                                <span className="font-mono">{formatCurrencyARS((temp.sourceUsdAmount || 0) * temp.tcCierre)}</span>
                                             </div>
                                             <div className="rxt-preview-row">
                                                 <span className="text-muted">(-) Valor Homogéneo:</span>
-                                                <span className="font-mono text-muted">{formatCurrencyARS(baselineHomog || 0)}</span>
+                                                <span className="font-mono text-muted">{formatCurrencyARS(temp.baseReference || 0)}</span>
                                             </div>
                                             <div className="rxt-preview-divider"></div>
                                             <div className="rxt-preview-total">
                                                 <span className="font-bold">Resultado (RxT):</span>
-                                                <span className={`font-mono font-bold tabular-nums ${((sourceUsdAmount || 0) * temp.tcCierre - (baselineHomog || 0)) >= 0 ? 'text-success' : 'text-error'}`}>
-                                                    {((sourceUsdAmount || 0) * temp.tcCierre - (baselineHomog || 0)) >= 0 ? '+' : ''}
-                                                    {formatCurrencyARS((sourceUsdAmount || 0) * temp.tcCierre - (baselineHomog || 0))}
+                                                <span className={`font-mono font-bold tabular-nums ${((temp.sourceUsdAmount || 0) * temp.tcCierre - (temp.baseReference || 0)) >= 0 ? 'text-success' : 'text-error'}`}>
+                                                    {((temp.sourceUsdAmount || 0) * temp.tcCierre - (temp.baseReference || 0)) >= 0 ? '+' : ''}
+                                                    {formatCurrencyARS((temp.sourceUsdAmount || 0) * temp.tcCierre - (temp.baseReference || 0))}
                                                 </span>
                                             </div>
                                         </div>
@@ -196,7 +195,6 @@ export function RT17Drawer({
                                 ) : null}
                             </div>
                         ) : (
-                            /* GENERICO */
                             <div className="animate-fade-in">
                                 <div className="mb-4">
                                     <label className="form-label">Valor Corriente (Manual) <span className="text-error">*</span></label>
@@ -222,21 +220,21 @@ export function RT17Drawer({
                                             </div>
                                             <div className="rxt-preview-row">
                                                 <span className="text-muted">(-) Valor Homogéneo:</span>
-                                                <span className="font-mono text-muted">{formatCurrencyARS(baselineHomog || 0)}</span>
+                                                <span className="font-mono text-muted">{formatCurrencyARS(temp.baseReference || 0)}</span>
                                             </div>
                                             <div className="rxt-preview-divider"></div>
                                             <div className="rxt-preview-total">
                                                 <span className="font-bold">Resultado (RxT):</span>
-                                                <span className={`font-mono font-bold tabular-nums ${(temp.manualCurrentValue - (baselineHomog || 0)) >= 0 ? 'text-success' : 'text-error'}`}>
-                                                    {(temp.manualCurrentValue - (baselineHomog || 0)) >= 0 ? '+' : ''}
-                                                    {formatCurrencyARS(temp.manualCurrentValue - (baselineHomog || 0))}
+                                                <span className={`font-mono font-bold tabular-nums ${(temp.manualCurrentValue - (temp.baseReference || 0)) >= 0 ? 'text-success' : 'text-error'}`}>
+                                                    {(temp.manualCurrentValue - (temp.baseReference || 0)) >= 0 ? '+' : ''}
+                                                    {formatCurrencyARS(temp.manualCurrentValue - (temp.baseReference || 0))}
                                                 </span>
                                             </div>
                                         </div>
                                     </div>
                                 ) : null}
                             </div>
-                        ))}
+                        )}
                     </div>
                 </div>
 
@@ -475,6 +473,6 @@ export function RT17Drawer({
                     color: var(--color-text-muted);
                 }
             `}</style>
-        </div>
+        </div >
     );
 }

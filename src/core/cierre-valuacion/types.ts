@@ -155,6 +155,20 @@ export interface PartidaRT17 {
     tcCierre?: number;
 }
 
+/** 
+ * RT17Valuation - Single source of truth for a valuation
+ * Keyed by RT6 item ID in the state map.
+ */
+export interface RT17Valuation {
+    rt6ItemId: string;
+    valCorriente: number;
+    resTenencia: number;
+    status: ValuacionStatus;
+    // Input persistence
+    tcCierre?: number;
+    manualCurrentValue?: number;
+}
+
 /** Fully computed RT17 partida */
 export interface ComputedPartidaRT17 extends PartidaRT17 {
     /** Current value (valor corriente) */
@@ -163,6 +177,8 @@ export interface ComputedPartidaRT17 extends PartidaRT17 {
     resTenencia: number;
     /** Base reference value (historical or homogeneous) */
     baseReference: number;
+    /** Source USD amount if any (for display calculation) */
+    sourceUsdAmount?: number;
     /** Warning if using fallback base */
     useFallbackBase?: boolean;
 }
@@ -219,8 +235,8 @@ export interface CierreValuacionState {
     indices: IndexRow[];
     /** RT6 partidas */
     partidasRT6: PartidaRT6[];
-    /** RT17 partidas */
-    partidasRT17: PartidaRT17[];
+    /** RT17 valuations keyed by RT6 item ID (Single Source of Truth) */
+    valuations: Record<string, RT17Valuation>;
     /** RECPAM calculator inputs */
     recpamInputs: RecpamInputs;
 }
@@ -297,7 +313,7 @@ export function createInitialState(): CierreValuacionState {
         closingDate: new Date().toISOString().split('T')[0],
         indices: INITIAL_INDICES,
         partidasRT6: [],
-        partidasRT17: [],
+        valuations: {},
         recpamInputs: { activeMon: 0, passiveMon: 0 },
     };
 }
