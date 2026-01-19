@@ -5,6 +5,9 @@
  */
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../../storage/db';
 import {
     type TabId,
     type IndexRow,
@@ -18,7 +21,7 @@ import {
     calculateRT6Totals,
     calculateRT17Totals,
     calculateRecpamEstimado,
-    generateAsientoRT6,
+    generateCierreDrafts,
     formatCurrencyARS,
     formatNumber,
     formatCoef,
@@ -28,11 +31,15 @@ import {
     loadCierreValuacionState,
     saveCierreValuacionState,
 } from '../../storage';
+import { getAllAccounts } from '../../storage/accounts';
+import { Account } from '../../core/models';
 import { RT6Drawer } from './components/RT6Drawer';
 import { RT17Drawer } from './components/RT17Drawer';
 import { IndicesImportWizard } from './components/IndicesImportWizard';
 import { Step2RT6Panel } from './components/Step2RT6Panel';
 import { Step3RT17Panel } from './components/Step3RT17Panel';
+import { createEntry, updateEntry } from '../../storage/entries';
+import { computeVoucherHash, findEntryByVoucherKey } from '../../core/cierre-valuacion/sync';
 
 // Icons (using emoji for simplicity - can be replaced with lucide-react)
 const ICONS = {
@@ -50,6 +57,7 @@ const ICONS = {
 };
 
 export default function CierreValuacionPage() {
+    const navigate = useNavigate();
     // =============================================
     // State
     // =============================================
@@ -57,6 +65,7 @@ export default function CierreValuacionPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<TabId>('reexpresion');
     const [toast, setToast] = useState<string | null>(null);
+    const [allAccounts, setAllAccounts] = useState<Account[]>([]);
 
     // Drawer state
     const [isRT6DrawerOpen, setRT6DrawerOpen] = useState(false);
@@ -83,6 +92,8 @@ export default function CierreValuacionPage() {
     // =============================================
     useEffect(() => {
         async function load() {
+            const accounts = await getAllAccounts();
+            setAllAccounts(accounts);
             const loaded = await loadCierreValuacionState();
             setState(loaded);
             setIsLoading(false);
@@ -182,7 +193,36 @@ export default function CierreValuacionPage() {
     const recpamEstimado = calculateRecpamEstimado(pmn, recpamCoef);
 
     // Draft asientos
-    const asientoRT6 = useMemo(() => generateAsientoRT6(computedRT6), [computedRT6]);
+    const asientosDraft = useMemo(
+        () => generateCierreDrafts(computedRT6, computedRT17, allAccounts),
+        [computedRT6, computedRT17, allAccounts]
+    );
+
+    // REAL-TIME SYNC with Ledger
+    const allJournalEntries = useLiveQuery(() => db.entries.reverse().toArray(), []);
+
+    // Compute Sync Status for each voucher
+    const voucherSyncData = useMemo(() => {
+        if (!state || !allJournalEntries) return [];
+
+        return asientosDraft.map(v => {
+            const entry = findEntryByVoucherKey(allJournalEntries, state.id || 'cierre-valuacion-state', v.key);
+            const currentHash = computeVoucherHash(v, closingDate);
+
+            let status: 'PENDIENTE' | 'ENVIADO' | 'DESACTUALIZADO' = 'PENDIENTE';
+            if (entry) {
+                const storedHash = entry.metadata?.voucherHash;
+                status = (storedHash === currentHash) ? 'ENVIADO' : 'DESACTUALIZADO';
+            }
+
+            return {
+                voucherKey: v.key,
+                status,
+                existingEntryId: entry?.id,
+                currentHash
+            };
+        });
+    }, [asientosDraft, allJournalEntries, state, closingDate]);
 
 
 
@@ -198,6 +238,53 @@ export default function CierreValuacionPage() {
     const handleGenerarAsientos = () => {
         setActiveTab('asientos');
         showToast('Asientos generados (borrador)');
+    };
+
+    const handleSendToLedger = async () => {
+        if (!state || !asientosDraft || asientosDraft.length === 0) return;
+
+        try {
+            const unsynced = voucherSyncData.filter(s => s.status !== 'ENVIADO');
+            if (unsynced.length === 0) {
+                showToast('Todos los asientos ya están sincronizados.');
+                return;
+            }
+
+            for (const sync of unsynced) {
+                const voucher = asientosDraft.find(v => v.key === sync.voucherKey);
+                if (!voucher || !voucher.isValid) continue;
+
+                const entryData = {
+                    date: closingDate,
+                    memo: voucher.descripcion,
+                    lines: voucher.lineas.map(l => ({
+                        accountId: l.accountId || '',
+                        debit: l.debe,
+                        credit: l.haber,
+                        description: voucher.descripcion
+                    })),
+                    metadata: {
+                        source: 'cierre',
+                        cierreId: state.id || 'cierre-valuacion-state',
+                        voucherKey: sync.voucherKey,
+                        voucherHash: sync.currentHash,
+                        step: voucher.tipo,
+                        side: sync.voucherKey.split('_')[1].toLowerCase()
+                    }
+                };
+
+                if (sync.status === 'DESACTUALIZADO' && sync.existingEntryId) {
+                    await updateEntry(sync.existingEntryId, entryData);
+                } else {
+                    await createEntry(entryData);
+                }
+            }
+
+            showToast(`¡Éxito! Se sincronizaron ${unsynced.length} asientos.`);
+        } catch (err: any) {
+            console.error('Error sending to ledger:', err);
+            showToast('Error al enviar: ' + err.message);
+        }
     };
 
     const showToast = (msg: string) => {
@@ -591,52 +678,92 @@ export default function CierreValuacionPage() {
                             </div>
                         </div>
 
-                        {/* Asiento RT6 */}
-                        <div className="card cierre-asiento-card">
-                            <div className="cierre-asiento-header">
-                                <div>
-                                    <span className="font-bold">ASIENTO #1</span>{' '}
-                                    <span className="text-muted">{asientoRT6.descripcion}</span>
+                        {asientosDraft.map((voucher, idx) => {
+                            const sync = voucherSyncData.find(s => s.voucherKey === voucher.key);
+                            const status = sync?.status || 'PENDIENTE';
+
+                            return (
+                                <div key={voucher.key} className="card cierre-asiento-card">
+                                    <div className="cierre-asiento-header">
+                                        <div>
+                                            <span className="font-bold">ASIENTO #{idx + 1}</span>{' '}
+                                            <span className="text-muted">{voucher.descripcion}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            {status === 'ENVIADO' && <span className="badge badge-success">ENVIADO</span>}
+                                            {status === 'PENDIENTE' && <span className="badge badge-warning">PENDIENTE</span>}
+                                            {status === 'DESACTUALIZADO' && <span className="badge badge-orange">ACTUALIZACIÓN PENDIENTE</span>}
+
+                                            {voucher.isValid ? (
+                                                <span className="text-success font-bold">{ICONS.check} Balanceado</span>
+                                            ) : (
+                                                <span className="text-error font-bold">{ICONS.warning} No balanceado</span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {voucher.warning && (
+                                        <div className="cierre-warning-banner mb-4">
+                                            {ICONS.warning} {voucher.warning}
+                                        </div>
+                                    )}
+
+                                    <div className="cierre-asiento-table-container">
+                                        <table className="cierre-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Cuenta</th>
+                                                    <th className="text-right" style={{ width: 120 }}>Debe</th>
+                                                    <th className="text-right" style={{ width: 120 }}>Haber</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {voucher.lineas.map((linea, i) => (
+                                                    <tr key={i}>
+                                                        <td className="font-medium">
+                                                            <div className="text-xs text-muted">{linea.cuentaCodigo}</div>
+                                                            {linea.cuentaNombre}
+                                                        </td>
+                                                        <td className="text-right font-mono tabular-nums">
+                                                            {linea.debe > 0 ? formatNumber(linea.debe) : '—'}
+                                                        </td>
+                                                        <td className="text-right font-mono tabular-nums">
+                                                            {linea.haber > 0 ? formatNumber(linea.haber) : '—'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                            <tfoot>
+                                                <tr className="font-bold bg-slate-50">
+                                                    <td>TOTALES</td>
+                                                    <td className="text-right font-mono">{formatNumber(voucher.totalDebe)}</td>
+                                                    <td className="text-right font-mono">{formatNumber(voucher.totalHaber)}</td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
                                 </div>
-                                <span className="badge badge-orange">Borrador</span>
+                            );
+                        })}
+
+                        <div className="cierre-asiento-footer flex items-center justify-between">
+                            <div className="flex gap-2">
+                                {voucherSyncData.some(s => s.status === 'ENVIADO' || s.status === 'DESACTUALIZADO') && (
+                                    <button
+                                        className="btn btn-secondary flex items-center gap-2"
+                                        onClick={() => navigate('/asientos')}
+                                    >
+                                        {ICONS.file} Ver en Libro Diario
+                                    </button>
+                                )}
                             </div>
-                            <div className="cierre-asiento-body">
-                                <table className="table">
-                                    <thead>
-                                        <tr>
-                                            <th>Cuenta</th>
-                                            <th className="text-right" style={{ width: 120 }}>
-                                                Debe
-                                            </th>
-                                            <th className="text-right" style={{ width: 120 }}>
-                                                Haber
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {asientoRT6.lineas.map((linea, i) => (
-                                            <tr key={i}>
-                                                <td className="font-medium">{linea.cuentaNombre}</td>
-                                                <td className="text-right font-mono">
-                                                    {linea.debe > 0 ? formatNumber(linea.debe) : '-'}
-                                                </td>
-                                                <td className="text-right font-mono">
-                                                    {linea.haber > 0 ? formatNumber(linea.haber) : '-'}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div className="cierre-asiento-footer">
-                                <button
-                                    className="btn btn-secondary"
-                                    disabled
-                                    title="Próximamente"
-                                >
-                                    📤 Enviar a Libro Diario
-                                </button>
-                            </div>
+                            <button
+                                className="btn btn-primary"
+                                disabled={!voucherSyncData.some(s => s.status === 'PENDIENTE' || s.status === 'DESACTUALIZADO')}
+                                onClick={handleSendToLedger}
+                            >
+                                📤 Enviar a Libro Diario
+                            </button>
                         </div>
                     </div>
                 )}

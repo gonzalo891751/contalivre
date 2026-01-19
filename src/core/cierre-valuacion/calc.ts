@@ -12,8 +12,6 @@ import type {
     ComputedPartidaRT6,
     ComputedPartidaRT17,
     ComputedLotRT6,
-    AsientoBorrador,
-    AsientoLine,
     PartidaStatus,
     GrupoContable,
 } from './types';
@@ -332,86 +330,6 @@ export function getValuationProgress(partidas: ComputedPartidaRT17[]): Valuation
 export function canGenerateAsientos(partidas: ComputedPartidaRT17[]): boolean {
     const progress = getValuationProgress(partidas);
     return progress.pending === 0 && progress.done > 0;
-}
-
-// ============================================
-// Asientos Generation
-// ============================================
-
-/**
- * Generate RT6 adjustment journal entry
- */
-export function generateAsientoRT6(partidas: ComputedPartidaRT6[]): AsientoBorrador {
-    const lineas: AsientoLine[] = [];
-    let totalRecpam = 0;
-
-    // Add debit lines for each partida
-    partidas.forEach((p) => {
-        if (p.totalRecpam !== 0) {
-            lineas.push({
-                cuentaCodigo: p.cuentaCodigo,
-                cuentaNombre: `Ajuste por Inf. — ${p.cuentaNombre}`,
-                debe: p.totalRecpam > 0 ? p.totalRecpam : 0,
-                haber: p.totalRecpam < 0 ? Math.abs(p.totalRecpam) : 0,
-            });
-            totalRecpam += p.totalRecpam;
-        }
-    });
-
-    // Add RECPAM counterpart
-    if (totalRecpam !== 0) {
-        lineas.push({
-            cuentaCodigo: '5.4.01.01',
-            cuentaNombre: 'RECPAM',
-            debe: totalRecpam < 0 ? Math.abs(totalRecpam) : 0,
-            haber: totalRecpam > 0 ? totalRecpam : 0,
-        });
-    }
-
-    return {
-        numero: 1,
-        descripcion: 'Ajuste por Inflación (RT6)',
-        lineas,
-        tipo: 'RT6',
-    };
-}
-
-/**
- * Generate RT17 valuation journal entry
- */
-export function generateAsientoRT17(partidas: ComputedPartidaRT17[]): AsientoBorrador {
-    const lineas: AsientoLine[] = [];
-    let totalResTenencia = 0;
-
-    // Add lines for each partida
-    partidas.forEach((p) => {
-        if (p.resTenencia !== 0) {
-            lineas.push({
-                cuentaCodigo: p.cuentaCodigo,
-                cuentaNombre: p.cuentaNombre,
-                debe: p.resTenencia > 0 ? p.resTenencia : 0,
-                haber: p.resTenencia < 0 ? Math.abs(p.resTenencia) : 0,
-            });
-            totalResTenencia += p.resTenencia;
-        }
-    });
-
-    // Add RxT counterpart
-    if (totalResTenencia !== 0) {
-        lineas.push({
-            cuentaCodigo: '4.2.01.01',
-            cuentaNombre: 'Resultado por Tenencia',
-            debe: totalResTenencia < 0 ? Math.abs(totalResTenencia) : 0,
-            haber: totalResTenencia > 0 ? totalResTenencia : 0,
-        });
-    }
-
-    return {
-        numero: 2,
-        descripcion: 'Valuación a Valores Corrientes (RT17)',
-        lineas,
-        tipo: 'RT17',
-    };
 }
 
 // ============================================

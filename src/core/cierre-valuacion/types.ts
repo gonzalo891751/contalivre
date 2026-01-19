@@ -189,6 +189,8 @@ export interface ComputedPartidaRT17 extends PartidaRT17 {
 
 /** Single line in a journal entry */
 export interface AsientoLine {
+    /** Account ID (from DB) */
+    accountId?: string;
     /** Account code */
     cuentaCodigo: string;
     /** Account name */
@@ -209,6 +211,15 @@ export interface AsientoBorrador {
     lineas: AsientoLine[];
     /** Entry type */
     tipo: 'RT6' | 'RT17' | 'Mixto';
+    /** Unique key for this voucher (e.g. RT6_HABER) */
+    key: string;
+    /** Totals for verification */
+    totalDebe: number;
+    totalHaber: number;
+    /** Error/Missing mapping message */
+    warning?: string;
+    /** Is the entry balanced and complete? */
+    isValid: boolean;
 }
 
 // ============================================
@@ -239,6 +250,8 @@ export interface CierreValuacionState {
     valuations: Record<string, RT17Valuation>;
     /** RECPAM calculator inputs */
     recpamInputs: RecpamInputs;
+    /** Keys of vouchers already posted to Libro Diario */
+    postedVoucherIds?: string[];
 }
 
 // ============================================

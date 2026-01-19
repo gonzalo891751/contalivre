@@ -109,6 +109,7 @@ export interface JournalEntry {
     date: string // ISO date string (YYYY-MM-DD)
     memo: string
     lines: EntryLine[]
+    metadata?: Record<string, any>
 }
 
 /**
