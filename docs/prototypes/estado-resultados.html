@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estado de Resultados — ContaLivre</title>
+    
+    <!-- Tailwind CSS (via CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts: Brand Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Tailwind Config & Brand Tokens -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',
+                            secondary: '#10B981',
+                        },
+                        ui: {
+                            bg: '#F8FAFC',
+                            paper: '#FFFFFF',
+                            text: '#0F172A',
+                            sec: '#64748B',
+                            border: '#E2E8F0',
+                        }
+                    },
+                    fontFamily: {
+                        display: ['Outfit', 'sans-serif'],
+                        body: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    boxShadow: {
+                        'paper': '0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05)',
+                        'float': '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        :root {
+            /* Brand Tokens (Sync with Brand Book) */
+            --brand-primary: #3B82F6;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --brand-gradient-hover: linear-gradient(135deg, #1D4ED8 0%, #059669 100%);
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --success: #10B981;
+            --error: #EF4444;
+            --border-light: #E2E8F0;
+        }
+
+        body {
+            background-color: var(--ui-bg, #F8FAFC);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Custom Scrollbar for the document container */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background-color: #CBD5E1; border-radius: 20px; }
+
+        /* Toggles */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #10B981;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #10B981;
+        }
+        
+        /* Accounting Specifics */
+        .num-cell {
+            font-family: 'JetBrains Mono', monospace;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.02em;
+        }
+        .negative {
+            color: var(--error);
+        }
+        .positive-ui {
+            color: var(--success);
+        }
+        
+        /* Interactive Rows */
+        .row-detail {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow: hidden;
+            max-height: 500px; /* Arbitrary large height for transition */
+            opacity: 1;
+        }
+        .row-detail.collapsed {
+            max-height: 0;
+            opacity: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            border: none;
+        }
+        
+        /* Print Styles */
+        @media print {
+            @page { size: A4; margin: 15mm; }
+            body { background: white; -webkit-print-color-adjust: exact; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            
+            #document-paper {
+                box-shadow: none;
+                max-width: 100%;
+                width: 100%;
+                padding: 0;
+                margin: 0;
+                border: none;
+            }
+            
+            /* Clean up colors for print */
+            .negative { color: black !important; font-weight: normal; }
+            .positive-ui { color: black !important; }
+            .bg-slate-50 { background-color: transparent !important; }
+            .border-b { border-bottom: 1px solid #000 !important; }
+            
+            /* Font adjustments */
+            h1 { font-size: 18pt !important; color: black !important; }
+            .text-sm { font-size: 9pt !important; }
+            .num-cell { font-size: 9pt !important; font-weight: normal !important; }
+            
+            /* Remove interactive indicators */
+            .caret-icon { display: none; }
+        }
+
+        /* Animations */
+        .slide-in { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center pb-20">
+
+    <!-- TOOLBAR (Floating Control Center) -->
+    <div class="sticky top-4 z-50 mb-6 no-print slide-in">
+        <div class="bg-white/90 backdrop-blur-md border border-gray-200 shadow-float rounded-full px-6 py-3 flex items-center gap-6">
+            
+            <!-- Controls Group -->
+            <div class="flex items-center gap-4 border-r border-gray-200 pr-4">
+                <!-- Toggle: Comparativo -->
+                <div class="flex items-center gap-2 cursor-pointer" onclick="toggleComparativo()">
+                    <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="toggle" id="toggleComp" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 left-0"/>
+                        <label for="toggleComp" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer transition-colors duration-300"></label>
+                    </div>
+                    <span class="text-sm font-medium text-slate-600 font-display">Comparativo</span>
+                </div>
+
+                <!-- Toggle: Detalle -->
+                <div class="flex items-center gap-2 cursor-pointer" onclick="toggleDetails()">
+                    <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="toggle" id="toggleDetail" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 left-0" checked/>
+                        <label for="toggleDetail" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer transition-colors duration-300"></label>
+                    </div>
+                    <span class="text-sm font-medium text-slate-600 font-display">Ver Detalle</span>
+                </div>
+            </div>
+
+            <!-- Year Selector -->
+            <div class="flex items-center gap-2">
+                <i class="ph ph-calendar-blank text-slate-400"></i>
+                <select class="bg-transparent text-sm font-semibold text-slate-700 focus:outline-none cursor-pointer font-display">
+                    <option>2025 (Cierre)</option>
+                    <option>2024 (Histórico)</option>
+                </select>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex items-center gap-3 pl-4 border-l border-gray-200">
+                <button onclick="togglePrintMode()" class="p-2 text-slate-500 hover:text-brand-primary hover:bg-blue-50 rounded-full transition-colors" title="Vista impresión">
+                    <i class="ph ph-eye text-lg"></i>
+                </button>
+                <button onclick="window.print()" class="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-700 hover:to-emerald-600 text-white px-5 py-2 rounded-full text-sm font-semibold shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0">
+                    <i class="ph ph-file-pdf text-lg"></i>
+                    <span>Descargar</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DOCUMENT CANVAS (The "Paper") -->
+    <main id="document-paper" class="bg-white w-full max-w-[620px] min-h-[800px] p-10 md:p-12 shadow-paper rounded-2xl border border-gray-100 relative slide-in">
+        
+        <!-- HEADER -->
+        <header class="text-center mb-10 pb-6 border-b border-gray-100">
+            <h1 class="font-display font-bold text-3xl text-slate-900 tracking-tight mb-2">Estado de Resultados</h1>
+            <p class="font-display font-medium text-slate-500 text-sm uppercase tracking-wide">
+                Ejercicio finalizado el 31/12/2025
+            </p>
+            <p class="font-body text-xs text-slate-400 mt-2 italic">
+                Cifras expresadas en pesos argentinos ($)
+            </p>
+        </header>
+
+        <!-- TABLE HEADER (Sticky inside doc) -->
+        <div class="grid grid-cols-12 gap-2 mb-4 pb-2 border-b-2 border-gray-100 text-xs font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-white z-10">
+            <div class="col-span-6 pl-2">Rubro / Cuenta</div>
+            <div class="col-span-3 text-right pr-2 header-actual">2025</div>
+            <div class="col-span-3 text-right pr-2 header-comp hidden text-slate-300">2024</div>
+        </div>
+
+        <!-- CONTENT BODY -->
+        <div class="space-y-1 text-sm">
+            
+            <!-- SECTION: VENTAS -->
+            <div class="group">
+                <!-- Ventas Subtotal -->
+                <div class="grid grid-cols-12 gap-2 py-2 hover:bg-slate-50 rounded transition-colors cursor-pointer items-center" onclick="toggleSection(this)">
+                    <div class="col-span-6 pl-2 font-display font-semibold text-slate-800 flex items-center gap-2">
+                        <i class="ph-bold ph-caret-down text-slate-300 text-xs caret-icon"></i>
+                        Ventas netas
+                    </div>
+                    <div class="col-span-3 text-right num-cell font-medium text-slate-900">1.400.000,00</div>
+                    <div class="col-span-3 text-right num-cell text-slate-400 col-comp hidden">1.100.000,00</div>
+                </div>
+                <!-- Details -->
+                <div class="details-container">
+                    <div class="grid grid-cols-12 gap-2 py-1 row-detail">
+                        <div class="col-span-6 pl-8 text-slate-500 text-xs">Ventas Brutas</div>
+                        <div class="col-span-3 text-right num-cell text-slate-500 text-xs">1.460.000,00</div>
+                        <div class="col-span-3 text-right num-cell text-slate-300 text-xs col-comp hidden">1.150.000,00</div>
+                    </div>
+                    <div class="grid grid-cols-12 gap-2 py-1 row-detail">
+                        <div class="col-span-6 pl-8 text-slate-500 text-xs">(-) Devoluciones</div>
+                        <div class="col-span-3 text-right num-cell text-slate-500 text-xs negative">(40.000,00)</div>
+                        <div class="col-span-3 text-right num-cell text-slate-300 text-xs col-comp hidden negative">(30.000,00)</div>
+                    </div>
+                    <div class="grid grid-cols-12 gap-2 py-1 row-detail">
+                        <div class="col-span-6 pl-8 text-slate-500 text-xs">(-) Bonificaciones</div>
+                        <div class="col-span-3 text-right num-cell text-slate-500 text-xs negative">(20.000,00)</div>
+                        <div class="col-span-3 text-right num-cell text-slate-300 text-xs col-comp hidden negative">(20.000,00)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION: COSTO -->
+            <div class="group pt-2">
+                <div class="grid grid-cols-12 gap-2 py-2 hover:bg-slate-50 rounded transition-colors cursor-pointer items-center" onclick="toggleSection(this)">
+                    <div class="col-span-6 pl-2 font-display font-semibold text-slate-700 flex items-center gap-2">
+                         <i class="ph-bold ph-caret-down text-slate-300 text-xs caret-icon"></i>
+                        (-) Costo de ventas
+                    </div>
+                    <div class="col-span-3 text-right num-cell text-slate-700 negative">(550.000,00)</div>
+                    <div class="col-span-3 text-right num-cell text-slate-400 col-comp hidden negative">(450.000,00)</div>
+                </div>
+                <div class="details-container">
+                    <div class="grid grid-cols-12 gap-2 py-1 row-detail">
+                        <div class="col-span-6 pl-8 text-slate-500 text-xs">CMV Mercaderías</div>
+                        <div class="col-span-3 text-right num-cell text-slate-500 text-xs negative">(550.000,00)</div>
+                        <div class="col-span-3 text-right num-cell text-slate-300 text-xs col-comp hidden negative">(450.000,00)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SUBTOTAL: BRUTO -->
+            <div class="my-4 py-3 border-t border-b border-slate-100 bg-slate-50/50 rounded-sm">
+                <div class="grid grid-cols-12 gap-2 items-center">
+                    <div class="col-span-6 pl-2 font-display font-bold text-slate-900 uppercase text-xs tracking-wider">
+                        (=) Resultado Bruto
+                    </div>
+                    <div class="col-span-3 text-right num-cell font-bold text-base text-slate-900 relative group-tooltip">
+                        850.000,00
+                        <!-- Hover Chip -->
+                        <span class="no-print absolute top-0 right-full mr-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded opacity-0 group-tooltip-hover:opacity-100 transition-opacity whitespace-nowrap">
+                            MG 60.7%
+                        </span>
+                    </div>
+                    <div class="col-span-3 text-right num-cell font-bold text-slate-400 col-comp hidden">650.000,00</div>
+                </div>
+            </div>
+
+            <!-- SECTION: GASTOS OP -->
+            <div class="space-y-4">
+                <!-- Comercializacion -->
+                <div class="group">
+                    <div class="grid grid-cols-12 gap-2 py-1 items-center cursor-pointer" onclick="toggleSection(this)">
+                        <div class="col-span-6 pl-2 font-display font-medium text-slate-700 flex items-center gap-2">
+                             <i class="ph-bold ph-caret-down text-slate-300 text-xs caret-icon"></i>
+                            (-) Gastos comercialización
+                        </div>
+                        <div class="col-span-3 text-right num-cell text-slate-600 negative">(30.000,00)</div>
+                        <div class="col-span-3 text-right num-cell text-slate-300 col-comp hidden negative">(25.000,00)</div>
+                    </div>
+                     <div class="details-container">
+                        <div class="grid grid-cols-12 gap-2 py-1 row-detail">
+                            <div class="col-span-6 pl-8 text-slate-500 text-xs">Publicidad y Propaganda</div>
+                            <div class="col-span-3 text-right num-cell text-slate-500 text-xs negative">(30.000,00)</div>
+                            <div class="col-span-3 text-right num-cell text-slate-300 text-xs col-comp hidden negative">(25.000,00)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin -->
+                <div class="group">
+                    <div class="grid grid-cols-12 gap-2 py-1 items-center cursor-pointer" onclick="toggleSection(this)">
+                        <div class="col-span-6 pl-2 font-display font-medium text-slate-700 flex items-center gap-2">
+                             <i class="ph-bold ph-caret-down text-slate-300 text-xs caret-icon"></i>
+                            (-) Gastos administración
+                        </div>
+                        <div class="col-span-3 text-right num-cell text-slate-600 negative">(434.000,00)</div>
+                        <div class="col-span-3 text-right num-cell text-slate-300 col-comp hidden negative">(350.000,00)</div>
+                    </div>
+                    <div class="details-container">
+                        <div class="grid grid-cols-12 gap-2 py-1 row-detail">
+                            <div class="col-span-6 pl-8 text-slate-500 text-xs">Sueldos y Cargas Sociales</div>
+                            <div class="col-span-3 text-right num-cell text-slate-500 text-xs negative">(400.000,00)</div>
+                            <div class="col-span-3 text-right num-cell text-slate-300 text-xs col-comp hidden negative">(320.000,00)</div>
+                        </div>
+                         <div class="grid grid-cols-12 gap-2 py-1 row-detail">
+                            <div class="col-span-6 pl-8 text-slate-500 text-xs">Servicios y Alquileres</div>
+                            <div class="col-span-3 text-right num-cell text-slate-500 text-xs negative">(34.000,00)</div>
+                            <div class="col-span-3 text-right num-cell text-slate-300 text-xs col-comp hidden negative">(30.000,00)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SUBTOTAL: OPERATIVO -->
+            <div class="my-4 py-3 border-t border-b border-slate-100 bg-slate-50/50 rounded-sm">
+                <div class="grid grid-cols-12 gap-2 items-center">
+                    <div class="col-span-6 pl-2 font-display font-bold text-slate-900 uppercase text-xs tracking-wider">
+                        (=) Resultado Operativo
+                    </div>
+                    <div class="col-span-3 text-right num-cell font-bold text-base text-slate-900">386.000,00</div>
+                    <div class="col-span-3 text-right num-cell font-bold text-slate-400 col-comp hidden">275.000,00</div>
+                </div>
+            </div>
+
+            <!-- SECTION: FINANCIERO -->
+             <div class="group">
+                <div class="grid grid-cols-12 gap-2 py-2 hover:bg-slate-50 rounded transition-colors cursor-pointer items-center" onclick="toggleSection(this)">
+                    <div class="col-span-6 pl-2 font-display font-semibold text-slate-700 flex items-center gap-2">
+                        <i class="ph-bold ph-caret-down text-slate-300 text-xs caret-icon"></i>
+                        Res. Financiero y Tenencia
+                    </div>
+                    <div class="col-span-3 text-right num-cell text-slate-700">129.000,00</div>
+                    <div class="col-span-3 text-right num-cell text-slate-400 col-comp hidden">85.000,00</div>
+                </div>
+                <div class="details-container">
+                    <div class="grid grid-cols-12 gap-2 py-1 row-detail">
+                        <div class="col-span-6 pl-8 text-slate-500 text-xs">Intereses Ganados</div>
+                        <div class="col-span-3 text-right num-cell text-slate-500 text-xs positive-ui">30.000,00</div>
+                        <div class="col-span-3 text-right num-cell text-slate-300 text-xs col-comp hidden positive-ui">20.000,00</div>
+                    </div>
+                     <div class="grid grid-cols-12 gap-2 py-1 row-detail">
+                        <div class="col-span-6 pl-8 text-slate-500 text-xs">RECPAM</div>
+                        <div class="col-span-3 text-right num-cell text-slate-500 text-xs positive-ui">99.000,00</div>
+                        <div class="col-span-3 text-right num-cell text-slate-300 text-xs col-comp hidden positive-ui">65.000,00</div>
+                    </div>
+                </div>
+            </div>
+
+             <!-- SUBTOTAL: ANTES IMPUESTO -->
+            <div class="my-4 py-3 border-t border-b border-slate-100 bg-slate-50/50 rounded-sm">
+                <div class="grid grid-cols-12 gap-2 items-center">
+                    <div class="col-span-6 pl-2 font-display font-bold text-slate-900 uppercase text-xs tracking-wider">
+                        (=) Res. antes de Impuesto
+                    </div>
+                    <div class="col-span-3 text-right num-cell font-bold text-base text-slate-900">515.000,00</div>
+                    <div class="col-span-3 text-right num-cell font-bold text-slate-400 col-comp hidden">360.000,00</div>
+                </div>
+            </div>
+
+            <!-- IMPUESTO -->
+            <div class="grid grid-cols-12 gap-2 py-2 items-center">
+                <div class="col-span-6 pl-2 font-display font-medium text-slate-600">
+                    (-) Impuesto a las ganancias
+                </div>
+                <div class="col-span-3 text-right num-cell text-slate-600 negative">(109.000,00)</div>
+                <div class="col-span-3 text-right num-cell text-slate-300 col-comp hidden negative">(70.000,00)</div>
+            </div>
+
+        </div>
+
+        <!-- TOTAL FINAL -->
+        <div class="mt-8 relative overflow-hidden rounded-xl border border-gray-100 bg-white">
+            <!-- Decorative Background (UI Only) -->
+            <div class="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-blue-500 to-teal-400 no-print"></div>
+            <div class="absolute inset-0 bg-gradient-to-r from-blue-50 to-teal-50 opacity-50 pointer-events-none no-print"></div>
+
+            <div class="relative p-6 grid grid-cols-12 gap-4 items-center">
+                <div class="col-span-6">
+                    <span class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Resultado del Ejercicio</span>
+                    <span class="block text-xl font-display font-bold text-slate-800">GANANCIA NETA</span>
+                </div>
+                
+                <div class="col-span-3 text-right">
+                    <span class="block text-2xl font-mono font-bold text-slate-900 tracking-tight">
+                        $ 406.000,00
+                    </span>
+                    <span class="no-print inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700">
+                        +28.5% YoY
+                    </span>
+                </div>
+                
+                 <div class="col-span-3 text-right col-comp hidden">
+                    <span class="block text-xl font-mono font-bold text-slate-400">
+                        $ 290.000,00
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- FOOTER (Print/Formal) -->
+        <footer class="mt-12 pt-8 border-t border-slate-200 grid grid-cols-2 gap-8 text-[10px] text-slate-400 font-mono">
+            <div>
+                <div class="w-32 border-b border-slate-300 mb-2"></div>
+                <p>Firma del Presidente</p>
+            </div>
+            <div>
+                <div class="w-32 border-b border-slate-300 mb-2"></div>
+                <p>Firma Contador Público (T° F° CPCECABA)</p>
+            </div>
+            <div class="col-span-2 text-center mt-4">
+                <p>El presente estado contable debe leerse conjuntamente con las notas y anexos que lo acompañan.</p>
+                <p>Página 1/1 — Emitido el 20/01/2026</p>
+            </div>
+        </footer>
+
+    </main>
+
+    <!-- LOGIC -->
+    <script>
+        // State
+        const state = {
+            comparativo: false,
+            details: true,
+            printMode: false
+        };
+
+        // DOM Elements
+        const colCompElements = document.querySelectorAll('.col-comp');
+        const headerActual = document.querySelector('.header-actual');
+        const headerComp = document.querySelector('.header-comp');
+        const rowDetails = document.querySelectorAll('.row-detail');
+        const caretIcons = document.querySelectorAll('.caret-icon');
+
+        // Functions
+        function toggleComparativo() {
+            state.comparativo = !state.comparativo;
+            const checkbox = document.getElementById('toggleComp');
+            checkbox.checked = state.comparativo;
+
+            if (state.comparativo) {
+                // Show Comparative
+                colCompElements.forEach(el => el.classList.remove('hidden'));
+                headerComp.classList.remove('hidden');
+                headerActual.classList.remove('col-span-3'); // Reset span if needed or adjust logic
+                
+                // Adjust layout width if needed, but in this fixed grid col-span works
+            } else {
+                // Hide Comparative
+                colCompElements.forEach(el => el.classList.add('hidden'));
+                headerComp.classList.add('hidden');
+            }
+        }
+
+        function toggleDetails() {
+            state.details = !state.details;
+            const checkbox = document.getElementById('toggleDetail');
+            checkbox.checked = state.details;
+
+            rowDetails.forEach(row => {
+                if (state.details) {
+                    row.classList.remove('collapsed');
+                } else {
+                    row.classList.add('collapsed');
+                }
+            });
+
+            // Rotate carets
+            caretIcons.forEach(icon => {
+                icon.style.transform = state.details ? 'rotate(0deg)' : 'rotate(-90deg)';
+                icon.style.transition = 'transform 0.2s';
+            });
+        }
+
+        function toggleSection(element) {
+            // Find the next sibling details-container
+            const details = element.nextElementSibling;
+            if(details && details.classList.contains('details-container')) {
+                const rows = details.querySelectorAll('.row-detail');
+                const caret = element.querySelector('.caret-icon');
+                
+                // Check if currently expanded (check first row)
+                const isExpanded = !rows[0].classList.contains('collapsed');
+                
+                rows.forEach(row => {
+                    if (isExpanded) {
+                        row.classList.add('collapsed');
+                    } else {
+                        row.classList.remove('collapsed');
+                    }
+                });
+
+                if(caret) {
+                    caret.style.transform = isExpanded ? 'rotate(-90deg)' : 'rotate(0deg)';
+                    caret.style.transition = 'transform 0.2s';
+                }
+            }
+        }
+
+        function togglePrintMode() {
+            // Simulate print view on screen (simplify UI)
+            state.printMode = !state.printMode;
+            const body = document.body;
+            const paper = document.getElementById('document-paper');
+            
+            if(state.printMode) {
+                body.style.backgroundColor = '#525252'; // Dark backdrop for contrast
+                paper.classList.remove('shadow-paper');
+                paper.classList.add('shadow-none');
+                // Could toggle more strict classes here
+            } else {
+                body.style.backgroundColor = '';
+                paper.classList.add('shadow-paper');
+                paper.classList.remove('shadow-none');
+            }
+        }
+        
+        // Init tooltip hover logic for custom behavior if needed
+        const tooltips = document.querySelectorAll('.group-tooltip');
+        tooltips.forEach(t => {
+            t.addEventListener('mouseenter', () => {
+                const tip = t.querySelector('span');
+                if(tip) tip.classList.add('group-tooltip-hover:opacity-100');
+            })
+        });
+
+    </script>
+</body>
+</html>

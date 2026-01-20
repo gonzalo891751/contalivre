@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from 'react'
+import { useMemo, useState, useRef, useCallback, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
 import { computeLedger } from '../core/ledger'
@@ -14,94 +14,9 @@ import {
     type SectionData,
     type AccountLine
 } from '../components/Estados/EstadoSituacionPatrimonialGemini'
-
-// Subcomponent for reusable sections
-interface SectionDisplayProps {
-    section: StatementSection
-    showNetTotal?: boolean
-    className?: string
-    colorTheme?: 'primary' | 'error' | 'success' | 'default'
-    hideTitle?: boolean
-}
-
-function SectionDisplay({
-    section,
-    showNetTotal = false,
-    className = '',
-    colorTheme = 'default',
-    hideTitle = false
-}: SectionDisplayProps) {
-    const formatAmount = (n: number) =>
-        n.toLocaleString('es-AR', { minimumFractionDigits: 2 })
-
-    if (section.accounts.length === 0) {
-        return null
-    }
-
-    return (
-        <div className={`statement-group ${className}`}>
-            {!hideTitle && (
-                <div className="statement-header-wrapper">
-                    <div className="statement-group-title">
-                        {section.label}
-                    </div>
-                </div>
-            )}
-
-            <div className="statement-rows-container">
-                {section.accounts.map((item) => (
-                    <div
-                        key={item.account.id}
-                        className={`statement-row ${item.isContra ? 'text-muted' : ''}`}
-                        style={{ fontStyle: item.isContra ? 'italic' : 'normal' }}
-                    >
-                        <span className="row-label">
-                            {item.account.id === '__current_result__' && '👉 '}
-                            {item.isContra ? '(-) ' : ''}
-                            {item.account.name}
-                        </span>
-                        <span className="statement-value">
-                            {item.balance < 0 ? '(' : ''}${formatAmount(Math.abs(item.balance))}
-                            {item.balance < 0 ? ')' : ''}
-                        </span>
-                    </div>
-                ))}
-            </div>
-
-            <div className={`statement-subtotal theme-${colorTheme}`}>
-                <span className="subtotal-label">Total {section.label}</span>
-                <span className="subtotal-value">
-                    ${formatAmount(showNetTotal ? section.netTotal : section.subtotal)}
-                </span>
-            </div>
-        </div>
-    )
-}
-
-function KeyResultRow({ label, amount, type = 'default' }: { label: string, amount: number, type?: 'default' | 'operating' | 'gross' }) {
-    const formatAmount = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2 })
-
-    return (
-        <div className={`key-result-row type-${type}`}>
-            <span className="key-label">{label}</span>
-            <span className="key-amount">${formatAmount(amount)}</span>
-        </div>
-    )
-}
-
-function NetGroupResultRow({ label, amount }: { label: string, amount: number }) {
-    const formatAmount = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2 })
-    const isGain = amount >= 0
-
-    return (
-        <div className="net-group-row">
-            <span className="net-label">{label}</span>
-            <span className={`net-amount ${isGain ? 'text-success-dark' : 'text-error-dark'}`}>
-                {isGain ? '' : '-'}${formatAmount(Math.abs(amount))}
-            </span>
-        </div>
-    )
-}
+import { EstadoResultadosDocument } from '../components/Estados/EstadoResultados'
+import { buildEstadoResultados, getFiscalYearDates } from '../domain/reports/estadoResultados'
+import { ImportComparativeModal, type ImportedRecord } from '../components/Estados/EstadoResultados/ImportComparativeModal'
 
 // ============================================
 // Data Adapter: BalanceSheet → Gemini Format
@@ -177,6 +92,56 @@ export default function Estados() {
     const [viewMode, setViewMode] = useState<'ESP' | 'ER'>('ESP')
     const [isExporting, setIsExporting] = useState(false)
 
+    // Estado de Resultados controls
+    const currentYear = new Date().getFullYear()
+    const [selectedYear, setSelectedYear] = useState(currentYear)
+    const [showComparative, setShowComparative] = useState(false)
+    const [showDetails, setShowDetails] = useState(true)
+    const fiscalYears = useMemo(() => [currentYear, currentYear - 1, currentYear - 2], [currentYear])
+
+    const [importModalOpen, setImportModalOpen] = useState(false)
+    const [comparativeOverrides, setComparativeOverrides] = useState<Map<string, number>>(new Map())
+
+    // Load comparative overrides from persistence
+    useEffect(() => {
+        const comparativeYear = selectedYear - 1
+        const key = `estadoResultados:comparativo:${comparativeYear}`
+        const stored = localStorage.getItem(key)
+        if (stored) {
+            try {
+                const parsed = JSON.parse(stored)
+                if (Array.isArray(parsed)) {
+                    setComparativeOverrides(new Map(parsed))
+                }
+            } catch (e) {
+                console.error('Error loading comparative overrides', e)
+            }
+        } else {
+            setComparativeOverrides(new Map())
+        }
+    }, [selectedYear])
+
+    const handleImportComparative = useCallback((records: ImportedRecord[]) => {
+        const comparativeYear = selectedYear - 1
+        const map = new Map<string, number>()
+        records.forEach(r => map.set(r.code, r.amount))
+
+        setComparativeOverrides(map)
+        setImportModalOpen(false)
+
+        // Save to localStorage
+        const key = `estadoResultados:comparativo:${comparativeYear}`
+        localStorage.setItem(key, JSON.stringify(Array.from(map.entries())))
+    }, [selectedYear])
+
+    const handleDeleteComparative = useCallback(() => {
+        if (!confirm('¿Estás seguro de que querés borrar los datos importados? Volverán a usarse los datos del sistema si existen.')) return
+
+        const comparativeYear = selectedYear - 1
+        setComparativeOverrides(new Map())
+        localStorage.removeItem(`estadoResultados:comparativo:${comparativeYear}`)
+    }, [selectedYear])
+
     // Refs for PDF capture
     const espRef = useRef<HTMLDivElement>(null)
     const erRef = useRef<HTMLDivElement>(null)
@@ -210,8 +175,28 @@ export default function Estados() {
         return computeStatements(trialBalance, accounts)
     }, [accounts, entries])
 
-    const formatAmount = (n: number) =>
-        n.toLocaleString('es-AR', { minimumFractionDigits: 2 })
+    // Build Estado de Resultados data for the new component
+    const estadoResultadosData = useMemo(() => {
+        if (!accounts || !entries) return null
+
+        const { fromDate, toDate } = getFiscalYearDates(selectedYear)
+        const { fromDate: compFromDate, toDate: compToDate } = getFiscalYearDates(selectedYear - 1)
+
+        return buildEstadoResultados({
+            accounts,
+            entries,
+            fromDate,
+            toDate,
+            fiscalYear: selectedYear,
+            comparativeFromDate: compFromDate,
+            comparativeToDate: compToDate,
+            comparativeOverrides
+        })
+    }, [accounts, entries, selectedYear, comparativeOverrides])
+
+    const handlePrint = useCallback(() => {
+        window.print()
+    }, [])
 
     if (!entries?.length) {
         return (
@@ -243,8 +228,7 @@ export default function Estados() {
         )
     }
 
-    const { balanceSheet, incomeStatement } = statements
-    const isNetIncomePositive = incomeStatement.netIncome >= 0
+    const { balanceSheet } = statements
 
     return (
         <div className="fade-in">
@@ -309,102 +293,22 @@ export default function Estados() {
                     </div>
                 )}
 
-                {viewMode === 'ER' && (
+                {viewMode === 'ER' && estadoResultadosData && (
                     <div className="animate-slide-up">
-                        <div ref={erRef} className="er-container-export">
-                            <div className="paper-card">
-                                <h2 className="er-main-title">Estado de Resultados</h2>
-                                <p className="er-date text-center text-muted-foreground mb-8">
-                                    Correspondiente al ejercicio actual
-                                </p>
-
-                                <div className="er-body">
-                                    {/* Bloque Operativo */}
-                                    <SectionDisplay section={incomeStatement.sales} colorTheme="primary" />
-                                    <SectionDisplay section={incomeStatement.cogs} colorTheme="default" />
-
-                                    <div className="my-6">
-                                        <KeyResultRow
-                                            label="RESULTADO BRUTO"
-                                            amount={incomeStatement.grossProfit}
-                                            type="gross"
-                                        />
-                                    </div>
-
-                                    <SectionDisplay section={incomeStatement.adminExpenses} />
-                                    <SectionDisplay section={incomeStatement.sellingExpenses} />
-
-                                    <div className="my-6">
-                                        <KeyResultRow
-                                            label="RESULTADO OPERATIVO"
-                                            amount={incomeStatement.operatingIncome}
-                                            type="operating"
-                                        />
-                                    </div>
-
-                                    {/* Bloque Financiero y Otros */}
-                                    <div className="grid gap-6 md:grid-cols-2">
-                                        <div className="er-subsection">
-                                            <SectionDisplay section={incomeStatement.financialIncome} />
-                                            <SectionDisplay section={incomeStatement.financialExpenses} />
-                                            <div className="mt-2">
-                                                <NetGroupResultRow
-                                                    label="Resultado financiero neto"
-                                                    amount={incomeStatement.netFinancialResult}
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div className="er-subsection">
-                                            <SectionDisplay section={incomeStatement.otherIncome} />
-                                            <SectionDisplay section={incomeStatement.otherExpenses} />
-                                            <div className="mt-2">
-                                                <NetGroupResultRow
-                                                    label="Otros resultados neto"
-                                                    amount={incomeStatement.netOtherResult}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* FOOTER RESULTADO DEL EJERCICIO */}
-                                <div className={`er-final-result ${isNetIncomePositive ? 'is-gain' : 'is-loss'}`}>
-                                    <div className="flex flex-col items-center gap-1">
-                                        <span className="final-label">RESULTADO DEL EJERCICIO</span>
-                                        {isNetIncomePositive ? (
-                                            <span className="final-badge badge-gain">✓ Ganancia</span>
-                                        ) : (
-                                            <span className="final-badge badge-loss">⚠ Pérdida</span>
-                                        )}
-                                    </div>
-                                    <div className="final-amount">
-                                        ${formatAmount(Math.abs(incomeStatement.netIncome))}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Download Button */}
-                        <div className="flex justify-center mt-10 mb-8">
-                            <button
-                                onClick={handleDownload}
-                                disabled={isExporting}
-                                className="btn-download"
-                            >
-                                {isExporting ? (
-                                    <>
-                                        <span className="animate-spin text-lg">⏳</span>
-                                        <span>Generando PDF...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="text-xl">📥</span>
-                                        <span>Descargar PDF</span>
-                                    </>
-                                )}
-                            </button>
-                        </div>
+                        <EstadoResultadosDocument
+                            data={estadoResultadosData}
+                            showComparative={showComparative}
+                            showDetails={showDetails}
+                            fiscalYear={selectedYear}
+                            fiscalYears={fiscalYears}
+                            onToggleComparative={() => setShowComparative(p => !p)}
+                            onToggleDetails={() => setShowDetails(p => !p)}
+                            onYearChange={setSelectedYear}
+                            onPrint={handlePrint}
+                            onImportComparative={() => setImportModalOpen(true)}
+                            onDeleteComparative={handleDeleteComparative}
+                            hasComparativeData={comparativeOverrides.size > 0}
+                        />
                     </div>
                 )}
             </div>
@@ -671,6 +575,15 @@ export default function Estados() {
                 }
                 .btn-download:disabled { opacity: 0.7; cursor: not-allowed; filter: grayscale(0.5); }
             `}</style>
+            <ImportComparativeModal
+                isOpen={importModalOpen}
+                onClose={() => setImportModalOpen(false)}
+                onImport={handleImportComparative}
+                onClean={handleDeleteComparative}
+                targetYear={selectedYear - 1}
+                accounts={accounts || []}
+                hasComparativeData={comparativeOverrides.size > 0}
+            />
         </div>
     )
 }
