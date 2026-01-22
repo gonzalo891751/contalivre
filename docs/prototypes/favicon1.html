@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre Favicon Studio</title>
+    <!-- Font for UI -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --bg-page: #F1F5F9;
+            --bg-card: #FFFFFF;
+            --text-main: #0F172A;
+            --text-sec: #64748B;
+            --border: #E2E8F0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-page);
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        h1 { margin-bottom: 0.5rem; font-weight: 800; letter-spacing: -0.02em; }
+        p.subtitle { color: var(--text-sec); margin-bottom: 2rem; max-width: 600px; text-align: center; }
+
+        .main-card {
+            background: var(--bg-card);
+            border-radius: 24px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            padding: 3rem;
+            width: 100%;
+            max-width: 900px;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 3rem;
+            align-items: start;
+        }
+
+        /* Left Column: Big Preview */
+        .preview-col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            padding-right: 2rem;
+            border-right: 1px dashed var(--border);
+        }
+
+        .icon-stage {
+            width: 200px;
+            height: 200px;
+            /* Checkboard pattern for transparency */
+            background-image: linear-gradient(45deg, #eee 25%, transparent 25%), linear-gradient(-45deg, #eee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #eee 75%), linear-gradient(-45deg, transparent 75%, #eee 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            border-radius: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.05);
+        }
+        
+        /* The rendered SVG container */
+        #masterSvg { width: 100%; height: 100%; }
+
+        /* Right Column: Generated Assets */
+        .assets-col {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .asset-group { }
+        .asset-group h3 { font-size: 0.9rem; text-transform: uppercase; color: var(--text-sec); letter-spacing: 0.05em; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+
+        .grid-assets {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .asset-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Canvas styling to look like files */
+        canvas {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: transform 0.2s;
+            cursor: pointer;
+        }
+        canvas:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-color: var(--brand-primary); }
+
+        .meta { font-size: 0.75rem; color: var(--text-sec); font-family: 'JetBrains Mono', monospace; }
+
+        .btn {
+            background: var(--text-main);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: background 0.2s;
+            text-decoration: none;
+            margin-top: 1rem;
+        }
+        .btn:hover { background: #1E293B; }
+        .btn i { font-style: normal; }
+
+        /* Mobile Adjustments */
+        @media (max-width: 768px) {
+            .main-card { grid-template-columns: 1fr; padding: 1.5rem; }
+            .preview-col { border-right: none; border-bottom: 1px dashed var(--border); padding-bottom: 2rem; padding-right: 0; }
+        }
+
+        /* Dark Mode Simulation for Browser Tab */
+        .browser-tab-sim {
+            background: #1e293b; 
+            padding: 8px 16px; 
+            border-radius: 8px 8px 0 0; 
+            display: flex; 
+            align-items: center; 
+            gap: 8px; 
+            color: #94a3b8; 
+            font-size: 12px;
+            width: 200px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
+        }
+        .browser-tab-sim.light { background: #e2e8f0; color: #475569; }
+        .sim-icon { width: 16px; height: 16px; }
+        
+    </style>
+</head>
+<body>
+
+    <h1>ContaLivre Favicon Studio</h1>
+    <p class="subtitle">Visualización y generación de assets en tiempo real según Brand Book 2026.</p>
+
+    <div class="main-card">
+        
+        <!-- COLUMNA IZQUIERDA: MASTER -->
+        <div class="preview-col">
+            <div class="icon-stage" id="svgContainer">
+                <!-- SVG INJECTED VIA JS -->
+            </div>
+            
+            <div style="text-align: center;">
+                <h2 style="font-size: 1.25rem; margin-bottom: 0.25rem;">Boti 2026</h2>
+                <span class="meta">Vector Master (SVG)</span>
+            </div>
+
+            <div style="width: 100%; margin-top: 1rem;">
+                <h4 style="font-size: 0.8rem; color: var(--text-sec); margin-bottom: 0.5rem;">Simulación Navegador</h4>
+                
+                <!-- Dark Mode Tab -->
+                <div class="browser-tab-sim" style="margin-bottom: 0.5rem;">
+                    <img id="simIconDark" class="sim-icon" src="" alt="">
+                    <span>ContaLivre | Inicio</span>
+                </div>
+                
+                <!-- Light Mode Tab -->
+                <div class="browser-tab-sim light">
+                    <img id="simIconLight" class="sim-icon" src="" alt="">
+                    <span>ContaLivre | Inicio</span>
+                </div>
+            </div>
+
+            <button class="btn" onclick="downloadSVG()">
+                Descargar SVG
+            </button>
+        </div>
+
+        <!-- COLUMNA DERECHA: ASSETS -->
+        <div class="assets-col">
+            
+            <!-- Standard Web -->
+            <div class="asset-group">
+                <h3>Standard Web (PNG)</h3>
+                <div class="grid-assets">
+                    <div class="asset-item">
+                        <!-- 16px -->
+                        <canvas id="c-16" width="16" height="16" style="width: 32px; height: 32px; image-rendering: pixelated;"></canvas>
+                        <span class="meta">16x16</span>
+                    </div>
+                    <div class="asset-item">
+                        <!-- 32px -->
+                        <canvas id="c-32" width="32" height="32" style="width: 32px; height: 32px;"></canvas>
+                        <span class="meta">32x32</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mobile & PWA -->
+            <div class="asset-group">
+                <h3>Mobile & PWA (PNG)</h3>
+                <div class="grid-assets">
+                    <div class="asset-item">
+                        <!-- Apple Touch -->
+                        <canvas id="c-180" width="180" height="180" style="width: 60px; height: 60px;"></canvas>
+                        <span class="meta">iOS (180)</span>
+                    </div>
+                    <div class="asset-item">
+                        <!-- Android 192 -->
+                        <canvas id="c-192" width="192" height="192" style="width: 64px; height: 64px;"></canvas>
+                        <span class="meta">Android (192)</span>
+                    </div>
+                     <div class="asset-item">
+                        <!-- Android 512 -->
+                        <canvas id="c-512" width="512" height="512" style="width: 80px; height: 80px;"></canvas>
+                        <span class="meta">Play Store (512)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Utils -->
+            <div style="margin-top: auto; padding-top: 2rem;">
+                <button class="btn" style="background: var(--brand-primary); width: 100%; justify-content: center;" onclick="downloadAllPNGs()">
+                    Descargar Todos los PNGs
+                </button>
+                <p style="font-size: 0.8rem; color: var(--text-sec); text-align: center; margin-top: 1rem;">
+                    Haz clic en cualquier ícono individual para descargarlo.
+                </p>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- SCRIPT LOGIC -->
+    <script>
+        // THE OFFICIAL SVG SOURCE CODE (from previous turn)
+        const svgString = `<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="brandGradient" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#2563EB"/><stop offset="100%" stop-color="#10B981"/></linearGradient><linearGradient id="shine" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="white" stop-opacity="0.2"/><stop offset="40%" stop-color="white" stop-opacity="0"/></linearGradient><filter id="shadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity="0.15"/></filter></defs><rect x="16" y="16" width="480" height="480" rx="108" fill="url(#brandGradient)"/><rect x="16" y="16" width="480" height="480" rx="108" fill="url(#shine)" style="mix-blend-mode: overlay;"/><g filter="url(#shadow)"><rect x="246" y="100" width="20" height="50" rx="4" fill="white"/><circle cx="256" cy="95" r="22" fill="white"/><rect x="136" y="150" width="240" height="190" rx="50" fill="white"/><circle cx="206" cy="235" r="24" fill="#3B82F6"/><circle cx="306" cy="235" r="24" fill="#3B82F6"/><path d="M226 290 Q256 305 286 290" stroke="#3B82F6" stroke-width="12" stroke-linecap="round" stroke-opacity="0.2"/></g></svg>`;
+
+        // CONFIG
+        const sizes = [
+            { id: 'c-16', size: 16, name: 'favicon-16.png' },
+            { id: 'c-32', size: 32, name: 'favicon-32.png' },
+            { id: 'c-180', size: 180, name: 'apple-touch-icon.png' },
+            { id: 'c-192', size: 192, name: 'android-chrome-192.png' },
+            { id: 'c-512', size: 512, name: 'android-chrome-512.png' }
+        ];
+
+        window.onload = function() {
+            // 1. Inject Master SVG
+            const container = document.getElementById('svgContainer');
+            container.innerHTML = svgString;
+            const svgEl = container.querySelector('svg');
+            svgEl.setAttribute('width', '100%');
+            svgEl.setAttribute('height', '100%');
+
+            // 2. Prepare Blob for Image Generation
+            const blob = new Blob([svgString], {type: 'image/svg+xml;charset=utf-8'});
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+
+            img.onload = function() {
+                // Render to all canvases
+                sizes.forEach(item => {
+                    const canvas = document.getElementById(item.id);
+                    const ctx = canvas.getContext('2d');
+                    // Enable high quality scaling
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    
+                    ctx.drawImage(img, 0, 0, item.size, item.size);
+
+                    // Add click to download
+                    canvas.onclick = () => downloadOne(canvas, item.name);
+                });
+
+                // Update Sim Icons
+                document.getElementById('simIconDark').src = document.getElementById('c-16').toDataURL();
+                document.getElementById('simIconLight').src = document.getElementById('c-16').toDataURL();
+                
+                URL.revokeObjectURL(url);
+            };
+
+            img.src = url;
+        };
+
+        function downloadSVG() {
+            const blob = new Blob([svgString], {type: 'image/svg+xml;charset=utf-8'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'favicon.svg';
+            link.click();
+        }
+
+        function downloadOne(canvas, filename) {
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function downloadAllPNGs() {
+            // Sequential download to avoid browser blocking
+            let delay = 0;
+            sizes.forEach(item => {
+                setTimeout(() => {
+                    const canvas = document.getElementById(item.id);
+                    downloadOne(canvas, item.name);
+                }, delay);
+                delay += 200;
+            });
+        }
+    </script>
+</body>
+</html>

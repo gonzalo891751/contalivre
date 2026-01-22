@@ -1,24 +1,35 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { NavLink, useLocation, Link } from 'react-router-dom'
+import {
+    SquaresFour,
+    TreeStructure,
+    Notebook,
+    BookBookmark,
+    Scales,
+    ChartLineUp,
+    Table,
+    Robot,
+    type Icon as PhosphorIcon,
+} from '@phosphor-icons/react'
 
 interface NavItem {
     path: string
     label: string
-    icon: string
+    icon: PhosphorIcon
     children?: { path: string; label: string }[]
 }
 
 const navItems: NavItem[] = [
-    { path: '/', label: 'Dashboard', icon: '📊' },
-    { path: '/cuentas', label: 'Plan de Cuentas', icon: '📋' },
-    { path: '/asientos', label: 'Libro Diario', icon: '📝' },
-    { path: '/mayor', label: 'Libro Mayor', icon: '📖' },
-    { path: '/balance', label: 'Balance de SyS', icon: '⚖️' },
-    { path: '/estados', label: 'Estados contables', icon: '📈' },
+    { path: '/', label: 'Dashboard', icon: SquaresFour },
+    { path: '/cuentas', label: 'Plan de Cuentas', icon: TreeStructure },
+    { path: '/asientos', label: 'Libro Diario', icon: Notebook },
+    { path: '/mayor', label: 'Libro Mayor', icon: BookBookmark },
+    { path: '/balance', label: 'Balance de SyS', icon: Scales },
+    { path: '/estados', label: 'Estados contables', icon: ChartLineUp },
     {
         path: '/planillas',
         label: 'Planillas',
-        icon: '🧮',
+        icon: Table,
         children: [
             { path: '/planillas/inventario', label: 'Inventario' },
             { path: '/planillas/amortizaciones', label: 'Amortizaciones' },
@@ -101,61 +112,66 @@ export default function MobileDrawer({ isOpen, onClose }: MobileDrawerProps) {
                 tabIndex={-1}
                 role="dialog"
                 aria-modal="true"
-                aria-label="Menú de navegación"
+                aria-label="Menu de navegacion"
             >
-                {/* Header */}
+                {/* Header with Logo */}
                 <div className="mobile-drawer-header">
-                    <div className="mobile-drawer-logo">
-                        <Link to="/" aria-label="Ir a Inicio" onClick={onClose}>
-                            <img
-                                src="/brand/contalivre-logo-v2.png"
-                                alt="ContaLivre"
-                                className="mobile-drawer-logo-img"
-                            />
-                        </Link>
-                    </div>
-                    <div className="sr-only">
-                        <h2 className="mobile-drawer-title">ContaLivre</h2>
-                        <p className="mobile-drawer-subtitle">Tu asistente contable</p>
-                    </div>
+                    <Link
+                        to="/"
+                        className="mobile-drawer-logo-link"
+                        aria-label="Ir a Inicio"
+                        onClick={onClose}
+                    >
+                        <div className="mobile-drawer-logo-icon">
+                            <Robot size={24} weight="fill" color="white" />
+                        </div>
+                        <div className="mobile-drawer-logo-text">
+                            <span className="mobile-drawer-title">CONTALIVRE</span>
+                            <span className="mobile-drawer-subtitle">Tu asistente contable</span>
+                        </div>
+                    </Link>
                 </div>
 
                 {/* Navigation */}
                 <nav className="mobile-drawer-nav">
-                    {navItems.map((item) => (
-                        <div key={item.path} className="mobile-drawer-nav-group">
-                            <NavLink
-                                to={item.path}
-                                className={({ isActive }) =>
-                                    `mobile-drawer-link ${isActive ? 'active' : ''}`
-                                }
-                                end={!item.children}
-                            >
-                                <span className="mobile-drawer-icon">{item.icon}</span>
-                                {item.label}
-                            </NavLink>
-                            {item.children && (
-                                <div className="mobile-drawer-children">
-                                    {item.children.map((child) => (
-                                        <NavLink
-                                            key={child.path}
-                                            to={child.path}
-                                            className={({ isActive }) =>
-                                                `mobile-drawer-link mobile-drawer-child ${isActive ? 'active' : ''}`
-                                            }
-                                        >
-                                            {child.label}
-                                        </NavLink>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    ))}
+                    {navItems.map((item) => {
+                        const IconComponent = item.icon
+                        return (
+                            <div key={item.path} className="mobile-drawer-nav-group">
+                                <NavLink
+                                    to={item.path}
+                                    className={({ isActive }) =>
+                                        `mobile-drawer-link ${isActive ? 'active' : ''}`
+                                    }
+                                    end={!item.children}
+                                >
+                                    <IconComponent size={20} className="mobile-drawer-icon" />
+                                    {item.label}
+                                </NavLink>
+                                {item.children && (
+                                    <div className="mobile-drawer-children">
+                                        {item.children.map((child) => (
+                                            <NavLink
+                                                key={child.path}
+                                                to={child.path}
+                                                className={({ isActive }) =>
+                                                    `mobile-drawer-link mobile-drawer-child ${isActive ? 'active' : ''}`
+                                                }
+                                            >
+                                                {child.label}
+                                            </NavLink>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )
+                    })}
                 </nav>
 
                 {/* Footer */}
                 <div className="mobile-drawer-footer">
-                    <p>ContaLivre v1.0</p>
+                    <p>&copy; 2026 Gonzalo Mendez</p>
+                    <p className="mobile-drawer-version">ContaLivre v1.0.4</p>
                 </div>
             </div>
         </div>

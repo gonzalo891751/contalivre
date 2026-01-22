@@ -1,25 +1,22 @@
 import { useState, useEffect } from 'react'
-import { NavLink, useLocation, Link } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import {
-    LayoutDashboard,
-    FolderTree,
-    NotebookPen,
-    Library,
-    Scale,
-    FileChartColumn,
-    Table2,
-    ChevronRight,
-    Moon,
-    Sun,
-    PanelLeftOpen,
-    PanelLeftClose,
-    type LucideIcon
-} from 'lucide-react'
+    SquaresFour,
+    TreeStructure,
+    Notebook,
+    BookBookmark,
+    Scales,
+    ChartLineUp,
+    Table,
+    CaretRight,
+    CaretLeft,
+    type Icon as PhosphorIcon,
+} from '@phosphor-icons/react'
 
 interface NavItem {
     path: string
     label: string
-    icon: LucideIcon
+    icon: PhosphorIcon
     children?: { path: string; label: string }[]
 }
 
@@ -37,36 +34,22 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
     const location = useLocation()
 
-    // Sidebar-only theme state (not global)
-    const [sidebarTheme, setSidebarTheme] = useState<'light' | 'dark'>(() => {
-        const stored = localStorage.getItem('contalivre.sidebarTheme')
-        return stored === 'dark' ? 'dark' : 'light'
-    })
-
-    const toggleSidebarTheme = () => {
-        setSidebarTheme(prev => {
-            const next = prev === 'light' ? 'dark' : 'light'
-            localStorage.setItem('contalivre.sidebarTheme', next)
-            return next
-        })
-    }
-
-    // Navigation Groups Definition
+    // Navigation Groups Definition with Phosphor icons
     const navGroups: NavGroup[] = [
         {
             label: 'PRINCIPAL',
             items: [
-                { path: '/', label: 'Dashboard', icon: LayoutDashboard }
+                { path: '/', label: 'Dashboard', icon: SquaresFour }
             ]
         },
         {
             label: 'CONTABILIDAD',
             items: [
-                { path: '/cuentas', label: 'Plan de Cuentas', icon: FolderTree },
-                { path: '/asientos', label: 'Libro Diario', icon: NotebookPen },
-                { path: '/mayor', label: 'Libro Mayor', icon: Library },
-                { path: '/balance', label: 'Balance de SyS', icon: Scale },
-                { path: '/estados', label: 'Estados contables', icon: FileChartColumn },
+                { path: '/cuentas', label: 'Plan de Cuentas', icon: TreeStructure },
+                { path: '/asientos', label: 'Libro Diario', icon: Notebook },
+                { path: '/mayor', label: 'Libro Mayor', icon: BookBookmark },
+                { path: '/balance', label: 'Balance de SyS', icon: Scales },
+                { path: '/estados', label: 'Estados contables', icon: ChartLineUp },
             ]
         },
         {
@@ -75,7 +58,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 {
                     path: '/planillas',
                     label: 'Planillas',
-                    icon: Table2,
+                    icon: Table,
                     children: [
                         { path: '/planillas/inventario', label: 'Inventario' },
                         { path: '/planillas/conciliaciones', label: 'Conciliaciones' },
@@ -99,7 +82,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 }
             })
         })
-    }, [location.pathname, isCollapsed]) // Dependencies should ideally include navGroups but it's constant
+    }, [location.pathname, isCollapsed])
 
     const toggleGroup = (path: string) => {
         if (isCollapsed) return
@@ -115,33 +98,13 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
     }
 
     return (
-        <aside
-            className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}
-            data-theme={sidebarTheme}
-        >
-            {/* Header with Logo + Toggle */}
-            <div className="sidebar-header-row !mb-0 !pb-3">
-                <div className="sidebar-logo !mb-0">
-                    <Link to="/" aria-label="Ir a Inicio" title={isCollapsed ? "ContaLivre" : undefined}>
-                        <img
-                            src="/brand/logo-for-dark-bg.png"
-                            alt="ContaLivre"
-                            className="sidebar-logo-img"
-                        />
-                    </Link>
-                </div>
-            </div>
-
-            {/* Separator - Subtle line */}
-            <div className={`px-4 transition-all duration-300 ${isCollapsed ? 'my-2' : 'my-3'}`}>
-                <div className="h-px bg-slate-200/60 dark:bg-slate-700/50" />
-            </div>
-
+        <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
+            {/* Navigation */}
             <nav className="sidebar-nav">
                 {navGroups.map((group) => (
                     <div key={group.label} className="nav-section">
                         {/* Section Header */}
-                        <div className={`sidebar-section-header !pt-2 !pb-2 ${isCollapsed ? 'sr-only' : ''}`}>
+                        <div className={`sidebar-section-header ${isCollapsed ? 'sr-only' : ''}`}>
                             {group.label}
                         </div>
 
@@ -164,7 +127,6 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                                             <div className={`sidebar-link-content ${isCollapsed ? 'collapsed' : ''}`}>
                                                 <IconComponent
                                                     size={20}
-                                                    strokeWidth={2}
                                                     className="sidebar-icon"
                                                 />
                                                 {!isCollapsed && <span className="sidebar-link-label">{item.label}</span>}
@@ -181,9 +143,12 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                                                     aria-label={isExpanded ? "Colapsar" : "Expandir"}
                                                     aria-expanded={isExpanded}
                                                 >
-                                                    <ChevronRight size={16} strokeWidth={2} />
+                                                    <CaretRight size={16} />
                                                 </button>
                                             )}
+
+                                            {/* Tooltip for collapsed mode */}
+                                            <span className="nav-tooltip">{item.label}</span>
                                         </NavLink>
                                     </div>
 
@@ -218,30 +183,26 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 ))}
             </nav>
 
-            {/* Premium Footer */}
+            {/* Sidebar Footer */}
             <div className="sidebar-footer">
-                <div className="sidebar-footer-row">
-                    {!isCollapsed && <span className="sidebar-footer-label">Modo Oscuro</span>}
-                    <button
-                        className="sidebar-footer-btn"
-                        onClick={toggleSidebarTheme}
-                        title={sidebarTheme === 'light' ? 'Activar modo oscuro' : 'Activar modo claro'}
-                        aria-label={sidebarTheme === 'light' ? 'Activar modo oscuro' : 'Activar modo claro'}
-                    >
-                        {sidebarTheme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
-                    </button>
-                </div>
-                <div className="sidebar-footer-row">
-                    {!isCollapsed && <span className="sidebar-footer-version">v1.0</span>}
-                    <button
-                        className="sidebar-footer-btn"
-                        onClick={onToggle}
-                        title={isCollapsed ? 'Expandir menú' : 'Colapsar menú'}
-                        aria-label={isCollapsed ? 'Expandir menú' : 'Colapsar menú'}
-                    >
-                        {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-                    </button>
-                </div>
+                {/* Collapse Button (Desktop only) */}
+                <button
+                    className="sidebar-collapse-btn desktop-only"
+                    onClick={onToggle}
+                    title={isCollapsed ? 'Expandir menu' : 'Contraer menu'}
+                    aria-label={isCollapsed ? 'Expandir menu' : 'Contraer menu'}
+                >
+                    {isCollapsed ? <CaretRight size={20} /> : <CaretLeft size={20} />}
+                </button>
+
+                {/* Credits - hidden when collapsed */}
+                {!isCollapsed && (
+                    <div className="sidebar-credits">
+                        <p>&copy; 2026 Gonzalo Mendez</p>
+                        <p>Todos los derechos reservados.</p>
+                        <p className="version">ContaLivre v1.0.4</p>
+                    </div>
+                )}
             </div>
         </aside>
     )

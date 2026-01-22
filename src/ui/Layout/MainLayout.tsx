@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 
 import Sidebar from './Sidebar'
-import MobileTopBar from './MobileTopBar'
+import { TopHeader } from './TopHeader'
 import MobileDrawer from './MobileDrawer'
 import MobileBottomNav from './MobileBottomNav'
 import { loadSeedDataIfNeeded } from '../../storage'
@@ -10,9 +10,6 @@ import { useMobileBreakpoint } from '../../hooks/useMobileBreakpoint'
 interface Props {
     children: ReactNode
 }
-
-// Map routes to page titles
-
 
 export default function MainLayout({ children }: Props) {
     const [isLoading, setIsLoading] = useState(true)
@@ -34,6 +31,19 @@ export default function MainLayout({ children }: Props) {
         })
     }
 
+    // Sync body class with sidebar collapsed state
+    useEffect(() => {
+        if (isSidebarCollapsed && !isMobile) {
+            document.body.classList.add('sidebar-is-collapsed')
+        } else {
+            document.body.classList.remove('sidebar-is-collapsed')
+        }
+
+        return () => {
+            document.body.classList.remove('sidebar-is-collapsed')
+        }
+    }, [isSidebarCollapsed, isMobile])
+
     useEffect(() => {
         async function init() {
             try {
@@ -48,16 +58,18 @@ export default function MainLayout({ children }: Props) {
         init()
     }, [])
 
-
-
     if (isLoading) {
         return (
             <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
+                <TopHeader
+                    onMobileMenuClick={() => setDrawerOpen(true)}
+                    isMobile={isMobile}
+                />
                 {!isMobile && <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />}
                 <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
                     <div className="empty-state">
-                        <div className="empty-state-icon">⏳</div>
-                        <p>Cargando aplicación...</p>
+                        <div className="empty-state-icon">...</div>
+                        <p>Cargando aplicacion...</p>
                     </div>
                 </main>
             </div>
@@ -67,6 +79,10 @@ export default function MainLayout({ children }: Props) {
     if (error) {
         return (
             <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
+                <TopHeader
+                    onMobileMenuClick={() => setDrawerOpen(true)}
+                    isMobile={isMobile}
+                />
                 {!isMobile && <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />}
                 <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
                     <div className="alert alert-error">
@@ -79,7 +95,13 @@ export default function MainLayout({ children }: Props) {
 
     return (
         <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
-            {/* Desktop: Sidebar */}
+            {/* New Fixed Header - Always visible */}
+            <TopHeader
+                onMobileMenuClick={() => setDrawerOpen(true)}
+                isMobile={isMobile}
+            />
+
+            {/* Desktop: Sidebar (below header) */}
             {!isMobile && (
                 <Sidebar
                     isCollapsed={isSidebarCollapsed}
@@ -87,17 +109,12 @@ export default function MainLayout({ children }: Props) {
                 />
             )}
 
-            {/* Mobile: Top Bar + Drawer */}
+            {/* Mobile: Drawer */}
             {isMobile && (
-                <>
-                    <MobileTopBar
-                        onMenuClick={() => setDrawerOpen(true)}
-                    />
-                    <MobileDrawer
-                        isOpen={drawerOpen}
-                        onClose={() => setDrawerOpen(false)}
-                    />
-                </>
+                <MobileDrawer
+                    isOpen={drawerOpen}
+                    onClose={() => setDrawerOpen(false)}
+                />
             )}
 
             {/* Main Content */}

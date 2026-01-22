@@ -10,32 +10,36 @@ export default defineConfig({
         tailwindcss(),
         VitePWA({
             registerType: 'autoUpdate',
-            includeAssets: ['favicon.ico', 'icons/*.png', 'brand/*.png'],
+            includeAssets: [
+                'favicon.svg',
+                'favicon.ico',
+                'favicon-16.png',
+                'favicon-32.png',
+                'apple-touch-icon.png',
+                'android-chrome-192.png',
+                'android-chrome-512.png',
+                'icons/*.png',
+                'brand/*.png'
+            ],
             manifest: {
                 name: 'ContaLivre',
                 short_name: 'ContaLivre',
                 description: 'Tu asistente contable',
-                theme_color: '#4094DA',
-                background_color: '#E9F4F7',
+                theme_color: '#0F172A',
+                background_color: '#0F172A',
                 display: 'standalone',
                 scope: '/',
                 start_url: '/',
                 icons: [
                     {
-                        src: 'icons/icon-192.png',
+                        src: '/android-chrome-192.png',
                         sizes: '192x192',
                         type: 'image/png'
                     },
                     {
-                        src: 'icons/icon-512.png',
+                        src: '/android-chrome-512.png',
                         sizes: '512x512',
                         type: 'image/png'
-                    },
-                    {
-                        src: 'icons/icon-512.png',
-                        sizes: '512x512',
-                        type: 'image/png',
-                        purpose: 'maskable'
                     }
                 ]
             },
