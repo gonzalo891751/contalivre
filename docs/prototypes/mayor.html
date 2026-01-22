@@ -1,0 +1,625 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  Search, 
+  Filter, 
+  Download, 
+  FileSpreadsheet, 
+  X, 
+  ArrowRight, 
+  ChevronRight, 
+  TrendingUp, 
+  TrendingDown, 
+  Minus,
+  Maximize2,
+  ArrowLeft,
+  Calendar,
+  CheckCircle2,
+  AlertCircle
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// --- TIPO DE DATOS & MOCK DATA ---
+
+type AccountType = 'Activo' | 'Pasivo' | 'PN' | 'Resultado';
+type AccountStatus = 'Deudor' | 'Acreedor' | 'Saldada';
+
+interface LedgerLine {
+  id: string;
+  date: string;
+  concept: string;
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+interface AccountSummary {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  rubro: string;
+  totalDebit: number;
+  totalCredit: number;
+  balance: number;
+  status: AccountStatus;
+  lastMovements: LedgerLine[]; // Últimos 5 para el drawer
+  allMovements?: LedgerLine[]; // Para la vista completa (se cargaría on demand)
+}
+
+// Mock Data Generator
+const generateMockData = (): AccountSummary[] => {
+  return [
+    {
+      id: '1', code: '1.1.01.01', name: 'Banco Nación c/c', type: 'Activo', rubro: 'Caja y Bancos',
+      totalDebit: 1500000, totalCredit: 320000, balance: 1180000, status: 'Deudor',
+      lastMovements: [
+        { id: 'm1', date: '2023-10-25', concept: 'Cobro Cliente A', debit: 50000, credit: 0, balance: 1180000 },
+        { id: 'm2', date: '2023-10-24', concept: 'Pago Proveedor X', debit: 0, credit: 120000, balance: 1130000 },
+        { id: 'm3', date: '2023-10-20', concept: 'Depósito Efectivo', debit: 200000, credit: 0, balance: 1250000 },
+      ]
+    },
+    {
+      id: '2', code: '2.1.01.01', name: 'Proveedores Locales', type: 'Pasivo', rubro: 'Cuentas por Pagar',
+      totalDebit: 450000, totalCredit: 890000, balance: -440000, status: 'Acreedor',
+      lastMovements: [
+        { id: 'm4', date: '2023-10-26', concept: 'Factura Compra Insumos', debit: 0, credit: 50000, balance: -440000 },
+        { id: 'm5', date: '2023-10-22', concept: 'Pago a cuenta', debit: 100000, credit: 0, balance: -390000 },
+      ]
+    },
+    {
+      id: '3', code: '4.1.01.02', name: 'Ventas Servicios', type: 'Resultado', rubro: 'Ingresos',
+      totalDebit: 0, totalCredit: 2500000, balance: -2500000, status: 'Acreedor',
+      lastMovements: [
+        { id: 'm6', date: '2023-10-26', concept: 'Factura F-0001-00004523', debit: 0, credit: 120000, balance: -2500000 },
+      ]
+    },
+    {
+      id: '4', code: '1.1.02.01', name: 'Fondo Fijo Administración', type: 'Activo', rubro: 'Caja y Bancos',
+      totalDebit: 50000, totalCredit: 50000, balance: 0, status: 'Saldada',
+      lastMovements: [
+        { id: 'm7', date: '2023-10-10', concept: 'Reposición Fondo Fijo', debit: 20000, credit: 0, balance: 0 },
+        { id: 'm8', date: '2023-10-05', concept: 'Gastos Librería', debit: 0, credit: 20000, balance: -20000 },
+      ]
+    },
+    {
+      id: '5', code: '1.1.04.01', name: 'Deudores por Ventas', type: 'Activo', rubro: 'Créditos',
+      totalDebit: 850000, totalCredit: 200000, balance: 650000, status: 'Deudor',
+      lastMovements: []
+    },
+  ];
+};
+
+// --- UTILS ---
+
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value);
+};
+
+// --- COMPONENTS ---
+
+// 1. BADGES & CHIPS
+const StatusBadge = ({ status }: { status: AccountStatus }) => {
+  const styles = {
+    Deudor: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800', // Brand Secondary related
+    Acreedor: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-800', // Warning/Debt
+    Saldada: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700',
+  };
+
+  return (
+    <span className={`px-2.5 py-0.5 rounded-md text-xs font-semibold border ${styles[status]}`}>
+      {status.toUpperCase()}
+    </span>
+  );
+};
+
+// 2. HERO SECTION
+const LedgerHero = () => (
+  <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 mb-6 relative overflow-hidden">
+    {/* Decorative Soft Gradient Background */}
+    <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-500/5 to-emerald-500/5 rounded-full blur-3xl -translate-y-12 translate-x-12" />
+    
+    <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div>
+        <h1 className="font-display text-3xl font-bold bg-gradient-to-r from-blue-600 to-emerald-500 bg-clip-text text-transparent mb-2">
+          Libro Mayor
+        </h1>
+        <p className="text-slate-500 dark:text-slate-400 max-w-xl">
+          Analizá los saldos de tus cuentas al detalle. Filtrá por estado para encontrar desvíos o cuentas a conciliar.
+        </p>
+      </div>
+      
+      <div className="flex gap-2">
+        {/* Botón Excel eliminado a pedido */}
+        <button className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-emerald-500 text-white rounded-lg font-medium shadow-lg shadow-blue-500/20 hover:shadow-blue-500/30 hover:scale-[1.02] transition-all text-sm">
+          <Download size={18} />
+          <span>Exportar PDF</span>
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+// 3. TOOLBAR
+interface ToolbarProps {
+  search: string;
+  setSearch: (v: string) => void;
+  filterStatus: string;
+  setFilterStatus: (v: string) => void;
+  showZero: boolean;
+  setShowZero: (v: boolean) => void;
+}
+
+const LedgerToolbar = ({ search, setSearch, filterStatus, setFilterStatus, showZero, setShowZero }: ToolbarProps) => {
+  const tabs = ['Todas', 'Deudoras', 'Acreedoras', 'Saldadas'];
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-4 justify-between items-center mb-6">
+      {/* Search */}
+      <div className="relative w-full lg:w-96 group">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={20} />
+        <input 
+          type="text"
+          placeholder="Buscar por nombre, código o rubro..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm text-slate-700 dark:text-slate-200"
+        />
+      </div>
+
+      {/* Filters & Toggles */}
+      <div className="flex flex-wrap items-center gap-4 w-full lg:w-auto justify-between lg:justify-end">
+        {/* Status Pills */}
+        <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+          {tabs.map((tab) => {
+            const isActive = (tab === 'Todas' && filterStatus === 'all') || 
+                             (tab === 'Deudoras' && filterStatus === 'Deudor') ||
+                             (tab === 'Acreedoras' && filterStatus === 'Acreedor') ||
+                             (tab === 'Saldadas' && filterStatus === 'Saldada');
+            
+            return (
+              <button
+                key={tab}
+                onClick={() => setFilterStatus(tab === 'Todas' ? 'all' : tab === 'Acreedoras' ? 'Acreedor' : tab === 'Deudoras' ? 'Deudor' : 'Saldada')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  isActive 
+                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' 
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                {tab}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Toggle Simple */}
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <div className="relative">
+            <input type="checkbox" className="sr-only peer" checked={showZero} onChange={(e) => setShowZero(e.target.checked)} />
+            <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+          </div>
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Ver sin mov.</span>
+        </label>
+      </div>
+    </div>
+  );
+};
+
+// 4. MAIN TABLE
+interface TableProps {
+  data: AccountSummary[];
+  onRowClick: (account: AccountSummary) => void;
+}
+
+const LedgerSummaryTable = ({ data, onRowClick }: TableProps) => {
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+              {/* COLUMNA CÓDIGO ELIMINADA */}
+              <th className="py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider font-display">Cuenta</th>
+              <th className="py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider font-display">Rubro</th>
+              <th className="py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider font-display text-right">Débitos</th>
+              <th className="py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider font-display text-right">Créditos</th>
+              <th className="py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider font-display text-right">Saldo</th>
+              {/* COLUMNA ESTADO ELIMINADA */}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {data.map((account) => (
+              <motion.tr 
+                key={account.id}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                whileHover={{ backgroundColor: "rgba(59, 130, 246, 0.02)", y: -1 }}
+                onClick={() => onRowClick(account)}
+                className="cursor-pointer group transition-colors"
+              >
+                {/* CÓDIGO ELIMINADO */}
+                <td className="py-4 px-6">
+                  <div className="font-medium text-slate-900 dark:text-slate-100">{account.name}</div>
+                  <div className="text-xs text-slate-400 font-mono mt-0.5">{account.code}</div> {/* Código movido aquí como subtítulo sutil */}
+                </td>
+                <td className="py-4 px-6 text-sm text-slate-500">
+                  {/* MODIFICADO: Ahora muestra el TIPO (Activo, Pasivo, etc) en lugar del Rubro específico */}
+                  <span className={`px-2 py-1 rounded text-xs font-medium border ${
+                      account.type === 'Activo' ? 'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800' :
+                      account.type === 'Pasivo' ? 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800' :
+                      account.type === 'Resultado' ? 'bg-purple-50 text-purple-700 border-purple-100 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800' :
+                      'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-400'
+                  }`}>
+                    {account.type}
+                  </span>
+                </td>
+                <td className="py-4 px-6 text-sm text-slate-500 font-mono text-right tabular-nums">
+                  {formatCurrency(account.totalDebit)}
+                </td>
+                <td className="py-4 px-6 text-sm text-slate-500 font-mono text-right tabular-nums">
+                  {formatCurrency(account.totalCredit)}
+                </td>
+                <td className={`py-4 px-6 text-sm font-bold font-mono text-right tabular-nums ${
+                  account.balance > 0 ? 'text-emerald-600 dark:text-emerald-400' : 
+                  account.balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'
+                }`}>
+                  {formatCurrency(Math.abs(account.balance))}
+                </td>
+                {/* ESTADO ELIMINADO */}
+              </motion.tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {data.length === 0 && (
+        <div className="p-12 text-center text-slate-400">
+          <p>No encontramos cuentas con esos filtros.</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// 5. QUICK DRAWER (LEVEL A)
+interface DrawerProps {
+  account: AccountSummary | null;
+  onClose: () => void;
+  onOpenFull: () => void;
+}
+
+const LedgerQuickDrawer = ({ account, onClose, onOpenFull }: DrawerProps) => {
+  return (
+    <AnimatePresence>
+      {account && (
+        <>
+          {/* Backdrop */}
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40"
+          />
+          
+          {/* Panel */}
+          <motion.div
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="fixed top-0 right-0 h-full w-full md:w-[480px] bg-white dark:bg-slate-900 shadow-2xl z-50 flex flex-col border-l border-slate-200 dark:border-slate-800"
+          >
+            {/* Header */}
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur sticky top-0">
+              <div className="flex justify-between items-start mb-2">
+                <span className="font-mono text-xs text-blue-500 font-medium bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                  {account.code}
+                </span>
+                <button onClick={onClose} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-400">
+                  <X size={20} />
+                </button>
+              </div>
+              <h2 className="text-2xl font-bold font-display text-slate-900 dark:text-white mb-1">{account.name}</h2>
+              <div className="flex gap-2 text-sm text-slate-500">
+                <span>{account.type}</span>
+                <span>•</span>
+                <span>{account.rubro}</span>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-8">
+              
+              {/* Big Balance Card */}
+              <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 text-center relative overflow-hidden group">
+                 <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-blue-500/10 to-transparent rounded-bl-full" />
+                 
+                 <p className="text-sm text-slate-500 uppercase tracking-widest font-semibold mb-2">Saldo Actual</p>
+                 <div className={`text-4xl font-bold font-mono tracking-tight mb-3 ${
+                   account.balance > 0 ? 'text-emerald-600 dark:text-emerald-400' : 
+                   account.balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500'
+                 }`}>
+                   {formatCurrency(Math.abs(account.balance))}
+                 </div>
+                 <StatusBadge status={account.status} />
+              </div>
+
+              {/* Visual Bars */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Resumen del Periodo</h3>
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-500">Total Debe</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">{formatCurrency(account.totalDebit)}</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full" style={{ width: '60%' }} /> 
+                      {/* En prod calcular % real sobre el max */}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-500">Total Haber</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">{formatCurrency(account.totalCredit)}</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: '35%' }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent Movements */}
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                  <Calendar size={14} className="text-slate-400" />
+                  Últimos Movimientos
+                </h3>
+                <div className="relative border-l-2 border-slate-200 dark:border-slate-700 pl-4 space-y-6">
+                  {account.lastMovements.length > 0 ? account.lastMovements.map((mov, i) => (
+                    <div key={mov.id} className="relative">
+                      {/* Timeline dot */}
+                      <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-white border-2 border-slate-300 dark:border-slate-600 dark:bg-slate-800" />
+                      
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="text-xs text-slate-400 mb-0.5">{mov.date}</p>
+                          <p className="text-sm font-medium text-slate-800 dark:text-slate-200">{mov.concept}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-mono font-bold ${
+                             mov.debit > 0 ? 'text-blue-600' : 'text-emerald-600'
+                          }`}>
+                            {mov.debit > 0 ? `+${formatCurrency(mov.debit)}` : `-${formatCurrency(mov.credit)}`}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )) : (
+                     <p className="text-sm text-slate-400 italic">No hay movimientos recientes.</p>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col gap-3">
+              <button 
+                onClick={onOpenFull}
+                className="w-full py-3 bg-gradient-to-r from-blue-600 to-emerald-500 text-white rounded-xl font-semibold shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              >
+                <span>Ver Mayor Completo</span>
+                <ArrowRight size={18} />
+              </button>
+              <button className="w-full py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2">
+                <Download size={18} />
+                Descargar Resumen PDF
+              </button>
+            </div>
+
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+};
+
+// 6. FULL VIEW (LEVEL B - T-Account)
+interface FullViewProps {
+  account: AccountSummary;
+  onBack: () => void;
+}
+
+const LedgerFullView = ({ account, onBack }: FullViewProps) => {
+  // Mocking "All Movements" by duplicating the last ones for demo
+  const allMovs = [...account.lastMovements, ...account.lastMovements];
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 20 }}
+      className="space-y-6"
+    >
+      {/* Header Full View */}
+      <div className="flex items-center gap-4 mb-6">
+        <button onClick={onBack} className="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-500 hover:text-blue-600 transition-colors">
+          <ArrowLeft size={20} />
+        </button>
+        <div>
+          <h2 className="text-2xl font-bold font-display text-slate-900 dark:text-white flex items-center gap-3">
+            {account.name} 
+            <span className="text-sm font-mono font-normal text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">{account.code}</span>
+          </h2>
+        </div>
+        <div className="ml-auto flex gap-2">
+           <StatusBadge status={account.status} />
+        </div>
+      </div>
+
+      {/* T-ACCOUNT VISUALIZATION (PREMIUM) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-0 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm relative">
+         {/* Central Divider Decor */}
+         <div className="absolute top-12 bottom-4 left-1/2 w-px bg-slate-200 dark:bg-slate-700 hidden md:block"></div>
+         
+         {/* DEBE */}
+         <div className="p-6">
+            <h3 className="text-center text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-100 dark:border-slate-800 pb-2">Debe</h3>
+            <div className="space-y-2">
+               {allMovs.filter(m => m.debit > 0).map((m, i) => (
+                 <div key={i} className="flex justify-between text-sm group hover:bg-slate-50 dark:hover:bg-slate-800/50 p-1.5 rounded cursor-default transition-colors">
+                    <span className="text-slate-500 truncate mr-2">{m.concept}</span>
+                    <span className="font-mono font-medium text-slate-700 dark:text-slate-300">{formatCurrency(m.debit)}</span>
+                 </div>
+               ))}
+               <div className="border-t border-slate-200 dark:border-slate-700 mt-4 pt-3 flex justify-between items-center">
+                  <span className="text-xs font-semibold text-slate-400">TOTAL DEBE</span>
+                  <span className="font-mono font-bold text-lg text-blue-600">{formatCurrency(account.totalDebit)}</span>
+               </div>
+            </div>
+         </div>
+
+         {/* HABER */}
+         <div className="p-6 bg-slate-50/30 dark:bg-slate-800/20">
+            <h3 className="text-center text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-100 dark:border-slate-800 pb-2">Haber</h3>
+             <div className="space-y-2">
+               {allMovs.filter(m => m.credit > 0).map((m, i) => (
+                 <div key={i} className="flex justify-between text-sm group hover:bg-slate-100 dark:hover:bg-slate-800/50 p-1.5 rounded cursor-default transition-colors">
+                    <span className="text-slate-500 truncate mr-2">{m.concept}</span>
+                    <span className="font-mono font-medium text-slate-700 dark:text-slate-300">{formatCurrency(m.credit)}</span>
+                 </div>
+               ))}
+               <div className="border-t border-slate-200 dark:border-slate-700 mt-4 pt-3 flex justify-between items-center">
+                  <span className="text-xs font-semibold text-slate-400">TOTAL HABER</span>
+                  <span className="font-mono font-bold text-lg text-emerald-600">{formatCurrency(account.totalCredit)}</span>
+               </div>
+            </div>
+         </div>
+      </div>
+
+      {/* DETAILED TABLE */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+          <h3 className="font-bold text-slate-800 dark:text-slate-200">Detalle de Movimientos</h3>
+          <button className="text-sm text-blue-600 font-medium hover:underline">Descargar Detalle</button>
+        </div>
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="bg-slate-50 dark:bg-slate-800/50">
+              <th className="py-3 px-6 font-medium text-slate-500">Fecha</th>
+              <th className="py-3 px-6 font-medium text-slate-500">Concepto</th>
+              <th className="py-3 px-6 font-medium text-slate-500 text-right">Debe</th>
+              <th className="py-3 px-6 font-medium text-slate-500 text-right">Haber</th>
+              <th className="py-3 px-6 font-medium text-slate-500 text-right">Saldo Parcial</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {allMovs.map((m, idx) => (
+              <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                <td className="py-3 px-6 text-slate-600 dark:text-slate-400 font-mono text-xs">{m.date}</td>
+                <td className="py-3 px-6 text-slate-800 dark:text-slate-200 font-medium">{m.concept}</td>
+                <td className="py-3 px-6 text-right font-mono text-slate-500">
+                  {m.debit > 0 ? formatCurrency(m.debit) : '-'}
+                </td>
+                <td className="py-3 px-6 text-right font-mono text-slate-500">
+                  {m.credit > 0 ? formatCurrency(m.credit) : '-'}
+                </td>
+                <td className="py-3 px-6 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                  {formatCurrency(m.balance)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </motion.div>
+  );
+};
+
+
+// --- MAIN PAGE COMPONENT ---
+
+export default function LibroMayorPage() {
+  const [data] = useState<AccountSummary[]>(generateMockData());
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [showZero, setShowZero] = useState(false);
+  
+  // State for Navigation Levels
+  const [selectedAccount, setSelectedAccount] = useState<AccountSummary | null>(null);
+  const [isFullView, setIsFullView] = useState(false);
+
+  // Filter Logic
+  const filteredData = useMemo(() => {
+    return data.filter(acc => {
+      const matchesSearch = acc.name.toLowerCase().includes(search.toLowerCase()) || 
+                            acc.code.includes(search);
+      const matchesStatus = filterStatus === 'all' || acc.status === filterStatus;
+      const matchesZero = showZero ? true : acc.totalDebit > 0 || acc.totalCredit > 0;
+      
+      return matchesSearch && matchesStatus && matchesZero;
+    });
+  }, [data, search, filterStatus, showZero]);
+
+  const handleRowClick = (acc: AccountSummary) => {
+    setSelectedAccount(acc);
+  };
+
+  const handleOpenFull = () => {
+    setIsFullView(true);
+    setSelectedAccount(prev => prev); // Keep selected
+  };
+
+  const handleBackToSummary = () => {
+    setIsFullView(false);
+    setSelectedAccount(null); // Optional: Close drawer too or keep it? Let's close it for cleaner state
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-8 font-sans text-slate-900 dark:text-slate-100 transition-colors duration-300">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;600;700&display=swap');
+        .font-sans { font-family: 'Inter', sans-serif; }
+        .font-display { font-family: 'Outfit', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+      `}</style>
+
+      <div className="max-w-7xl mx-auto">
+        <AnimatePresence mode="wait">
+          {!isFullView ? (
+            <motion.div
+              key="summary"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              <LedgerHero />
+              <LedgerToolbar 
+                search={search} setSearch={setSearch}
+                filterStatus={filterStatus} setFilterStatus={setFilterStatus}
+                showZero={showZero} setShowZero={setShowZero}
+              />
+              <LedgerSummaryTable data={filteredData} onRowClick={handleRowClick} />
+            </motion.div>
+          ) : (
+             selectedAccount && (
+               <LedgerFullView account={selectedAccount} onBack={handleBackToSummary} />
+             )
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Drawer Overlay (Level 1 Detail) */}
+      {/* Solo mostramos el Drawer si NO estamos en vista completa */}
+      {!isFullView && (
+        <LedgerQuickDrawer 
+          account={selectedAccount} 
+          onClose={() => setSelectedAccount(null)} 
+          onOpenFull={handleOpenFull}
+        />
+      )}
+    </div>
+  );
+}
