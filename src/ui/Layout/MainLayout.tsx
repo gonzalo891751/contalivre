@@ -60,70 +60,76 @@ export default function MainLayout({ children }: Props) {
 
     if (isLoading) {
         return (
-            <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
-                <TopHeader
-                    onMobileMenuClick={() => setDrawerOpen(true)}
-                    isMobile={isMobile}
-                />
-                {!isMobile && <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />}
-                <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
-                    <div className="empty-state">
-                        <div className="empty-state-icon">...</div>
-                        <p>Cargando aplicacion...</p>
-                    </div>
-                </main>
+            <div className="cl-shell cl-ui cl-prose">
+                <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
+                    <TopHeader
+                        onMobileMenuClick={() => setDrawerOpen(true)}
+                        isMobile={isMobile}
+                    />
+                    {!isMobile && <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />}
+                    <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
+                        <div className="empty-state">
+                            <div className="empty-state-icon">...</div>
+                            <p>Cargando aplicacion...</p>
+                        </div>
+                    </main>
+                </div>
             </div>
         )
     }
 
     if (error) {
         return (
-            <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
-                <TopHeader
-                    onMobileMenuClick={() => setDrawerOpen(true)}
-                    isMobile={isMobile}
-                />
-                {!isMobile && <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />}
-                <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
-                    <div className="alert alert-error">
-                        <strong>Error al iniciar:</strong> {error}
-                    </div>
-                </main>
+            <div className="cl-shell cl-ui cl-prose">
+                <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
+                    <TopHeader
+                        onMobileMenuClick={() => setDrawerOpen(true)}
+                        isMobile={isMobile}
+                    />
+                    {!isMobile && <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />}
+                    <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
+                        <div className="alert alert-error">
+                            <strong>Error al iniciar:</strong> {error}
+                        </div>
+                    </main>
+                </div>
             </div>
         )
     }
 
     return (
-        <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
-            {/* New Fixed Header - Always visible */}
-            <TopHeader
-                onMobileMenuClick={() => setDrawerOpen(true)}
-                isMobile={isMobile}
-            />
-
-            {/* Desktop: Sidebar (below header) */}
-            {!isMobile && (
-                <Sidebar
-                    isCollapsed={isSidebarCollapsed}
-                    onToggle={toggleSidebar}
+        <div className="cl-shell cl-ui cl-prose">
+            <div className={`layout ${!isMobile && isSidebarCollapsed ? 'collapsed' : ''}`}>
+                {/* New Fixed Header - Always visible */}
+                <TopHeader
+                    onMobileMenuClick={() => setDrawerOpen(true)}
+                    isMobile={isMobile}
                 />
-            )}
 
-            {/* Mobile: Drawer */}
-            {isMobile && (
-                <MobileDrawer
-                    isOpen={drawerOpen}
-                    onClose={() => setDrawerOpen(false)}
-                />
-            )}
+                {/* Desktop: Sidebar (below header) */}
+                {!isMobile && (
+                    <Sidebar
+                        isCollapsed={isSidebarCollapsed}
+                        onToggle={toggleSidebar}
+                    />
+                )}
 
-            {/* Main Content */}
-            <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
-                {children}
-            </main>
+                {/* Mobile: Drawer */}
+                {isMobile && (
+                    <MobileDrawer
+                        isOpen={drawerOpen}
+                        onClose={() => setDrawerOpen(false)}
+                    />
+                )}
 
-            {/* Mobile: Bottom Nav */}
-            {isMobile && <MobileBottomNav />}
+                {/* Main Content */}
+                <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
+                    {children}
+                </main>
+
+                {/* Mobile: Bottom Nav */}
+                {isMobile && <MobileBottomNav />}
+            </div>
         </div>
     )
 }
