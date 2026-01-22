@@ -1,5 +1,7 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import MainLayout from './ui/Layout/MainLayout'
+import CleanLayout from './layouts/CleanLayout'
+import CleanPrototype from './pages/clean/CleanPrototype'
 import Dashboard from './pages/Dashboard'
 import Cuentas from './pages/Cuentas'
 import Asientos from './pages/Asientos'
@@ -13,10 +15,26 @@ import CierreValuacionPage from './pages/Planillas/CierreValuacionPage'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
 import PlanillasHome from './pages/Planillas/PlanillasHome'
 
-function App() {
+function MainLayoutRoute() {
     return (
         <MainLayout>
-            <Routes>
+            <Outlet />
+        </MainLayout>
+    )
+}
+
+function CleanLayoutRoute() {
+    return (
+        <CleanLayout>
+            <Outlet />
+        </CleanLayout>
+    )
+}
+
+function App() {
+    return (
+        <Routes>
+            <Route element={<MainLayoutRoute />}>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/cuentas" element={<Cuentas />} />
                 <Route path="/asientos" element={<Asientos />} />
@@ -31,8 +49,11 @@ function App() {
                     <Route path="amortizaciones" element={<AmortizacionesPage />} />
                     <Route path="cierre-valuacion" element={<CierreValuacionPage />} />
                 </Route>
-            </Routes>
-        </MainLayout>
+            </Route>
+            <Route path="/clean" element={<CleanLayoutRoute />}>
+                <Route path="prototype" element={<CleanPrototype />} />
+            </Route>
+        </Routes>
     )
 }
 
