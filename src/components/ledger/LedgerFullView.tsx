@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react'
+﻿import { ArrowLeft } from 'lucide-react'
 import { motion } from 'framer-motion'
 import StatusBadge, { type AccountStatus } from './StatusBadge'
 import type { LedgerMovement, AccountKind } from '../../core/models'
@@ -19,14 +19,15 @@ interface LedgerFullViewProps {
     account: FullViewAccount
     onBack: () => void
     formatCurrency: (value: number) => string
+    onDownloadDetail?: () => void
 }
 
 export default function LedgerFullView({
     account,
     onBack,
     formatCurrency,
+    onDownloadDetail,
 }: LedgerFullViewProps) {
-    // Separate movements by type
     const debitMovements = account.movements.filter((m) => m.debit > 0)
     const creditMovements = account.movements.filter((m) => m.credit > 0)
 
@@ -35,68 +36,73 @@ export default function LedgerFullView({
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
-            className="ledger-full-view"
+            className="space-y-6"
         >
-            {/* Header */}
-            <header className="ledger-full-header">
+            <div className="flex items-center gap-4 mb-6">
                 <button
                     onClick={onBack}
-                    className="ledger-full-back-btn"
+                    className="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-500 hover:text-blue-600 transition-colors"
                     aria-label="Volver al resumen"
+                    type="button"
                 >
                     <ArrowLeft size={20} />
                 </button>
-                <div className="ledger-full-title-group">
-                    <h2 className="ledger-full-title">
+                <div>
+                    <h2 className="text-2xl font-bold font-display text-slate-900 dark:text-white flex items-center gap-3">
                         {account.name}
-                        <span className="ledger-full-code">{account.code}</span>
+                        <span className="text-sm font-mono font-normal text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md">
+                            {account.code}
+                        </span>
                     </h2>
                 </div>
-                <div className="ledger-full-badge">
+                <div className="ml-auto flex gap-2">
                     <StatusBadge status={account.status} />
                 </div>
-            </header>
+            </div>
 
-            {/* T-Account Visualization */}
-            <div className="ledger-t-account">
-                <div className="ledger-t-divider" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-0 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm relative">
+                <div className="absolute top-12 bottom-4 left-1/2 w-px bg-slate-200 dark:bg-slate-700 hidden md:block" />
 
-                {/* DEBE */}
-                <div className="ledger-t-column ledger-t-debe">
-                    <h3 className="ledger-t-header">Debe</h3>
-                    <div className="ledger-t-items">
+                <div className="p-6">
+                    <h3 className="text-center text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-100 dark:border-slate-800 pb-2">Debe</h3>
+                    <div className="space-y-2">
                         {debitMovements.map((m, i) => (
-                            <div key={`d-${i}`} className="ledger-t-item">
-                                <span className="ledger-t-concept">{m.memo}</span>
-                                <span className="ledger-t-amount font-mono">
+                            <div
+                                key={`d-${i}`}
+                                className="flex justify-between text-sm group hover:bg-slate-50 dark:hover:bg-slate-800/50 p-1.5 rounded cursor-default transition-colors"
+                            >
+                                <span className="text-slate-500 truncate mr-2">{m.memo}</span>
+                                <span className="font-mono font-medium text-slate-700 dark:text-slate-300">
                                     {formatCurrency(m.debit)}
                                 </span>
                             </div>
                         ))}
-                        <div className="ledger-t-total">
-                            <span className="ledger-t-total-label">TOTAL DEBE</span>
-                            <span className="ledger-t-total-value text-blue-600 font-mono font-bold">
+                        <div className="border-t border-slate-200 dark:border-slate-700 mt-4 pt-3 flex justify-between items-center">
+                            <span className="text-xs font-semibold text-slate-400">TOTAL DEBE</span>
+                            <span className="font-mono font-bold text-lg text-blue-600">
                                 {formatCurrency(account.totalDebit)}
                             </span>
                         </div>
                     </div>
                 </div>
 
-                {/* HABER */}
-                <div className="ledger-t-column ledger-t-haber">
-                    <h3 className="ledger-t-header">Haber</h3>
-                    <div className="ledger-t-items">
+                <div className="p-6 bg-slate-50/30 dark:bg-slate-800/20">
+                    <h3 className="text-center text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-100 dark:border-slate-800 pb-2">Haber</h3>
+                    <div className="space-y-2">
                         {creditMovements.map((m, i) => (
-                            <div key={`c-${i}`} className="ledger-t-item">
-                                <span className="ledger-t-concept">{m.memo}</span>
-                                <span className="ledger-t-amount font-mono">
+                            <div
+                                key={`c-${i}`}
+                                className="flex justify-between text-sm group hover:bg-slate-100 dark:hover:bg-slate-800/50 p-1.5 rounded cursor-default transition-colors"
+                            >
+                                <span className="text-slate-500 truncate mr-2">{m.memo}</span>
+                                <span className="font-mono font-medium text-slate-700 dark:text-slate-300">
                                     {formatCurrency(m.credit)}
                                 </span>
                             </div>
                         ))}
-                        <div className="ledger-t-total">
-                            <span className="ledger-t-total-label">TOTAL HABER</span>
-                            <span className="ledger-t-total-value text-emerald-600 font-mono font-bold">
+                        <div className="border-t border-slate-200 dark:border-slate-700 mt-4 pt-3 flex justify-between items-center">
+                            <span className="text-xs font-semibold text-slate-400">TOTAL HABER</span>
+                            <span className="font-mono font-bold text-lg text-emerald-600">
                                 {formatCurrency(account.totalCredit)}
                             </span>
                         </div>
@@ -104,40 +110,43 @@ export default function LedgerFullView({
                 </div>
             </div>
 
-            {/* Detailed Movements Table */}
-            <div className="ledger-detail-table-container">
-                <header className="ledger-detail-table-header">
-                    <h3 className="ledger-detail-table-title">Detalle de Movimientos</h3>
-                    <button className="ledger-detail-download">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+                    <h3 className="font-bold text-slate-800 dark:text-slate-200">Detalle de Movimientos</h3>
+                    <button
+                        className="text-sm text-blue-600 font-medium hover:underline"
+                        onClick={onDownloadDetail}
+                        type="button"
+                    >
                         Descargar Detalle
                     </button>
-                </header>
-                <table className="ledger-detail-table">
+                </div>
+                <table className="w-full text-left text-sm">
                     <thead>
-                        <tr>
-                            <th>Fecha</th>
-                            <th>Concepto</th>
-                            <th className="text-right">Debe</th>
-                            <th className="text-right">Haber</th>
-                            <th className="text-right">Saldo Parcial</th>
+                        <tr className="bg-slate-50 dark:bg-slate-800/50">
+                            <th className="py-3 px-6 font-medium text-slate-500">Fecha</th>
+                            <th className="py-3 px-6 font-medium text-slate-500">Concepto</th>
+                            <th className="py-3 px-6 font-medium text-slate-500 text-right">Debe</th>
+                            <th className="py-3 px-6 font-medium text-slate-500 text-right">Haber</th>
+                            <th className="py-3 px-6 font-medium text-slate-500 text-right">Saldo Parcial</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                         {account.movements.map((m, idx) => (
-                            <tr key={`${m.entryId}-${idx}`}>
-                                <td className="font-mono text-xs text-slate-600 dark:text-slate-400">
+                            <tr key={`${m.entryId}-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                                <td className="py-3 px-6 text-slate-600 dark:text-slate-400 font-mono text-xs">
                                     {m.date}
                                 </td>
-                                <td className="text-slate-800 dark:text-slate-200 font-medium">
+                                <td className="py-3 px-6 text-slate-800 dark:text-slate-200 font-medium">
                                     {m.memo}
                                 </td>
-                                <td className="text-right font-mono text-slate-500">
+                                <td className="py-3 px-6 text-right font-mono text-slate-500">
                                     {m.debit > 0 ? formatCurrency(m.debit) : '-'}
                                 </td>
-                                <td className="text-right font-mono text-slate-500">
+                                <td className="py-3 px-6 text-right font-mono text-slate-500">
                                     {m.credit > 0 ? formatCurrency(m.credit) : '-'}
                                 </td>
-                                <td className="text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                                <td className="py-3 px-6 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
                                     {formatCurrency(m.balance)}
                                 </td>
                             </tr>

@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react'
+﻿import { Search } from 'lucide-react'
 import type { AccountStatus } from './StatusBadge'
 
 interface LedgerToolbarProps {
@@ -26,53 +26,55 @@ export default function LedgerToolbar({
     ]
 
     return (
-        <div className="ledger-toolbar">
-            {/* Search */}
-            <div className="ledger-toolbar-search">
+        <div className="flex flex-col lg:flex-row gap-4 justify-between items-center mb-6">
+            <div className="relative w-full lg:w-96 group">
                 <Search
-                    className="ledger-toolbar-search-icon"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors"
                     size={20}
                     aria-hidden="true"
                 />
                 <input
                     type="text"
-                    placeholder="Buscar por nombre o código..."
+                    placeholder="Buscar por nombre, código o rubro..."
                     value={search}
                     onChange={(e) => onSearchChange(e.target.value)}
-                    className="ledger-toolbar-search-input"
+                    className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm text-slate-700 dark:text-slate-200"
                     aria-label="Buscar cuentas"
                 />
             </div>
 
-            {/* Filters & Toggles */}
-            <div className="ledger-toolbar-filters">
-                {/* Status Pills */}
-                <div className="ledger-status-pills">
-                    {tabs.map((tab) => (
-                        <button
-                            key={tab.value}
-                            onClick={() => onFilterStatusChange(tab.value)}
-                            className={`ledger-status-pill ${filterStatus === tab.value ? 'active' : ''
-                                }`}
-                            aria-pressed={filterStatus === tab.value}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
+            <div className="flex flex-wrap items-center gap-4 w-full lg:w-auto justify-between lg:justify-end">
+                <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                    {tabs.map((tab) => {
+                        const isActive = filterStatus === tab.value
+
+                        return (
+                            <button
+                                key={tab.value}
+                                onClick={() => onFilterStatusChange(tab.value)}
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${isActive
+                                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                                    }`}
+                                aria-pressed={isActive}
+                            >
+                                {tab.label}
+                            </button>
+                        )
+                    })}
                 </div>
 
-                {/* Toggle */}
-                <label className="ledger-toggle-label">
-                    <div className="ledger-toggle-wrapper">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <div className="relative">
                         <input
                             type="checkbox"
                             className="sr-only peer"
                             checked={showZero}
                             onChange={(e) => onShowZeroChange(e.target.checked)}
                         />
-                        <div className="ledger-toggle-track peer-checked:bg-emerald-500 peer-checked:after:translate-x-full peer-focus:ring-2 peer-focus:ring-blue-300" />
+                        <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500" />
                     </div>
-                    <span className="ledger-toggle-text">Ver sin mov.</span>
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Ver sin mov.</span>
                 </label>
             </div>
         </div>
