@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre - Estados Contables</title>
+    
+    <!-- Fuentes Google (Brand Book) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Iconos Phosphor -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- Tailwind CSS (Configurado vía CDN para prototipado rápido) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Configuración del Brand Book en Tailwind -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class', // Soporte manual para demo
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',
+                            secondary: '#10B981',
+                            dark: '#1E3A8A'
+                        },
+                        slate: {
+                            850: '#1e293b', // Custom dark
+                            900: '#0F172A'
+                        }
+                    },
+                    backgroundImage: {
+                        'brand-gradient': 'linear-gradient(135deg, #2563EB 0%, #10B981 100%)',
+                        'brand-gradient-hover': 'linear-gradient(135deg, #1D4ED8 0%, #059669 100%)',
+                    },
+                    fontFamily: {
+                        display: ['Outfit', 'sans-serif'],
+                        body: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+                        'glow': '0 0 15px rgba(59, 130, 246, 0.15)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Estilos base y utilidades extra */
+        body {
+            background-color: #F8FAFC; /* Slate 50 */
+            color: #0F172A; /* Slate 900 */
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Scrollbar fina para tablas */
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        
+        /* Efecto Glass */
+        .glass {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        /* Animaciones de entrada */
+        .fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        .slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Toggle Switch Premium CSS */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #10B981;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #10B981;
+        }
+        
+        /* Clases utilitarias para la tabla comparativa */
+        .col-comparative {
+            display: none; /* Oculto por defecto */
+        }
+        .show-comparative .col-comparative {
+            display: table-cell;
+            animation: fadeIn 0.5s ease;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col font-body">
+
+    <!-- ================= HERO / HEADER (Modificado) ================= -->
+    <!-- Se eliminó sticky top-0 z-30 -->
+    <header class="bg-white border-b border-slate-200 shadow-soft">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                
+                <!-- Títulos -->
+                <div>
+                    <span class="text-xs font-bold tracking-wider text-slate-500 uppercase font-display mb-1 block">Reportes Contables</span>
+                    <!-- Título Uppercase y Tracking -->
+                    <h1 class="text-3xl font-extrabold font-display uppercase tracking-wide bg-brand-gradient bg-clip-text text-transparent pb-1">
+                        ESTADOS CONTABLES
+                    </h1>
+                    <!-- Nuevo Subtítulo -->
+                    <p class="text-slate-500 text-sm mt-1">
+                        Los 4 estados contables básicos
+                    </p>
+                </div>
+
+                <!-- Context Bar (Limpia, solo empresa) -->
+                <div class="flex items-center gap-3 bg-slate-50 p-1.5 rounded-xl border border-slate-100">
+                    <!-- Empresa Chip -->
+                    <div class="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg shadow-sm border border-slate-200">
+                        <div class="w-6 h-6 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-blue-600">
+                            <i class="ph-bold ph-buildings"></i>
+                        </div>
+                        <span class="text-sm font-semibold text-slate-700">Mi Empresa S.A.</span>
+                    </div>
+                    
+                    <!-- Eliminados: Divisor vertical y Selector de Periodo -->
+                </div>
+            </div>
+
+            <!-- NAVEGACIÓN TABS (Segmented Control) -->
+            <div class="mt-8 mb-2">
+                <nav class="flex p-1 space-x-1 bg-slate-100/80 rounded-xl max-w-fit border border-slate-200" aria-label="Tabs">
+                    
+                    <!-- Tab Activo: ESP -->
+                    <button onclick="switchTab('esp')" id="tab-btn-esp" class="tab-btn active flex items-center gap-2 px-4 py-2 text-sm font-bold font-display rounded-lg shadow-sm bg-white text-brand-primary ring-1 ring-black/5 transition-all">
+                        <i class="ph-bold ph-scales"></i>
+                        Situación Patrimonial
+                    </button>
+
+                    <!-- Tab Inactivo: ER -->
+                    <button onclick="switchTab('er')" id="tab-btn-er" class="tab-btn flex items-center gap-2 px-4 py-2 text-sm font-medium font-display text-slate-500 rounded-lg hover:text-slate-700 hover:bg-slate-200/50 transition-all">
+                        <i class="ph-bold ph-chart-line-up"></i>
+                        Resultados
+                    </button>
+
+                    <!-- Tab Disabled: EFE -->
+                    <div class="group relative">
+                        <button disabled class="flex items-center gap-2 px-4 py-2 text-sm font-medium font-display text-slate-400 cursor-not-allowed rounded-lg opacity-70">
+                            <i class="ph ph-money"></i>
+                            Flujo de Efectivo
+                            <i class="ph-fill ph-lock-key text-xs ml-1"></i>
+                        </button>
+                        <!-- Tooltip -->
+                        <div class="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
+                            Próximamente
+                        </div>
+                    </div>
+
+                    <!-- Tab Disabled: EPN -->
+                    <div class="group relative">
+                        <button disabled class="flex items-center gap-2 px-4 py-2 text-sm font-medium font-display text-slate-400 cursor-not-allowed rounded-lg opacity-70">
+                            <i class="ph ph-chart-pie-slice"></i>
+                            Evolución PN
+                            <i class="ph-fill ph-lock-key text-xs ml-1"></i>
+                        </button>
+                    </div>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- ================= MAIN CONTENT ================= -->
+    <main class="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- SLOT: ESTADO DE SITUACIÓN PATRIMONIAL -->
+        <section id="tab-esp" class="tab-content fade-in space-y-6">
+            
+            <!-- Toolbar de Acciones del Documento -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white rounded-xl shadow-soft border border-slate-100">
+                
+                <!-- Guía Rápida (Accordion comprimido) -->
+                <div class="flex-1">
+                     <button onclick="toggleGuide()" class="flex items-center gap-2 text-sm text-slate-500 hover:text-brand-primary transition-colors focus:outline-none">
+                        <div class="w-6 h-6 rounded-full bg-blue-50 text-brand-primary flex items-center justify-center">
+                            <i class="ph-bold ph-info"></i>
+                        </div>
+                        <span class="font-medium border-b border-dashed border-slate-300">Sobre este estado</span>
+                        <i id="guide-chevron" class="ph-bold ph-caret-down transition-transform"></i>
+                    </button>
+                    <!-- Contenido Guía (Oculto) -->
+                    <div id="guide-content" class="hidden mt-3 pl-8 text-xs text-slate-500 space-y-1">
+                        <p>• Muestra lo que tenés (Activo) y lo que debés (Pasivo/PN).</p>
+                        <p>• La ecuación fundamental debe dar cero: Activo = Pasivo + PN.</p>
+                        <p>• Usá el modo comparativo para ver la evolución interanual.</p>
+                    </div>
+                </div>
+
+                <!-- Acciones Derecha -->
+                <div class="flex items-center gap-3 sm:gap-4 flex-wrap sm:flex-nowrap">
+                    
+                    <!-- SWITCH COMPARATIVO (Feature Nueva) -->
+                    <div class="flex items-center gap-3 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 mr-2">
+                        <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Comparar</span>
+                        
+                        <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="toggle" id="toggle-comparative" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300 transition-all duration-300 ease-in-out"/>
+                            <label for="toggle-comparative" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-300 cursor-pointer transition-colors duration-300"></label>
+                        </div>
+                        
+                        <!-- Dropdown año (visible solo si activo, simulado visualmente siempre) -->
+                        <div class="relative group">
+                            <span class="text-sm font-mono font-medium text-slate-700 cursor-pointer flex items-center gap-1 group-hover:text-brand-primary">
+                                vs 2025 <i class="ph-bold ph-caret-down text-xs"></i>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="h-6 w-px bg-slate-200 hidden sm:block"></div>
+
+                    <button class="btn-secondary flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-all shadow-sm">
+                        <i class="ph ph-share-network"></i>
+                        <span class="hidden sm:inline">Compartir</span>
+                    </button>
+                    
+                    <button class="btn-primary flex items-center gap-2 px-4 py-2 text-sm font-bold text-white rounded-lg shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 transform hover:-translate-y-0.5 transition-all bg-brand-gradient">
+                        <i class="ph ph-file-pdf"></i>
+                        Descargar PDF
+                    </button>
+                </div>
+            </div>
+
+            <!-- COMPONENTE: DOCUMENTO (ESP) -->
+            <!-- Aquí asumimos que este es el componente existente, pero le agregamos las clases para soportar la inyección de columnas -->
+            <div id="document-esp" class="bg-white rounded-none sm:rounded-lg shadow-md border border-slate-200 overflow-hidden relative min-h-[600px] slide-up">
+                
+                <!-- Header del Documento (Impresión) -->
+                <div class="p-8 pb-4 border-b border-slate-100">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h2 class="text-2xl font-display font-bold text-slate-900">Estado de Situación Patrimonial</h2>
+                            <p class="text-sm text-slate-500 font-mono mt-1">Al 31 de Diciembre de 2026</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm font-bold text-slate-900">Mi Empresa S.A.</p>
+                            <p class="text-xs text-slate-400 font-mono">CUIT 30-12345678-9</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TABLA CONTABLE -->
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-slate-50 text-xs text-slate-500 uppercase font-semibold tracking-wider sticky top-0">
+                            <tr>
+                                <th class="px-6 py-3 border-b border-slate-200 w-1/2">Rubro / Cuenta</th>
+                                <th class="px-6 py-3 border-b border-slate-200 text-right">Ejercicio 2026</th>
+                                <!-- Columnas Comparativas (Inyectadas) -->
+                                <th class="px-6 py-3 border-b border-slate-200 text-right col-comparative text-slate-400">Ejercicio 2025</th>
+                                <th class="px-6 py-3 border-b border-slate-200 text-right col-comparative w-24">Var %</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 font-mono text-slate-700">
+                            
+                            <!-- SECCIÓN: ACTIVO -->
+                            <tr class="bg-slate-50/50">
+                                <td colspan="4" class="px-6 py-2 font-display font-bold text-brand-primary text-base">ACTIVO</td>
+                            </tr>
+
+                            <!-- Rubro: Caja y Bancos -->
+                            <tr>
+                                <td class="px-6 py-3 pl-8 font-semibold text-slate-800">Caja y Bancos</td>
+                                <td class="px-6 py-3 text-right tabular-nums font-bold">12.500.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-slate-500 col-comparative">10.000.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-emerald-500 font-bold col-comparative bg-emerald-50/30">+25%</td>
+                            </tr>
+                            <tr>
+                                <td class="px-6 py-2 pl-12 text-slate-500 text-xs">Banco Galicia C.C.</td>
+                                <td class="px-6 py-2 text-right tabular-nums text-slate-500 text-xs">8.000.000,00</td>
+                                <td class="px-6 py-2 text-right tabular-nums text-slate-400 text-xs col-comparative">6.000.000,00</td>
+                                <td class="px-6 py-2 text-right tabular-nums text-slate-400 text-xs col-comparative"></td>
+                            </tr>
+                            <tr>
+                                <td class="px-6 py-2 pl-12 text-slate-500 text-xs">Caja Chica</td>
+                                <td class="px-6 py-2 text-right tabular-nums text-slate-500 text-xs">4.500.000,00</td>
+                                <td class="px-6 py-2 text-right tabular-nums text-slate-400 text-xs col-comparative">4.000.000,00</td>
+                                <td class="px-6 py-2 text-right tabular-nums text-slate-400 text-xs col-comparative"></td>
+                            </tr>
+
+                            <!-- Rubro: Inversiones -->
+                            <tr>
+                                <td class="px-6 py-3 pl-8 font-semibold text-slate-800">Inversiones Temporarias</td>
+                                <td class="px-6 py-3 text-right tabular-nums font-bold">5.000.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-slate-500 col-comparative">0,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-emerald-500 font-bold col-comparative bg-emerald-50/30">NEW</td>
+                            </tr>
+
+                            <!-- Rubro: Créditos -->
+                            <tr>
+                                <td class="px-6 py-3 pl-8 font-semibold text-slate-800">Créditos por Ventas</td>
+                                <td class="px-6 py-3 text-right tabular-nums font-bold">3.200.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-slate-500 col-comparative">4.000.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-rose-500 font-bold col-comparative bg-rose-50/30">-20%</td>
+                            </tr>
+
+                            <!-- TOTAL ACTIVO -->
+                            <tr class="bg-blue-50/50 border-t-2 border-brand-primary/20">
+                                <td class="px-6 py-4 font-display font-bold text-slate-900">TOTAL ACTIVO</td>
+                                <td class="px-6 py-4 text-right tabular-nums font-bold text-lg text-brand-primary">20.700.000,00</td>
+                                <td class="px-6 py-4 text-right tabular-nums font-bold text-slate-500 col-comparative">14.000.000,00</td>
+                                <td class="px-6 py-4 text-right tabular-nums font-bold text-emerald-600 col-comparative">+47%</td>
+                            </tr>
+
+                             <!-- Spacer -->
+                             <tr class="h-8 border-none"><td colspan="4"></td></tr>
+
+                             <!-- SECCIÓN: PASIVO -->
+                            <tr class="bg-slate-50/50">
+                                <td colspan="4" class="px-6 py-2 font-display font-bold text-slate-700 text-base">PASIVO</td>
+                            </tr>
+                            <tr>
+                                <td class="px-6 py-3 pl-8 font-semibold text-slate-800">Deudas Comerciales</td>
+                                <td class="px-6 py-3 text-right tabular-nums font-bold">4.200.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-slate-500 col-comparative">3.800.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-rose-500 font-bold col-comparative bg-rose-50/30">+10%</td>
+                            </tr>
+                             <tr>
+                                <td class="px-6 py-3 pl-8 font-semibold text-slate-800">Deudas Fiscales</td>
+                                <td class="px-6 py-3 text-right tabular-nums font-bold">1.500.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-slate-500 col-comparative">1.200.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums text-rose-500 font-bold col-comparative bg-rose-50/30">+25%</td>
+                            </tr>
+
+                             <!-- TOTAL PASIVO -->
+                             <tr class="bg-slate-100 border-t border-slate-200">
+                                <td class="px-6 py-3 font-display font-bold text-slate-800">TOTAL PASIVO</td>
+                                <td class="px-6 py-3 text-right tabular-nums font-bold text-slate-800">5.700.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums font-bold text-slate-500 col-comparative">5.000.000,00</td>
+                                <td class="px-6 py-3 text-right tabular-nums font-bold text-rose-600 col-comparative">+14%</td>
+                            </tr>
+
+                             <!-- PATRIMONIO NETO -->
+                             <tr class="bg-emerald-50/30 border-t-2 border-emerald-500/20 mt-4">
+                                <td class="px-6 py-4 font-display font-bold text-slate-900">PATRIMONIO NETO</td>
+                                <td class="px-6 py-4 text-right tabular-nums font-bold text-lg text-emerald-600">15.000.000,00</td>
+                                <td class="px-6 py-4 text-right tabular-nums font-bold text-slate-500 col-comparative">9.000.000,00</td>
+                                <td class="px-6 py-4 text-right tabular-nums font-bold text-emerald-600 col-comparative">+66%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Footer del Documento -->
+                <div class="bg-slate-50 p-4 border-t border-slate-200 text-center">
+                    <p class="text-xs text-slate-400 font-mono">Documento generado por ContaLivre — 22 Ene 2026</p>
+                </div>
+                
+                <!-- Overlay Importar Comparativo (Oculto por defecto) -->
+                <!-- Este se muestra si el usuario activa el toggle pero no hay datos -->
+                <div id="import-cta-overlay" class="hidden absolute inset-0 bg-white/60 backdrop-blur-sm z-10 flex items-center justify-center fade-in">
+                    <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 text-center max-w-sm">
+                        <div class="w-12 h-12 bg-blue-50 text-brand-primary rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                            <i class="ph-duotone ph-file-csv"></i>
+                        </div>
+                        <h3 class="font-display font-bold text-lg mb-2">Faltan datos de 2025</h3>
+                        <p class="text-sm text-slate-500 mb-6">Para ver la comparación, necesitás importar el balance del ejercicio anterior.</p>
+                        <button onclick="openModal()" class="btn-primary w-full py-2.5 px-4 rounded-lg bg-brand-primary text-white font-bold hover:bg-blue-600 transition shadow-lg shadow-blue-500/30">
+                            Importar Comparativo
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- SLOT: ESTADO DE RESULTADOS (Mock) -->
+        <section id="tab-er" class="hidden tab-content fade-in">
+             <div class="bg-white rounded-lg shadow-soft border border-slate-200 p-12 text-center min-h-[400px] flex flex-col items-center justify-center">
+                <i class="ph-duotone ph-chart-line-up text-6xl text-slate-200 mb-4"></i>
+                <h3 class="font-display font-bold text-xl text-slate-800">Estado de Resultados</h3>
+                <p class="text-slate-500 max-w-md mt-2">Aquí iría el componente existente del ER, manteniendo la misma estructura de toolbar superior.</p>
+                <div class="mt-6 border-t border-slate-100 pt-6 w-full max-w-sm mx-auto">
+                    <div class="h-4 bg-slate-100 rounded w-3/4 mx-auto mb-3"></div>
+                    <div class="h-4 bg-slate-100 rounded w-1/2 mx-auto"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- EMPTY STATES (Futures) -->
+        <section id="tab-empty" class="hidden tab-content fade-in">
+            <div class="bg-white rounded-xl shadow-soft border border-slate-200 p-8 md:p-16 text-center">
+                <div class="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <i class="ph-duotone ph-rocket text-4xl text-brand-primary"></i>
+                </div>
+                <h2 class="font-display font-bold text-2xl text-slate-900 mb-2">Próximamente</h2>
+                <p class="text-slate-500 max-w-lg mx-auto mb-8">
+                    Estamos trabajando para que puedas generar el <strong>Flujo de Efectivo</strong> y la <strong>Evolución del Patrimonio Neto</strong> de forma automática.
+                </p>
+                <div class="flex justify-center gap-4">
+                    <button class="px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-600 font-medium hover:bg-slate-50 hover:border-slate-300 transition-colors">
+                        Ver Roadmap
+                    </button>
+                    <button class="px-4 py-2 text-brand-primary font-medium hover:underline">
+                        Sugerir mejoras
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ================= MODAL DE IMPORTACIÓN ================= -->
+    <div id="import-modal" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true">
+        <!-- Backdrop -->
+        <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onclick="closeModal()"></div>
+        
+        <!-- Modal Content -->
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-auto mt-20 p-0 overflow-hidden transform transition-all scale-100">
+            
+            <!-- Header Modal -->
+            <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <h3 class="font-display font-bold text-lg text-slate-800">Importar Comparativo (2025)</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">
+                    <i class="ph-bold ph-x text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Steps Indicator -->
+            <div class="flex justify-center py-4 gap-2">
+                <div id="step-dot-1" class="w-2.5 h-2.5 rounded-full bg-brand-primary"></div>
+                <div id="step-dot-2" class="w-2.5 h-2.5 rounded-full bg-slate-200"></div>
+                <div id="step-dot-3" class="w-2.5 h-2.5 rounded-full bg-slate-200"></div>
+            </div>
+
+            <!-- Content Area (WIZARD) -->
+            <div class="p-6 pt-2">
+                
+                <!-- STEP 1: UPLOAD -->
+                <div id="step-1" class="step-content">
+                    <div class="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 p-8 text-center hover:border-brand-primary hover:bg-blue-50/30 transition-colors cursor-pointer group" onclick="goToStep(2)">
+                        <i class="ph-duotone ph-microsoft-excel-logo text-4xl text-slate-400 mb-3 group-hover:text-brand-primary transition-colors"></i>
+                        <p class="font-medium text-slate-700">Arrastrá tu archivo Excel o CSV acá</p>
+                        <p class="text-xs text-slate-400 mt-1">o hacé clic para buscar en tu compu</p>
+                    </div>
+                    <div class="mt-4 text-center">
+                        <p class="text-xs text-slate-400">Plantilla sugerida: <a href="#" class="text-brand-primary underline">descargar modelo.xlsx</a></p>
+                    </div>
+                </div>
+
+                <!-- STEP 2: MAPPING (Simulado) -->
+                <div id="step-2" class="step-content hidden">
+                    <p class="text-sm text-slate-600 mb-4">Ayudanos a entender tu archivo. Mapeá las columnas:</p>
+                    
+                    <div class="space-y-3">
+                        <div class="grid grid-cols-3 items-center gap-2">
+                            <label class="text-xs font-bold text-slate-500 uppercase col-span-1">Columna Código</label>
+                            <select class="col-span-2 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none">
+                                <option>A - Código de Cuenta</option>
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-3 items-center gap-2">
+                            <label class="text-xs font-bold text-slate-500 uppercase col-span-1">Columna Saldo</label>
+                            <select class="col-span-2 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none">
+                                <option>E - Saldo Final</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Mini Preview -->
+                    <div class="mt-6 bg-slate-50 rounded-lg border border-slate-200 p-3">
+                        <p class="text-xs font-bold text-slate-400 mb-2 uppercase">Vista Previa (3 filas)</p>
+                        <div class="space-y-1 text-xs font-mono text-slate-600">
+                            <div class="flex justify-between border-b border-slate-200 pb-1"><span>1.1.01</span> <span class="text-slate-900">10.000.000,00</span></div>
+                            <div class="flex justify-between border-b border-slate-200 pb-1"><span>1.1.02</span> <span class="text-slate-900">4.000.000,00</span></div>
+                            <div class="flex justify-between"><span>2.1.01</span> <span class="text-slate-900">3.800.000,00</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                 <!-- STEP 3: LOADING / SUCCESS -->
+                 <div id="step-3" class="step-content hidden text-center py-8">
+                    <i class="ph-duotone ph-check-circle text-5xl text-emerald-500 mb-4 animate-bounce"></i>
+                    <h4 class="font-display font-bold text-xl text-slate-800">¡Listo!</h4>
+                    <p class="text-slate-500 text-sm">Los datos de 2025 se importaron correctamente.</p>
+                 </div>
+
+            </div>
+
+            <!-- Footer Modal -->
+            <div class="p-6 pt-0 flex justify-end gap-3">
+                <button onclick="closeModal()" class="px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 transition">Cancelar</button>
+                <button id="modal-action-btn" class="hidden px-4 py-2 bg-brand-primary text-white text-sm font-bold rounded-lg hover:bg-blue-600 transition shadow-lg shadow-blue-500/20" onclick="confirmImport()">
+                    Confirmar Mapeo
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= SCRIPTS DE INTERACCIÓN ================= -->
+    <script>
+        // --- VARIABLES DE ESTADO ---
+        let hasComparativeData = false; // Simula si ya se importó data
+        
+        // --- FUNCIONES DE TABS ---
+        function switchTab(tabId) {
+            // Reset UI Tabs
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active', 'bg-white', 'text-brand-primary', 'shadow-sm', 'ring-1', 'ring-black/5');
+                btn.classList.add('text-slate-500', 'hover:text-slate-700');
+            });
+
+            // Activate current tab UI
+            if (tabId === 'esp' || tabId === 'er') {
+                const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+                activeBtn.classList.add('active', 'bg-white', 'text-brand-primary', 'shadow-sm', 'ring-1', 'ring-black/5');
+                activeBtn.classList.remove('text-slate-500', 'hover:text-slate-700');
+            }
+
+            // Hide all content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.add('hidden'));
+
+            // Show selected content
+            if (tabId === 'esp') document.getElementById('tab-esp').classList.remove('hidden');
+            else if (tabId === 'er') document.getElementById('tab-er').classList.remove('hidden');
+            else document.getElementById('tab-empty').classList.remove('hidden');
+        }
+
+        // --- FUNCIONES DE ACCORDION ---
+        function toggleGuide() {
+            const content = document.getElementById('guide-content');
+            const chevron = document.getElementById('guide-chevron');
+            content.classList.toggle('hidden');
+            chevron.style.transform = content.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
+        }
+
+        // --- LOGICA DE COMPARATIVO ---
+        const toggle = document.getElementById('toggle-comparative');
+        const docEsp = document.getElementById('document-esp');
+        const ctaOverlay = document.getElementById('import-cta-overlay');
+
+        toggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                if (!hasComparativeData) {
+                    // Si no hay datos, mostrar CTA overlay
+                    ctaOverlay.classList.remove('hidden');
+                    // NO expandir la tabla todavía
+                } else {
+                    // Si hay datos, expandir tabla
+                    docEsp.classList.add('show-comparative');
+                }
+            } else {
+                // Apagar comparativo
+                ctaOverlay.classList.add('hidden');
+                docEsp.classList.remove('show-comparative');
+            }
+        });
+
+        // --- LOGICA DE MODAL (WIZARD) ---
+        const modal = document.getElementById('import-modal');
+        const step1 = document.getElementById('step-1');
+        const step2 = document.getElementById('step-2');
+        const step3 = document.getElementById('step-3');
+        const actionBtn = document.getElementById('modal-action-btn');
+        const dots = [document.getElementById('step-dot-1'), document.getElementById('step-dot-2'), document.getElementById('step-dot-3')];
+
+        function openModal() {
+            modal.classList.remove('hidden');
+            resetModal();
+        }
+
+        function closeModal() {
+            modal.classList.add('hidden');
+        }
+
+        function resetModal() {
+            showStep(1);
+            hasComparativeData = false; // Reset sim
+        }
+
+        function showStep(stepNum) {
+            step1.classList.add('hidden');
+            step2.classList.add('hidden');
+            step3.classList.add('hidden');
+            actionBtn.classList.add('hidden');
+            
+            // Update dots
+            dots.forEach((dot, idx) => {
+                dot.classList.remove('bg-brand-primary');
+                dot.classList.add('bg-slate-200');
+                if (idx < stepNum) {
+                    dot.classList.remove('bg-slate-200');
+                    dot.classList.add('bg-brand-primary');
+                }
+            });
+
+            if (stepNum === 1) {
+                step1.classList.remove('hidden');
+            } else if (stepNum === 2) {
+                step2.classList.remove('hidden');
+                actionBtn.classList.remove('hidden');
+                actionBtn.innerText = "Confirmar Mapeo";
+            } else if (stepNum === 3) {
+                step3.classList.remove('hidden');
+                // Auto close after success
+                setTimeout(() => {
+                    finishImport();
+                }, 1500);
+            }
+        }
+
+        function goToStep(step) {
+            // Simulamos loading minúsculo
+            showStep(step);
+        }
+
+        function confirmImport() {
+            // Simular proceso
+            actionBtn.innerHTML = '<i class="ph ph-spinner animate-spin"></i> Procesando...';
+            setTimeout(() => {
+                showStep(3);
+            }, 800);
+        }
+
+        function finishImport() {
+            closeModal();
+            // Lógica de éxito:
+            hasComparativeData = true;
+            ctaOverlay.classList.add('hidden');
+            // Asegurar que el toggle siga prendido y mostrar columnas
+            toggle.checked = true;
+            docEsp.classList.add('show-comparative');
+        }
+
+    </script>
+</body>
+</html>
