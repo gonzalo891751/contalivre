@@ -6,7 +6,7 @@ interface LedgerHeroProps {
 
 export default function LedgerHero({ onExportPDF }: LedgerHeroProps) {
     return (
-        <header className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 mb-6 relative overflow-hidden">
+        <header className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 mb-6 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-500/5 to-emerald-500/5 rounded-full blur-3xl -translate-y-12 translate-x-12" />
 
             <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -14,7 +14,7 @@ export default function LedgerHero({ onExportPDF }: LedgerHeroProps) {
                     <h1 className="font-display text-3xl font-bold bg-gradient-to-r from-blue-600 to-emerald-500 bg-clip-text text-transparent mb-2">
                         Libro Mayor
                     </h1>
-                    <p className="text-slate-500 dark:text-slate-400 max-w-xl">
+                    <p className="text-slate-500 max-w-xl">
                         Analizá los saldos de tus cuentas al detalle. Filtrá por estado para encontrar desvíos o cuentas a conciliar.
                     </p>
                 </div>

@@ -22,9 +22,9 @@ interface LedgerSummaryTableProps {
 }
 
 const RUBRO_STYLES: Record<string, string> = {
-    Activo: 'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
-    Pasivo: 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
-    Resultado: 'bg-purple-50 text-purple-700 border-purple-100 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800',
+    Activo: 'bg-blue-50 text-blue-700 border-blue-100',
+    Pasivo: 'bg-amber-50 text-amber-700 border-amber-100',
+    Resultado: 'bg-purple-50 text-purple-700 border-purple-100',
 }
 
 export default function LedgerSummaryTable({
@@ -33,11 +33,11 @@ export default function LedgerSummaryTable({
     formatCurrency,
 }: LedgerSummaryTableProps) {
     return (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                     <thead>
-                        <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                        <tr className="bg-slate-50 border-b border-slate-200">
                             <th className="py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider font-display">
                                 Cuenta
                             </th>
@@ -55,7 +55,7 @@ export default function LedgerSummaryTable({
                             </th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    <tbody className="divide-y divide-slate-100">
                         {data.map((row) => (
                             <motion.tr
                                 key={row.id}
@@ -69,7 +69,7 @@ export default function LedgerSummaryTable({
                                 className="cursor-pointer group transition-colors"
                             >
                                 <td className="py-4 px-6">
-                                    <div className="font-medium text-slate-900 dark:text-slate-100">
+                                    <div className="font-medium text-slate-900">
                                         {row.name}
                                     </div>
                                     <div className="text-xs text-slate-400 font-mono mt-0.5">
@@ -78,7 +78,7 @@ export default function LedgerSummaryTable({
                                 </td>
                                 <td className="py-4 px-6 text-sm text-slate-500">
                                     <span
-                                        className={`px-2 py-1 rounded text-xs font-medium border ${RUBRO_STYLES[row.rubroLabel] ?? 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-400'}`}
+                                        className={`px-2 py-1 rounded text-xs font-medium border ${RUBRO_STYLES[row.rubroLabel] ?? 'bg-slate-100 text-slate-700 border-slate-200'}`}
                                     >
                                         {row.rubroLabel}
                                     </span>
@@ -91,9 +91,9 @@ export default function LedgerSummaryTable({
                                 </td>
                                 <td
                                     className={`py-4 px-6 text-sm font-bold font-mono text-right tabular-nums ${row.balance > 0
-                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        ? 'text-emerald-600'
                                         : row.balance < 0
-                                            ? 'text-rose-600 dark:text-rose-400'
+                                            ? 'text-rose-600'
                                             : 'text-slate-400'
                                         }`}
                                 >

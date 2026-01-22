@@ -221,9 +221,9 @@ export default function Mayor() {
     // Loading state
     if (!ledger || !accounts) {
         return (
-            <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-8 font-body text-slate-900 dark:text-slate-100 transition-colors duration-300">
+            <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-body text-slate-900 transition-colors duration-300">
                 <div className="max-w-7xl mx-auto">
-                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center text-slate-500 dark:text-slate-400">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-500">
                         Cargando libro mayor...
                     </div>
                 </div>
@@ -232,7 +232,7 @@ export default function Mayor() {
     }
 
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-8 font-body text-slate-900 dark:text-slate-100 transition-colors duration-300">
+        <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-body text-slate-900 transition-colors duration-300">
             <div className="max-w-7xl mx-auto">
                 <AnimatePresence mode="wait">
                 {!isFullView ? (

@@ -38,13 +38,13 @@ export default function LedgerToolbar({
                     placeholder="Buscar por nombre, código o rubro..."
                     value={search}
                     onChange={(e) => onSearchChange(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm text-slate-700 dark:text-slate-200"
+                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm text-slate-700"
                     aria-label="Buscar cuentas"
                 />
             </div>
 
             <div className="flex flex-wrap items-center gap-4 w-full lg:w-auto justify-between lg:justify-end">
-                <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                <div className="flex p-1 bg-slate-100 rounded-lg">
                     {tabs.map((tab) => {
                         const isActive = filterStatus === tab.value
 
@@ -53,8 +53,8 @@ export default function LedgerToolbar({
                                 key={tab.value}
                                 onClick={() => onFilterStatusChange(tab.value)}
                                 className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${isActive
-                                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                                    ? 'bg-white text-blue-600 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700'
                                     }`}
                                 aria-pressed={isActive}
                             >
@@ -72,9 +72,9 @@ export default function LedgerToolbar({
                             checked={showZero}
                             onChange={(e) => onShowZeroChange(e.target.checked)}
                         />
-                        <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500" />
+                        <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500" />
                     </div>
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Ver sin mov.</span>
+                    <span className="text-xs font-medium text-slate-600">Ver sin mov.</span>
                 </label>
             </div>
         </div>
