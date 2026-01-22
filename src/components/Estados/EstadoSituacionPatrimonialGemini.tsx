@@ -17,11 +17,13 @@ import { formatCurrencyARS } from '../../core/amortizaciones/calc'
 
 export type AccountLine = {
     id: string
+    code?: string
     label: string
     amount: number
     level: 1 | 2 | 3
     isTotal?: boolean
     isContra?: boolean
+    comparativeAmount?: number
 }
 
 export type SectionData = {
@@ -44,13 +46,20 @@ interface EstadoSituacionPatrimonialGeminiProps {
     onExportPdf: () => Promise<void>
     isExporting: boolean
     pdfRef?: React.Ref<HTMLDivElement>
+    // Comparative props
+    showComparative?: boolean
+    comparativeYear?: number
+    currentYear?: number
+    comparativeTotalActivo?: number
+    comparativeTotalPasivo?: number
+    comparativeTotalPN?: number
 }
 
 // ============================================
 // Subcomponents
 // ============================================
 
-const AccountRow = ({ item }: { item: AccountLine }) => {
+const AccountRow = ({ item, showComparative = false }: { item: AccountLine; showComparative?: boolean }) => {
     const isHeader = item.level === 1
     const isTotal = item.isTotal
 
@@ -58,8 +67,28 @@ const AccountRow = ({ item }: { item: AccountLine }) => {
     const fontSize = isHeader || isTotal ? 'row-header' : 'row-normal'
     const textColor = isHeader ? 'row-title' : item.isContra ? 'row-contra' : 'row-default'
 
+    // Calculate variation
+    const hasComparative = showComparative && item.comparativeAmount !== undefined
+    let varPercent: string | null = null
+    let varClass = ''
+
+    if (hasComparative) {
+        const compAmount = item.comparativeAmount!
+        if (compAmount === 0 && item.amount > 0) {
+            varPercent = 'NEW'
+            varClass = 'var-new'
+        } else if (item.amount === 0 && compAmount > 0) {
+            varPercent = '—'
+            varClass = 'var-neutral'
+        } else if (compAmount !== 0) {
+            const pct = ((item.amount - compAmount) / Math.abs(compAmount)) * 100
+            varPercent = `${pct >= 0 ? '+' : ''}${pct.toFixed(0)}%`
+            varClass = pct > 0 ? 'var-positive' : pct < 0 ? 'var-negative' : 'var-neutral'
+        }
+    }
+
     return (
-        <div className={`account-row ${isTotal ? 'is-total' : ''}`}>
+        <div className={`account-row ${isTotal ? 'is-total' : ''} ${showComparative ? 'with-comparative' : ''}`}>
             <span className={`row-label ${paddingLeft} ${fontSize} ${textColor}`}>
                 {item.isContra ? '(-) ' : ''}
                 {item.label}
@@ -67,6 +96,16 @@ const AccountRow = ({ item }: { item: AccountLine }) => {
             <span className={`row-amount ${isTotal ? 'is-total' : ''}`}>
                 {formatCurrencyARS(item.amount)}
             </span>
+            {showComparative && (
+                <>
+                    <span className={`row-amount comparative ${isTotal ? 'is-total' : ''}`}>
+                        {hasComparative ? formatCurrencyARS(item.comparativeAmount!) : '—'}
+                    </span>
+                    <span className={`row-var ${varClass} ${isTotal ? 'is-total' : ''}`}>
+                        {varPercent || '—'}
+                    </span>
+                </>
+            )}
         </div>
     )
 }
@@ -76,13 +115,17 @@ const SectionCard = ({
     icon: Icon,
     sections,
     totalAmount,
-    accentColor
+    accentColor,
+    showComparative = false,
+    comparativeTotal
 }: {
     title: string
     icon: React.ElementType
     sections: SectionData[]
     totalAmount: number
     accentColor: 'blue' | 'emerald' | 'slate'
+    showComparative?: boolean
+    comparativeTotal?: number
 }) => {
     const accentClasses = {
         blue: { icon: 'accent-blue', gradient: 'gradient-blue', bar: 'bar-blue' },
@@ -90,8 +133,25 @@ const SectionCard = ({
         slate: { icon: 'accent-slate', gradient: 'gradient-slate', bar: 'bar-slate' }
     }[accentColor]
 
+    // Calculate section total variation
+    let totalVarPercent: string | null = null
+    let totalVarClass = ''
+    if (showComparative && comparativeTotal !== undefined) {
+        if (comparativeTotal === 0 && totalAmount > 0) {
+            totalVarPercent = 'NEW'
+            totalVarClass = 'var-new'
+        } else if (totalAmount === 0 && comparativeTotal > 0) {
+            totalVarPercent = '—'
+            totalVarClass = 'var-neutral'
+        } else if (comparativeTotal !== 0) {
+            const pct = ((totalAmount - comparativeTotal) / Math.abs(comparativeTotal)) * 100
+            totalVarPercent = `${pct >= 0 ? '+' : ''}${pct.toFixed(0)}%`
+            totalVarClass = pct > 0 ? 'var-positive' : pct < 0 ? 'var-negative' : 'var-neutral'
+        }
+    }
+
     return (
-        <div className="section-card">
+        <div className={`section-card ${showComparative ? 'show-comparative' : ''}`}>
             {/* Header */}
             <div className="section-card-header">
                 <div className="header-icon-row">
@@ -115,7 +175,7 @@ const SectionCard = ({
                         </h4>
                         <div className="subsection-rows">
                             {section.items.map(item => (
-                                <AccountRow key={item.id} item={item} />
+                                <AccountRow key={item.id} item={item} showComparative={showComparative} />
                             ))}
                         </div>
                     </div>
@@ -123,11 +183,21 @@ const SectionCard = ({
             </div>
 
             {/* Footer */}
-            <div className="section-card-footer">
+            <div className={`section-card-footer ${showComparative ? 'with-comparative' : ''}`}>
                 <span className="footer-label">Total {title}</span>
                 <span className={`footer-amount ${accentColor === 'emerald' ? 'accent-emerald-text' : ''}`}>
                     {formatCurrencyARS(totalAmount)}
                 </span>
+                {showComparative && (
+                    <>
+                        <span className="footer-amount comparative">
+                            {comparativeTotal !== undefined ? formatCurrencyARS(comparativeTotal) : '—'}
+                        </span>
+                        <span className={`footer-var ${totalVarClass}`}>
+                            {totalVarPercent || '—'}
+                        </span>
+                    </>
+                )}
             </div>
         </div>
     )
@@ -151,7 +221,14 @@ export function EstadoSituacionPatrimonialGemini({
     diff,
     onExportPdf,
     isExporting,
-    pdfRef
+    pdfRef,
+    // Comparative props
+    showComparative = false,
+    // comparativeYear, // Unused
+    // currentYear, // Unused
+    comparativeTotalActivo,
+    comparativeTotalPasivo,
+    comparativeTotalPN
 }: EstadoSituacionPatrimonialGeminiProps) {
 
     const handleDownload = async () => {
@@ -245,6 +322,8 @@ export function EstadoSituacionPatrimonialGemini({
                             accentColor="blue"
                             sections={activoSections}
                             totalAmount={totalActivo}
+                            showComparative={showComparative}
+                            comparativeTotal={comparativeTotalActivo}
                         />
                     </div>
 
@@ -256,6 +335,8 @@ export function EstadoSituacionPatrimonialGemini({
                             accentColor="slate"
                             sections={pasivoSections}
                             totalAmount={totalPasivo}
+                            showComparative={showComparative}
+                            comparativeTotal={comparativeTotalPasivo}
                         />
 
                         <SectionCard
@@ -264,6 +345,8 @@ export function EstadoSituacionPatrimonialGemini({
                             accentColor="emerald"
                             sections={[patrimonioNetoSection]}
                             totalAmount={totalPN}
+                            showComparative={showComparative}
+                            comparativeTotal={comparativeTotalPN}
                         />
                     </div>
                 </main>
@@ -941,6 +1024,137 @@ const mainStyles = `
     font-size: 1rem;
     color: var(--text-muted, #64748b);
     margin: 0;
+}
+
+/* ---- Comparative Mode Styles ---- */
+.account-row.with-comparative {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.row-amount.comparative {
+    color: var(--text-muted, #64748b);
+    font-size: 0.8rem;
+}
+
+.row-var {
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    min-width: 50px;
+    text-align: center;
+}
+
+.row-var.is-total {
+    font-weight: 700;
+}
+
+.row-var.var-positive {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+}
+
+.row-var.var-negative {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.row-var.var-new {
+    background: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+}
+
+.row-var.var-neutral {
+    background: rgba(100, 116, 139, 0.1);
+    color: #64748b;
+}
+
+/* Section footer comparative */
+.section-card-footer.with-comparative {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.footer-amount.comparative {
+    font-size: 0.95rem;
+    color: var(--text-muted, #64748b);
+}
+
+.footer-var {
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 0.875rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 6px;
+    min-width: 60px;
+    text-align: center;
+}
+
+.footer-var.var-positive {
+    background: rgba(16, 185, 129, 0.15);
+    color: #059669;
+}
+
+.footer-var.var-negative {
+    background: rgba(239, 68, 68, 0.15);
+    color: #dc2626;
+}
+
+.footer-var.var-new {
+    background: rgba(59, 130, 246, 0.15);
+    color: #2563eb;
+}
+
+.footer-var.var-neutral {
+    background: rgba(100, 116, 139, 0.1);
+    color: #64748b;
+}
+
+/* Responsive: scroll horizontally on mobile when comparative */
+.section-card.show-comparative .section-card-body {
+    overflow-x: auto;
+}
+
+.section-card.show-comparative .subsection-rows {
+    min-width: 400px;
+}
+
+@media (max-width: 640px) {
+    .account-row.with-comparative {
+        grid-template-columns: 1fr auto;
+        gap: 4px;
+    }
+    
+    .row-amount.comparative,
+    .row-var {
+        display: none;
+    }
+    
+    .section-card-footer.with-comparative {
+        grid-template-columns: 1fr auto;
+    }
+    
+    .footer-amount.comparative,
+    .footer-var {
+        display: none;
+    }
+}
+
+@media (min-width: 641px) and (max-width: 1023px) {
+    .row-amount.comparative {
+        font-size: 0.75rem;
+    }
+    
+    .row-var {
+        font-size: 0.65rem;
+        min-width: 40px;
+    }
 }
 `
 
