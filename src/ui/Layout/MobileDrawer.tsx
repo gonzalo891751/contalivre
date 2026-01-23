@@ -32,7 +32,9 @@ const navItems: NavItem[] = [
         icon: Table,
         children: [
             { path: '/planillas/inventario', label: 'Inventario' },
+            { path: '/planillas/conciliaciones', label: 'Conciliaciones' },
             { path: '/planillas/amortizaciones', label: 'Amortizaciones' },
+            { path: '/planillas/cierre-valuacion', label: 'Cierre: AxI + Valuación' },
         ]
     },
 ]
