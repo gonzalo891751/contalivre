@@ -234,6 +234,21 @@ export interface RecpamInputs {
     passiveMon: number;
 }
 
+/**
+ * Account override settings for monetary classification
+ * (Re-exported from monetary-classification.ts for convenience)
+ */
+export interface AccountOverride {
+    /** Manual monetary classification override */
+    classification?: 'MONETARY' | 'NON_MONETARY';
+    /** Manual origin date for all movements */
+    manualOriginDate?: string;
+    /** Exclude from automatic calculation */
+    exclude?: boolean;
+    /** User has validated this classification */
+    validated?: boolean;
+}
+
 /** Full page state */
 export interface CierreValuacionState {
     /** Unique state ID for storage */
@@ -252,6 +267,8 @@ export interface CierreValuacionState {
     recpamInputs: RecpamInputs;
     /** Keys of vouchers already posted to Libro Diario */
     postedVoucherIds?: string[];
+    /** Account overrides for monetary classification and settings */
+    accountOverrides?: Record<string, AccountOverride>;
 }
 
 // ============================================
@@ -328,6 +345,7 @@ export function createInitialState(): CierreValuacionState {
         partidasRT6: [],
         valuations: {},
         recpamInputs: { activeMon: 0, passiveMon: 0 },
+        accountOverrides: {},
     };
 }
 
