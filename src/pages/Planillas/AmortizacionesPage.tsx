@@ -160,7 +160,7 @@ const normalizeState = (loaded: AmortizationState): AmortizationState => {
             residualPct,
             amortizablePct,
             vidaUtilValor,
-            vidaUtilTipo: 'AÑOS',
+            vidaUtilTipo: 'AÑOS' as const,
             metodo,
             noAmortiza,
             overrideGlobals: false,

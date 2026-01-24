@@ -40,6 +40,14 @@ import { Step2RT6Panel } from './components/Step2RT6Panel';
 import { Step3RT17Panel } from './components/Step3RT17Panel';
 import { createEntry, updateEntry } from '../../storage/entries';
 import { computeVoucherHash, findEntryByVoucherKey } from '../../core/cierre-valuacion/sync';
+import { useLedgerBalances } from '../../hooks/useLedgerBalances';
+import { useAccountOverrides } from '../../hooks/useAccountOverrides';
+import { autoGeneratePartidasRT6 } from '../../core/cierre-valuacion/auto-partidas-rt6';
+import { calculateRecpamIndirecto, type RecpamIndirectoResult } from '../../core/cierre-valuacion/recpam-indirecto';
+import { MonetaryAccountsPanel } from './components/MonetaryAccountsPanel';
+import { RecpamIndirectoDrawer } from './components/RecpamIndirectoDrawer';
+import { toggleMonetaryClass, markAsValidated } from '../../hooks/useAccountOverrides';
+import type { MonetaryClass } from '../../core/cierre-valuacion/monetary-classification';
 
 // Icons (using emoji for simplicity - can be replaced with lucide-react)
 const ICONS = {
@@ -83,6 +91,14 @@ export default function CierreValuacionPage() {
 
     // Delete confirmation state
     const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'RT6' | 'RT17'; id: string } | null>(null);
+
+    // Sub-tab state for Step 2 (Monetarias vs No Monetarias)
+    const [step2SubTab, setStep2SubTab] = useState<'monetarias' | 'nomonetarias'>('nomonetarias');
+
+    // RECPAM Drawer state
+    const [isRecpamDrawerOpen, setRecpamDrawerOpen] = useState(false);
+    const [recpamResult, setRecpamResult] = useState<RecpamIndirectoResult | null>(null);
+    const [recpamLoading, setRecpamLoading] = useState(false);
 
     // Refs
     const saveTimeoutRef = useRef<number | null>(null);
@@ -200,6 +216,18 @@ export default function CierreValuacionPage() {
 
     // REAL-TIME SYNC with Ledger
     const allJournalEntries = useLiveQuery(() => db.entries.reverse().toArray(), []);
+
+    // Ledger balances (RT6 Auto)
+    const { byAccount: ledgerBalances, totals: ledgerTotals, loading: ledgerLoading } =
+        useLedgerBalances(allJournalEntries, allAccounts, { closingDate });
+
+    // Account overrides (RT6 Auto)
+    const { setOverride } = useAccountOverrides(
+        state?.accountOverrides || {},
+        (newOverrides) => {
+            updateState(prev => ({ ...prev, accountOverrides: newOverrides }));
+        }
+    );
 
     // Compute Sync Status for each voucher
     const voucherSyncData = useMemo(() => {
@@ -378,13 +406,101 @@ export default function CierreValuacionPage() {
         showToast('Valuación reseteada');
     };
 
-    // RECPAM handlers
-    const handleRecpamChange = (field: 'activeMon' | 'passiveMon', value: number) => {
+    // RT6 Auto handlers
+    const handleCalcularAutomaticamente = useCallback(() => {
+        if (!allAccounts || !ledgerBalances || !state) return;
+
+        // Determinar inicio de período (1 año antes del cierre)
+        const closingYear = parseInt(closingDate.split('-')[0]);
+        const startOfPeriod = `${closingYear}-01-01`;
+
+        // Auto-generar partidas
+        const { partidas, stats } = autoGeneratePartidasRT6(
+            allAccounts,
+            ledgerBalances,
+            state.accountOverrides || {},
+            {
+                startOfPeriod,
+                closingDate,
+                groupByMonth: true,
+                minLotAmount: 100,
+            }
+        );
+
+        // Actualizar state
         updateState((prev) => ({
             ...prev,
-            recpamInputs: { ...prev.recpamInputs, [field]: value },
+            partidasRT6: partidas,
         }));
-    };
+
+        showToast(`Generadas ${stats.partidasGenerated} partidas con ${stats.lotsGenerated} lotes`);
+    }, [allAccounts, ledgerBalances, state, closingDate, updateState]);
+
+    const handleRecalcular = useCallback(() => {
+        // Mismo que handleCalcularAutomaticamente pero respetando partidas manuales
+        handleCalcularAutomaticamente();
+    }, [handleCalcularAutomaticamente]);
+
+    const handleToggleMonetaryClass = useCallback(
+        (accountId: string, currentClass: MonetaryClass) => {
+            toggleMonetaryClass(accountId, currentClass, state?.accountOverrides || {}, (newOverrides) => {
+                updateState((prev) => ({ ...prev, accountOverrides: newOverrides }));
+            });
+            showToast('Clasificación actualizada');
+        },
+        [state, updateState]
+    );
+
+    const handleMarkValidated = useCallback(
+        (accountId: string) => {
+            markAsValidated(accountId, state?.accountOverrides || {}, (newOverrides) => {
+                updateState((prev) => ({ ...prev, accountOverrides: newOverrides }));
+            });
+        },
+        [state, updateState]
+    );
+
+    const handleMarkAllValidated = useCallback(() => {
+        if (!allAccounts || !state) return;
+
+        const newOverrides = { ...state.accountOverrides };
+        for (const account of allAccounts) {
+            if (!account.isHeader && !newOverrides[account.id]?.validated) {
+                newOverrides[account.id] = { ...(newOverrides[account.id] || {}), validated: true };
+            }
+        }
+
+        updateState((prev) => ({ ...prev, accountOverrides: newOverrides }));
+        showToast('Todas las cuentas marcadas como validadas');
+    }, [allAccounts, state, updateState]);
+
+    const handleOpenRecpamDrawer = useCallback(async () => {
+        if (!allJournalEntries || !allAccounts || !state) return;
+
+        setRecpamDrawerOpen(true);
+        setRecpamLoading(true);
+
+        try {
+            const closingYear = parseInt(closingDate.split('-')[0]);
+            const startOfPeriod = `${closingYear}-01-01`;
+
+            const result = calculateRecpamIndirecto(
+                allJournalEntries,
+                allAccounts,
+                state.accountOverrides || {},
+                indices,
+                startOfPeriod,
+                closingDate
+            );
+
+            setRecpamResult(result);
+        } catch (error) {
+            console.error('Error calculating RECPAM:', error);
+            showToast('Error al calcular RECPAM');
+        } finally {
+            setRecpamLoading(false);
+        }
+    }, [allJournalEntries, allAccounts, state, closingDate, indices]);
 
     // TODO: Add reset button to UI that calls clearCierreValuacionState()
 
@@ -604,53 +720,79 @@ export default function CierreValuacionPage() {
                                 <strong>Guía rápida RT6</strong>
                                 <ul>
                                     <li>Las <strong>partidas no monetarias</strong> se reexpresan con coeficiente desde fecha de origen.</li>
-                                    <li>Las <strong>partidas monetarias</strong> generan RECPAM. Usá la calculadora de abajo.</li>
+                                    <li>Las <strong>partidas monetarias</strong> generan RECPAM. Usá el método indirecto para calcular automáticamente.</li>
+                                    <li>Podés <strong>calcular automáticamente</strong> desde el Mayor o agregar partidas manualmente.</li>
                                 </ul>
                             </div>
                         </div>
 
-                        {/* RECPAM Calculator */}
-                        <div className="card cierre-recpam-card">
-                            <div className="card-header">
-                                <h4>{ICONS.calculator} Papel de trabajo: Estimación RECPAM</h4>
-                                <span className="badge">Estimación</span>
-                            </div>
-                            <div className="cierre-recpam-grid">
-                                <div className="form-group">
-                                    <label className="form-label">Activos Monetarios</label>
-                                    <input
-                                        type="number"
-                                        className="form-input"
-                                        value={recpamInputs.activeMon || ''}
-                                        onChange={(e) => handleRecpamChange('activeMon', Number(e.target.value))}
-                                        placeholder="0.00"
-                                    />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Pasivos Monetarios</label>
-                                    <input
-                                        type="number"
-                                        className="form-input"
-                                        value={recpamInputs.passiveMon || ''}
-                                        onChange={(e) => handleRecpamChange('passiveMon', Number(e.target.value))}
-                                        placeholder="0.00"
-                                    />
-                                </div>
-                                <div className="cierre-recpam-result">
-                                    <div className="cierre-recpam-label">RECPAM Estimado</div>
-                                    <div className={`cierre-recpam-value ${recpamEstimado > 0 ? 'positive' : ''}`}>
-                                        {formatCurrencyARS(recpamEstimado)}
-                                    </div>
-                                </div>
-                            </div>
+                        {/* Action Buttons */}
+                        <div className="step2-actions-bar">
+                            <button
+                                className="btn btn-secondary"
+                                onClick={handleOpenRecpamDrawer}
+                                disabled={ledgerLoading}
+                            >
+                                {ICONS.calculator} Método indirecto
+                            </button>
+                            <button
+                                className="btn btn-secondary"
+                                onClick={handleRecalcular}
+                                disabled={ledgerLoading}
+                            >
+                                🔄 Recalcular
+                            </button>
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleCalcularAutomaticamente}
+                                disabled={ledgerLoading}
+                            >
+                                ✨ Calcular automáticamente
+                            </button>
                         </div>
 
-                        <Step2RT6Panel
-                            computedRT6={computedRT6}
-                            onAddPartida={() => handleOpenRT6Drawer()}
-                            onEditPartida={(id) => handleOpenRT6Drawer(id)}
-                            onDeletePartida={(id) => setDeleteConfirm({ type: 'RT6', id })}
-                        />
+                        {/* Sub-tabs */}
+                        <div className="step2-tabs">
+                            <button
+                                className={`step2-tab ${step2SubTab === 'monetarias' ? 'active' : ''}`}
+                                onClick={() => setStep2SubTab('monetarias')}
+                            >
+                                {ICONS.dollar} Partidas Monetarias
+                                <span className="badge">{ledgerTotals.totalNonZero || 0}</span>
+                            </button>
+                            <button
+                                className={`step2-tab ${step2SubTab === 'nomonetarias' ? 'active' : ''}`}
+                                onClick={() => setStep2SubTab('nomonetarias')}
+                            >
+                                📦 Partidas No Monetarias
+                                <span className="badge">{computedRT6.length}</span>
+                            </button>
+                        </div>
+
+                        {/* Tab Content */}
+                        {step2SubTab === 'monetarias' && (
+                            <MonetaryAccountsPanel
+                                accounts={allAccounts}
+                                balances={ledgerBalances}
+                                overrides={state?.accountOverrides || {}}
+                                onToggleClassification={handleToggleMonetaryClass}
+                                onMarkValidated={handleMarkValidated}
+                                onMarkAllValidated={handleMarkAllValidated}
+                                onExclude={(accountId) => {
+                                    setOverride(accountId, { exclude: true });
+                                    showToast('Cuenta excluida');
+                                }}
+                            />
+                        )}
+
+                        {step2SubTab === 'nomonetarias' && (
+                            <Step2RT6Panel
+                                computedRT6={computedRT6}
+                                onAddPartida={() => handleOpenRT6Drawer()}
+                                onEditPartida={(id) => handleOpenRT6Drawer(id)}
+                                onDeletePartida={(id) => setDeleteConfirm({ type: 'RT6', id })}
+                            />
+                        )}
                     </div>
                 )}
 
@@ -792,6 +934,13 @@ export default function CierreValuacionPage() {
                 isOpen={isImportWizardOpen}
                 onClose={() => setImportWizardOpen(false)}
                 onImport={handleImportIndices}
+            />
+
+            <RecpamIndirectoDrawer
+                isOpen={isRecpamDrawerOpen}
+                onClose={() => setRecpamDrawerOpen(false)}
+                result={recpamResult}
+                loading={recpamLoading}
             />
 
             {/* INDEX EDIT MODAL */}
@@ -1291,6 +1440,60 @@ export default function CierreValuacionPage() {
                     font-weight: 500;
                 }
                 .btn-ghost:hover { text-decoration: underline; }
+
+                /* Step 2 RT6 Auto styles */
+                .step2-actions-bar {
+                    display: flex;
+                    gap: var(--space-sm);
+                    justify-content: flex-end;
+                    margin-bottom: var(--space-md);
+                }
+
+                .step2-tabs {
+                    display: flex;
+                    gap: var(--space-sm);
+                    border-bottom: 1px solid var(--color-border);
+                    margin-bottom: var(--space-lg);
+                }
+
+                .step2-tab {
+                    display: flex;
+                    align-items: center;
+                    gap: var(--space-sm);
+                    padding: var(--space-sm) var(--space-md);
+                    background: none;
+                    border: none;
+                    font-size: var(--font-size-sm);
+                    font-weight: 600;
+                    color: var(--color-text-secondary);
+                    cursor: pointer;
+                    position: relative;
+                    transition: color 0.2s;
+                    border-bottom: 2px solid transparent;
+                }
+
+                .step2-tab:hover {
+                    color: var(--color-text);
+                }
+
+                .step2-tab.active {
+                    color: var(--brand-primary);
+                    border-bottom-color: var(--brand-primary);
+                    background: rgba(59, 130, 246, 0.05);
+                }
+
+                .step2-tab .badge {
+                    background: var(--surface-3);
+                    color: var(--color-text-secondary);
+                    font-size: var(--font-size-xs);
+                    padding: 2px 6px;
+                    border-radius: var(--radius-sm);
+                }
+
+                .step2-tab.active .badge {
+                    background: var(--brand-primary);
+                    color: white;
+                }
             `}</style>
         </div >
     );

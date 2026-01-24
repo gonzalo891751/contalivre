@@ -13,10 +13,10 @@ import {
     applyOverrides,
     isExcluded,
     getAccountType,
-    type MonetaryClass,
 } from './monetary-classification';
 import { getAccountMetadata } from './classification';
-import { generateId, getPeriodFromDate } from './calc';
+import { getPeriodFromDate } from './calc';
+import { generateId } from './types';
 
 /**
  * Options for auto-generation
@@ -165,16 +165,21 @@ function generatePartidaForAccount(
 
     // Derive metadata
     const metadata = getAccountMetadata(account.code, account);
-    const grupo = getAccountType(account);
+    const grupoExtended = getAccountType(account);
     const rubroLabel = account.group || deriveRubroLabel(account.code, metadata.group);
 
+    // Skip RESULTADOS accounts (they are flow, not stock)
+    if (grupoExtended === 'RESULTADOS') {
+        return null;
+    }
+
     // Map grupo to rubro (legacy enum)
-    const rubro = mapGrupoToRubro(grupo, rubroLabel);
+    const rubro = mapGrupoToRubro(grupoExtended, rubroLabel);
 
     return {
         id: generateId(),
         rubro,
-        grupo,
+        grupo: grupoExtended as GrupoContable, // Safe cast after filtering RESULTADOS
         rubroLabel,
         cuentaCodigo: account.code,
         cuentaNombre: account.name,
@@ -310,7 +315,7 @@ function deriveRubroLabel(code: string, grupo: string): string {
 /**
  * Map GrupoContable to legacy RubroType enum
  */
-function mapGrupoToRubro(grupo: GrupoContable | 'RESULTADOS', rubroLabel: string): RubroType {
+function mapGrupoToRubro(_grupo: GrupoContable | 'RESULTADOS', rubroLabel: string): RubroType {
     // Try to infer from rubro label keywords
     const label = rubroLabel.toLowerCase();
 
@@ -340,7 +345,7 @@ function mapGrupoToRubro(grupo: GrupoContable | 'RESULTADOS', rubroLabel: string
  * Future enhancement: track manual edits and preserve them.
  */
 export function mergeAutoPartidas(
-    existingPartidas: PartidaRT6[],
+    _existingPartidas: PartidaRT6[],
     autoPartidas: PartidaRT6[]
 ): PartidaRT6[] {
     // Keep manual partidas (those without a specific marker)
