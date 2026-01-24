@@ -12,6 +12,7 @@ import type {
     AmortizationRow,
     AmortizationTotals,
     EstadoBien,
+    AmortizationMethod,
 } from './types'
 
 // Small tolerance for floating point comparisons
@@ -99,39 +100,43 @@ export function calculateAnnualDepreciation(
     }
 }
 
+function resolveMetodo(asset: AmortizationAsset, params: AmortizationParams): AmortizationMethod {
+    if (asset.metodo) return asset.metodo
+    if (asset.noAmortiza) return 'none'
+    return params.prorrateoMensual ? 'lineal-month' : 'lineal-year'
+}
+
 /**
- * Main calculation function for a single asset
+ * Main calculation function for a single asset (prototype-aligned)
  */
 export function calculateAmortization(
     asset: AmortizationAsset,
     params: AmortizationParams
 ): CalculatedValues {
-    // Case 1: No amortiza (e.g., Terreno)
-    if (asset.noAmortiza) {
-        return {
-            valorResidual: asset.valorOrigen !== null ? asset.valorOrigen * (asset.residualPct / 100) : null,
-            valorAmortizable: asset.valorOrigen !== null ? asset.valorOrigen * (asset.amortizablePct / 100) : null,
-            amortizacionEjercicio: 0,
-            acumuladaInicio: 0,
-            acumuladaCierre: 0,
-            vrContable: asset.valorOrigen,
-            estado: 'NO_AMORTIZA',
-        }
-    }
+    const metodo = resolveMetodo(asset, params)
+    const noAmortiza = asset.noAmortiza || metodo === 'none'
 
-    // Check if we have the required values
     const C = asset.valorOrigen
     if (C === null || C <= 0) {
         return createEmptyCalculated()
     }
 
-    const r = asset.residualPct / 100
-    const a = asset.amortizablePct / 100
+    const residualPct = Number.isFinite(asset.residualPct) ? asset.residualPct : 0
+    const VR = C * (residualPct / 100)
+    const VA = Math.max(0, C - VR)
 
-    const VR = C * r  // Valor Residual
-    const VA = C * a  // Valor Amortizable
+    if (noAmortiza) {
+        return {
+            valorResidual: VR,
+            valorAmortizable: VA,
+            amortizacionEjercicio: 0,
+            acumuladaInicio: 0,
+            acumuladaCierre: 0,
+            vrContable: C,
+            estado: 'NO_AMORTIZA',
+        }
+    }
 
-    // Check if vida útil is valid
     if (!asset.vidaUtilValor || asset.vidaUtilValor <= 0) {
         return {
             valorResidual: VR,
@@ -144,14 +149,11 @@ export function calculateAmortization(
         }
     }
 
-    // Calculate annual depreciation
     const depAnual = calculateAnnualDepreciation(VA, asset.vidaUtilValor, asset.vidaUtilTipo)
-
-    // Parse dates
     const fechaAlta = parseDate(asset.fechaAlta)
-    const fyEnd = parseDate(params.fechaCierreEjercicio)
+    const cierre = parseDate(params.fechaCierreEjercicio)
 
-    if (!fechaAlta || !fyEnd) {
+    if (!fechaAlta || !cierre) {
         return {
             valorResidual: VR,
             valorAmortizable: VA,
@@ -163,29 +165,58 @@ export function calculateAmortization(
         }
     }
 
-    const fyStart = getFiscalYearStart(params.fechaCierreEjercicio)
-
-    let acumInicio: number
-    let amortEj: number
-
-    if (params.prorrateoMensual) {
-        // Case B: Prorrateo mensual ON
-        const monthsBefore = calculateMonthsBetween(fechaAlta, fyStart)
-        acumInicio = clamp(depAnual * (monthsBefore / 12), 0, VA)
-
-        const monthsInYear = calculateMonthsInFiscalYear(fechaAlta, fyStart, fyEnd)
-        amortEj = clamp(depAnual * (monthsInYear / 12), 0, VA - acumInicio)
-    } else {
-        // Case A: Prorrateo mensual OFF (simple annual)
-        const yearsBefore = Math.max(0, fyStart.getFullYear() - fechaAlta.getFullYear())
-        acumInicio = clamp(depAnual * yearsBefore, 0, VA)
-        amortEj = clamp(depAnual, 0, VA - acumInicio)
+    if (fechaAlta > cierre) {
+        return {
+            valorResidual: VR,
+            valorAmortizable: VA,
+            amortizacionEjercicio: 0,
+            acumuladaInicio: 0,
+            acumuladaCierre: 0,
+            vrContable: C,
+            estado: 'ACTIVO',
+        }
     }
 
-    const acumCierre = clamp(acumInicio + amortEj, 0, VA)
-    const vrContable = Math.max(VR, C - acumCierre)
+    const closingYear = cierre.getFullYear()
+    const closingMonth = cierre.getMonth()
+    const altaYear = fechaAlta.getFullYear()
+    const altaMonth = fechaAlta.getMonth()
 
-    // Determine estado
+    let acumInicio = 0
+    let amortEj = 0
+
+    if (metodo === 'lineal-month') {
+        const monthsTotal = (closingYear - altaYear) * 12 + (closingMonth - altaMonth) + 1
+        if (monthsTotal > 0) {
+            const monthlyAmort = depAnual / 12
+            const startOfExercise = new Date(closingYear, 0, 1)
+
+            if (fechaAlta < startOfExercise) {
+                const prevYearEnd = new Date(closingYear - 1, 11, 31)
+                const monthsPrevCnt = (prevYearEnd.getFullYear() - altaYear) * 12 + (prevYearEnd.getMonth() - altaMonth) + 1
+                acumInicio = Math.max(0, monthsPrevCnt * monthlyAmort)
+            }
+
+            const lifeMonths = asset.vidaUtilValor * 12
+            const monthsAmortized = Math.min(monthsTotal, lifeMonths)
+            const totalShouldBe = monthsAmortized * monthlyAmort
+            amortEj = Math.max(0, totalShouldBe - acumInicio)
+        }
+    } else {
+        const yearsActive = closingYear - altaYear + 1
+        const yearsPrev = Math.max(0, yearsActive - 1)
+        acumInicio = yearsPrev * depAnual
+
+        if (yearsActive <= asset.vidaUtilValor && yearsActive > 0) {
+            amortEj = depAnual
+        }
+    }
+
+    acumInicio = clamp(acumInicio, 0, VA)
+    const acumCierre = clamp(acumInicio + amortEj, 0, VA)
+    amortEj = acumCierre - acumInicio
+    const vrContable = C - acumCierre
+
     let estado: EstadoBien = 'ACTIVO'
     if (acumCierre >= VA - EPSILON) {
         estado = 'AMORTIZADO'

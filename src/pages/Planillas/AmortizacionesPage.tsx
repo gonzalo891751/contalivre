@@ -1,60 +1,216 @@
-/**
- * AmortizacionesPage - Depreciation Calculator Tool
- * 
- * Main page for the "Planillas complementarias" section.
- * Provides a spreadsheet-like interface for calculating asset depreciation.
- */
-
-import { useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent, type ChangeEvent } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
-    type AmortizationState,
+    ArrowLeft,
+    FileText,
+    Info,
+    PencilSimple,
+    Plus,
+    Printer,
+    Trash,
+    Tray,
+    X,
+} from '@phosphor-icons/react'
+import {
     type AmortizationAsset,
+    type AmortizationMethod,
     type AmortizationParams,
-    type AmortizationRow,
-    createInitialState,
+    type AmortizationState,
     createDefaultAsset,
+    createInitialState,
     generateAssetId,
 } from '../../core/amortizaciones/types'
 import {
     calculateAllRows,
     calculateTotals,
-    formatCurrencyARS,
-    exportToCSV,
-    downloadCSV,
-    parseArgentineNumber,
+    parseDate,
 } from '../../core/amortizaciones/calc'
-import {
-    loadAmortizationState,
-    saveAmortizationState,
-    clearAmortizationState,
-} from '../../storage'
+import { loadAmortizationState, saveAmortizationState } from '../../storage'
+import { usePeriodYear } from '../../hooks/usePeriodYear'
 
-// Tabs for future expansion
-const TABS = [
-    { id: 'amortizaciones', label: 'Amortizaciones' },
-    // Future: { id: 'provisiones', label: 'Provisiones' },
+const DEFAULT_RUBRO = 'Muebles y Útiles'
+
+const RUBROS = [
+    DEFAULT_RUBRO,
+    'Rodados',
+    'Instalaciones',
+    'Eq. Computación',
+    'Maquinarias',
+    'Inmuebles',
+    'Terrenos',
+    'Mejoras',
+    'Otros Bienes',
 ]
+
+const RUBRO_ALIASES: Record<string, string> = {
+    'Muebles y Utiles': DEFAULT_RUBRO,
+    'Eq. Computacion': 'Eq. Computación',
+}
+
+const DEFAULT_LIFE_YEARS: Record<string, number> = {
+    Rodados: 5,
+    [DEFAULT_RUBRO]: 10,
+    'Eq. Computación': 3,
+    Inmuebles: 50,
+    Instalaciones: 10,
+    Maquinarias: 10,
+    Terrenos: 0,
+    Mejoras: 10,
+    'Otros Bienes': 5,
+}
+
+const amountFormatter = new Intl.NumberFormat('es-AR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+})
+
+type ActiveTab = 'carga' | 'anexo'
+
+type AssetFormState = {
+    rubro: string
+    fechaAlta: string
+    detalle: string
+    valorOrigen: string
+    vidaUtilValor: string
+    metodo: AmortizationMethod
+    residualPct: string
+    noAmortiza: boolean
+}
+
+const normalizeRubro = (rubro: string) => RUBRO_ALIASES[rubro] ?? rubro
+
+const emptyForm = (): AssetFormState => {
+    const rubro = DEFAULT_RUBRO
+    return {
+        rubro,
+        fechaAlta: new Date().toISOString().slice(0, 10),
+        detalle: '',
+        valorOrigen: '',
+        vidaUtilValor: String(DEFAULT_LIFE_YEARS[rubro] ?? 0),
+        metodo: 'lineal-year',
+        residualPct: '0',
+        noAmortiza: false,
+    }
+}
+
+const isAssetPopulated = (asset: AmortizationAsset) => {
+    return Boolean(asset.detalle?.trim() || asset.valorOrigen || asset.fechaAlta)
+}
+
+const formatAmount = (value: number) => amountFormatter.format(value)
+
+const dashIfZero = (value: number | null | undefined) => {
+    if (!value || Math.abs(value) < 0.01) return '-'
+    return formatAmount(value)
+}
+
+const formatPercentOrDash = (value: number | null | undefined) => {
+    if (!value || Math.abs(value) < 0.01) return '-'
+    return `${value}%`
+}
+
+const formatDate = (dateStr: string) => {
+    if (!dateStr) return '-'
+    const [y, m, d] = dateStr.split('-')
+    if (!y || !m || !d) return '-'
+    return `${d}/${m}/${y}`
+}
+
+const formatMetodoLabel = (metodo: AmortizationMethod, noAmortiza: boolean) => {
+    if (noAmortiza || metodo === 'none') return 'No Amortiza'
+    if (metodo === 'lineal-month') return 'Lineal (Mes)'
+    return 'Lineal (Año)'
+}
+
+const normalizeState = (loaded: AmortizationState): AmortizationState => {
+    const initial = createInitialState()
+    const params = loaded.params ?? initial.params
+    const residual = Number.isFinite(params.residualPctGlobal) ? params.residualPctGlobal : 0
+    const nextParams: AmortizationParams = {
+        ...params,
+        fechaCierreEjercicio: params.fechaCierreEjercicio || initial.params.fechaCierreEjercicio,
+        residualPctGlobal: residual,
+        amortizablePctGlobal: 100 - residual,
+        prorrateoMensual: Boolean(params.prorrateoMensual),
+    }
+
+    const assetsByPeriod = { ...(loaded.assetsByPeriod ?? {}) }
+    const periodKey = nextParams.fechaCierreEjercicio
+    let assets = loaded.assets ?? []
+
+    if (assetsByPeriod[periodKey]) {
+        assets = assetsByPeriod[periodKey]
+    } else if (assets.length > 0) {
+        assetsByPeriod[periodKey] = assets
+    }
+
+    const normalizedAssets = assets.map((asset) => {
+        const rubro = normalizeRubro(asset.rubro || DEFAULT_RUBRO)
+        const defaultLife = DEFAULT_LIFE_YEARS[rubro] ?? null
+        const vidaUtilValor = Number.isFinite(asset.vidaUtilValor) ? asset.vidaUtilValor : defaultLife
+        const noAmortiza = asset.noAmortiza ?? (rubro === 'Terrenos' || (vidaUtilValor ?? 0) <= 0)
+        const metodo = asset.metodo ?? (noAmortiza ? 'none' : (nextParams.prorrateoMensual ? 'lineal-month' : 'lineal-year'))
+        const residualPct = Number.isFinite(asset.residualPct) ? asset.residualPct : nextParams.residualPctGlobal
+        const amortizablePct = 100 - residualPct
+
+        return {
+            ...createDefaultAsset(asset.id ?? generateAssetId(), nextParams),
+            ...asset,
+            rubro,
+            residualPct,
+            amortizablePct,
+            vidaUtilValor,
+            vidaUtilTipo: 'AÑOS',
+            metodo,
+            noAmortiza,
+            overrideGlobals: false,
+        }
+    })
+
+    assetsByPeriod[periodKey] = normalizedAssets
+
+    return {
+        ...loaded,
+        params: nextParams,
+        assets: normalizedAssets,
+        assetsByPeriod,
+        lastUpdated: loaded.lastUpdated ?? new Date().toISOString(),
+    }
+}
 
 export default function AmortizacionesPage() {
     const [state, setState] = useState<AmortizationState | null>(null)
     const [isLoading, setIsLoading] = useState(true)
-    const [activeTab, setActiveTab] = useState('amortizaciones')
-    const [showClearModal, setShowClearModal] = useState(false)
-    const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
-    const tableRef = useRef<HTMLTableElement>(null)
+    const [activeTab, setActiveTab] = useState<ActiveTab>('carga')
+    const [isModalOpen, setIsModalOpen] = useState(false)
+    const [formState, setFormState] = useState<AssetFormState | null>(null)
+    const [formError, setFormError] = useState<string | null>(null)
+    const [editingId, setEditingId] = useState<string | null>(null)
     const saveTimeoutRef = useRef<number | null>(null)
+    const viewBeforePrintRef = useRef<ActiveTab | null>(null)
+    const { year: periodYear } = usePeriodYear()
 
-    // Load initial state
     useEffect(() => {
         async function load() {
             const loadedState = await loadAmortizationState()
-            setState(loadedState)
+            const normalized = normalizeState(loadedState)
+            setState(normalized)
             setIsLoading(false)
         }
         load()
     }, [])
 
-    // Auto-save with debounce
+    useEffect(() => {
+        const handleAfterPrint = () => {
+            if (viewBeforePrintRef.current && viewBeforePrintRef.current !== 'anexo') {
+                setActiveTab(viewBeforePrintRef.current)
+            }
+            viewBeforePrintRef.current = null
+        }
+        window.addEventListener('afterprint', handleAfterPrint)
+        return () => window.removeEventListener('afterprint', handleAfterPrint)
+    }, [])
+
     const debouncedSave = useCallback((newState: AmortizationState) => {
         if (saveTimeoutRef.current !== null) {
             window.clearTimeout(saveTimeoutRef.current)
@@ -63,143 +219,256 @@ export default function AmortizacionesPage() {
         saveTimeoutRef.current = window.setTimeout(() => {
             saveAmortizationState(newState)
             saveTimeoutRef.current = null
-        }, 500)
+        }, 400)
     }, [])
 
-    // Update state and trigger save
     const updateState = useCallback((updater: (prev: AmortizationState) => AmortizationState) => {
-        setState(prev => {
+        setState((prev) => {
             if (!prev) return prev
-            const newState = updater(prev)
-            debouncedSave(newState)
-            return newState
+            const nextState = updater(prev)
+            const periodKey = nextState.params.fechaCierreEjercicio
+            const assetsByPeriod = {
+                ...(nextState.assetsByPeriod ?? {}),
+                [periodKey]: nextState.assets,
+            }
+            const normalizedState = {
+                ...nextState,
+                assetsByPeriod,
+            }
+            debouncedSave(normalizedState)
+            return normalizedState
         })
     }, [debouncedSave])
 
-    // Update params
-    const updateParams = useCallback((updates: Partial<AmortizationParams>) => {
-        updateState(prev => ({
-            ...prev,
-            params: { ...prev.params, ...updates },
-            // Update assets that don't have overrideGlobals
-            assets: prev.assets.map(asset =>
-                asset.overrideGlobals
-                    ? asset
-                    : {
-                        ...asset,
-                        residualPct: updates.residualPctGlobal ?? asset.residualPct,
-                        amortizablePct: updates.amortizablePctGlobal ?? asset.amortizablePct,
-                    }
-            ),
-        }))
-    }, [updateState])
-
-    // Update single asset
-    const updateAsset = useCallback((id: string, updates: Partial<AmortizationAsset>) => {
-        updateState(prev => ({
-            ...prev,
-            assets: prev.assets.map(asset =>
-                asset.id === id
-                    ? {
-                        ...asset,
-                        ...updates,
-                        // Mark as override if editing percentages
-                        overrideGlobals: updates.residualPct !== undefined || updates.amortizablePct !== undefined
-                            ? true
-                            : asset.overrideGlobals,
-                    }
-                    : asset
-            ),
-        }))
-    }, [updateState])
-
-    // Add new row
-    const addRow = useCallback(() => {
-        if (!state) return
-        const newAsset = createDefaultAsset(generateAssetId(), state.params)
-        updateState(prev => ({
-            ...prev,
-            assets: [...prev.assets, newAsset],
-        }))
-    }, [state, updateState])
-
-    // Duplicate row
-    const duplicateRow = useCallback((id: string) => {
-        updateState(prev => {
-            const sourceAsset = prev.assets.find(a => a.id === id)
-            if (!sourceAsset) return prev
-            const newAsset: AmortizationAsset = {
-                ...sourceAsset,
-                id: generateAssetId(),
-                detalle: `${sourceAsset.detalle} (copia)`,
+    const changeClosingDate = useCallback((nextDate: string) => {
+        updateState((prev) => {
+            const prevPeriod = prev.params.fechaCierreEjercicio
+            const assetsByPeriod = {
+                ...(prev.assetsByPeriod ?? {}),
+                [prevPeriod]: prev.assets,
             }
-            const sourceIndex = prev.assets.findIndex(a => a.id === id)
-            const newAssets = [...prev.assets]
-            newAssets.splice(sourceIndex + 1, 0, newAsset)
-            return { ...prev, assets: newAssets }
+            const nextAssets = assetsByPeriod[nextDate] ?? []
+            return {
+                ...prev,
+                params: {
+                    ...prev.params,
+                    fechaCierreEjercicio: nextDate,
+                },
+                assets: nextAssets,
+                assetsByPeriod,
+            }
         })
     }, [updateState])
 
-    // Delete row
-    const deleteRow = useCallback((id: string) => {
-        updateState(prev => ({
+    const deleteAsset = useCallback((id: string) => {
+        if (!window.confirm('¿Eliminar este bien?')) return
+        updateState((prev) => ({
             ...prev,
-            assets: prev.assets.filter(a => a.id !== id),
+            assets: prev.assets.filter((asset) => asset.id !== id),
         }))
-        if (selectedRowId === id) {
-            setSelectedRowId(null)
-        }
-    }, [updateState, selectedRowId])
+    }, [updateState])
 
-    // Clear all data
-    const handleClear = useCallback(async () => {
-        await clearAmortizationState()
-        setState(createInitialState())
-        setShowClearModal(false)
-        setSelectedRowId(null)
+    const upsertAsset = useCallback((asset: AmortizationAsset) => {
+        updateState((prev) => {
+            const exists = prev.assets.some((item) => item.id === asset.id)
+            return {
+                ...prev,
+                assets: exists
+                    ? prev.assets.map((item) => (item.id === asset.id ? asset : item))
+                    : [...prev.assets, asset],
+            }
+        })
+    }, [updateState])
+
+    const openModal = useCallback((asset?: AmortizationAsset) => {
+        setFormError(null)
+        if (asset) {
+            setEditingId(asset.id)
+            setFormState({
+                rubro: asset.rubro,
+                fechaAlta: asset.fechaAlta || new Date().toISOString().slice(0, 10),
+                detalle: asset.detalle || '',
+                valorOrigen: asset.valorOrigen ? String(asset.valorOrigen) : '',
+                vidaUtilValor: Number.isFinite(asset.vidaUtilValor) ? String(asset.vidaUtilValor) : '',
+                metodo: asset.metodo === 'none' ? 'lineal-year' : asset.metodo,
+                residualPct: Number.isFinite(asset.residualPct) ? String(asset.residualPct) : '0',
+                noAmortiza: asset.noAmortiza || asset.metodo === 'none',
+            })
+        } else {
+            setEditingId(null)
+            setFormState(emptyForm())
+        }
+        setIsModalOpen(true)
     }, [])
 
-    // Export to CSV
-    const handleExport = useCallback(() => {
-        if (!state) return
-        const rows = calculateAllRows(state.assets, state.params)
-        const csv = exportToCSV(rows)
-        const date = new Date().toISOString().slice(0, 10)
-        downloadCSV(csv, `amortizaciones-${date}.csv`)
-    }, [state])
+    const closeModal = useCallback(() => {
+        setIsModalOpen(false)
+        setFormError(null)
+        setFormState(null)
+        setEditingId(null)
+    }, [])
 
-    // Auto toggle for % calculations
-    const handleAutoPercent = useCallback(() => {
-        if (!state) return
-        const newAmortizable = 100 - state.params.residualPctGlobal
-        updateParams({ amortizablePctGlobal: newAmortizable })
-    }, [state, updateParams])
-
-    // Keyboard navigation
-    const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>, rowId: string, fieldName: string) => {
-        if (e.key === 'Enter' || e.key === 'Tab') {
-            if (!state) return
-
-            const currentRowIndex = state.assets.findIndex(a => a.id === rowId)
-            const isLastRow = currentRowIndex === state.assets.length - 1
-            const isLastEditableField = fieldName === 'noAmortiza'
-
-            // Add new row if Enter on last field of last row
-            if (e.key === 'Enter' && isLastRow && isLastEditableField) {
-                e.preventDefault()
-                addRow()
+    const handleRubroChange = useCallback((nextRubro: string) => {
+        setFormState((prev) => {
+            if (!prev) return prev
+            const rubro = normalizeRubro(nextRubro)
+            const defaultLife = DEFAULT_LIFE_YEARS[rubro] ?? 0
+            const isTerrenos = rubro === 'Terrenos'
+            return {
+                ...prev,
+                rubro,
+                vidaUtilValor: String(defaultLife),
+                noAmortiza: isTerrenos,
             }
-        }
-    }, [state, addRow])
+        })
+    }, [])
 
-    // Calculate all rows
-    const rows: AmortizationRow[] = useMemo(() => {
+    const handleNoAmortizaChange = useCallback((checked: boolean) => {
+        setFormState((prev) => {
+            if (!prev) return prev
+            const fallbackLife = String(DEFAULT_LIFE_YEARS[prev.rubro] ?? 0)
+            return {
+                ...prev,
+                noAmortiza: checked,
+                vidaUtilValor: checked ? '0' : (prev.vidaUtilValor || fallbackLife),
+            }
+        })
+    }, [])
+
+    const handleSaveAsset = useCallback(() => {
+        if (!state || !formState) return
+
+        const detalle = formState.detalle.trim()
+        const valorOrigen = Number(formState.valorOrigen)
+        const vidaUtilValor = Number(formState.vidaUtilValor)
+        const residualPct = Number(formState.residualPct)
+        const noAmortiza = formState.noAmortiza
+
+        if (!detalle) {
+            setFormError('Por favor ingresá el detalle del bien.')
+            return
+        }
+        if (!Number.isFinite(valorOrigen) || valorOrigen <= 0) {
+            setFormError('El valor de origen debe ser mayor a 0.')
+            return
+        }
+        if (!noAmortiza && (!Number.isFinite(vidaUtilValor) || vidaUtilValor <= 0)) {
+            setFormError('La vida útil debe ser mayor a 0.')
+            return
+        }
+        if (!noAmortiza && (!Number.isFinite(residualPct) || residualPct < 0 || residualPct > 100)) {
+            setFormError('El valor residual debe estar entre 0 y 100.')
+            return
+        }
+
+        const metodo = noAmortiza ? 'none' : formState.metodo
+        const normalizedResidual = noAmortiza ? 0 : (Number.isFinite(residualPct) ? residualPct : 0)
+
+        const newAsset: AmortizationAsset = {
+            id: editingId ?? generateAssetId(),
+            rubro: formState.rubro,
+            fechaAlta: formState.fechaAlta,
+            detalle,
+            valorOrigen,
+            residualPct: normalizedResidual,
+            amortizablePct: 100 - normalizedResidual,
+            vidaUtilValor: noAmortiza ? 0 : vidaUtilValor,
+            vidaUtilTipo: 'AÑOS',
+            metodo,
+            noAmortiza,
+            overrideGlobals: false,
+        }
+
+        upsertAsset(newAsset)
+        closeModal()
+    }, [closeModal, editingId, formState, state, upsertAsset])
+
+    const handlePrint = useCallback(() => {
+        viewBeforePrintRef.current = activeTab
+        setActiveTab('anexo')
+        window.setTimeout(() => {
+            window.print()
+        }, 100)
+    }, [activeTab])
+
+    const assets = useMemo(() => {
         if (!state) return []
-        return calculateAllRows(state.assets, state.params)
+        return state.assets.filter(isAssetPopulated)
     }, [state])
 
-    // Calculate totals
+    const rows = useMemo(() => {
+        if (!state) return []
+        return calculateAllRows(assets, state.params)
+    }, [assets, state])
+
     const totals = useMemo(() => calculateTotals(rows), [rows])
+
+    const annexGroups = useMemo(() => {
+        if (!state) return []
+        const fyEnd = parseDate(state.params.fechaCierreEjercicio)
+        const closingYear = fyEnd?.getFullYear() ?? new Date().getFullYear()
+
+        const groups = new Map<string, {
+            rubro: string
+            originStart: number
+            originAlta: number
+            originEnd: number
+            amortStart: number
+            amortYear: number
+            amortEnd: number
+            net: number
+        }>()
+
+        rows.forEach((row) => {
+            const { asset, calculated } = row
+            const rubro = asset.rubro || 'Sin rubro'
+            const altaYear = parseDate(asset.fechaAlta)?.getFullYear()
+            const isAlta = altaYear === closingYear
+            const valorOrigen = asset.valorOrigen ?? 0
+            const amortStart = calculated.acumuladaInicio ?? 0
+            const amortYear = calculated.amortizacionEjercicio ?? 0
+            const amortEnd = calculated.acumuladaCierre ?? 0
+            const net = calculated.vrContable ?? Math.max(0, valorOrigen - amortEnd)
+
+            if (!groups.has(rubro)) {
+                groups.set(rubro, {
+                    rubro,
+                    originStart: 0,
+                    originAlta: 0,
+                    originEnd: 0,
+                    amortStart: 0,
+                    amortYear: 0,
+                    amortEnd: 0,
+                    net: 0,
+                })
+            }
+
+            const group = groups.get(rubro)
+            if (!group) return
+
+            group.originStart += isAlta ? 0 : valorOrigen
+            group.originAlta += isAlta ? valorOrigen : 0
+            group.originEnd += valorOrigen
+            group.amortStart += amortStart
+            group.amortYear += amortYear
+            group.amortEnd += amortEnd
+            group.net += net
+        })
+
+        return Array.from(groups.values())
+    }, [rows, state])
+
+    const annexTotals = useMemo(() => {
+        return annexGroups.reduce(
+            (acc, group) => {
+                acc.originEnd += group.originEnd
+                acc.amortYear += group.amortYear
+                acc.net += group.net
+                return acc
+            },
+            { originEnd: 0, amortYear: 0, net: 0 }
+        )
+    }, [annexGroups])
 
     if (isLoading || !state) {
         return (
@@ -210,386 +479,821 @@ export default function AmortizacionesPage() {
         )
     }
 
+    const subtitleYear = Number.isFinite(periodYear)
+        ? periodYear
+        : Number(state.params.fechaCierreEjercicio?.slice(0, 4)) || new Date().getFullYear()
+
+    const pageStyles = `
+.amort-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-bottom: 2rem;
+}
+.amort-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.amort-back-link {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 500;
+}
+.amort-back-link:hover {
+  color: var(--brand-primary);
+}
+.amort-header-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.amort-title {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.1;
+  margin: 0;
+  color: var(--text-strong);
+}
+.amort-subtitle {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+.amort-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.amort-tabs {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--surface-2);
+  padding: 0.25rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.amort-tab-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.amort-tab-btn.active {
+  background: white;
+  color: var(--brand-primary);
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
+}
+.amort-tab-btn:hover:not(.active) {
+  color: var(--text-strong);
+}
+.amort-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+}
+.amort-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  align-items: center;
+}
+.amort-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 180px;
+}
+.amort-input-group label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.amort-input {
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: white;
+}
+.amort-input:focus {
+  outline: none;
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+}
+.amort-kpis {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.amort-kpi {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  min-width: 140px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.amort-kpi-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+  white-space: nowrap;
+}
+.amort-kpi-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text-strong);
+}
+.amort-kpi-value.highlight {
+  color: var(--brand-primary);
+}
+.amort-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-tertiary);
+  font-size: 0.8rem;
+  background: var(--surface-2);
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+}
+.amort-table-wrapper {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.amort-scroll {
+  overflow-x: auto;
+}
+.amort-work-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.amort-work-table th {
+  background: #F8FAFC;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.amort-work-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-strong);
+}
+.amort-work-table tr:hover {
+  background: #F1F5F9;
+}
+.amort-text-right {
+  text-align: right;
+}
+.amort-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.amort-muted {
+  color: var(--text-muted);
+}
+.amort-highlight {
+  color: var(--brand-primary);
+  font-weight: 600;
+}
+.amort-action-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0.25rem;
+}
+.amort-action-btn:hover {
+  color: var(--text-strong);
+}
+.amort-action-delete {
+  color: var(--color-error);
+}
+.amort-action-delete:hover {
+  color: var(--color-error);
+}
+.amort-empty {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+}
+.amort-empty-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.5rem;
+  color: var(--text-tertiary);
+}
+.amort-annex {
+  background: white;
+  padding: 2rem;
+  min-height: 800px;
+}
+.amort-annex-header {
+  margin-bottom: 1.5rem;
+  border-bottom: 2px solid var(--text-strong);
+  padding-bottom: 1rem;
+}
+.amort-annex-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.amort-annex-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+.amort-annex-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-body);
+}
+.amort-annex-table th {
+  background: white;
+  border: 1px solid #94A3B8;
+  padding: 0.4rem;
+  font-size: 0.7rem;
+  text-align: center;
+  font-weight: 700;
+  color: black;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.amort-annex-table td {
+  border: 1px solid #CBD5E1;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.8rem;
+}
+.amort-annex-number {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.amort-annex-rubro {
+  background: #F1F5F9;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.amort-annex-total {
+  background: #E2E8F0;
+  font-weight: 800;
+  border-top: 2px solid black;
+}
+.amort-annex-sep {
+  border-right: 2px solid #CBD5E1;
+}
+.amort-modal {
+  max-width: 560px;
+}
+.amort-modal-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+}
+.amort-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem;
+}
+.amort-modal-close:hover {
+  color: var(--text-strong);
+}
+.amort-modal-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 0.5rem 0;
+}
+.amort-helper {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+.amort-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+.amort-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand-primary);
+}
+.amort-hidden {
+  display: none !important;
+}
+@media (max-width: 640px) {
+  .amort-annex-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  .top-header,
+  .sidebar,
+  .mobile-bottom-nav,
+  .mobile-drawer,
+  .amort-print-hide {
+    display: none !important;
+  }
+  .main-content {
+    padding: 0 !important;
+  }
+  .amort-view-carga {
+    display: none !important;
+  }
+  .amort-view-anexo {
+    display: block !important;
+  }
+  .amort-annex {
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+  }
+  .amort-annex-table th,
+  .amort-annex-table td {
+    border-color: #000 !important;
+    color: #000 !important;
+  }
+  .amort-annex-rubro,
+  .amort-annex-total {
+    background: #f0f0f0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+`
+
     return (
         <div className="amort-page">
-            {/* Header removed - Rendered in PlanillasLayout */}
+            <style>{pageStyles}</style>
 
-            {/* Tabs */}
-            <div className="tabs-pills">
-                {TABS.map(tab => (
-                    <button
-                        key={tab.id}
-                        className={`tab-pill ${activeTab === tab.id ? 'active' : ''}`}
-                        onClick={() => setActiveTab(tab.id)}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
+            <div className="amort-header amort-print-hide">
+                <Link
+                    to="/planillas"
+                    className="amort-back-link"
+                >
+                    <ArrowLeft size={14} />
+                    Volver a Planillas
+                </Link>
 
-            {/* Parameters Card */}
-            <div className="card params-card">
-                <div className="card-header">
-                    <h3 className="card-title">Parámetros del ejercicio</h3>
-                </div>
-                <div className="params-grid">
-                    <div className="form-group">
-                        <label className="form-label">Fecha de cierre</label>
-                        <input
-                            type="date"
-                            className="form-input"
-                            value={state.params.fechaCierreEjercicio}
-                            onChange={(e) => updateParams({ fechaCierreEjercicio: e.target.value })}
-                        />
+                <div className="amort-header-bar">
+                    <div>
+                        <h1 className="amort-title">
+                            Amortizaciones
+                        </h1>
+                        <p className="amort-subtitle">
+                            Anexo de Bienes de Uso (Ejercicio {subtitleYear})
+                        </p>
                     </div>
-                    <div className="form-group">
-                        <label className="form-label">% Valor residual global</label>
-                        <input
-                            type="number"
-                            className="form-input form-input-number"
-                            value={state.params.residualPctGlobal}
-                            min={0}
-                            max={100}
-                            onChange={(e) => updateParams({ residualPctGlobal: Number(e.target.value) })}
-                        />
-                    </div>
-                    <div className="form-group">
-                        <label className="form-label">% Valor amortizable global</label>
-                        <div className="flex gap-sm">
-                            <input
-                                type="number"
-                                className="form-input form-input-number"
-                                value={state.params.amortizablePctGlobal}
-                                min={0}
-                                max={100}
-                                onChange={(e) => updateParams({ amortizablePctGlobal: Number(e.target.value) })}
-                            />
+
+                    <div className="amort-actions">
+                        <div className="amort-tabs" role="tablist">
                             <button
-                                className="btn btn-secondary btn-sm"
-                                onClick={handleAutoPercent}
-                                title="Calcular automáticamente (100 - % residual)"
+                                type="button"
+                                className={`amort-tab-btn ${activeTab === 'carga' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('carga')}
+                                aria-selected={activeTab === 'carga'}
                             >
-                                Auto
+                                <PencilSimple size={16} /> Carga
+                            </button>
+                            <button
+                                type="button"
+                                className={`amort-tab-btn ${activeTab === 'anexo' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('anexo')}
+                                aria-selected={activeTab === 'anexo'}
+                            >
+                                <FileText size={16} /> Anexo Imprimible
                             </button>
                         </div>
-                    </div>
-                    <div className="form-group">
-                        <label className="form-label">Prorrateo mensual</label>
-                        <div className="toggle-container">
-                            <label className="toggle">
-                                <input
-                                    type="checkbox"
-                                    checked={state.params.prorrateoMensual}
-                                    onChange={(e) => updateParams({ prorrateoMensual: e.target.checked })}
-                                />
-                                <span className="toggle-slider"></span>
-                            </label>
-                            <span
-                                className="toggle-label"
-                                title="Si está activo, prorratea la amortización del ejercicio por meses según fecha de alta y cierre."
-                            >
-                                {state.params.prorrateoMensual ? 'Activado' : 'Desactivado'}
-                            </span>
-                        </div>
+
+                        <div className="amort-divider" />
+
+                        <button className="btn btn-secondary" onClick={handlePrint}>
+                            <Printer size={16} /> Imprimir
+                        </button>
+                        <button className="btn btn-primary" onClick={() => openModal()}>
+                            <Plus size={16} /> Agregar Bien
+                        </button>
                     </div>
                 </div>
-                {state.params.residualPctGlobal + state.params.amortizablePctGlobal !== 100 && (
-                    <div className="alert alert-warning" style={{ marginTop: 'var(--space-md)' }}>
-                        ⚠️ Los porcentajes (residual + amortizable) no suman 100%
+            </div>
+
+            <section className="card amort-params amort-print-hide">
+                <div className="amort-input-group">
+                    <label htmlFor="amort-closing">Cierre de Ejercicio</label>
+                    <input
+                        id="amort-closing"
+                        type="date"
+                        className="amort-input"
+                        value={state.params.fechaCierreEjercicio}
+                        onChange={(event) => changeClosingDate(event.target.value)}
+                    />
+                </div>
+
+                <div className="amort-kpis">
+                    <div className="amort-kpi">
+                        <span className="amort-kpi-label">Depreciación Ej.</span>
+                        <span className="amort-kpi-value highlight">
+                            {dashIfZero(totals.amortizacionEjercicio)}
+                        </span>
                     </div>
-                )}
-            </div>
+                    <div className="amort-kpi">
+                        <span className="amort-kpi-label">Valor Neto Total</span>
+                        <span className="amort-kpi-value">
+                            {dashIfZero(totals.vrContable)}
+                        </span>
+                    </div>
+                    <div className="amort-kpi">
+                        <span className="amort-kpi-label">Bienes Cargados</span>
+                        <span className="amort-kpi-value">{assets.length}</span>
+                    </div>
+                </div>
 
-            {/* Toolbar */}
-            <div className="amort-toolbar">
-                <button className="btn btn-primary" onClick={addRow}>
-                    <span>+</span> Agregar bien
-                </button>
-                {selectedRowId && (
-                    <button
-                        className="btn btn-secondary"
-                        onClick={() => duplicateRow(selectedRowId)}
-                    >
-                        📋 Duplicar fila
-                    </button>
-                )}
-                <button className="btn btn-secondary" onClick={handleExport}>
-                    📤 Exportar CSV
-                </button>
-                <button
-                    className="btn btn-danger-soft"
-                    onClick={() => setShowClearModal(true)}
-                >
-                    🗑️ Limpiar planilla
-                </button>
-            </div>
+                <div style={{ flex: 1 }} />
 
-            {/* Table */}
-            <div className="card amort-table-card">
-                <div className="table-container amort-table-container">
-                    <table className="table amort-table" ref={tableRef}>
+                <div className="amort-pill">
+                    <Info size={14} /> Moneda Homogénea
+                </div>
+            </section>
+
+            <section className={`amort-table-wrapper amort-view-carga ${activeTab === 'carga' ? '' : 'amort-hidden'}`}>
+                <div className="amort-scroll">
+                    <table className="amort-work-table">
                         <thead>
                             <tr>
-                                <th className="amort-col-input">Fecha Alta</th>
-                                <th className="amort-col-input amort-col-wide">Detalle</th>
-                                <th className="amort-col-input">Valor Origen</th>
-                                <th className="amort-col-input">% Res.</th>
-                                <th className="amort-col-calculated">V. Residual</th>
-                                <th className="amort-col-input">% Amort.</th>
-                                <th className="amort-col-calculated">V. Amortizable</th>
-                                <th className="amort-col-input">Vida Útil</th>
-                                <th className="amort-col-input">Tipo</th>
-                                <th className="amort-col-input">No Amort.</th>
-                                <th className="amort-col-calculated">Amort. Ej.</th>
-                                <th className="amort-col-calculated">Acum. Inicio</th>
-                                <th className="amort-col-calculated">Acum. Cierre</th>
-                                <th className="amort-col-calculated amort-col-vr-contable">V.R. Contable</th>
-                                <th className="amort-col-calculated">Estado</th>
-                                <th className="amort-col-actions">Acciones</th>
+                                <th>Rubro</th>
+                                <th>Detalle del Bien</th>
+                                <th>F. Alta</th>
+                                <th>Vida Útil</th>
+                                <th>Método</th>
+                                <th className="amort-text-right">V. Origen</th>
+                                <th className="amort-text-right">% Res.</th>
+                                <th className="amort-text-right">Amort. Ejercicio</th>
+                                <th className="amort-text-right">Acum. Cierre</th>
+                                <th className="amort-text-right">Valor Neto</th>
+                                <th style={{ textAlign: 'center' }}>Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {rows.map((row, index) => (
-                                <AmortRow
-                                    key={row.asset.id}
-                                    row={row}
-                                    index={index}
-                                    isSelected={selectedRowId === row.asset.id}
-                                    onSelect={() => setSelectedRowId(row.asset.id)}
-                                    onUpdate={updateAsset}
-                                    onDuplicate={duplicateRow}
-                                    onDelete={deleteRow}
-                                    onKeyDown={handleKeyDown}
-                                />
-                            ))}
+                            {rows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={11} className="amort-empty">
+                                        <div className="amort-empty-icon">
+                                            <Tray size={32} />
+                                        </div>
+                                        No hay bienes cargados.
+                                    </td>
+                                </tr>
+                            ) : (
+                                rows.map((row) => {
+                                    const { asset, calculated } = row
+                                    return (
+                                        <tr key={asset.id}>
+                                            <td><strong>{asset.rubro}</strong></td>
+                                            <td>{asset.detalle}</td>
+                                            <td className="amort-mono">{formatDate(asset.fechaAlta)}</td>
+                                            <td className="amort-mono amort-text-right">
+                                                {asset.noAmortiza || !asset.vidaUtilValor ? '-' : asset.vidaUtilValor}
+                                            </td>
+                                            <td className="amort-muted" style={{ fontSize: '0.75rem' }}>
+                                                {formatMetodoLabel(asset.metodo, asset.noAmortiza)}
+                                            </td>
+                                            <td className="amort-mono amort-text-right">
+                                                {asset.valorOrigen ? formatAmount(asset.valorOrigen) : '-'}
+                                            </td>
+                                            <td className="amort-mono amort-text-right">
+                                                {formatPercentOrDash(asset.residualPct)}
+                                            </td>
+                                            <td className="amort-mono amort-text-right amort-highlight">
+                                                {dashIfZero(calculated.amortizacionEjercicio)}
+                                            </td>
+                                            <td className="amort-mono amort-text-right">
+                                                {dashIfZero(calculated.acumuladaCierre)}
+                                            </td>
+                                            <td className="amort-mono amort-text-right" style={{ fontWeight: 700 }}>
+                                                {calculated.vrContable !== null && calculated.vrContable !== undefined
+                                                    ? formatAmount(calculated.vrContable)
+                                                    : '-'}
+                                            </td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                <button
+                                                    type="button"
+                                                    className="amort-action-btn"
+                                                    onClick={() => openModal(asset)}
+                                                    title="Editar"
+                                                >
+                                                    <PencilSimple size={16} />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="amort-action-btn amort-action-delete"
+                                                    onClick={() => deleteAsset(asset.id)}
+                                                    title="Eliminar"
+                                                >
+                                                    <Trash size={16} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    )
+                                })
+                            )}
                         </tbody>
                     </table>
                 </div>
-            </div>
+            </section>
 
-            {/* Totals */}
-            <div className="card amort-totals-card">
-                <div className="amort-totals-grid">
-                    <div className="amort-total-item">
-                        <span className="amort-total-label">Valor Origen</span>
-                        <span className="amort-total-value">{formatCurrencyARS(totals.valorOrigen)}</span>
+            <section className={`amort-table-wrapper amort-view-anexo ${activeTab === 'anexo' ? '' : 'amort-hidden'}`}>
+                <div className="amort-annex">
+                    <div className="amort-annex-header">
+                        <div className="amort-annex-title">
+                            ANEXO — BIENES DE USO
+                        </div>
+                        <div style={{ marginTop: '0.5rem' }}>
+                            Correspondiente al ejercicio anual finalizado el{' '}
+                            <span style={{ fontWeight: 600 }}>{formatDate(state.params.fechaCierreEjercicio)}</span>
+                        </div>
                     </div>
-                    <div className="amort-total-item">
-                        <span className="amort-total-label">Valor Residual</span>
-                        <span className="amort-total-value">{formatCurrencyARS(totals.valorResidual)}</span>
+
+                    <div className="amort-annex-meta">
+                        <div>
+                            <strong>Entidad:</strong> -
+                        </div>
+                        <div>
+                            <strong>CUIT:</strong> -
+                        </div>
                     </div>
-                    <div className="amort-total-item">
-                        <span className="amort-total-label">Valor Amortizable</span>
-                        <span className="amort-total-value">{formatCurrencyARS(totals.valorAmortizable)}</span>
-                    </div>
-                    <div className="amort-total-item">
-                        <span className="amort-total-label">Amort. Ejercicio</span>
-                        <span className="amort-total-value">{formatCurrencyARS(totals.amortizacionEjercicio)}</span>
-                    </div>
-                    <div className="amort-total-item">
-                        <span className="amort-total-label">Acum. Cierre</span>
-                        <span className="amort-total-value">{formatCurrencyARS(totals.acumuladaCierre)}</span>
-                    </div>
-                    <div className="amort-total-item amort-total-item-highlight">
-                        <span className="amort-total-label">V.R. Contable</span>
-                        <span className="amort-total-value">{formatCurrencyARS(totals.vrContable)}</span>
+
+                    <div className="amort-scroll">
+                        <table className="amort-annex-table">
+                            <thead>
+                                <tr>
+                                    <th rowSpan={2} style={{ textAlign: 'left', verticalAlign: 'middle', minWidth: 150, borderBottom: '2px solid #64748B' }}>
+                                        RUBRO
+                                    </th>
+                                    <th colSpan={4} style={{ borderBottom: '1px solid #94A3B8' }}>
+                                        VALORES DE INCORPORACIÓN
+                                    </th>
+                                    <th colSpan={4} style={{ borderBottom: '1px solid #94A3B8' }}>
+                                        AMORTIZACIONES
+                                    </th>
+                                    <th style={{ borderBottom: '2px solid #64748B' }}>
+                                        VALOR NETO
+                                    </th>
+                                </tr>
+                                <tr>
+                                    <th style={{ minWidth: 90 }}>Al Inicio</th>
+                                    <th style={{ minWidth: 90 }}>Altas</th>
+                                    <th style={{ minWidth: 90 }}>Bajas</th>
+                                    <th style={{ minWidth: 90, borderRight: '2px solid #CBD5E1' }}>Al Cierre</th>
+                                    <th style={{ minWidth: 90 }}>Acum. Inicio</th>
+                                    <th style={{ minWidth: 90 }}>Bajas</th>
+                                    <th style={{ minWidth: 90 }}>Del Ejercicio</th>
+                                    <th style={{ minWidth: 90, borderRight: '2px solid #CBD5E1' }}>Acum. Cierre</th>
+                                    <th style={{ minWidth: 100 }}>Al Cierre</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {annexGroups.map((group) => (
+                                    <tr key={group.rubro} className="amort-annex-rubro">
+                                        <td style={{ textAlign: 'left' }}>{group.rubro}</td>
+                                        <td className="amort-annex-number">{dashIfZero(group.originStart)}</td>
+                                        <td className="amort-annex-number">{dashIfZero(group.originAlta)}</td>
+                                        <td className="amort-annex-number">-</td>
+                                        <td className="amort-annex-number amort-annex-sep">{dashIfZero(group.originEnd)}</td>
+                                        <td className="amort-annex-number">{dashIfZero(group.amortStart)}</td>
+                                        <td className="amort-annex-number">-</td>
+                                        <td className="amort-annex-number">{dashIfZero(group.amortYear)}</td>
+                                        <td className="amort-annex-number amort-annex-sep">{dashIfZero(group.amortEnd)}</td>
+                                        <td className="amort-annex-number">{dashIfZero(group.net)}</td>
+                                    </tr>
+                                ))}
+                                <tr className="amort-annex-total">
+                                    <td style={{ textAlign: 'left' }}>TOTALES</td>
+                                    <td className="amort-annex-number">-</td>
+                                    <td className="amort-annex-number">-</td>
+                                    <td className="amort-annex-number">-</td>
+                                    <td className="amort-annex-number amort-annex-sep">{dashIfZero(annexTotals.originEnd)}</td>
+                                    <td className="amort-annex-number">-</td>
+                                    <td className="amort-annex-number">-</td>
+                                    <td className="amort-annex-number">{dashIfZero(annexTotals.amortYear)}</td>
+                                    <td className="amort-annex-number amort-annex-sep">-</td>
+                                    <td className="amort-annex-number">{dashIfZero(annexTotals.net)}</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            </div>
+            </section>
 
-            {/* Clear Modal */}
-            {showClearModal && (
-                <div className="modal-overlay" onClick={() => setShowClearModal(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()}>
+            {isModalOpen && formState && (
+                <div className="modal-overlay amort-print-hide" onClick={closeModal}>
+                    <div className="modal amort-modal" onClick={(event) => event.stopPropagation()}>
                         <div className="modal-header">
-                            <h3 className="modal-title">¿Limpiar planilla?</h3>
+                            <h3 className="modal-title amort-modal-title">
+                                {editingId ? 'Editar Bien de Uso' : 'Nuevo Bien de Uso'}
+                            </h3>
+                            <button
+                                className="amort-modal-close"
+                                onClick={closeModal}
+                                aria-label="Cerrar"
+                                type="button"
+                            >
+                                <X size={18} />
+                            </button>
                         </div>
                         <div className="modal-body">
-                            <p>Esta acción eliminará todos los bienes cargados y restaurará los parámetros por defecto.</p>
-                            <p><strong>Esta acción no se puede deshacer.</strong></p>
+                            {formError && (
+                                <div className="alert alert-warning">{formError}</div>
+                            )}
+
+                            <div className="amort-input-group">
+                                <label htmlFor="amort-rubro">Rubro</label>
+                                <select
+                                    id="amort-rubro"
+                                    className="amort-input"
+                                    value={formState.rubro}
+                                    onChange={(event) => handleRubroChange(event.target.value)}
+                                >
+                                    {RUBROS.map((rubro) => (
+                                        <option key={rubro} value={rubro}>
+                                            {rubro}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="amort-input-group">
+                                <label htmlFor="amort-detalle">Detalle / Descripción</label>
+                                <input
+                                    id="amort-detalle"
+                                    type="text"
+                                    className="amort-input"
+                                    value={formState.detalle}
+                                    placeholder="Ej: Notebook Dell Inspiron 15..."
+                                    onChange={(event) =>
+                                        setFormState((prev) =>
+                                            prev ? { ...prev, detalle: event.target.value } : prev
+                                        )
+                                    }
+                                />
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                <div className="amort-input-group">
+                                    <label htmlFor="amort-fecha">Fecha de Alta</label>
+                                    <input
+                                        id="amort-fecha"
+                                        type="date"
+                                        className="amort-input"
+                                        value={formState.fechaAlta}
+                                        onChange={(event) =>
+                                            setFormState((prev) =>
+                                                prev ? { ...prev, fechaAlta: event.target.value } : prev
+                                            )
+                                        }
+                                    />
+                                </div>
+                                <div className="amort-input-group">
+                                    <label htmlFor="amort-valor">Valor de Origen ($)</label>
+                                    <input
+                                        id="amort-valor"
+                                        type="number"
+                                        className="amort-input"
+                                        value={formState.valorOrigen}
+                                        placeholder="0.00"
+                                        min={0}
+                                        step="0.01"
+                                        onChange={(event) =>
+                                            setFormState((prev) =>
+                                                prev ? { ...prev, valorOrigen: event.target.value } : prev
+                                            )
+                                        }
+                                    />
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+                                <div className="amort-input-group" style={{ flex: 1 }}>
+                                    <label htmlFor="amort-vida">Vida Útil (Años)</label>
+                                    <input
+                                        id="amort-vida"
+                                        type="number"
+                                        className="amort-input"
+                                        value={formState.vidaUtilValor}
+                                        min={0}
+                                        disabled={formState.noAmortiza}
+                                        onChange={(event) =>
+                                            setFormState((prev) =>
+                                                prev ? { ...prev, vidaUtilValor: event.target.value } : prev
+                                            )
+                                        }
+                                    />
+                                </div>
+                                <div style={{ paddingBottom: '0.6rem' }}>
+                                    <label className="amort-check">
+                                        <input
+                                            type="checkbox"
+                                            checked={formState.noAmortiza}
+                                            onChange={(event) => handleNoAmortizaChange(event.target.checked)}
+                                        />
+                                        NO AMORTIZA
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div className="amort-modal-separator" />
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                <div className="amort-input-group">
+                                    <label htmlFor="amort-metodo">Método de amortización</label>
+                                    <select
+                                        id="amort-metodo"
+                                        className="amort-input"
+                                        value={formState.metodo}
+                                        disabled={formState.noAmortiza}
+                                        onChange={(event) =>
+                                            setFormState((prev) =>
+                                                prev ? { ...prev, metodo: event.target.value as AmortizationMethod } : prev
+                                            )
+                                        }
+                                    >
+                                        <option value="lineal-year">Lineal (Año completo)</option>
+                                        <option value="lineal-month">Lineal (Prorrateo mensual)</option>
+                                        <option value="decreasing" disabled>Decreciente (Próximamente)</option>
+                                    </select>
+                                </div>
+                                <div className="amort-input-group">
+                                    <label htmlFor="amort-residual">Valor residual (%)</label>
+                                    <input
+                                        id="amort-residual"
+                                        type="number"
+                                        className="amort-input"
+                                        value={formState.residualPct}
+                                        min={0}
+                                        max={100}
+                                        disabled={formState.noAmortiza}
+                                        onChange={(event) =>
+                                            setFormState((prev) =>
+                                                prev ? { ...prev, residualPct: event.target.value } : prev
+                                            )
+                                        }
+                                    />
+                                    <div className="amort-helper">Porcentaje sobre valor origen.</div>
+                                </div>
+                            </div>
                         </div>
                         <div className="modal-footer">
-                            <button className="btn btn-secondary" onClick={() => setShowClearModal(false)}>
+                            <button className="btn btn-secondary" onClick={closeModal}>
                                 Cancelar
                             </button>
-                            <button className="btn btn-danger" onClick={handleClear}>
-                                Sí, limpiar todo
+                            <button className="btn btn-primary" onClick={handleSaveAsset}>
+                                Guardar Bien
                             </button>
                         </div>
                     </div>
                 </div>
             )}
         </div>
-    )
-}
-
-// ========================================
-// AmortRow Component
-// ========================================
-
-interface AmortRowProps {
-    row: AmortizationRow
-    index: number
-    isSelected: boolean
-    onSelect: () => void
-    onUpdate: (id: string, updates: Partial<AmortizationAsset>) => void
-    onDuplicate: (id: string) => void
-    onDelete: (id: string) => void
-    onKeyDown: (e: KeyboardEvent<HTMLInputElement>, rowId: string, fieldName: string) => void
-}
-
-function AmortRow({ row, index, isSelected, onSelect, onUpdate, onDuplicate, onDelete, onKeyDown }: AmortRowProps) {
-    const { asset, calculated } = row
-
-    const handleNumberChange = (field: keyof AmortizationAsset) => (e: ChangeEvent<HTMLInputElement>) => {
-        const value = parseArgentineNumber(e.target.value)
-        onUpdate(asset.id, { [field]: value })
-    }
-
-    const handlePercentChange = (field: 'residualPct' | 'amortizablePct') => (e: ChangeEvent<HTMLInputElement>) => {
-        const value = Number(e.target.value)
-        if (!isNaN(value) && value >= 0 && value <= 100) {
-            onUpdate(asset.id, { [field]: value })
-        }
-    }
-
-    const getEstadoChip = () => {
-        switch (calculated.estado) {
-            case 'AMORTIZADO':
-                return <span className="chip chip-amortizado">AMORTIZADO</span>
-            case 'NO_AMORTIZA':
-                return <span className="chip chip-no-amortiza">NO AMORTIZA</span>
-            default:
-                return <span className="chip chip-activo">ACTIVO</span>
-        }
-    }
-
-    return (
-        <tr
-            className={`amort-row ${isSelected ? 'amort-row-selected' : ''} ${index % 2 === 0 ? '' : 'amort-row-zebra'}`}
-            onClick={onSelect}
-        >
-            <td className="amort-col-input">
-                <input
-                    type="date"
-                    className="form-input form-input-cell"
-                    value={asset.fechaAlta}
-                    onChange={(e) => onUpdate(asset.id, { fechaAlta: e.target.value })}
-                    onKeyDown={(e) => onKeyDown(e, asset.id, 'fechaAlta')}
-                />
-            </td>
-            <td className="amort-col-input amort-col-wide">
-                <input
-                    type="text"
-                    className="form-input form-input-cell"
-                    value={asset.detalle}
-                    placeholder="Descripción del bien..."
-                    onChange={(e) => onUpdate(asset.id, { detalle: e.target.value })}
-                    onKeyDown={(e) => onKeyDown(e, asset.id, 'detalle')}
-                />
-            </td>
-            <td className="amort-col-input">
-                <input
-                    type="text"
-                    className="form-input form-input-cell form-input-number"
-                    value={asset.valorOrigen ?? ''}
-                    placeholder="0,00"
-                    onChange={handleNumberChange('valorOrigen')}
-                    onKeyDown={(e) => onKeyDown(e, asset.id, 'valorOrigen')}
-                />
-            </td>
-            <td className="amort-col-input">
-                <input
-                    type="number"
-                    className="form-input form-input-cell form-input-number"
-                    value={asset.residualPct}
-                    min={0}
-                    max={100}
-                    onChange={handlePercentChange('residualPct')}
-                    onKeyDown={(e) => onKeyDown(e, asset.id, 'residualPct')}
-                />
-            </td>
-            <td className="amort-col-calculated table-number">
-                {formatCurrencyARS(calculated.valorResidual)}
-            </td>
-            <td className="amort-col-input">
-                <input
-                    type="number"
-                    className="form-input form-input-cell form-input-number"
-                    value={asset.amortizablePct}
-                    min={0}
-                    max={100}
-                    onChange={handlePercentChange('amortizablePct')}
-                    onKeyDown={(e) => onKeyDown(e, asset.id, 'amortizablePct')}
-                />
-            </td>
-            <td className="amort-col-calculated table-number">
-                {formatCurrencyARS(calculated.valorAmortizable)}
-            </td>
-            <td className="amort-col-input">
-                <input
-                    type="number"
-                    className="form-input form-input-cell form-input-number"
-                    value={asset.vidaUtilValor ?? ''}
-                    min={0}
-                    placeholder="—"
-                    onChange={(e) => onUpdate(asset.id, { vidaUtilValor: e.target.value ? Number(e.target.value) : null })}
-                    onKeyDown={(e) => onKeyDown(e, asset.id, 'vidaUtilValor')}
-                />
-            </td>
-            <td className="amort-col-input">
-                <select
-                    className="form-select form-input-cell"
-                    value={asset.vidaUtilTipo}
-                    onChange={(e) => onUpdate(asset.id, { vidaUtilTipo: e.target.value as 'AÑOS' | 'PORCENTAJE_ANUAL' })}
-                >
-                    <option value="AÑOS">Años</option>
-                    <option value="PORCENTAJE_ANUAL">% anual</option>
-                </select>
-            </td>
-            <td className="amort-col-input text-center">
-                <input
-                    type="checkbox"
-                    className="form-checkbox"
-                    checked={asset.noAmortiza}
-                    onChange={(e) => onUpdate(asset.id, { noAmortiza: e.target.checked })}
-                    onKeyDown={(e) => onKeyDown(e, asset.id, 'noAmortiza')}
-                    title="No amortiza (ej: Terreno)"
-                />
-            </td>
-            <td className="amort-col-calculated table-number">
-                {formatCurrencyARS(calculated.amortizacionEjercicio)}
-            </td>
-            <td className="amort-col-calculated table-number">
-                {formatCurrencyARS(calculated.acumuladaInicio)}
-            </td>
-            <td className="amort-col-calculated table-number">
-                {formatCurrencyARS(calculated.acumuladaCierre)}
-            </td>
-            <td className="amort-col-calculated amort-col-vr-contable table-number">
-                {formatCurrencyARS(calculated.vrContable)}
-            </td>
-            <td className="amort-col-calculated text-center">
-                {getEstadoChip()}
-            </td>
-            <td className="amort-col-actions">
-                <div className="amort-row-actions">
-                    <button
-                        className="btn btn-icon btn-secondary"
-                        onClick={(e) => { e.stopPropagation(); onDuplicate(asset.id) }}
-                        title="Duplicar fila"
-                    >
-                        📋
-                    </button>
-                    <button
-                        className="btn btn-icon btn-danger-soft"
-                        onClick={(e) => { e.stopPropagation(); onDelete(asset.id) }}
-                        title="Eliminar fila"
-                    >
-                        🗑️
-                    </button>
-                </div>
-            </td>
-        </tr>
     )
 }

@@ -10,6 +10,11 @@
 export type VidaUtilTipo = 'AÑOS' | 'PORCENTAJE_ANUAL'
 
 /**
+ * Metodo de amortizacion
+ */
+export type AmortizationMethod = 'lineal-year' | 'lineal-month' | 'none'
+
+/**
  * Estado del bien
  */
 export type EstadoBien = 'ACTIVO' | 'AMORTIZADO' | 'NO_AMORTIZA'
@@ -19,6 +24,7 @@ export type EstadoBien = 'ACTIVO' | 'AMORTIZADO' | 'NO_AMORTIZA'
  */
 export interface AmortizationAsset {
     id: string
+    rubro: string
     fechaAlta: string           // ISO date string (YYYY-MM-DD)
     detalle: string
     valorOrigen: number | null  // Nullable for empty rows
@@ -26,6 +32,7 @@ export interface AmortizationAsset {
     amortizablePct: number      // % valor amortizable (default from global)
     vidaUtilValor: number | null
     vidaUtilTipo: VidaUtilTipo
+    metodo: AmortizationMethod
     noAmortiza: boolean         // Checkbox "No amortiza (ej: Terreno)"
     overrideGlobals: boolean    // True if user manually edited % for this row
 }
@@ -68,6 +75,7 @@ export interface AmortizationState {
     id: string                      // Fixed ID for single-document store
     params: AmortizationParams
     assets: AmortizationAsset[]
+    assetsByPeriod?: Record<string, AmortizationAsset[]>
     lastUpdated: string             // ISO date string
 }
 
@@ -89,6 +97,7 @@ export interface AmortizationTotals {
 export function createDefaultAsset(id: string, params: AmortizationParams): AmortizationAsset {
     return {
         id,
+        rubro: 'Muebles y Utiles',
         fechaAlta: '',
         detalle: '',
         valorOrigen: null,
@@ -96,6 +105,7 @@ export function createDefaultAsset(id: string, params: AmortizationParams): Amor
         amortizablePct: params.amortizablePctGlobal,
         vidaUtilValor: null,
         vidaUtilTipo: 'AÑOS',
+        metodo: 'lineal-year',
         noAmortiza: false,
         overrideGlobals: false,
     }
@@ -109,8 +119,8 @@ export function createDefaultParams(): AmortizationParams {
     const year = now.getFullYear()
     return {
         fechaCierreEjercicio: `${year}-12-31`,
-        residualPctGlobal: 5,
-        amortizablePctGlobal: 95,
+        residualPctGlobal: 0,
+        amortizablePctGlobal: 100,
         prorrateoMensual: false,
     }
 }
@@ -123,7 +133,7 @@ export function createInitialState(): AmortizationState {
     return {
         id: 'amortizaciones-state',
         params,
-        assets: [createDefaultAsset(generateAssetId(), params)],
+        assets: [],
         lastUpdated: new Date().toISOString(),
     }
 }

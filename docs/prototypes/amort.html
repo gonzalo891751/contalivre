@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amortizaciones - ContaLivre</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        :root {
+            /* --- TOKENS DEL BRAND BOOK --- */
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --brand-gradient-hover: linear-gradient(135deg, #1D4ED8 0%, #059669 100%);
+            
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            
+            --border-light: #E2E8F0;
+            --border-focus: #3B82F6;
+
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --radius-md: 12px;
+            --radius-sm: 6px;
+        }
+
+        /* RESET & BASE */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg-app);
+            font-family: var(--font-body);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* LAYOUT PRINCIPAL */
+        .app-layout {
+            display: flex;
+            width: 100%;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* SIDEBAR (MOCK) */
+        .sidebar {
+            width: 260px;
+            background: var(--bg-paper);
+            border-right: 1px solid var(--border-light);
+            padding: 1.5rem 1rem;
+            display: none; /* Oculto en mobile, visible en desktop */
+            flex-direction: column;
+            gap: 2rem;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+        }
+        @media (min-width: 1024px) { .sidebar { display: flex; } }
+
+        .logo { font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--text-main); }
+        .logo i { color: var(--brand-primary); }
+
+        .nav-item {
+            padding: 0.75rem;
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .nav-item:hover { background: var(--bg-app); color: var(--text-main); }
+        .nav-item.active { background: #EFF6FF; color: var(--brand-primary); font-weight: 600; }
+        .nav-item.active i { color: var(--brand-primary); }
+
+        /* MAIN CONTENT */
+        .main-content {
+            flex: 1;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            overflow-x: hidden;
+            width: 100%;
+        }
+
+        /* HEADER & TOOLBAR */
+        .header-bar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+        .back-link {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+        .back-link:hover { color: var(--brand-primary); }
+        
+        .page-title { font-family: var(--font-display); font-size: 2rem; font-weight: 700; color: var(--text-main); line-height: 1.1; }
+        .page-subtitle { font-size: 0.95rem; color: var(--text-secondary); }
+
+        .actions-group { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+
+        /* BUTTONS */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.6rem 1.25rem;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            gap: 0.5rem;
+            font-family: var(--font-body);
+            white-space: nowrap;
+        }
+        .btn-primary { background: var(--brand-gradient); color: white; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2); }
+        .btn-primary:hover { background: var(--brand-gradient-hover); transform: translateY(-1px); }
+        .btn-secondary { background: white; border: 1px solid var(--border-light); color: var(--text-main); }
+        .btn-secondary:hover { border-color: var(--text-tertiary); background: var(--bg-app); }
+        .btn-text { background: transparent; color: var(--brand-primary); padding: 0.5rem; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+        .btn-text:hover { text-decoration: underline; }
+        .btn-icon-only { padding: 0.5rem; aspect-ratio: 1; }
+
+        /* PARAMETERS CARD & KPIs */
+        .params-card {
+            background: white;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            align-items: center;
+            box-shadow: var(--shadow-sm);
+        }
+        .input-group { display: flex; flex-direction: column; gap: 0.4rem; flex: 1; min-width: 150px; }
+        .input-group label { font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
+        .input-field {
+            padding: 0.6rem;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-body);
+            font-size: 0.9rem;
+            width: 100%;
+            background: white;
+            color: var(--text-main);
+        }
+        .input-field:focus { outline: none; border-color: var(--brand-primary); box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); }
+        .input-field:disabled { background: var(--bg-app); color: var(--text-tertiary); cursor: not-allowed; border-color: var(--border-light); }
+
+        /* KPI Cards Styles */
+        .kpi-container {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .kpi-card {
+            background: white;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            padding: 0.6rem 0.8rem;
+            min-width: 140px;
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .kpi-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: var(--text-secondary);
+            font-weight: 600;
+            margin-bottom: 0.2rem;
+            white-space: nowrap;
+        }
+        .kpi-value {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 1rem;
+            color: var(--text-main);
+        }
+        .kpi-value.highlight { color: var(--brand-primary); }
+
+        /* VIEW TOGGLE TABS */
+        .tabs {
+            display: flex;
+            gap: 0.25rem;
+            background: var(--bg-app);
+            padding: 0.25rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-light);
+            width: fit-content;
+        }
+        .tab-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+        }
+        .tab-btn.active { background: white; color: var(--brand-primary); box-shadow: var(--shadow-sm); font-weight: 600; }
+        .tab-btn:hover:not(.active) { color: var(--text-main); }
+
+        /* TABLES */
+        .table-wrapper {
+            background: white;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            overflow: hidden; /* Clips corners */
+            box-shadow: var(--shadow-sm);
+            position: relative;
+        }
+        .scroll-container {
+            overflow-x: auto;
+            max-width: 100%;
+        }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; white-space: nowrap; }
+        
+        /* WORK TABLE STYLE */
+        .work-table th {
+            background: #F8FAFC;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-light);
+            white-space: nowrap;
+        }
+        .work-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-light);
+            color: var(--text-main);
+        }
+        .work-table tr:hover { background: #F1F5F9; }
+        
+        /* ANNEX TABLE STYLE (Formal) */
+        .annex-view {
+            background: white;
+            padding: 2rem;
+            min-height: 800px;
+        }
+        .annex-header { margin-bottom: 2rem; border-bottom: 2px solid var(--text-main); padding-bottom: 1rem; }
+        .annex-meta { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 1rem; color: var(--text-secondary); }
+        
+        .annex-table { width: 100%; border-collapse: collapse; font-family: var(--font-body); }
+        .annex-table th {
+            background: white;
+            border: 1px solid #94A3B8; /* Borde más oscuro para reporte */
+            padding: 0.4rem;
+            font-size: 0.7rem;
+            text-align: center;
+            font-weight: 700;
+            color: black;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+        }
+        .annex-table td {
+            border: 1px solid #CBD5E1;
+            padding: 0.4rem 0.5rem;
+            font-size: 0.8rem;
+        }
+        .annex-table .rubro-row { background: #F1F5F9; font-weight: 700; color: var(--text-main); }
+        .annex-table .total-row { background: #E2E8F0; font-weight: 800; border-top: 2px solid black; }
+
+        /* UTILS */
+        .text-right { text-align: right; }
+        .font-mono { font-family: var(--font-mono); font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+        .hidden { display: none !important; }
+        .text-error { color: var(--error); }
+        .text-success { color: var(--success); }
+        .w-full { width: 100%; }
+        
+        /* MODAL PRO */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .modal {
+            background: white;
+            width: 100%;
+            max-width: 550px; /* Ancho ajustado para verse compacto y pro */
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            max-height: 90vh;
+        }
+        .modal-header { 
+            padding: 1rem 1.5rem; 
+            border-bottom: 1px solid var(--border-light); 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+        }
+        .modal-body { 
+            padding: 1.5rem; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 1.25rem; 
+            overflow-y: auto; 
+        }
+        .modal-footer { 
+            padding: 1rem 1.5rem; 
+            background: var(--bg-app); 
+            border-top: 1px solid var(--border-light); 
+            display: flex; 
+            justify-content: flex-end; 
+            gap: 0.75rem; 
+            border-radius: 0 0 var(--radius-md) var(--radius-md); 
+        }
+
+        .helper-text { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem; }
+        .modal-separator { height: 1px; background: var(--border-light); margin: 0.5rem 0; }
+        
+        .check-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            user-select: none;
+            font-size: 0.85rem;
+            color: var(--text-main);
+            font-weight: 500;
+        }
+        .check-group input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--brand-primary);
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* GRID HELPERS FOR MODAL */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .gap-2 { gap: 1rem; }
+
+        /* PRINT STYLES (A4 LANDSCAPE OPTIMIZED) */
+        @media print {
+            @page { size: A4 landscape; margin: 10mm; }
+            body { background: white; display: block; color: black; }
+            .sidebar, .header-bar, .params-card, .tabs, .back-link, .actions-group { display: none !important; }
+            .main-content { padding: 0; width: 100%; max-width: none; }
+            
+            /* Hide Work View if active, show Annex */
+            #view-work { display: none !important; }
+            #view-annex { display: block !important; border: none; box-shadow: none; }
+            
+            .annex-view { padding: 0; min-height: auto; }
+            .annex-header { margin-bottom: 1rem; border-bottom: 2px solid black; }
+            .annex-table th, .annex-table td { border-color: black !important; color: black !important; }
+            .annex-table .rubro-row { background-color: #f0f0f0 !important; -webkit-print-color-adjust: exact; font-weight: bold; }
+            .annex-table .total-row { background-color: #e0e0e0 !important; -webkit-print-color-adjust: exact; border-top: 2px solid black; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- LAYOUT -->
+    <div class="app-layout">
+        
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="ph-duotone ph-robot"></i> ContaLivre
+            </div>
+            <nav style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <div class="nav-item">
+                    <i class="ph ph-squares-four"></i> Dashboard
+                </div>
+                <div class="nav-item">
+                    <i class="ph ph-notebook"></i> Contabilidad
+                </div>
+                <div class="nav-item active">
+                    <i class="ph-fill ph-table"></i> Planillas
+                </div>
+                <div class="nav-item">
+                    <i class="ph ph-file-text"></i> Reportes
+                </div>
+            </nav>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <main class="main-content">
+            
+            <!-- HEADER -->
+            <header>
+                <a href="#" class="back-link"><i class="ph-bold ph-arrow-left"></i> Volver a Planillas</a>
+                <div class="header-bar">
+                    <div>
+                        <h1 class="page-title">Amortizaciones</h1>
+                        <p class="page-subtitle">Anexo de Bienes de Uso (Ejercicio 2026)</p>
+                    </div>
+                    <div class="actions-group">
+                        <!-- View Toggles -->
+                        <div class="tabs">
+                            <button class="tab-btn active" onclick="switchView('work')" id="tab-work">
+                                <i class="ph ph-pencil-simple"></i> Carga
+                            </button>
+                            <button class="tab-btn" onclick="switchView('annex')" id="tab-annex">
+                                <i class="ph ph-file-text"></i> Anexo Imprimible
+                            </button>
+                        </div>
+
+                        <div style="width: 1px; height: 24px; background: var(--border-light); margin: 0 0.5rem;" class="mobile-hide"></div>
+
+                        <button class="btn btn-secondary" onclick="printAnnex()">
+                            <i class="ph ph-printer"></i> Imprimir
+                        </button>
+                        <button class="btn btn-primary" onclick="openModal()">
+                            <i class="ph-bold ph-plus"></i> Agregar Bien
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- PARAMETERS BLOCK & KPIs -->
+            <section class="params-card">
+                <div class="input-group" style="max-width: 200px;">
+                    <label>Cierre de Ejercicio</label>
+                    <input type="date" id="param-date" class="input-field" value="2026-12-31" onchange="recalculateAll()">
+                </div>
+                
+                <!-- KPIs Container -->
+                <div class="kpi-container">
+                    <div class="kpi-card">
+                        <span class="kpi-label">Depreciación Ej.</span>
+                        <span class="kpi-value highlight" id="kpi-amort-ej">-</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span class="kpi-label">Valor Neto Total</span>
+                        <span class="kpi-value" id="kpi-net-total">-</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span class="kpi-label">Bienes Cargados</span>
+                        <span class="kpi-value" id="kpi-count">0</span>
+                    </div>
+                </div>
+
+                <!-- Spacer -->
+                <div style="flex: 1;"></div>
+
+                <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-tertiary); font-size: 0.8rem; background: var(--bg-app); padding: 0.5rem 1rem; border-radius: 20px;">
+                    <i class="ph-fill ph-info"></i> Moneda Homogénea
+                </div>
+            </section>
+
+            <!-- VIEW: WORKSPACE (Editable Table) -->
+            <section id="view-work" class="table-wrapper">
+                <div class="scroll-container">
+                    <table class="work-table">
+                        <thead>
+                            <tr>
+                                <th>Rubro</th>
+                                <th>Detalle del Bien</th>
+                                <th>F. Alta</th>
+                                <th>Vida Útil</th>
+                                <th>Método</th>
+                                <th class="text-right">V. Origen</th>
+                                <th class="text-right">% Res.</th>
+                                <th class="text-right">Amort. Ejercicio</th>
+                                <th class="text-right">Acum. Cierre</th>
+                                <th class="text-right">Valor Neto</th>
+                                <th style="text-align: center;">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="work-table-body">
+                            <!-- JS Rendered Rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- VIEW: ANNEX (Formal Report) -->
+            <section id="view-annex" class="table-wrapper hidden">
+                <div class="annex-view">
+                    
+                    <div class="annex-header">
+                        <div style="font-family: var(--font-display); font-size: 1.5rem; font-weight: 700;">ANEXO — BIENES DE USO</div>
+                        <div style="margin-top: 0.5rem; font-family: var(--font-body);">Correspondiente al ejercicio anual finalizado el <span id="annex-date-display" style="font-weight: 600;">31/12/2026</span></div>
+                    </div>
+                    
+                    <div class="annex-meta">
+                        <div><strong>Entidad:</strong> Mi Empresa S.A.</div>
+                        <div><strong>CUIT:</strong> 30-12345678-9</div>
+                    </div>
+
+                    <div class="scroll-container">
+                        <table class="annex-table">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2" style="text-align: left; vertical-align: middle; min-width: 150px; border-bottom: 2px solid #64748B;">RUBRO</th>
+                                    <th colspan="4" style="border-bottom: 1px solid #94A3B8;">VALORES DE INCORPORACIÓN</th>
+                                    <th colspan="4" style="border-bottom: 1px solid #94A3B8;">AMORTIZACIONES</th>
+                                    <th colspan="1" style="border-bottom: 2px solid #64748B;">VALOR NETO</th>
+                                </tr>
+                                <tr>
+                                    <!-- Valores -->
+                                    <th style="min-width: 90px;">Al Inicio</th>
+                                    <th style="min-width: 90px;">Altas</th>
+                                    <th style="min-width: 90px;">Bajas</th>
+                                    <th style="min-width: 90px; border-right: 2px solid #CBD5E1;">Al Cierre</th>
+                                    <!-- Amortizaciones -->
+                                    <th style="min-width: 90px;">Acum. Inicio</th>
+                                    <th style="min-width: 90px;">Bajas</th>
+                                    <th style="min-width: 90px;">Del Ejercicio</th>
+                                    <th style="min-width: 90px; border-right: 2px solid #CBD5E1;">Acum. Cierre</th>
+                                    <!-- Neto -->
+                                    <th style="min-width: 100px;">Al Cierre</th>
+                                </tr>
+                            </thead>
+                            <tbody id="annex-table-body">
+                                <!-- JS Rendered Groups -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- MODAL ADD/EDIT ASSET (LAYOUT CAPTURE 1) -->
+    <div id="modal-add" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 style="font-family: var(--font-display); font-size: 1.25rem;" id="modal-title">Nuevo Bien de Uso</h3>
+                <button class="btn-icon-only btn-text" onclick="closeModal()" aria-label="Cerrar"><i class="ph-bold ph-x" style="font-size: 1.25rem;"></i></button>
+            </div>
+            
+            <div class="modal-body">
+                <input type="hidden" id="input-id"> <!-- Hidden ID for edits -->
+
+                <!-- 1. RUBRO -->
+                <div class="input-group">
+                    <label>RUBRO</label>
+                    <select id="input-rubro" class="input-field" onchange="updateRubroDefaults()">
+                        <option value="Muebles y Útiles">Muebles y Útiles</option>
+                        <option value="Rodados">Rodados</option>
+                        <option value="Instalaciones">Instalaciones</option>
+                        <option value="Eq. Computación">Eq. Computación</option>
+                        <option value="Maquinarias">Maquinarias</option>
+                        <option value="Inmuebles">Inmuebles</option>
+                        <option value="Terrenos">Terrenos</option>
+                        <option value="Mejoras">Mejoras</option>
+                        <option value="Otros Bienes">Otros Bienes</option>
+                    </select>
+                </div>
+
+                <!-- 2. DETALLE -->
+                <div class="input-group">
+                    <label>DETALLE / DESCRIPCIÓN</label>
+                    <input type="text" id="input-detail" class="input-field" placeholder="Ej: Notebook Dell Inspiron 15...">
+                </div>
+
+                <!-- 3. FECHA & VALOR -->
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label>FECHA DE ALTA</label>
+                        <input type="date" id="input-date" class="input-field">
+                    </div>
+                    <div class="input-group">
+                        <label>VALOR DE ORIGEN ($)</label>
+                        <input type="number" id="input-value" class="input-field" placeholder="0.00" min="0" step="0.01">
+                    </div>
+                </div>
+
+                <!-- 4. VIDA ÚTIL + NO AMORTIZA -->
+                <div style="display: flex; gap: 1rem; align-items: flex-end;">
+                     <div class="input-group" style="flex: 1;">
+                        <label>VIDA ÚTIL (AÑOS)</label>
+                        <input type="number" id="input-years" class="input-field" value="10" min="1">
+                    </div>
+                    <div style="padding-bottom: 0.8rem;">
+                         <label class="check-group">
+                            <input type="checkbox" id="check-no-amortiza" onchange="toggleNoAmortiza()">
+                            NO AMORTIZA
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 5. SEPARATOR -->
+                <div class="modal-separator"></div>
+
+                <!-- 6. MÉTODO & RESIDUAL -->
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label>MÉTODO DE AMORTIZACIÓN</label>
+                        <select id="input-method" class="input-field">
+                            <option value="lineal-year">Lineal (Año completo)</option>
+                            <option value="lineal-month">Lineal (Prorrateo mensual)</option>
+                            <option value="decreasing" disabled>Decreciente (Próximamente)</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>VALOR RESIDUAL (%)</label>
+                        <input type="number" id="input-residual-val" class="input-field" value="0" min="0" max="100">
+                        <div class="helper-text">Porcentaje sobre valor origen.</div>
+                    </div>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                <button class="btn btn-primary" onclick="saveAsset()"><i class="ph-bold ph-check"></i> Guardar Bien</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOGIC -->
+    <script>
+        // --- STATE & MOCK DATA ---
+        let assets = [
+            { id: 1, rubro: 'Rodados', detail: 'Toyota Hilux AA234BB', dateAlta: '2024-03-15', valOrigin: 25000000, lifeYears: 5, method: 'lineal-year', residualVal: 0 },
+            { id: 2, rubro: 'Eq. Computación', detail: 'MacBook Pro M3', dateAlta: '2026-01-10', valOrigin: 3500000, lifeYears: 3, method: 'lineal-year', residualVal: 0 },
+            { id: 3, rubro: 'Inmuebles', detail: 'Oficina Central Piso 4', dateAlta: '2020-01-01', valOrigin: 150000000, lifeYears: 50, method: 'lineal-year', residualVal: 20 },
+            { id: 4, rubro: 'Terrenos', detail: 'Lote Parque Industrial', dateAlta: '2019-06-15', valOrigin: 80000000, lifeYears: 0, method: 'none', residualVal: 0 }
+        ];
+        
+        // --- INIT ---
+        document.addEventListener('DOMContentLoaded', () => {
+            recalculateAll();
+        });
+
+        // --- UI FUNCTIONS ---
+
+        function switchView(viewName) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(`tab-${viewName}`).classList.add('active');
+            document.getElementById('view-work').classList.add('hidden');
+            document.getElementById('view-annex').classList.add('hidden');
+            document.getElementById(`view-${viewName}`).classList.remove('hidden');
+            if (viewName === 'annex') renderAnnex();
+        }
+
+        // Print Logic (Reliable Annex)
+        let viewBeforePrint = null;
+
+        function printAnnex() {
+            // 1. Force data update
+            recalculateAll();
+            renderAnnex();
+            
+            // 2. Save current view & switch to annex for printing
+            const activeTab = document.querySelector('.tab-btn.active');
+            viewBeforePrint = activeTab ? activeTab.id.replace('tab-', '') : 'work';
+
+            if (viewBeforePrint !== 'annex') {
+                switchView('annex');
+            }
+
+            // 3. Print with delay to ensure DOM is ready
+            setTimeout(() => {
+                window.print();
+            }, 100);
+        }
+
+        // Restore view after print
+        window.addEventListener('afterprint', () => {
+            if (viewBeforePrint && viewBeforePrint !== 'annex') {
+                switchView(viewBeforePrint);
+            }
+            viewBeforePrint = null;
+        });
+
+        // --- MODAL & ASSET MANAGEMENT ---
+
+        function openModal(assetId = null) {
+            const modal = document.getElementById('modal-add');
+            const title = document.getElementById('modal-title');
+            
+            // Default Values
+            document.getElementById('input-id').value = '';
+            document.getElementById('input-rubro').value = 'Muebles y Útiles';
+            document.getElementById('input-date').valueAsDate = new Date();
+            document.getElementById('input-detail').value = '';
+            document.getElementById('input-value').value = '';
+            document.getElementById('input-years').value = '10';
+            document.getElementById('input-method').value = 'lineal-year';
+            document.getElementById('input-residual-val').value = '0';
+            document.getElementById('check-no-amortiza').checked = false;
+            
+            // Enable fields by default
+            toggleNoAmortiza();
+
+            if (assetId) {
+                // Edit Mode
+                const asset = assets.find(a => a.id === assetId);
+                if (asset) {
+                    title.textContent = "Editar Bien de Uso";
+                    document.getElementById('input-id').value = asset.id;
+                    document.getElementById('input-rubro').value = asset.rubro;
+                    document.getElementById('input-date').value = asset.dateAlta;
+                    document.getElementById('input-detail').value = asset.detail;
+                    document.getElementById('input-value').value = asset.valOrigin;
+                    document.getElementById('input-years').value = asset.lifeYears;
+                    document.getElementById('input-residual-val').value = asset.residualVal;
+                    
+                    if (asset.method === 'none') {
+                        document.getElementById('check-no-amortiza').checked = true;
+                    } else {
+                        document.getElementById('input-method').value = asset.method;
+                        document.getElementById('check-no-amortiza').checked = false;
+                    }
+                    toggleNoAmortiza();
+                }
+            } else {
+                title.textContent = "Nuevo Bien de Uso";
+            }
+
+            modal.classList.remove('hidden');
+            document.getElementById('input-detail').focus();
+        }
+
+        function closeModal() {
+            document.getElementById('modal-add').classList.add('hidden');
+        }
+
+        function updateRubroDefaults() {
+            const rubro = document.getElementById('input-rubro').value;
+            const yearsInput = document.getElementById('input-years');
+            const noAmortizaCheck = document.getElementById('check-no-amortiza');
+            
+            const defaults = {
+                'Rodados': 5, 'Muebles y Útiles': 10, 'Eq. Computación': 3,
+                'Inmuebles': 50, 'Instalaciones': 10, 'Maquinarias': 10,
+                'Terrenos': 0, 'Mejoras': 10, 'Otros Bienes': 5
+            };
+
+            if (rubro === 'Terrenos') {
+                noAmortizaCheck.checked = true;
+                yearsInput.value = 0;
+            } else {
+                noAmortizaCheck.checked = false;
+                if (defaults[rubro] !== undefined) yearsInput.value = defaults[rubro];
+            }
+            toggleNoAmortiza();
+        }
+
+        function toggleNoAmortiza() {
+            const isNoAmortiza = document.getElementById('check-no-amortiza').checked;
+            const yearsInput = document.getElementById('input-years');
+            const methodInput = document.getElementById('input-method');
+            const residualInput = document.getElementById('input-residual-val');
+
+            if (isNoAmortiza) {
+                yearsInput.disabled = true;
+                methodInput.disabled = true;
+                residualInput.disabled = true;
+            } else {
+                yearsInput.disabled = false;
+                methodInput.disabled = false;
+                residualInput.disabled = false;
+            }
+        }
+
+        function saveAsset() {
+            const idStr = document.getElementById('input-id').value;
+            const rubro = document.getElementById('input-rubro').value;
+            const detail = document.getElementById('input-detail').value;
+            const date = document.getElementById('input-date').value;
+            const valOrigin = parseFloat(document.getElementById('input-value').value) || 0;
+            const isNoAmortiza = document.getElementById('check-no-amortiza').checked;
+            
+            let years = 0;
+            let method = 'none';
+            let residualVal = 0;
+
+            if (!isNoAmortiza) {
+                years = parseInt(document.getElementById('input-years').value) || 0;
+                method = document.getElementById('input-method').value;
+                residualVal = parseFloat(document.getElementById('input-residual-val').value) || 0;
+            }
+
+            if (!detail) return alert("Por favor ingresá el detalle del bien.");
+            if (valOrigin <= 0) return alert("El valor de origen debe ser mayor a 0.");
+            if (!isNoAmortiza && years <= 0) return alert("La vida útil debe ser mayor a 0.");
+
+            const assetData = {
+                id: idStr ? parseInt(idStr) : Date.now(),
+                rubro, detail, dateAlta: date, valOrigin, lifeYears: years,
+                method, residualVal
+            };
+
+            if (idStr) {
+                const idx = assets.findIndex(a => a.id == idStr);
+                if (idx !== -1) assets[idx] = assetData;
+            } else {
+                assets.push(assetData);
+            }
+
+            recalculateAll();
+            closeModal();
+        }
+
+        function deleteAsset(id) {
+            if(confirm('¿Eliminar este bien?')) {
+                assets = assets.filter(a => a.id !== id);
+                recalculateAll();
+            }
+        }
+
+        // --- CALCULATION ENGINE ---
+
+        function recalculateAll() {
+            const closingDate = new Date(document.getElementById('param-date').value);
+            const closingYear = closingDate.getFullYear();
+            const closingMonth = closingDate.getMonth(); // 0-11
+
+            const tbody = document.getElementById('work-table-body');
+            tbody.innerHTML = '';
+
+            // KPI Accumulators
+            let totalAmortEj = 0;
+            let totalNet = 0;
+
+            if (assets.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 3rem; color: var(--text-secondary);"><i class="ph ph-tray" style="font-size: 2rem; margin-bottom: 0.5rem;"></i><br>No hay bienes cargados.</td></tr>`;
+                updateKpis(0, 0, 0);
+                renderAnnex();
+                return;
+            }
+
+            assets.forEach(asset => {
+                // 1. Base Values
+                const residualPct = asset.residualVal || 0;
+                const residualValue = asset.valOrigin * (residualPct / 100);
+                const amortizableBase = asset.valOrigin - residualValue;
+                
+                // 2. Time Calculations
+                const altaDate = new Date(asset.dateAlta);
+                const altaYear = altaDate.getFullYear();
+                const altaMonth = altaDate.getMonth();
+
+                let amortExercise = 0;
+                let accumPrev = 0;
+                let accumTotal = 0;
+                let netValue = 0;
+
+                // Only amortize if method is NOT none and active
+                if (asset.method !== 'none' && asset.lifeYears > 0 && altaDate <= closingDate) {
+                    const yearlyAmort = amortizableBase / asset.lifeYears;
+                    const yearsElapsed = closingYear - altaYear; // Difference in years
+                    
+                    if (asset.method === 'lineal-year') {
+                        // Año de alta completo
+                        const yearsActive = yearsElapsed + 1;
+                        
+                        // Calc Prev
+                        const yearsPrev = Math.max(0, yearsActive - 1);
+                        accumPrev = yearsPrev * yearlyAmort;
+                        
+                        // Calc Current
+                        if (yearsActive <= asset.lifeYears && yearsActive > 0) {
+                            amortExercise = yearlyAmort;
+                        }
+
+                    } else if (asset.method === 'lineal-month') {
+                        // Prorrateo Mensual
+                        const monthsTotal = (closingYear - altaYear) * 12 + (closingMonth - altaMonth) + 1;
+                        const monthlyAmort = yearlyAmort / 12;
+
+                        if (monthsTotal > 0) {
+                            // Prev: Start of current year
+                            const startOfExercise = new Date(closingYear, 0, 1);
+                            
+                            if (altaDate < startOfExercise) {
+                                // Calculate months up to end of previous year
+                                const prevYearEnd = new Date(closingYear - 1, 11, 31);
+                                const monthsPrevCnt = (prevYearEnd.getFullYear() - altaYear) * 12 + (prevYearEnd.getMonth() - altaMonth) + 1;
+                                accumPrev = Math.max(0, monthsPrevCnt * monthlyAmort);
+                            } else {
+                                accumPrev = 0;
+                            }
+
+                            // Current
+                            const lifeMonths = asset.lifeYears * 12;
+                            const monthsAmortizedSoFar = Math.min(monthsTotal, lifeMonths);
+                            const totalShouldBe = monthsAmortizedSoFar * monthlyAmort;
+                            
+                            amortExercise = Math.max(0, totalShouldBe - accumPrev);
+                        }
+                    }
+                }
+
+                // Safety Caps
+                if (accumPrev > amortizableBase) accumPrev = amortizableBase;
+                accumTotal = accumPrev + amortExercise;
+                if (accumTotal > amortizableBase) {
+                    accumTotal = amortizableBase;
+                    amortExercise = accumTotal - accumPrev;
+                }
+                
+                netValue = asset.valOrigin - accumTotal;
+
+                // Accumulate KPIs
+                totalAmortEj += amortExercise;
+                totalNet += netValue;
+
+                // Store for Annex
+                asset.calc = { amortExercise, accumTotal, accumPrev, netValue, altaYear, closingYear };
+
+                // Render Work Row
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="font-weight: 500;">${asset.rubro}</td>
+                    <td>${asset.detail}</td>
+                    <td class="font-mono">${formatDate(asset.dateAlta)}</td>
+                    <td class="font-mono text-right">${asset.lifeYears > 0 ? asset.lifeYears : '-'}</td>
+                    <td class="text-secondary" style="font-size:0.75rem;">${formatMethodName(asset.method)}</td>
+                    <td class="font-mono text-right">${formatCurrency(asset.valOrigin)}</td>
+                    <td class="font-mono text-right">${residualPct > 0 ? residualPct + '%' : '-'}</td>
+                    <td class="font-mono text-right" style="color: var(--brand-primary); font-weight:600;">${dashIfZero(amortExercise)}</td>
+                    <td class="font-mono text-right">${dashIfZero(accumTotal)}</td>
+                    <td class="font-mono text-right" style="font-weight: 700;">${formatCurrency(netValue)}</td>
+                    <td style="text-align: center;">
+                        <button class="btn-text" onclick="openModal(${asset.id})" title="Editar"><i class="ph-bold ph-pencil-simple"></i></button>
+                        <button class="btn-text" onclick="deleteAsset(${asset.id})" title="Eliminar" style="color: var(--error);"><i class="ph-bold ph-trash"></i></button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // Update KPIs UI
+            updateKpis(totalAmortEj, totalNet, assets.length);
+
+            if (!document.getElementById('view-annex').classList.contains('hidden')) {
+                renderAnnex();
+            }
+        }
+
+        function updateKpis(totalAmort, totalNet, count) {
+            document.getElementById('kpi-amort-ej').textContent = dashIfZero(totalAmort);
+            document.getElementById('kpi-net-total').textContent = dashIfZero(totalNet);
+            document.getElementById('kpi-count').textContent = count;
+        }
+
+        function renderAnnex() {
+            const tbody = document.getElementById('annex-table-body');
+            tbody.innerHTML = '';
+            
+            const groups = {};
+            assets.forEach(a => {
+                if (!groups[a.rubro]) groups[a.rubro] = { 
+                    items: [], 
+                    tOriginStart: 0, tAlta: 0, tBaja: 0, tOriginEnd: 0,
+                    tAmortStart: 0, tAmortBaja: 0, tAmortYear: 0, tAmortEnd: 0,
+                    tNet: 0
+                };
+                groups[a.rubro].items.push(a);
+            });
+
+            let gTotal = { tOriginEnd:0, tAmortYear:0, tNet:0 };
+
+            Object.keys(groups).forEach(rubro => {
+                const g = groups[rubro];
+                
+                g.items.forEach(a => {
+                    const isNew = a.calc.altaYear === a.calc.closingYear;
+                    
+                    const originStart = isNew ? 0 : a.valOrigin;
+                    const originAlta = isNew ? a.valOrigin : 0;
+                    
+                    g.tOriginStart += originStart;
+                    g.tAlta += originAlta;
+                    g.tOriginEnd += a.valOrigin;
+                    
+                    g.tAmortStart += a.calc.accumPrev;
+                    g.tAmortYear += a.calc.amortExercise;
+                    g.tAmortEnd += a.calc.accumTotal;
+                    g.tNet += a.calc.netValue;
+                });
+
+                gTotal.tOriginEnd += g.tOriginEnd;
+                gTotal.tAmortYear += g.tAmortYear;
+                gTotal.tNet += g.tNet;
+
+                const tr = document.createElement('tr');
+                tr.className = 'rubro-row';
+                tr.innerHTML = `
+                    <td style="text-align:left;">${rubro}</td>
+                    <td class="font-mono text-right">${dashIfZero(g.tOriginStart)}</td>
+                    <td class="font-mono text-right">${dashIfZero(g.tAlta)}</td>
+                    <td class="font-mono text-right">-</td>
+                    <td class="font-mono text-right" style="border-right: 2px solid #CBD5E1;">${dashIfZero(g.tOriginEnd)}</td>
+                    
+                    <td class="font-mono text-right">${dashIfZero(g.tAmortStart)}</td>
+                    <td class="font-mono text-right">-</td>
+                    <td class="font-mono text-right">${dashIfZero(g.tAmortYear)}</td>
+                    <td class="font-mono text-right" style="border-right: 2px solid #CBD5E1;">${dashIfZero(g.tAmortEnd)}</td>
+                    
+                    <td class="font-mono text-right">${dashIfZero(g.tNet)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+             const trTotal = document.createElement('tr');
+                trTotal.className = 'total-row';
+                trTotal.innerHTML = `
+                    <td style="text-align:left;">TOTALES</td>
+                    <td class="font-mono text-right">-</td>
+                    <td class="font-mono text-right">-</td>
+                    <td class="font-mono text-right">-</td>
+                    <td class="font-mono text-right" style="border-right: 2px solid black;">${dashIfZero(gTotal.tOriginEnd)}</td>
+                    
+                    <td class="font-mono text-right">-</td>
+                    <td class="font-mono text-right">-</td>
+                    <td class="font-mono text-right">${dashIfZero(gTotal.tAmortYear)}</td>
+                    <td class="font-mono text-right" style="border-right: 2px solid black;">-</td>
+                    
+                    <td class="font-mono text-right">${dashIfZero(gTotal.tNet)}</td>
+                `;
+            tbody.appendChild(trTotal);
+            
+            const d = document.getElementById('param-date').value;
+            document.getElementById('annex-date-display').textContent = formatDate(d);
+        }
+
+        // --- UTILS ---
+        function formatCurrency(val) {
+            return new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+        }
+        
+        function dashIfZero(val) {
+            // Fix strict: if val is basically 0, return dash '-'
+            if (!val || Math.abs(val) < 0.01) return '-';
+            return formatCurrency(val);
+        }
+
+        function formatDate(dateStr) {
+            if(!dateStr) return '-';
+            const [y, m, d] = dateStr.split('-');
+            return `${d}/${m}/${y}`;
+        }
+        
+        function formatMethodName(methodKey) {
+            const map = {
+                'lineal-year': 'Lineal (Año)',
+                'lineal-month': 'Lineal (Mes)',
+                'none': 'No Amortiza'
+            };
+            return map[methodKey] || methodKey;
+        }
+    </script>
+</body>
+</html>
+<!-- CHANGELOG:
+    - PrintAnnex: Botón 'Imprimir' ahora fuerza regeneración de datos y cambio de vista a Anexo antes de abrir el diálogo de impresión, garantizando consistencia.
+    - KPIs Totales: Se agregaron tarjetas de resumen (Depreciación Ej, Valor Neto, Conteo) en la barra de parámetros para visión rápida de estado.
+    - Responsive: Layout de parámetros y KPIs se adapta con wrap en mobile.
+-->

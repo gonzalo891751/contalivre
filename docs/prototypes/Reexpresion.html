@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre - Reexpresión y Valuación</title>
+    
+    <!-- Fonts: Outfit, Inter, JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- Tailwind CSS (Configured via CDN for Prototyping) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',
+                            secondary: '#10B981',
+                        },
+                        slate: {
+                            900: '#0F172A', // Brand dark
+                            50: '#F8FAFC',  // Brand bg
+                        },
+                        semantic: {
+                            error: '#EF4444',
+                            warning: '#F59E0B',
+                            success: '#10B981',
+                            info: '#3B82F6'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    backgroundImage: {
+                        'brand-gradient': 'linear-gradient(135deg, #2563EB 0%, #10B981 100%)',
+                        'brand-gradient-hover': 'linear-gradient(135deg, #1D4ED8 0%, #059669 100%)',
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05)',
+                        'glow': '0 0 15px rgba(59, 130, 246, 0.15)'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom Scrollbar for Tables */
+        .custom-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Drawer Transition */
+        .drawer-backdrop { transition: opacity 0.3s ease; }
+        .drawer-panel { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        
+        /* Hide visuals */
+        .hidden-visually { display: none; opacity: 0; pointer-events: none; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased selection:bg-brand-primary selection:text-white">
+
+    <!-- LAYOUT WRAPPER -->
+    <div class="flex min-h-screen">
+        
+        <!-- SIDEBAR MOCK (Collapsed) -->
+        <aside class="hidden md:flex flex-col w-20 bg-white border-r border-gray-200 items-center py-6 sticky top-0 h-screen z-10">
+            <div class="text-2xl text-brand-primary mb-8"><i class="ph-duotone ph-robot"></i></div>
+            <nav class="flex flex-col gap-6 w-full px-2">
+                <a href="#" class="p-3 rounded-xl text-gray-400 hover:bg-slate-50 hover:text-brand-primary transition-colors flex justify-center"><i class="ph ph-squares-four text-xl"></i></a>
+                <a href="#" class="p-3 rounded-xl bg-blue-50 text-brand-primary flex justify-center shadow-sm"><i class="ph-fill ph-notebook text-xl"></i></a> <!-- Active -->
+                <a href="#" class="p-3 rounded-xl text-gray-400 hover:bg-slate-50 hover:text-brand-primary transition-colors flex justify-center"><i class="ph ph-chart-line-up text-xl"></i></a>
+            </nav>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <main class="flex-1 flex flex-col min-w-0">
+            
+            <!-- 1. HEADER -->
+            <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+                    <div>
+                        <h1 class="font-display font-bold text-2xl text-slate-900 tracking-tight">Reexpresión y Valuación</h1>
+                        <p class="text-sm text-gray-500 font-medium">Ajuste por Inflación + Valuación • Periodo 2026</p>
+                    </div>
+                    
+                    <div class="flex items-center gap-3">
+                        <div class="hidden sm:flex items-center bg-slate-50 border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                            <i class="ph ph-calendar text-gray-400 mr-2"></i>
+                            <span class="font-mono text-slate-700">31/12/2026</span>
+                        </div>
+                        <button class="bg-brand-gradient hover:bg-brand-gradient-hover text-white font-semibold py-2.5 px-5 rounded-lg shadow-lg shadow-blue-500/20 transition-all transform active:scale-95 flex items-center gap-2">
+                            <i class="ph-bold ph-magic-wand"></i>
+                            <span class="hidden sm:inline">Generar Asientos</span>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full space-y-8">
+
+                <!-- 2. KPI ROW -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <!-- KPI 1 -->
+                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-soft hover:border-brand-primary/30 transition-colors">
+                        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Activo Histórico</div>
+                        <div class="font-mono text-2xl font-semibold text-slate-900">$ 12.450M</div>
+                        <div class="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                            <i class="ph-fill ph-database"></i> Base contable
+                        </div>
+                    </div>
+                    <!-- KPI 2 -->
+                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-soft hover:border-brand-primary/30 transition-colors">
+                        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Ajustado al Cierre</div>
+                        <div class="font-mono text-2xl font-semibold text-brand-primary">$ 18.920M</div>
+                        <div class="text-xs text-brand-secondary mt-2 flex items-center gap-1 font-medium">
+                            <i class="ph-bold ph-trend-up"></i> +52% Variación
+                        </div>
+                    </div>
+                    <!-- KPI 3 -->
+                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-soft hover:border-brand-primary/30 transition-colors">
+                        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Impacto RECPAM</div>
+                        <div class="font-mono text-2xl font-semibold text-semantic-warning">- $ 420.5k</div>
+                        <div class="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                            <i class="ph-fill ph-calculator"></i> Estimado RT6
+                        </div>
+                    </div>
+                    <!-- KPI 4 -->
+                    <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-soft hover:border-brand-primary/30 transition-colors relative overflow-hidden">
+                        <div class="absolute right-0 top-0 p-3 opacity-10"><i class="ph-fill ph-scales text-4xl text-brand-primary"></i></div>
+                        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Valuación RT17</div>
+                        <div class="font-mono text-2xl font-semibold text-slate-900">$ 0,00</div>
+                        <a href="#" class="text-xs text-brand-primary mt-2 flex items-center gap-1 hover:underline font-medium">
+                            Ver detalle <i class="ph-bold ph-arrow-right"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- 3. STEPPER -->
+                <nav aria-label="Progress">
+                    <ol role="list" class="flex items-center">
+                        <!-- Step 1: Completed -->
+                        <li class="relative pr-8 sm:pr-20">
+                            <div class="absolute inset-0 flex items-center" aria-hidden="true">
+                                <div class="h-0.5 w-full bg-brand-primary"></div>
+                            </div>
+                            <a href="#" class="relative flex h-8 w-8 items-center justify-center rounded-full bg-brand-primary hover:bg-brand-primary-dark">
+                                <i class="ph-bold ph-check text-white text-sm"></i>
+                            </a>
+                            <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-medium text-brand-primary whitespace-nowrap">Índices</span>
+                        </li>
+                        <!-- Step 2: Current -->
+                        <li class="relative pr-8 sm:pr-20">
+                            <div class="absolute inset-0 flex items-center" aria-hidden="true">
+                                <div class="h-0.5 w-full bg-gray-200"></div>
+                            </div>
+                            <a href="#" class="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-brand-primary bg-white" aria-current="step">
+                                <span class="h-2.5 w-2.5 rounded-full bg-brand-primary" aria-hidden="true"></span>
+                            </a>
+                            <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-bold text-slate-900 whitespace-nowrap">Reexpresión</span>
+                        </li>
+                        <!-- Step 3: Upcoming -->
+                        <li class="relative pr-8 sm:pr-20">
+                            <div class="absolute inset-0 flex items-center" aria-hidden="true">
+                                <div class="h-0.5 w-full bg-gray-200"></div>
+                            </div>
+                            <a href="#" class="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-gray-300 bg-white hover:border-gray-400">
+                                <span class="text-xs text-gray-500">3</span>
+                            </a>
+                            <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-medium text-gray-500 whitespace-nowrap">Valuación</span>
+                        </li>
+                        <!-- Step 4: Upcoming -->
+                        <li class="relative">
+                            <a href="#" class="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-gray-300 bg-white hover:border-gray-400">
+                                <span class="text-xs text-gray-500">4</span>
+                            </a>
+                            <span class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-medium text-gray-500 whitespace-nowrap">Asientos</span>
+                        </li>
+                    </ol>
+                </nav>
+
+                <!-- 4. MAIN ACTION: IMPORT/ANALYZE -->
+                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div class="flex items-start gap-4">
+                        <div class="bg-blue-50 p-3 rounded-lg text-brand-primary hidden sm:block">
+                            <i class="ph-duotone ph-magic-wand text-2xl"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-display font-bold text-lg text-slate-900">Calcular automáticamente</h2>
+                            <p class="text-gray-500 text-sm mt-1 max-w-xl">
+                                Calculamos y sugerimos la clasificación RT6 automáticamente a partir de los saldos del período. 
+                                <span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded ml-1 border border-gray-200">Última imp: Hoy 10:45</span>
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 w-full sm:w-auto">
+                        <button onclick="toggleDrawer()" class="group bg-white border border-gray-200 hover:border-brand-primary/50 text-slate-600 hover:text-brand-primary font-medium py-2 px-4 rounded-full text-sm shadow-sm transition-all flex items-center gap-2">
+                            <i class="ph-bold ph-function text-lg text-gray-400 group-hover:text-brand-primary transition-colors"></i>
+                            Método indirecto
+                        </button>
+                        <button class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-4 rounded-lg text-sm transition-colors border border-gray-200">
+                            Recalcular
+                        </button>
+                        <button class="bg-brand-primary hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg text-sm shadow-md transition-colors flex items-center gap-2">
+                            <i class="ph-bold ph-arrows-clockwise"></i>
+                            Analizar Mayor
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 5. TABS & CONTENT -->
+                <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden min-h-[500px]">
+                    
+                    <!-- Tab Headers -->
+                    <div class="border-b border-gray-200 flex">
+                        <button onclick="switchTab('monetarias')" id="tab-btn-mon" class="flex-1 py-4 text-sm font-semibold text-brand-primary border-b-2 border-brand-primary bg-blue-50/50 transition-colors flex items-center justify-center gap-2">
+                            <i class="ph-fill ph-currency-dollar"></i>
+                            Partidas Monetarias
+                            <span class="bg-brand-primary text-white text-[10px] px-1.5 py-0.5 rounded-full">12</span>
+                        </button>
+                        <button onclick="switchTab('nomonetarias')" id="tab-btn-nomon" class="flex-1 py-4 text-sm font-medium text-gray-500 hover:text-slate-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">
+                            <i class="ph ph-package"></i>
+                            Partidas No Monetarias
+                            <span class="bg-gray-200 text-gray-600 text-[10px] px-1.5 py-0.5 rounded-full">5</span>
+                        </button>
+                    </div>
+
+                    <!-- TAB 1 CONTENT: MONETARIAS -->
+                    <div id="tab-monetarias" class="p-6">
+                        
+                        <!-- Summary Bar -->
+                        <div class="flex flex-wrap items-center justify-between gap-4 mb-6 bg-slate-50 p-3 rounded-lg border border-gray-100">
+                            <div class="flex items-center gap-6 text-sm">
+                                <div>
+                                    <span class="text-gray-500 block text-xs uppercase font-bold">Activo Mon.</span>
+                                    <span class="font-mono text-brand-primary font-bold">$ 4.200.000</span>
+                                </div>
+                                <div class="h-6 w-px bg-gray-300"></div>
+                                <div>
+                                    <span class="text-gray-500 block text-xs uppercase font-bold">Pasivo Mon.</span>
+                                    <span class="font-mono text-amber-600 font-bold">$ 1.100.000</span>
+                                </div>
+                                <div class="h-6 w-px bg-gray-300"></div>
+                                <div>
+                                    <span class="text-gray-500 block text-xs uppercase font-bold">Neto (RECPAM)</span>
+                                    <span class="font-mono text-slate-900 font-bold">$ 3.100.000</span>
+                                </div>
+                            </div>
+                            <button class="text-brand-secondary text-sm font-semibold hover:bg-green-50 px-3 py-1.5 rounded transition-colors flex items-center gap-1">
+                                <i class="ph-bold ph-check-all"></i> Marcar todo validado
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            
+                            <!-- Activos Monetarios -->
+                            <div>
+                                <div class="flex items-center gap-2 mb-3">
+                                    <div class="w-1 h-5 bg-brand-primary rounded-full"></div>
+                                    <h3 class="font-display font-semibold text-slate-800">Activos Monetarios</h3>
+                                    <span class="ml-auto relative group">
+                                        <i class="ph-fill ph-question text-gray-300 hover:text-brand-primary cursor-help"></i>
+                                        <!-- Tooltip Mock -->
+                                        <div class="absolute bottom-full right-0 mb-2 w-48 bg-slate-800 text-white text-xs p-2 rounded shadow-lg hidden group-hover:block z-10">
+                                            Clasificado por código de plan de cuentas y keywords.
+                                        </div>
+                                    </span>
+                                </div>
+                                
+                                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                                    <table class="w-full text-sm">
+                                        <thead class="bg-gray-50 border-b border-gray-200">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-medium text-gray-500 text-xs uppercase">Cuenta</th>
+                                                <th class="px-3 py-2 text-right font-medium text-gray-500 text-xs uppercase">Saldo</th>
+                                                <th class="px-3 py-2 text-center font-medium text-gray-500 text-xs uppercase">Acción</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-gray-100">
+                                            <!-- Row 1: Auto Pending -->
+                                            <tr class="bg-orange-50/50 hover:bg-orange-50 transition-colors group">
+                                                <td class="px-3 py-3">
+                                                    <div class="font-medium text-slate-700">Caja y Bancos</div>
+                                                    <div class="flex items-center gap-2 mt-1">
+                                                        <span class="text-[10px] text-gray-400 font-mono">1.1.01</span>
+                                                        <span class="text-[10px] bg-blue-100 text-blue-700 px-1.5 rounded border border-blue-200 font-medium">AUTO</span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-3 py-3 text-right font-mono text-slate-700">$ 1.500.000</td>
+                                                <td class="px-3 py-3 text-center">
+                                                    <button class="p-1.5 text-gray-400 hover:text-brand-primary rounded hover:bg-white border border-transparent hover:border-gray-200 transition-all" title="Editar">
+                                                        <i class="ph-bold ph-pencil-simple"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            <!-- Row 2: Validated -->
+                                            <tr class="hover:bg-gray-50 transition-colors">
+                                                <td class="px-3 py-3">
+                                                    <div class="font-medium text-slate-700">Créditos por Ventas</div>
+                                                    <div class="flex items-center gap-2 mt-1">
+                                                        <span class="text-[10px] text-gray-400 font-mono">1.1.02</span>
+                                                        <span class="text-[10px] text-brand-secondary flex items-center gap-0.5"><i class="ph-bold ph-check"></i> Validado</span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-3 py-3 text-right font-mono text-slate-700">$ 2.700.000</td>
+                                                <td class="px-3 py-3 text-center">
+                                                    <button class="p-1.5 text-gray-400 hover:text-brand-primary rounded hover:bg-white" title="Editar">
+                                                        <i class="ph-bold ph-pencil-simple"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Pasivos Monetarios -->
+                            <div>
+                                <div class="flex items-center gap-2 mb-3">
+                                    <div class="w-1 h-5 bg-amber-500 rounded-full"></div>
+                                    <h3 class="font-display font-semibold text-slate-800">Pasivos Monetarios</h3>
+                                </div>
+                                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                                    <table class="w-full text-sm">
+                                        <thead class="bg-gray-50 border-b border-gray-200">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-medium text-gray-500 text-xs uppercase">Cuenta</th>
+                                                <th class="px-3 py-2 text-right font-medium text-gray-500 text-xs uppercase">Saldo</th>
+                                                <th class="px-3 py-2 text-center font-medium text-gray-500 text-xs uppercase">Acción</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-gray-100">
+                                            <tr class="bg-orange-50/50 hover:bg-orange-50 transition-colors">
+                                                <td class="px-3 py-3">
+                                                    <div class="font-medium text-slate-700">Proveedores Locales</div>
+                                                    <div class="flex items-center gap-2 mt-1">
+                                                        <span class="text-[10px] text-gray-400 font-mono">2.1.01</span>
+                                                        <span class="text-[10px] bg-blue-100 text-blue-700 px-1.5 rounded border border-blue-200 font-medium">AUTO</span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-3 py-3 text-right font-mono text-slate-700">$ 1.100.000</td>
+                                                <td class="px-3 py-3 text-center">
+                                                    <button class="p-1.5 text-gray-400 hover:text-brand-primary rounded hover:bg-white border border-transparent hover:border-gray-200 transition-all">
+                                                        <i class="ph-bold ph-pencil-simple"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- TAB 2 CONTENT: NO MONETARIAS -->
+                    <div id="tab-nomonetarias" class="hidden p-6 bg-slate-50 min-h-[500px]">
+                        
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="font-display font-bold text-slate-700">Ajuste por Índice (RT6)</h3>
+                            <button class="text-sm font-semibold text-brand-primary hover:bg-white hover:shadow-sm px-3 py-2 rounded-lg transition-all border border-transparent hover:border-gray-200">
+                                + Agregar partida manual
+                            </button>
+                        </div>
+
+                        <!-- Accordion Item 1: Bienes de Uso (ACTIVO) -->
+                        <div class="bg-white rounded-lg border border-gray-200 shadow-sm mb-3 overflow-hidden border-l-4 border-l-brand-primary">
+                            <div class="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors" onclick="toggleAccordion('acc-1')">
+                                <div class="flex items-center gap-4">
+                                    <button class="text-gray-400 hover:text-brand-primary transition-colors">
+                                        <i class="ph-bold ph-caret-right transform transition-transform" id="icon-acc-1"></i>
+                                    </button>
+                                    <div>
+                                        <div class="font-bold text-slate-800 flex items-center gap-2">
+                                            <span class="text-[10px] font-bold uppercase tracking-wider text-brand-primary bg-blue-50 px-2 py-0.5 rounded border border-blue-100 mr-1">ACTIVO</span>
+                                            Bienes de Uso
+                                            <span class="bg-orange-100 text-orange-700 text-[10px] px-1.5 py-0.5 rounded font-medium border border-orange-200">PENDIENTE</span>
+                                        </div>
+                                        <div class="text-xs text-gray-500 mt-0.5">3 cuentas sugeridas del mayor</div>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="font-mono font-semibold text-slate-900">$ 5.400.000</div>
+                                    <div class="text-[10px] text-gray-400 uppercase tracking-wide">Valor Origen</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Expanded Content -->
+                            <div id="acc-1" class="hidden border-t border-gray-100 bg-gray-50/50">
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-sm">
+                                        <thead class="bg-gray-100 text-xs text-gray-500 uppercase font-medium">
+                                            <tr>
+                                                <th class="px-4 py-2 text-left w-1/3">Cuenta</th>
+                                                <th class="px-4 py-2 text-center">F. Origen</th>
+                                                <th class="px-4 py-2 text-right">V. Origen</th>
+                                                <th class="px-4 py-2 text-right">Coef.</th>
+                                                <th class="px-4 py-2 text-right">V. Homog.</th>
+                                                <th class="px-4 py-2 text-right w-24">Acciones</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-gray-200">
+                                            <tr class="bg-white">
+                                                <td class="px-4 py-3 font-medium text-slate-700">Rodados</td>
+                                                <td class="px-4 py-3 text-center font-mono text-slate-600">01/2026</td>
+                                                <td class="px-4 py-3 text-right font-mono">$ 2.000.000</td>
+                                                <td class="px-4 py-3 text-right font-mono text-gray-500">2.5000</td>
+                                                <td class="px-4 py-3 text-right font-mono font-semibold text-brand-primary">$ 5.000.000</td>
+                                                <td class="px-4 py-3 text-right">
+                                                    <button class="text-brand-primary hover:bg-blue-50 p-1.5 rounded transition-colors"><i class="ph-bold ph-pencil-simple"></i></button>
+                                                </td>
+                                            </tr>
+                                            <!-- Example of 'Expand for movements' -->
+                                            <tr class="bg-white">
+                                                <td class="px-4 py-3 font-medium text-slate-700">Muebles y Útiles</td>
+                                                <td class="px-4 py-3 text-center font-mono text-slate-600">Mar/Jun</td>
+                                                <td class="px-4 py-3 text-right font-mono">$ 3.400.000</td>
+                                                <td class="px-4 py-3 text-right font-mono text-gray-500">Mix</td>
+                                                <td class="px-4 py-3 text-right font-mono font-semibold text-brand-primary">$ 8.100.000</td>
+                                                <td class="px-4 py-3 text-right">
+                                                    <button class="text-brand-primary hover:bg-blue-50 p-1.5 rounded transition-colors"><i class="ph-bold ph-pencil-simple"></i></button>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                         <!-- Accordion Item 2: Patrimonio Neto (PN) -->
+                         <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden border-l-4 border-l-brand-secondary">
+                            <div class="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors">
+                                <div class="flex items-center gap-4">
+                                    <button class="text-gray-400">
+                                        <i class="ph-bold ph-caret-right"></i>
+                                    </button>
+                                    <div>
+                                        <div class="font-bold text-slate-800 flex items-center gap-2">
+                                            <span class="text-[10px] font-bold uppercase tracking-wider text-brand-secondary bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 mr-1">PATRIMONIO NETO</span>
+                                            Patrimonio Neto
+                                            <span class="text-brand-secondary text-[10px] flex items-center gap-0.5"><i class="ph-fill ph-check-circle"></i> VALIDADO</span>
+                                        </div>
+                                        <div class="text-xs text-gray-500 mt-0.5">Capital, Ajuste de Capital, Resultados</div>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="font-mono font-semibold text-slate-900">$ 10.000.000</div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- DRAWER: PAPEL DE TRABAJO -->
+    <div id="drawer-backdrop" onclick="toggleDrawer()" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-30 hidden drawer-backdrop opacity-0" aria-hidden="true"></div>
+    <div id="drawer-panel" class="fixed inset-y-0 right-0 max-w-md w-full bg-white shadow-2xl z-40 transform translate-x-full drawer-panel flex flex-col">
+        
+        <!-- Drawer Header -->
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+            <div>
+                <h2 class="font-display font-bold text-lg text-slate-900">Método Indirecto</h2>
+                <p class="text-xs text-gray-500">Cálculo simplificado de RECPAM</p>
+            </div>
+            <button onclick="toggleDrawer()" class="text-gray-400 hover:text-slate-900 p-2 rounded-full hover:bg-gray-200 transition-colors">
+                <i class="ph-bold ph-x text-lg"></i>
+            </button>
+        </div>
+
+        <!-- Drawer Content -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-6">
+            
+            <div class="bg-blue-50 border border-blue-100 p-4 rounded-lg flex gap-3">
+                <i class="ph-fill ph-info text-brand-primary text-xl mt-0.5"></i>
+                <div class="text-sm text-slate-700">
+                    <strong class="block text-brand-primary mb-1">Método Indirecto</strong>
+                    El RECPAM se calcula aplicando la tasa de inflación sobre los activos y pasivos monetarios netos mantenidos durante el período.
+                </div>
+            </div>
+
+            <!-- Summary Table -->
+            <table class="w-full text-sm border-collapse">
+                <tbody>
+                    <tr class="border-b border-gray-100">
+                        <td class="py-2 text-gray-500">Activos Monetarios Prom.</td>
+                        <td class="py-2 text-right font-mono font-medium">$ 4.100.000</td>
+                    </tr>
+                    <tr class="border-b border-gray-100">
+                        <td class="py-2 text-gray-500">Pasivos Monetarios Prom.</td>
+                        <td class="py-2 text-right font-mono font-medium text-amber-600">($ 1.100.000)</td>
+                    </tr>
+                    <tr class="bg-gray-50 font-semibold">
+                        <td class="py-3 px-2 text-slate-900">Posición Monetaria Neta</td>
+                        <td class="py-3 px-2 text-right font-mono text-slate-900">$ 3.000.000</td>
+                    </tr>
+                    <tr>
+                        <td class="py-2 px-2 text-gray-500">Inflación del período</td>
+                        <td class="py-2 px-2 text-right font-mono text-slate-700">14.5%</td>
+                    </tr>
+                    <tr class="border-t-2 border-brand-primary bg-blue-50/30">
+                        <td class="py-4 px-2 font-display font-bold text-slate-900 text-lg">RECPAM Estimado</td>
+                        <td class="py-4 px-2 text-right font-mono font-bold text-brand-primary text-lg">($ 435.000)</td>
+                    </tr>
+                </tbody>
+            </table>
+
+        </div>
+
+        <!-- Drawer Footer -->
+        <div class="p-4 border-t border-gray-200 bg-gray-50">
+            <button class="w-full bg-white border border-gray-300 text-slate-700 font-semibold py-3 rounded-lg shadow-sm hover:bg-gray-100 transition-colors">
+                <i class="ph-bold ph-download-simple mr-2"></i> Descargar Excel
+            </button>
+        </div>
+    </div>
+
+    <!-- SCRIPT FOR INTERACTIONS -->
+    <script>
+        // Tab Logic
+        function switchTab(tabId) {
+            // Hide all
+            document.getElementById('tab-monetarias').classList.add('hidden');
+            document.getElementById('tab-nomonetarias').classList.add('hidden');
+            
+            // Reset buttons styles
+            const btnMon = document.getElementById('tab-btn-mon');
+            const btnNoMon = document.getElementById('tab-btn-nomon');
+            
+            btnMon.className = "flex-1 py-4 text-sm font-medium text-gray-500 hover:text-slate-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2";
+            btnNoMon.className = "flex-1 py-4 text-sm font-medium text-gray-500 hover:text-slate-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2";
+
+            // Show selected
+            document.getElementById('tab-' + tabId).classList.remove('hidden');
+
+            // Style active button
+            const activeBtn = tabId === 'monetarias' ? btnMon : btnNoMon;
+            activeBtn.className = "flex-1 py-4 text-sm font-semibold text-brand-primary border-b-2 border-brand-primary bg-blue-50/50 transition-colors flex items-center justify-center gap-2";
+        }
+
+        // Drawer Logic
+        function toggleDrawer() {
+            const backdrop = document.getElementById('drawer-backdrop');
+            const panel = document.getElementById('drawer-panel');
+            
+            if (backdrop.classList.contains('hidden')) {
+                // Open
+                backdrop.classList.remove('hidden');
+                // Small timeout to allow display:block to render before opacity transition
+                setTimeout(() => {
+                    backdrop.classList.remove('opacity-0');
+                    panel.classList.remove('translate-x-full');
+                }, 10);
+            } else {
+                // Close
+                backdrop.classList.add('opacity-0');
+                panel.classList.add('translate-x-full');
+                setTimeout(() => {
+                    backdrop.classList.add('hidden');
+                }, 300);
+            }
+        }
+
+        // Accordion Logic
+        function toggleAccordion(id) {
+            const content = document.getElementById(id);
+            const icon = document.getElementById('icon-' + id);
+            
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                icon.classList.add('rotate-90');
+            } else {
+                content.classList.add('hidden');
+                icon.classList.remove('rotate-90');
+            }
+        }
+    </script>
+</body>
+</html>
