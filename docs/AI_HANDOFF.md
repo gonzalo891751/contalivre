@@ -1,5 +1,35 @@
 # ContaLivre - AI Handoff Protocol
 
+## CHECKPOINT #6 - DIAGNÓSTICO MERGE (LIMPIO)
+**Fecha:** 2026-01-26
+**Estado:** NO HAY CONFLICTOS DE MERGE - El branch NO-SE está adelante de main
+
+---
+
+### Diagnóstico Realizado
+
+**Objetivo:** Verificar y resolver conflictos de merge en archivos RT6
+
+**Archivos verificados:**
+- `src/core/cierre-valuacion/auto-partidas-rt6.ts` - ✅ Sin markers
+- `src/pages/Planillas/CierreValuacionPage.tsx` - ✅ Sin markers
+- `src/pages/Planillas/components/MonetaryAccountsPanel.tsx` - ✅ Sin markers
+
+**Resultado:**
+1. `git merge origin/main` → "Already up to date"
+2. `git diff --check` → Sin markers de conflicto
+3. `npm run build` → PASS (sin errores TS)
+4. El branch NO-SE está 3 commits adelante de main
+
+**Nota:** El grep inicial encontró patrones `=======` en archivos CSS/código (separadores visuales), NO markers de conflicto git reales.
+
+**Commits en NO-SE no en main:**
+- `74d377b` - ..
+- `b966724` - Resolve merge conflicts (RT6 cierre-valuacion)
+- `d68bf01` - CAMBIOS PAGINA
+
+---
+
 ## CHECKPOINT #5 - TODOS LOS BLOQUES COMPLETADOS
 **Fecha:** 2026-01-26
 **Estado:** HARDENING COMPLETO - Build limpio, todas las mejoras implementadas
@@ -164,6 +194,7 @@ npm run dev     # Verificar UI visualmente
 
 | Checkpoint | Fecha | Contenido |
 |------------|-------|-----------|
+| #6 | 2026-01-26 | Diagnóstico merge - NO hay conflictos reales |
 | #5 | 2026-01-26 | Todos los bloques completados |
 | #4 | 2026-01-26 | BLOQUE C (Drilldown) |
 | #3 | 2026-01-26 | BLOQUE A + B (UI + Clasificación) |
