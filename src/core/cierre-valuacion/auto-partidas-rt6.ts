@@ -15,8 +15,8 @@ import {
     getAccountType,
 } from './monetary-classification';
 import { getAccountMetadata } from './classification';
-import { generateId } from './types';
 import { getPeriodFromDate } from './calc';
+import { generateId } from './types';
 
 /**
  * Options for auto-generation
@@ -165,24 +165,21 @@ function generatePartidaForAccount(
 
     // Derive metadata
     const metadata = getAccountMetadata(account.code, account);
-    const extendedGrupo = getAccountType(account);
+    const grupoExtended = getAccountType(account);
     const rubroLabel = account.group || deriveRubroLabel(account.code, metadata.group);
 
-    // Skip RESULTADOS accounts (they don't have RT6 reexpression)
-    if (extendedGrupo === 'RESULTADOS') {
+    // Skip RESULTADOS accounts (they are flow, not stock)
+    if (grupoExtended === 'RESULTADOS') {
         return null;
     }
 
-    // Safe cast: extendedGrupo is now guaranteed to be GrupoContable
-    const grupo = extendedGrupo as 'ACTIVO' | 'PASIVO' | 'PN';
-
     // Map grupo to rubro (legacy enum)
-    const rubro = mapGrupoToRubro(grupo, rubroLabel);
+    const rubro = mapGrupoToRubro(grupoExtended, rubroLabel);
 
     return {
         id: generateId(),
         rubro,
-        grupo,
+        grupo: grupoExtended as GrupoContable, // Safe cast after filtering RESULTADOS
         rubroLabel,
         cuentaCodigo: account.code,
         cuentaNombre: account.name,
@@ -348,7 +345,7 @@ export function isAjusteCapitalAccount(code: string, name: string): boolean {
 /**
  * Map GrupoContable to legacy RubroType enum
  */
-function mapGrupoToRubro(_grupo: GrupoContable, rubroLabel: string): RubroType {
+function mapGrupoToRubro(_grupo: GrupoContable | 'RESULTADOS', rubroLabel: string): RubroType {
     // Try to infer from rubro label keywords
     const label = rubroLabel.toLowerCase();
 

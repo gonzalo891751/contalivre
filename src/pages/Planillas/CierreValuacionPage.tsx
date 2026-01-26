@@ -27,10 +27,7 @@ import {
     formatCoef,
     canGenerateAsientos,
 } from '../../core/cierre-valuacion';
-import {
-    loadCierreValuacionState,
-    saveCierreValuacionState,
-} from '../../storage';
+import { loadCierreValuacionState, saveCierreValuacionState } from '../../storage';
 import { getAllAccounts } from '../../storage/accounts';
 import { Account } from '../../core/models';
 import { RT6Drawer } from './components/RT6Drawer';
@@ -1483,6 +1480,60 @@ export default function CierreValuacionPage() {
                     font-weight: 500;
                 }
                 .btn-ghost:hover { text-decoration: underline; }
+
+                /* Step 2 RT6 Auto styles */
+                .step2-actions-bar {
+                    display: flex;
+                    gap: var(--space-sm);
+                    justify-content: flex-end;
+                    margin-bottom: var(--space-md);
+                }
+
+                .step2-tabs {
+                    display: flex;
+                    gap: var(--space-sm);
+                    border-bottom: 1px solid var(--color-border);
+                    margin-bottom: var(--space-lg);
+                }
+
+                .step2-tab {
+                    display: flex;
+                    align-items: center;
+                    gap: var(--space-sm);
+                    padding: var(--space-sm) var(--space-md);
+                    background: none;
+                    border: none;
+                    font-size: var(--font-size-sm);
+                    font-weight: 600;
+                    color: var(--color-text-secondary);
+                    cursor: pointer;
+                    position: relative;
+                    transition: color 0.2s;
+                    border-bottom: 2px solid transparent;
+                }
+
+                .step2-tab:hover {
+                    color: var(--color-text);
+                }
+
+                .step2-tab.active {
+                    color: var(--brand-primary);
+                    border-bottom-color: var(--brand-primary);
+                    background: rgba(59, 130, 246, 0.05);
+                }
+
+                .step2-tab .badge {
+                    background: var(--surface-3);
+                    color: var(--color-text-secondary);
+                    font-size: var(--font-size-xs);
+                    padding: 2px 6px;
+                    border-radius: var(--radius-sm);
+                }
+
+                .step2-tab.active .badge {
+                    background: var(--brand-primary);
+                    color: white;
+                }
             `}</style>
         </div >
     );

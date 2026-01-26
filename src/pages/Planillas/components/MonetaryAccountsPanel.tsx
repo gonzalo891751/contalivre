@@ -322,7 +322,7 @@ interface MonetaryAccountRowProps {
     item: MonetaryAccount;
     onToggle: () => void;
     onValidate: () => void;
-    onExclude: () => void;
+    onExclude?: () => void; // Optional for future use
 }
 
 function MonetaryAccountRow({ item, onToggle, onValidate, onExclude: _onExclude }: MonetaryAccountRowProps) {
