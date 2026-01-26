@@ -116,13 +116,15 @@ function getMonetaryClassByStatementGroup(group: StatementGroup): MonetaryClass 
 /**
  * Infer Monetary Class by Code Prefix (Plan de Cuentas hierarchy)
  *
- * Typical structure:
+ * Typical Argentine Plan de Cuentas structure:
  * 1.1.01 - Caja y Bancos (MONETARY)
- * 1.1.02 - Créditos (MONETARY)
- * 1.1.03 - Otros Créditos (MONETARY)
+ * 1.1.02 - Créditos por Ventas (MONETARY)
+ * 1.1.03 - Otros Créditos / IVA (MONETARY)
+ * 1.1.04 - Anticipos / Créditos Fiscales (MONETARY)
  * 1.2.01 - Mercaderías (NON_MONETARY)
  * 1.2.02 - Bienes de Uso (NON_MONETARY)
  * 1.2.03 - Intangibles (NON_MONETARY)
+ * 1.2.04 - Inversiones (NON_MONETARY - typically non-monetary investments)
  * 2.1.* - Deudas Corrientes (MONETARY)
  * 2.2.* - Deudas No Corrientes (MONETARY)
  * 3.* - PN (NON_MONETARY)
@@ -131,26 +133,52 @@ function getMonetaryClassByStatementGroup(group: StatementGroup): MonetaryClass 
 function getMonetaryClassByCodePrefix(code: string): MonetaryClass | null {
     const c = code.trim();
 
-    // Exact prefix matches (highest priority)
-    if (c.startsWith('1.1.01')) return 'MONETARY'; // Caja y Bancos
-    if (c.startsWith('1.1.02')) return 'MONETARY'; // Créditos por Ventas
-    if (c.startsWith('1.1.03')) return 'MONETARY'; // Otros Créditos
+    // ==========================================
+    // ACTIVO CORRIENTE
+    // ==========================================
 
-    // Bienes de Cambio / Inventories
-    if (c.startsWith('1.2.01')) return 'NON_MONETARY'; // Mercaderías
+    // Caja y Bancos (MONETARY) - but note: foreign currency sub-accounts
+    // will be caught by name keywords as NON_MONETARY
+    if (c.startsWith('1.1.01')) return 'MONETARY';
 
-    // Bienes de Uso / PPE
-    if (c.startsWith('1.2.02')) return 'NON_MONETARY'; // Bienes de Uso
-    if (c.startsWith('1.2.03')) return 'NON_MONETARY'; // Intangibles
+    // Créditos por Ventas (MONETARY)
+    if (c.startsWith('1.1.02')) return 'MONETARY';
 
-    // Pasivo (generally MONETARY)
+    // Otros Créditos / IVA Crédito Fiscal (MONETARY)
+    if (c.startsWith('1.1.03')) return 'MONETARY';
+    if (c.startsWith('1.1.04')) return 'MONETARY'; // Anticipos, más créditos
+
+    // ==========================================
+    // ACTIVO NO CORRIENTE
+    // ==========================================
+
+    // Bienes de Cambio / Inventories (NON_MONETARY)
+    if (c.startsWith('1.2.01')) return 'NON_MONETARY';
+
+    // Bienes de Uso / PPE (NON_MONETARY)
+    if (c.startsWith('1.2.02')) return 'NON_MONETARY';
+
+    // Intangibles (NON_MONETARY)
+    if (c.startsWith('1.2.03')) return 'NON_MONETARY';
+
+    // Inversiones No Corrientes (typically NON_MONETARY: participaciones, inmuebles)
+    if (c.startsWith('1.2.04')) return 'NON_MONETARY';
+    if (c.startsWith('1.2.05')) return 'NON_MONETARY';
+
+    // ==========================================
+    // PASIVO (generally MONETARY)
+    // ==========================================
     if (c.startsWith('2.1')) return 'MONETARY'; // Deudas Corrientes
     if (c.startsWith('2.2')) return 'MONETARY'; // Deudas No Corrientes
 
-    // PN (always NON_MONETARY)
+    // ==========================================
+    // PATRIMONIO NETO (always NON_MONETARY)
+    // ==========================================
     if (c.startsWith('3')) return 'NON_MONETARY';
 
-    // Resultados (always NON_MONETARY)
+    // ==========================================
+    // RESULTADOS (always NON_MONETARY)
+    // ==========================================
     if (c.startsWith('4') || c.startsWith('5')) return 'NON_MONETARY';
 
     // No clear prefix match
@@ -159,11 +187,49 @@ function getMonetaryClassByCodePrefix(code: string): MonetaryClass | null {
 
 /**
  * Infer Monetary Class by Account Name Keywords (last resort)
+ *
+ * IMPORTANT RT6 FLOW RULES:
+ * - "Moneda extranjera" / foreign currency accounts => NON_MONETARY
+ *   (Even though conceptually monetary, for RT6 they need coefficient adjustment)
+ * - IVA accounts => MONETARY (IVA Crédito Fiscal, IVA Débito Fiscal)
  */
 function getMonetaryClassByName(name: string): MonetaryClass | null {
     const lowerName = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-    // MONETARY keywords
+    // ==========================================
+    // RT6 SPECIAL RULES (highest priority within name matching)
+    // ==========================================
+
+    // Foreign currency accounts => NON_MONETARY in RT6 (they need reexpression)
+    const foreignCurrencyKeywords = [
+        'moneda extranjera',
+        'dolar',
+        'dolares',
+        'usd',
+        'euro',
+        'divisa',
+        'exterior',
+    ];
+    if (foreignCurrencyKeywords.some(kw => lowerName.includes(kw))) {
+        return 'NON_MONETARY';
+    }
+
+    // IVA accounts => MONETARY (they are typical exposed items)
+    const ivaKeywords = [
+        'iva credito',
+        'iva debito',
+        'iva cf',
+        'iva df',
+        'credito fiscal',
+        'debito fiscal',
+    ];
+    if (ivaKeywords.some(kw => lowerName.includes(kw))) {
+        return 'MONETARY';
+    }
+
+    // ==========================================
+    // MONETARY keywords (typical exposed items)
+    // ==========================================
     const monetaryKeywords = [
         'caja',
         'banco',
@@ -179,9 +245,25 @@ function getMonetaryClassByName(name: string): MonetaryClass | null {
         'financiacion',
         'pagar',
         'cobrar',
+        // Payroll and tax liabilities
+        'sueldo',
+        'salario',
+        'remuneracion',
+        'cargas sociales',
+        'contribucion',
+        'impuesto',
+        'anticipo',
+        'retención',
+        'retencion',
+        'percepcion',
+        // Other receivables/payables
+        'a cobrar',
+        'a pagar',
+        'documentos',
+        'cheque',
     ];
 
-    // NON_MONETARY keywords
+    // NON_MONETARY keywords (items that need coefficient adjustment)
     const nonMonetaryKeywords = [
         'mercaderia',
         'mercadería',
@@ -207,6 +289,11 @@ function getMonetaryClassByName(name: string): MonetaryClass | null {
         'compra',
         'gasto',
         'ingreso',
+        // Investments in non-monetary assets
+        'inversion',
+        'inversión',
+        'participacion',
+        'participación',
     ];
 
     // Check MONETARY keywords

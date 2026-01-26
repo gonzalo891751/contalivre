@@ -325,7 +325,7 @@ interface MonetaryAccountRowProps {
     onExclude: () => void;
 }
 
-function MonetaryAccountRow({ item, onToggle, onValidate, onExclude }: MonetaryAccountRowProps) {
+function MonetaryAccountRow({ item, onToggle, onValidate, onExclude: _onExclude }: MonetaryAccountRowProps) {
     const rowClass = item.isValidated ? '' : 'monetary-row-pending';
 
     return (

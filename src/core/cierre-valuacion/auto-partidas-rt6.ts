@@ -13,10 +13,10 @@ import {
     applyOverrides,
     isExcluded,
     getAccountType,
-    type MonetaryClass,
 } from './monetary-classification';
 import { getAccountMetadata } from './classification';
-import { generateId, getPeriodFromDate } from './calc';
+import { generateId } from './types';
+import { getPeriodFromDate } from './calc';
 
 /**
  * Options for auto-generation
@@ -165,8 +165,16 @@ function generatePartidaForAccount(
 
     // Derive metadata
     const metadata = getAccountMetadata(account.code, account);
-    const grupo = getAccountType(account);
+    const extendedGrupo = getAccountType(account);
     const rubroLabel = account.group || deriveRubroLabel(account.code, metadata.group);
+
+    // Skip RESULTADOS accounts (they don't have RT6 reexpression)
+    if (extendedGrupo === 'RESULTADOS') {
+        return null;
+    }
+
+    // Safe cast: extendedGrupo is now guaranteed to be GrupoContable
+    const grupo = extendedGrupo as 'ACTIVO' | 'PASIVO' | 'PN';
 
     // Map grupo to rubro (legacy enum)
     const rubro = mapGrupoToRubro(grupo, rubroLabel);
@@ -296,6 +304,8 @@ function deriveRubroLabel(code: string, grupo: string): string {
     if (code.startsWith('1.2.03')) return 'Intangibles';
     if (code.startsWith('2.1')) return 'Deudas Corrientes';
     if (code.startsWith('2.2')) return 'Deudas No Corrientes';
+    if (code.startsWith('3.1.01')) return 'Capital Social';
+    if (code.startsWith('3.1.02')) return 'Ajuste de Capital';
     if (code.startsWith('3.1')) return 'Capital';
     if (code.startsWith('3.2')) return 'Resultados Acumulados';
     if (code.startsWith('4.1')) return 'Ventas';
@@ -308,9 +318,37 @@ function deriveRubroLabel(code: string, grupo: string): string {
 }
 
 /**
+ * Check if account is a Capital Social account
+ */
+export function isCapitalSocialAccount(code: string, name: string): boolean {
+    const normalizedName = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // Code-based detection (3.1.01.* typically Capital Social)
+    if (code.startsWith('3.1.01')) return true;
+
+    // Name-based detection
+    const capitalKeywords = ['capital social', 'capital suscripto', 'capital integrado'];
+    return capitalKeywords.some(kw => normalizedName.includes(kw));
+}
+
+/**
+ * Check if account is an Ajuste de Capital account
+ */
+export function isAjusteCapitalAccount(code: string, name: string): boolean {
+    const normalizedName = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // Code-based detection (3.1.02.* typically Ajuste de Capital)
+    if (code.startsWith('3.1.02')) return true;
+
+    // Name-based detection
+    const ajusteKeywords = ['ajuste de capital', 'ajuste del capital', 'revaluo de capital'];
+    return ajusteKeywords.some(kw => normalizedName.includes(kw));
+}
+
+/**
  * Map GrupoContable to legacy RubroType enum
  */
-function mapGrupoToRubro(grupo: GrupoContable | 'RESULTADOS', rubroLabel: string): RubroType {
+function mapGrupoToRubro(_grupo: GrupoContable, rubroLabel: string): RubroType {
     // Try to infer from rubro label keywords
     const label = rubroLabel.toLowerCase();
 
@@ -340,7 +378,7 @@ function mapGrupoToRubro(grupo: GrupoContable | 'RESULTADOS', rubroLabel: string
  * Future enhancement: track manual edits and preserve them.
  */
 export function mergeAutoPartidas(
-    existingPartidas: PartidaRT6[],
+    _existingPartidas: PartidaRT6[],
     autoPartidas: PartidaRT6[]
 ): PartidaRT6[] {
     // Keep manual partidas (those without a specific marker)

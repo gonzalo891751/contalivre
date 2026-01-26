@@ -4,7 +4,7 @@
  * Transforms journal entries into account balances and movements.
  */
 
-import type { Account, JournalEntry, EntryLine } from '../models';
+import type { Account, JournalEntry } from '../models';
 
 /**
  * Single movement in the ledger (mayorización)

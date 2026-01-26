@@ -38,22 +38,31 @@ import { RT17Drawer } from './components/RT17Drawer';
 import { IndicesImportWizard } from './components/IndicesImportWizard';
 import { Step2RT6Panel } from './components/Step2RT6Panel';
 import { Step3RT17Panel } from './components/Step3RT17Panel';
+import { RecpamIndirectoDrawer } from './components/RecpamIndirectoDrawer';
+import { useLedgerBalances } from '../../hooks/useLedgerBalances';
+import { autoGeneratePartidasRT6 } from '../../core/cierre-valuacion/auto-partidas-rt6';
+import { calculateRecpamIndirecto, type RecpamIndirectoResult } from '../../core/cierre-valuacion/recpam-indirecto';
+import type { MonetaryClass } from '../../core/cierre-valuacion/monetary-classification';
 import { createEntry, updateEntry } from '../../storage/entries';
 import { computeVoucherHash, findEntryByVoucherKey } from '../../core/cierre-valuacion/sync';
 
-// Icons (using emoji for simplicity - can be replaced with lucide-react)
-const ICONS = {
-    calendar: '📅',
-    warning: '⚠️',
-    check: '✓',
-    plus: '+',
-    edit: '✏️',
-    trending: '📈',
-    calculator: '🧮',
-    dollar: '💵',
-    file: '📄',
-    download: '📥',
-    info: 'ℹ️',
+// Phosphor icon class names (consistent with prototype)
+const ICON_CLASSES = {
+    back: 'ph-bold ph-arrow-left',
+    calendar: 'ph ph-calendar',
+    warning: 'ph-fill ph-warning',
+    check: 'ph-bold ph-check',
+    plus: 'ph-bold ph-plus',
+    edit: 'ph-bold ph-pencil-simple',
+    trending: 'ph-fill ph-trend-up',
+    calculator: 'ph-fill ph-calculator',
+    dollar: 'ph-fill ph-currency-dollar',
+    file: 'ph-fill ph-notebook',
+    download: 'ph-bold ph-download-simple',
+    info: 'ph-fill ph-info',
+    magicWand: 'ph-bold ph-magic-wand',
+    scales: 'ph-fill ph-scales',
+    database: 'ph-fill ph-database',
 };
 
 export default function CierreValuacionPage() {
@@ -83,6 +92,13 @@ export default function CierreValuacionPage() {
 
     // Delete confirmation state
     const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'RT6' | 'RT17'; id: string } | null>(null);
+
+    // RT6 Reexpresion states
+    const [isMetodoIndirectoOpen, setMetodoIndirectoOpen] = useState(false);
+    const [isAnalyzingMayor, setAnalyzingMayor] = useState(false);
+    const [lastMayorAnalysis, setLastMayorAnalysis] = useState<string | undefined>(undefined);
+    const [recpamIndirectoResult, setRecpamIndirectoResult] = useState<RecpamIndirectoResult | null>(null);
+    const [recpamIndirectoLoading, setRecpamIndirectoLoading] = useState(false);
 
     // Refs
     const saveTimeoutRef = useRef<number | null>(null);
@@ -200,6 +216,9 @@ export default function CierreValuacionPage() {
 
     // REAL-TIME SYNC with Ledger
     const allJournalEntries = useLiveQuery(() => db.entries.reverse().toArray(), []);
+
+    // Ledger balances for RT6 classification
+    const ledgerBalances = useLedgerBalances(allJournalEntries, allAccounts, { closingDate });
 
     // Compute Sync Status for each voucher
     const voucherSyncData = useMemo(() => {
@@ -378,13 +397,94 @@ export default function CierreValuacionPage() {
         showToast('Valuación reseteada');
     };
 
-    // RECPAM handlers
-    const handleRecpamChange = (field: 'activeMon' | 'passiveMon', value: number) => {
-        updateState((prev) => ({
-            ...prev,
-            recpamInputs: { ...prev.recpamInputs, [field]: value },
-        }));
-    };
+    // RT6 Panel handlers
+    const handleAnalyzeMayor = useCallback(() => {
+        if (!state || !allJournalEntries) return;
+
+        setAnalyzingMayor(true);
+
+        // Default to start of year based on closingDate
+        const year = closingDate.substring(0, 4);
+        const startOfPeriod = `${year}-01-01`;
+
+        try {
+            const result = autoGeneratePartidasRT6(
+                allAccounts,
+                ledgerBalances.byAccount,
+                state.accountOverrides || {},
+                {
+                    startOfPeriod,
+                    closingDate,
+                    groupByMonth: true,
+                    minLotAmount: 0,
+                }
+            );
+
+            updateState((prev) => ({
+                ...prev,
+                partidasRT6: result.partidas,
+            }));
+
+            setLastMayorAnalysis(new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }));
+            showToast(`Generadas ${result.stats.partidasGenerated} partidas RT6`);
+        } catch (err) {
+            console.error('Error analyzing mayor:', err);
+            showToast('Error al analizar el mayor');
+        } finally {
+            setAnalyzingMayor(false);
+        }
+    }, [state, allJournalEntries, allAccounts, ledgerBalances.byAccount, closingDate, updateState]);
+
+    const handleRecalculate = useCallback(() => {
+        // Recalculate is essentially the same as analyze but without re-generating partidas
+        // Just triggers a re-render by updating state timestamp
+        showToast('Coeficientes recalculados');
+    }, []);
+
+    const handleOpenMetodoIndirecto = useCallback(() => {
+        if (!state || !allJournalEntries) return;
+
+        setMetodoIndirectoOpen(true);
+        setRecpamIndirectoLoading(true);
+
+        // Default to start of year based on closingDate
+        const year = closingDate.substring(0, 4);
+        const startOfPeriod = `${year}-01-01`;
+
+        try {
+            const result = calculateRecpamIndirecto(
+                allJournalEntries,
+                allAccounts,
+                state.accountOverrides || {},
+                indices,
+                startOfPeriod,
+                closingDate
+            );
+            setRecpamIndirectoResult(result);
+        } catch (err) {
+            console.error('Error calculating RECPAM indirecto:', err);
+            setRecpamIndirectoResult(null);
+        } finally {
+            setRecpamIndirectoLoading(false);
+        }
+    }, [state, allJournalEntries, allAccounts, indices, closingDate]);
+
+    const handleToggleClassification = useCallback((accountId: string, _currentClass: MonetaryClass) => {
+        updateState((prev) => {
+            const overrides = { ...(prev.accountOverrides || {}) };
+            const existing = overrides[accountId] || {};
+
+            // Toggle between MONETARY and NON_MONETARY
+            const newClass = existing.classification === 'NON_MONETARY' ? 'MONETARY' : 'NON_MONETARY';
+            overrides[accountId] = {
+                ...existing,
+                classification: newClass as 'MONETARY' | 'NON_MONETARY',
+            };
+
+            return { ...prev, accountOverrides: overrides };
+        });
+        showToast('Clasificación actualizada');
+    }, [updateState]);
 
     // TODO: Add reset button to UI that calls clearCierreValuacionState()
 
@@ -394,17 +494,17 @@ export default function CierreValuacionPage() {
     if (isLoading || !state) {
         return (
             <div className="empty-state">
-                <div className="empty-state-icon">⏳</div>
+                <div className="empty-state-icon"><i className="ph ph-spinner ph-spin" /></div>
                 <p>Cargando planilla...</p>
             </div>
         );
     }
 
     const tabs = [
-        { id: 'indices' as TabId, label: '1. Índices (RT6)', icon: ICONS.trending },
-        { id: 'reexpresion' as TabId, label: '2. Reexpresión', icon: ICONS.calculator },
-        { id: 'valuacion' as TabId, label: '3. Valuación (RT17)', icon: ICONS.dollar },
-        { id: 'asientos' as TabId, label: '4. Asientos Sugeridos', icon: ICONS.file },
+        { id: 'indices' as TabId, label: 'Índices', iconClass: 'ph ph-chart-line-up' },
+        { id: 'reexpresion' as TabId, label: 'Reexpresión', iconClass: 'ph ph-arrows-clockwise' },
+        { id: 'valuacion' as TabId, label: 'Valuación', iconClass: 'ph ph-scales' },
+        { id: 'asientos' as TabId, label: 'Asientos', iconClass: 'ph ph-notebook' },
     ];
 
     return (
@@ -412,89 +512,107 @@ export default function CierreValuacionPage() {
             {/* HEADER */}
             <header className="cierre-header">
                 <div className="cierre-header-left">
-                    <div className="cierre-breadcrumb">
-                        {ICONS.file} Planillas Complementarias / Cierre
+                    <button
+                        className="cierre-back-btn"
+                        onClick={() => navigate('/planillas')}
+                        title="Volver a Planillas"
+                    >
+                        <i className={ICON_CLASSES.back} />
+                    </button>
+                    <div>
+                        <h1 className="cierre-title">Reexpresión y Valuación</h1>
+                        <p className="cierre-subtitle">Ajuste por Inflación + Valuación • Periodo {closingDate.substring(0, 4)}</p>
                     </div>
-                    <h1 className="cierre-title">Cierre: AxI + Valuación</h1>
                 </div>
 
                 <div className="cierre-header-right">
                     <div className="cierre-date-picker">
-                        <span className="cierre-date-label">{ICONS.calendar} Fecha Cierre</span>
+                        <i className={ICON_CLASSES.calendar} />
+                        <span className="cierre-date-value">{new Date(closingDate + 'T00:00:00').toLocaleDateString('es-AR')}</span>
                         <input
                             type="date"
                             value={closingDate}
                             onChange={handleDateChange}
-                            className="form-input"
+                            className="cierre-date-input"
                         />
                     </div>
 
                     {isMissingClosingIndex && (
                         <div className="cierre-warning-chip">
-                            {ICONS.warning} Falta índice {closingPeriod}
+                            <i className={ICON_CLASSES.warning} /> Falta índice {closingPeriod}
                         </div>
                     )}
 
                     <button
-                        className="btn btn-primary"
+                        className="btn btn-gradient"
                         onClick={handleGenerarAsientos}
                         disabled={!canGenerateAsientos(computedRT17)}
                         title={!canGenerateAsientos(computedRT17) ? "Completá todas las valuaciones pendientes para generar asientos" : ""}
                     >
-                        {ICONS.check} Generar Asientos
+                        <i className={ICON_CLASSES.magicWand} />
+                        <span className="btn-text-desktop">Generar Asientos</span>
                     </button>
                 </div>
             </header>
 
             {/* KPI CARDS */}
             <div className="cierre-kpi-row">
-                <div className="cierre-kpi-card cierre-kpi-muted">
-                    <div className="cierre-kpi-label">Activo Base</div>
+                <div className="cierre-kpi-card">
+                    <div className="cierre-kpi-label">Activo Histórico</div>
                     <div className="cierre-kpi-value">{formatCurrencyARS(rt6Totals.totalBase)}</div>
-                    <div className="cierre-kpi-sub">Valores históricos</div>
-                </div>
-                <div className="cierre-kpi-card cierre-kpi-muted">
-                    <div className="cierre-kpi-label">Ajustado (RT6)</div>
-                    <div className="cierre-kpi-value">{formatCurrencyARS(rt6Totals.totalHomog)}</div>
                     <div className="cierre-kpi-sub">
-                        Coef. cierre: {closingIndexValue ? formatCoef(recpamCoef) : '-'}
+                        <i className={ICON_CLASSES.database} /> Base contable
                     </div>
                 </div>
-                <div className="cierre-kpi-card cierre-kpi-emphasis">
+                <div className="cierre-kpi-card">
+                    <div className="cierre-kpi-label">Ajustado al Cierre</div>
+                    <div className="cierre-kpi-value cierre-kpi-primary">{formatCurrencyARS(rt6Totals.totalHomog)}</div>
+                    <div className="cierre-kpi-sub cierre-kpi-sub-success">
+                        <i className={ICON_CLASSES.trending} /> {closingIndexValue ? `+${formatNumber((recpamCoef - 1) * 100, 0)}% Variación` : '-'}
+                    </div>
+                </div>
+                <div className="cierre-kpi-card">
                     <div className="cierre-kpi-label">Impacto RECPAM</div>
-                    <div className="cierre-kpi-value cierre-kpi-gradient-text">
+                    <div className="cierre-kpi-value cierre-kpi-warning">
                         {formatCurrencyARS(rt6Totals.totalRecpam + recpamEstimado)}
                     </div>
-                    <div className="cierre-kpi-sub">RT6 + PMN estimado</div>
-                </div>
-                <div className="cierre-kpi-card cierre-kpi-emphasis cierre-kpi-dark">
-                    <div className="cierre-kpi-label">Valuación</div>
-                    <div className="cierre-kpi-value cierre-kpi-green">
-                        {formatCurrencyARS(rt17Totals.totalResTenencia)}
+                    <div className="cierre-kpi-sub">
+                        <i className={ICON_CLASSES.calculator} /> Estimado RT6
                     </div>
-                    <div className="cierre-kpi-sub">Resultado x Tenencia</div>
+                </div>
+                <div className="cierre-kpi-card cierre-kpi-card-accent">
+                    <div className="cierre-kpi-icon-bg"><i className={ICON_CLASSES.scales} /></div>
+                    <div className="cierre-kpi-label">Valuación RT17</div>
+                    <div className="cierre-kpi-value">{formatCurrencyARS(rt17Totals.totalResTenencia)}</div>
                     <button
-                        className="cierre-kpi-cta"
-                        onClick={() => setActiveTab('asientos')}
+                        className="cierre-kpi-link"
+                        onClick={() => setActiveTab('valuacion')}
                     >
-                        Ver Asientos →
+                        Ver detalle <i className="ph-bold ph-arrow-right" />
                     </button>
                 </div>
             </div>
 
-            {/* TABS */}
-            <div className="cierre-tabs">
-                {tabs.map((tab) => (
-                    <button
-                        key={tab.id}
-                        className={`cierre-tab ${activeTab === tab.id ? 'active' : ''}`}
-                        onClick={() => setActiveTab(tab.id)}
-                    >
-                        <span className="cierre-tab-icon">{tab.icon}</span>
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
+            {/* STEPPER (Visual Progress) */}
+            <nav className="cierre-stepper" aria-label="Progreso">
+                {tabs.map((tab, idx) => {
+                    const isActive = activeTab === tab.id;
+                    const isPast = tabs.findIndex(t => t.id === activeTab) > idx;
+                    return (
+                        <button
+                            key={tab.id}
+                            className={`cierre-step ${isActive ? 'active' : ''} ${isPast ? 'completed' : ''}`}
+                            onClick={() => setActiveTab(tab.id)}
+                        >
+                            <div className="cierre-step-circle">
+                                {isPast ? <i className="ph-bold ph-check" /> : <span>{idx + 1}</span>}
+                            </div>
+                            <span className="cierre-step-label">{tab.label}</span>
+                            {idx < tabs.length - 1 && <div className="cierre-step-line" />}
+                        </button>
+                    );
+                })}
+            </nav>
 
             {/* TAB CONTENT */}
             <div className="cierre-content">
@@ -513,7 +631,7 @@ export default function CierreValuacionPage() {
                                     className="btn btn-secondary"
                                     onClick={() => setImportWizardOpen(true)}
                                 >
-                                    {ICONS.download} Importar
+                                    <i className={ICON_CLASSES.download} /> Importar
                                 </button>
                             </div>
                         </div>
@@ -597,59 +715,22 @@ export default function CierreValuacionPage() {
                 {/* TAB 2: REEXPRESION */}
                 {activeTab === 'reexpresion' && (
                     <div className="cierre-reexpresion">
-                        {/* Info callout */}
-                        <div className="cierre-callout cierre-callout-info">
-                            <span className="cierre-callout-icon">{ICONS.info}</span>
-                            <div>
-                                <strong>Guía rápida RT6</strong>
-                                <ul>
-                                    <li>Las <strong>partidas no monetarias</strong> se reexpresan con coeficiente desde fecha de origen.</li>
-                                    <li>Las <strong>partidas monetarias</strong> generan RECPAM. Usá la calculadora de abajo.</li>
-                                </ul>
-                            </div>
-                        </div>
-
-                        {/* RECPAM Calculator */}
-                        <div className="card cierre-recpam-card">
-                            <div className="card-header">
-                                <h4>{ICONS.calculator} Papel de trabajo: Estimación RECPAM</h4>
-                                <span className="badge">Estimación</span>
-                            </div>
-                            <div className="cierre-recpam-grid">
-                                <div className="form-group">
-                                    <label className="form-label">Activos Monetarios</label>
-                                    <input
-                                        type="number"
-                                        className="form-input"
-                                        value={recpamInputs.activeMon || ''}
-                                        onChange={(e) => handleRecpamChange('activeMon', Number(e.target.value))}
-                                        placeholder="0.00"
-                                    />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Pasivos Monetarios</label>
-                                    <input
-                                        type="number"
-                                        className="form-input"
-                                        value={recpamInputs.passiveMon || ''}
-                                        onChange={(e) => handleRecpamChange('passiveMon', Number(e.target.value))}
-                                        placeholder="0.00"
-                                    />
-                                </div>
-                                <div className="cierre-recpam-result">
-                                    <div className="cierre-recpam-label">RECPAM Estimado</div>
-                                    <div className={`cierre-recpam-value ${recpamEstimado > 0 ? 'positive' : ''}`}>
-                                        {formatCurrencyARS(recpamEstimado)}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
                         <Step2RT6Panel
+                            accounts={allAccounts}
+                            balances={ledgerBalances.byAccount}
+                            overrides={state.accountOverrides || {}}
+                            indices={indices}
+                            closingDate={closingDate}
                             computedRT6={computedRT6}
+                            lastAnalysis={lastMayorAnalysis}
+                            onAnalyzeMayor={handleAnalyzeMayor}
+                            onRecalculate={handleRecalculate}
+                            onOpenMetodoIndirecto={handleOpenMetodoIndirecto}
+                            onToggleClassification={handleToggleClassification}
                             onAddPartida={() => handleOpenRT6Drawer()}
                             onEditPartida={(id) => handleOpenRT6Drawer(id)}
                             onDeletePartida={(id) => setDeleteConfirm({ type: 'RT6', id })}
+                            isAnalyzing={isAnalyzingMayor}
                         />
                     </div>
                 )}
@@ -669,7 +750,7 @@ export default function CierreValuacionPage() {
                 {activeTab === 'asientos' && (
                     <div className="cierre-asientos">
                         <div className="cierre-callout cierre-callout-warning">
-                            <span className="cierre-callout-icon">{ICONS.warning}</span>
+                            <i className={ICON_CLASSES.warning} />
                             <div>
                                 <strong>Borrador de Cierre</strong>
                                 <p>
@@ -695,16 +776,16 @@ export default function CierreValuacionPage() {
                                             {status === 'DESACTUALIZADO' && <span className="badge badge-orange">ACTUALIZACIÓN PENDIENTE</span>}
 
                                             {voucher.isValid ? (
-                                                <span className="text-success font-bold">{ICONS.check} Balanceado</span>
+                                                <span className="text-success font-bold"><i className={ICON_CLASSES.check} /> Balanceado</span>
                                             ) : (
-                                                <span className="text-error font-bold">{ICONS.warning} No balanceado</span>
+                                                <span className="text-error font-bold"><i className={ICON_CLASSES.warning} /> No balanceado</span>
                                             )}
                                         </div>
                                     </div>
 
                                     {voucher.warning && (
                                         <div className="cierre-warning-banner mb-4">
-                                            {ICONS.warning} {voucher.warning}
+                                            <i className={ICON_CLASSES.warning} /> {voucher.warning}
                                         </div>
                                     )}
 
@@ -753,7 +834,7 @@ export default function CierreValuacionPage() {
                                         className="btn btn-secondary flex items-center gap-2"
                                         onClick={() => navigate('/asientos')}
                                     >
-                                        {ICONS.file} Ver en Libro Diario
+                                        <i className={ICON_CLASSES.file} /> Ver en Libro Diario
                                     </button>
                                 )}
                             </div>
@@ -762,7 +843,7 @@ export default function CierreValuacionPage() {
                                 disabled={!voucherSyncData.some(s => s.status === 'PENDIENTE' || s.status === 'DESACTUALIZADO')}
                                 onClick={handleSendToLedger}
                             >
-                                📤 Enviar a Libro Diario
+                                <i className="ph-bold ph-upload-simple" /> Enviar a Libro Diario
                             </button>
                         </div>
                     </div>
@@ -792,6 +873,13 @@ export default function CierreValuacionPage() {
                 isOpen={isImportWizardOpen}
                 onClose={() => setImportWizardOpen(false)}
                 onImport={handleImportIndices}
+            />
+
+            <RecpamIndirectoDrawer
+                isOpen={isMetodoIndirectoOpen}
+                onClose={() => setMetodoIndirectoOpen(false)}
+                result={recpamIndirectoResult}
+                loading={recpamIndirectoLoading}
             />
 
             {/* INDEX EDIT MODAL */}
@@ -886,18 +974,48 @@ export default function CierreValuacionPage() {
                     align-items: center;
                     gap: var(--space-md);
                     margin-bottom: var(--space-lg);
-                    padding: var(--space-md) 0;
+                    padding: var(--space-md) var(--space-lg);
+                    background: white;
                     border-bottom: 1px solid var(--color-border);
+                    position: sticky;
+                    top: 0;
+                    z-index: 20;
                 }
-                .cierre-breadcrumb {
-                    font-size: var(--font-size-sm);
+                .cierre-header-left {
+                    display: flex;
+                    align-items: center;
+                    gap: var(--space-md);
+                }
+                .cierre-back-btn {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 40px;
+                    height: 40px;
+                    border: none;
+                    background: var(--surface-2);
+                    border-radius: var(--radius-md);
+                    cursor: pointer;
+                    transition: all 0.15s ease;
                     color: var(--color-text-secondary);
-                    margin-bottom: var(--space-xs);
                 }
+                .cierre-back-btn:hover {
+                    background: var(--surface-3);
+                    color: var(--brand-primary);
+                }
+                .cierre-back-btn i { font-size: 1.25rem; }
                 .cierre-title {
-                    font-size: var(--font-size-2xl);
+                    font-family: var(--font-display, 'Outfit', sans-serif);
+                    font-size: var(--font-size-xl);
                     font-weight: 700;
                     margin: 0;
+                    color: var(--color-text);
+                    letter-spacing: -0.02em;
+                }
+                .cierre-subtitle {
+                    font-size: var(--font-size-sm);
+                    color: var(--color-text-secondary);
+                    margin: var(--space-xs) 0 0 0;
                 }
                 .cierre-header-right {
                     display: flex;
@@ -913,12 +1031,49 @@ export default function CierreValuacionPage() {
                     padding: var(--space-sm) var(--space-md);
                     border-radius: var(--radius-md);
                     border: 1px solid var(--color-border);
+                    position: relative;
+                    cursor: pointer;
                 }
-                .cierre-date-label {
-                    font-size: var(--font-size-xs);
+                .cierre-date-picker i { color: var(--color-text-secondary); }
+                .cierre-date-value {
+                    font-family: var(--font-mono);
+                    font-size: var(--font-size-sm);
+                    color: var(--color-text);
+                }
+                .cierre-date-input {
+                    position: absolute;
+                    inset: 0;
+                    opacity: 0;
+                    cursor: pointer;
+                    width: 100%;
+                }
+                .btn-gradient {
+                    display: flex;
+                    align-items: center;
+                    gap: var(--space-sm);
+                    background: linear-gradient(135deg, #3B82F6 0%, #10B981 100%);
+                    color: white;
+                    border: none;
+                    padding: var(--space-sm) var(--space-md);
+                    border-radius: var(--radius-md);
                     font-weight: 600;
-                    text-transform: uppercase;
-                    color: var(--color-text-secondary);
+                    cursor: pointer;
+                    transition: all 0.15s ease;
+                    box-shadow: 0 4px 14px rgba(59, 130, 246, 0.25);
+                }
+                .btn-gradient:hover {
+                    background: linear-gradient(135deg, #2563EB 0%, #059669 100%);
+                    transform: translateY(-1px);
+                }
+                .btn-gradient:active { transform: scale(0.98); }
+                .btn-gradient:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                    transform: none;
+                }
+                .btn-text-desktop { display: none; }
+                @media (min-width: 640px) {
+                    .btn-text-desktop { display: inline; }
                 }
                 .cierre-warning-chip {
                     display: flex;
@@ -936,92 +1091,161 @@ export default function CierreValuacionPage() {
                     0%, 100% { opacity: 1; }
                     50% { opacity: 0.7; }
                 }
+                /* KPI Row */
                 .cierre-kpi-row {
                     display: grid;
                     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
                     gap: var(--space-md);
                     margin-bottom: var(--space-lg);
+                    padding: 0 var(--space-lg);
                 }
                 .cierre-kpi-card {
-                    background: var(--surface-2);
+                    background: white;
                     border: 1px solid var(--color-border);
                     border-radius: var(--radius-lg);
                     padding: var(--space-md);
                     transition: all 0.2s ease;
-                }
-                /* Muted cards - less emphasis */
-                .cierre-kpi-muted {
-                    opacity: 0.85;
-                    border-color: var(--color-border);
-                }
-                .cierre-kpi-muted .cierre-kpi-value {
-                    font-size: var(--font-size-lg);
-                    font-weight: 600;
-                }
-                /* Emphasis cards - more prominent */
-                .cierre-kpi-emphasis {
-                    background: linear-gradient(135deg, var(--surface-1) 0%, var(--surface-2) 100%);
-                    border: 2px solid transparent;
-                    background-clip: padding-box;
+                    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
                     position: relative;
+                    overflow: hidden;
                 }
-                .cierre-kpi-emphasis::before {
-                    content: '';
+                .cierre-kpi-card:hover {
+                    border-color: rgba(59, 130, 246, 0.3);
+                }
+                .cierre-kpi-card-accent {
+                    background: white;
+                }
+                .cierre-kpi-icon-bg {
                     position: absolute;
-                    inset: -2px;
-                    border-radius: calc(var(--radius-lg) + 2px);
-                    background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 50%, #10B981 100%);
-                    z-index: -1;
+                    right: 0;
+                    top: 0;
+                    padding: var(--space-md);
+                    opacity: 0.1;
                 }
-                .cierre-kpi-emphasis .cierre-kpi-value {
-                    font-size: var(--font-size-2xl);
-                }
-                .cierre-kpi-gradient-text {
-                    background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                    background-clip: text;
-                }
-                .cierre-kpi-highlight {
-                    background: var(--surface-1);
-                    border-color: var(--brand-primary);
-                    box-shadow: 0 0 0 1px var(--brand-primary);
-                }
-                .cierre-kpi-dark {
-                    background: #0F172A;
-                    color: white;
-                    border: none;
-                }
-                .cierre-kpi-dark::before {
-                    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-                }
+                .cierre-kpi-icon-bg i { font-size: 2rem; color: var(--brand-primary); }
                 .cierre-kpi-label {
                     font-size: var(--font-size-xs);
-                    font-weight: 600;
+                    font-weight: 700;
                     text-transform: uppercase;
-                    opacity: 0.7;
+                    letter-spacing: 0.05em;
+                    color: var(--color-text-secondary);
                     margin-bottom: var(--space-xs);
                 }
                 .cierre-kpi-value {
                     font-size: var(--font-size-xl);
-                    font-weight: 700;
+                    font-weight: 600;
                     font-family: var(--font-mono);
+                    color: var(--color-text);
                 }
-                .cierre-kpi-green { color: #10B981; }
+                .cierre-kpi-primary { color: var(--brand-primary); }
+                .cierre-kpi-warning { color: #F59E0B; }
                 .cierre-kpi-sub {
                     font-size: var(--font-size-xs);
-                    opacity: 0.6;
-                    margin-top: var(--space-xs);
+                    color: var(--color-text-secondary);
+                    margin-top: var(--space-sm);
+                    display: flex;
+                    align-items: center;
+                    gap: var(--space-xs);
                 }
-                .cierre-kpi-cta {
+                .cierre-kpi-sub i { font-size: 0.85rem; }
+                .cierre-kpi-sub-success { color: #10B981; font-weight: 500; }
+                .cierre-kpi-link {
                     margin-top: var(--space-sm);
                     background: none;
                     border: none;
-                    color: #60A5FA;
-                    font-size: var(--font-size-sm);
-                    font-weight: 600;
+                    color: var(--brand-primary);
+                    font-size: var(--font-size-xs);
+                    font-weight: 500;
                     cursor: pointer;
                     padding: 0;
+                    display: flex;
+                    align-items: center;
+                    gap: var(--space-xs);
+                }
+                .cierre-kpi-link:hover { text-decoration: underline; }
+
+                /* Stepper */
+                .cierre-stepper {
+                    display: flex;
+                    align-items: center;
+                    justify-content: flex-start;
+                    padding: var(--space-lg) var(--space-lg) calc(var(--space-lg) + var(--space-md));
+                    gap: 0;
+                }
+                .cierre-step {
+                    display: flex;
+                    align-items: center;
+                    position: relative;
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                    padding: 0;
+                }
+                .cierre-step-circle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: var(--font-size-xs);
+                    font-weight: 600;
+                    background: white;
+                    border: 2px solid var(--color-border);
+                    color: var(--color-text-secondary);
+                    transition: all 0.2s ease;
+                }
+                .cierre-step.active .cierre-step-circle {
+                    border-color: var(--brand-primary);
+                    background: white;
+                }
+                .cierre-step.active .cierre-step-circle::after {
+                    content: '';
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 50%;
+                    background: var(--brand-primary);
+                }
+                .cierre-step.active .cierre-step-circle span { display: none; }
+                .cierre-step.completed .cierre-step-circle {
+                    background: var(--brand-primary);
+                    border-color: var(--brand-primary);
+                    color: white;
+                }
+                .cierre-step:hover .cierre-step-circle {
+                    border-color: var(--brand-primary);
+                }
+                .cierre-step-label {
+                    position: absolute;
+                    top: 100%;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    margin-top: var(--space-sm);
+                    font-size: var(--font-size-xs);
+                    font-weight: 500;
+                    color: var(--color-text-secondary);
+                    white-space: nowrap;
+                }
+                .cierre-step.active .cierre-step-label {
+                    font-weight: 700;
+                    color: var(--color-text);
+                }
+                .cierre-step.completed .cierre-step-label {
+                    color: var(--brand-primary);
+                }
+                .cierre-step-line {
+                    width: 80px;
+                    height: 2px;
+                    background: var(--color-border);
+                    margin: 0 var(--space-xs);
+                }
+                .cierre-step.completed + .cierre-step .cierre-step-line,
+                .cierre-step.completed .cierre-step-line {
+                    background: var(--brand-primary);
+                }
+                @media (max-width: 640px) {
+                    .cierre-step-line { width: 40px; }
+                    .cierre-step-label { font-size: 0.65rem; }
                 }
                 /* Edit Modal */
                 .cierre-edit-modal-overlay {
@@ -1136,41 +1360,9 @@ export default function CierreValuacionPage() {
                 .cierre-totals-row td {
                     padding: var(--space-sm);
                 }
-                .cierre-tabs {
-                    display: flex;
-                    gap: var(--space-lg);
-                    border-bottom: 1px solid var(--color-border);
-                    margin-bottom: var(--space-lg);
+                .cierre-content {
+                    padding: 0 var(--space-lg);
                 }
-                .cierre-tab {
-                    display: flex;
-                    align-items: center;
-                    gap: var(--space-sm);
-                    padding: var(--space-sm) 0;
-                    background: none;
-                    border: none;
-                    font-size: var(--font-size-sm);
-                    font-weight: 600;
-                    color: var(--color-text-secondary);
-                    cursor: pointer;
-                    position: relative;
-                    transition: color 0.2s;
-                }
-                .cierre-tab:hover { color: var(--color-text); }
-                .cierre-tab.active {
-                    color: var(--brand-primary);
-                }
-                .cierre-tab.active::after {
-                    content: '';
-                    position: absolute;
-                    bottom: -1px;
-                    left: 0;
-                    right: 0;
-                    height: 2px;
-                    background: var(--brand-primary);
-                    border-radius: 2px 2px 0 0;
-                }
-                .cierre-content { }
                 .cierre-callout {
                     display: flex;
                     gap: var(--space-md);

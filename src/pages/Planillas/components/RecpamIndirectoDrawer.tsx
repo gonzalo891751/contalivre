@@ -44,7 +44,7 @@ export function RecpamIndirectoDrawer({
                         onClick={onClose}
                         aria-label="Cerrar"
                     >
-                        ✕
+                        <i className="ph-bold ph-x" />
                     </button>
                 </div>
 
@@ -70,7 +70,7 @@ export function RecpamIndirectoDrawer({
                         <>
                             {/* Info Callout */}
                             <div className="recpam-info-callout">
-                                <div className="recpam-info-icon">ℹ️</div>
+                                <i className="ph-fill ph-info recpam-info-icon" />
                                 <div className="recpam-info-text">
                                     <strong className="recpam-info-title">Método Indirecto</strong>
                                     <p>
@@ -86,31 +86,33 @@ export function RecpamIndirectoDrawer({
                                     <tr>
                                         <td>Activos Monetarios Prom.</td>
                                         <td className="text-right font-mono font-medium">
-                                            {formatNumber(result.avgActivoMon, 2)}
+                                            {isNaN(result.avgActivoMon) ? '—' : formatCurrencyARS(result.avgActivoMon)}
                                         </td>
                                     </tr>
                                     <tr>
                                         <td>Pasivos Monetarios Prom.</td>
                                         <td className="text-right font-mono font-medium text-warning">
-                                            ({formatNumber(result.avgPasivoMon, 2)})
+                                            {isNaN(result.avgPasivoMon) ? '—' : `(${formatCurrencyARS(result.avgPasivoMon)})`}
                                         </td>
                                     </tr>
                                     <tr className="recpam-summary-highlight">
                                         <td className="font-semibold">Posición Monetaria Neta</td>
                                         <td className="text-right font-mono font-semibold">
-                                            {formatNumber(result.avgPmn, 2)}
+                                            {isNaN(result.avgPmn) ? '—' : formatCurrencyARS(result.avgPmn)}
                                         </td>
                                     </tr>
                                     <tr>
                                         <td>Inflación del período</td>
                                         <td className="text-right font-mono">
-                                            {formatCoef(result.overallCoef - 1)} ({((result.overallCoef - 1) * 100).toFixed(1)}%)
+                                            {isNaN(result.overallCoef) || result.overallCoef === 1
+                                                ? '—'
+                                                : `${((result.overallCoef - 1) * 100).toFixed(1)}%`}
                                         </td>
                                     </tr>
                                     <tr className="recpam-summary-total">
                                         <td className="recpam-summary-total-label">RECPAM Estimado</td>
                                         <td className="recpam-summary-total-value">
-                                            {formatCurrencyARS(result.total)}
+                                            {isNaN(result.total) ? '—' : formatCurrencyARS(result.total)}
                                         </td>
                                     </tr>
                                 </tbody>
@@ -164,7 +166,7 @@ export function RecpamIndirectoDrawer({
                             {/* Missing Indices Warning */}
                             {result.missingIndices.length > 0 && (
                                 <div className="recpam-warning-callout">
-                                    <div className="recpam-warning-icon">⚠️</div>
+                                    <i className="ph-fill ph-warning recpam-warning-icon" />
                                     <div>
                                         <strong>Indices faltantes:</strong> {result.missingIndices.join(', ')}
                                         <p className="text-muted text-sm">El cálculo puede ser inexacto.</p>
@@ -310,6 +312,9 @@ export function RecpamIndirectoDrawer({
                 }
                 .recpam-info-icon {
                     font-size: 1.25rem;
+                    color: var(--brand-primary);
+                    flex-shrink: 0;
+                    margin-top: 2px;
                 }
                 .recpam-info-title {
                     display: block;
@@ -418,6 +423,9 @@ export function RecpamIndirectoDrawer({
                 }
                 .recpam-warning-icon {
                     font-size: 1.25rem;
+                    color: #F59E0B;
+                    flex-shrink: 0;
+                    margin-top: 2px;
                 }
 
                 /* Footer */
