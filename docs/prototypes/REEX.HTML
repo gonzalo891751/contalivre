@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Reexpresión (RT6)</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        :root {
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --border-light: #E2E8F0;
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --radius-md: 12px;
+            --radius-sm: 6px;
+        }
+
+        body {
+            background-color: var(--bg-app);
+            font-family: var(--font-body);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .font-display { font-family: var(--font-display); }
+        .font-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+
+        /* Accordion & Transitions */
+        .origin-row { transition: all 0.2s ease; }
+        .origin-row:hover { background-color: #F1F5F9; }
+        
+        .tab-active {
+            border-bottom: 2px solid var(--brand-primary);
+            color: var(--brand-primary);
+            font-weight: 600;
+        }
+
+        .kpi-card {
+            background: white;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .btn-primary {
+            background: var(--brand-gradient);
+            color: white;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+            transition: all 0.2s;
+        }
+        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+
+        .badge-monetary-ne {
+            background: #E0F2FE;
+            color: #0369A1;
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .nature-header {
+            background: #F1F5F9;
+            padding: 0.75rem 1rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-family: var(--font-display);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .rubric-header {
+            background: #F8FAFC;
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid var(--border-light);
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Tooltip simple */
+        .tooltip { position: relative; cursor: help; }
+        .tooltip:hover::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1E293B;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            z-index: 50;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <!-- HEADER / BREADCRUMBS -->
+    <header class="max-w-7xl mx-auto mb-6">
+        <nav class="flex items-center gap-2 text-sm text-slate-500 mb-2">
+            <a href="#" class="hover:text-blue-600 transition-colors">Planillas complementarias</a>
+            <i class="ph ph-caret-right text-xs"></i>
+            <a href="#" class="hover:text-blue-600 transition-colors">Ajuste por Inflación + Valuación</a>
+        </nav>
+        <div class="flex items-center gap-4">
+            <button class="p-2 hover:bg-white rounded-full transition-all border border-transparent hover:border-slate-200">
+                <i class="ph ph-arrow-left text-xl"></i>
+            </button>
+            <h1 class="text-3xl font-extrabold font-display tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-emerald-500">
+                Reexpresión (RT6)
+            </h1>
+        </div>
+    </header>
+
+    <!-- STEPPER -->
+    <div class="max-w-7xl mx-auto mb-8">
+        <div class="flex items-center justify-between relative">
+            <div class="absolute top-1/2 left-0 w-full h-0.5 bg-slate-200 -z-10"></div>
+            <!-- Step 1 -->
+            <div class="flex flex-col items-center gap-2 bg-slate-50 px-4">
+                <div class="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold">
+                    <i class="ph ph-check"></i>
+                </div>
+                <span class="text-xs font-semibold text-slate-400">Índices</span>
+            </div>
+            <!-- Step 2 (Active) -->
+            <div class="flex flex-col items-center gap-2 bg-slate-50 px-4">
+                <div class="w-10 h-10 rounded-full border-4 border-white bg-blue-600 text-white flex items-center justify-center font-bold shadow-lg">
+                    2
+                </div>
+                <span class="text-xs font-bold text-blue-600 uppercase tracking-wider">Reexpresión</span>
+            </div>
+            <!-- Step 3 -->
+            <div class="flex flex-col items-center gap-2 bg-slate-50 px-4">
+                <div class="w-8 h-8 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center font-bold">
+                    3
+                </div>
+                <span class="text-xs font-semibold text-slate-400">Valuación</span>
+            </div>
+            <!-- Step 4 -->
+            <div class="flex flex-col items-center gap-2 bg-slate-50 px-4">
+                <div class="w-8 h-8 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center font-bold">
+                    4
+                </div>
+                <span class="text-xs font-semibold text-slate-400">Asientos</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- KPI ROW -->
+    <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div class="kpi-card">
+            <span class="text-xs font-semibold text-slate-400 uppercase">Activo Histórico</span>
+            <div class="text-2xl font-bold font-mono mt-1 text-slate-800">$ 4.250.800,00</div>
+        </div>
+        <div class="kpi-card border-blue-100 bg-blue-50/30">
+            <div class="flex justify-between items-start">
+                <span class="text-xs font-semibold text-blue-600 uppercase">Ajustado al Cierre</span>
+                <span class="tooltip text-blue-400" data-tip="Fórmula: ((Ajustado / Histórico) - 1) * 100">
+                    <i class="ph ph-info text-base"></i>
+                </span>
+            </div>
+            <div class="text-2xl font-bold font-mono mt-1 text-blue-700">$ 5.890.320,15</div>
+            <div class="text-xs font-bold text-emerald-600 mt-1">
+                <i class="ph ph-trend-up"></i> +38.57% variación
+            </div>
+        </div>
+        <div class="kpi-card border-emerald-100">
+            <span class="text-xs font-semibold text-emerald-600 uppercase">Impacto RECPAM Est.</span>
+            <div class="text-2xl font-bold font-mono mt-1 text-emerald-700">$ 1.639.520,15</div>
+            <div class="text-[10px] text-slate-400 mt-1 uppercase">Basado en posición monetaria</div>
+        </div>
+        <div class="kpi-card">
+            <div class="flex justify-between items-center">
+                <span class="text-xs font-semibold text-slate-400 uppercase">Valuación (RT17)</span>
+                <a href="#" class="text-[10px] font-bold text-blue-600 hover:underline">VER DETALLE</a>
+            </div>
+            <div class="text-2xl font-bold font-mono mt-1 text-slate-800">$ 250.100,00</div>
+            <div class="text-[10px] text-slate-400 mt-1 uppercase">Diferencia de cotización/VNR</div>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT CARD -->
+    <main class="max-w-7xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        
+        <!-- ACTION BAR -->
+        <div class="p-4 border-bottom border-slate-100 bg-slate-50/50 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <button class="btn-primary px-6 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2" onclick="showLoading()">
+                    <i class="ph ph-magnifying-glass-plus"></i> Analizar Mayor
+                </button>
+                <button class="bg-white border border-slate-200 px-4 py-2.5 rounded-lg font-bold text-sm text-slate-700 flex items-center gap-2 hover:bg-slate-50">
+                    <i class="ph ph-arrows-counter-clockwise"></i> Recalcular
+                </button>
+                <button class="text-blue-600 font-bold text-sm px-4 hover:bg-blue-50 py-2.5 rounded-lg transition-colors">
+                    Método Indirecto
+                </button>
+            </div>
+            <div class="flex items-center gap-3 text-xs">
+                <div class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
+                    <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span class="font-bold">AUTO-SYNC ON</span>
+                </div>
+                <span class="text-slate-400">Último análisis: Hoy 14:25</span>
+            </div>
+        </div>
+
+        <!-- TABS -->
+        <div class="flex border-b border-slate-200 px-4">
+            <button class="px-6 py-4 text-sm font-bold flex items-center gap-2 transition-all hover:bg-slate-50" onclick="switchTab('monetarias')">
+                Monetarias (Expuestas)
+                <span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px]">12</span>
+            </button>
+            <button class="px-6 py-4 text-sm font-bold flex items-center gap-2 transition-all tab-active" onclick="switchTab('no-monetarias')">
+                No Monetarias (No Expuestas)
+                <span class="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-[10px]">24</span>
+            </button>
+        </div>
+
+        <!-- TAB CONTENT: NO MONETARIAS -->
+        <div id="tab-no-monetarias" class="block">
+            <div class="p-4 bg-blue-50/40 border-b border-blue-100">
+                <p class="text-xs text-blue-700 leading-relaxed">
+                    <i class="ph ph-info-fill"></i> 
+                    Estas partidas se reexpresan aplicando coeficientes basados en la fecha de origen (anticuación) para llevar los valores a moneda de cierre. 
+                </p>
+            </div>
+
+            <!-- TABLE HEADERS -->
+            <div class="grid grid-cols-12 gap-4 px-6 py-3 bg-slate-50 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest border-b border-slate-200">
+                <div class="col-span-5">Cuenta / Rubro</div>
+                <div class="col-span-2 text-right">V. Origen</div>
+                <div class="col-span-2 text-right">V. Homogéneo</div>
+                <div class="col-span-2 text-right">Ajuste</div>
+                <div class="col-span-1 text-center">Acciones</div>
+            </div>
+
+            <!-- HIERARCHY -->
+            <div class="divide-y divide-slate-100">
+                
+                <!-- NATURE: ACTIVO -->
+                <div class="nature-block">
+                    <div class="nature-header">
+                        <span>Activo</span>
+                        <div class="flex gap-8 font-mono text-sm tracking-normal font-medium">
+                            <span>$ 3.120.000</span>
+                            <span class="text-blue-600">$ 4.500.000</span>
+                        </div>
+                    </div>
+
+                    <!-- RUBRIC: BIENES DE CAMBIO -->
+                    <div class="rubric-block">
+                        <div class="rubric-header" onclick="toggleAccordion('rub-cambio')">
+                            <div class="flex items-center gap-2 cursor-pointer">
+                                <i class="ph ph-caret-down text-xs"></i>
+                                <span>Bienes de Cambio</span>
+                            </div>
+                            <div class="flex gap-8 font-mono text-[13px] text-slate-500">
+                                <span>$ 850.000</span>
+                                <span class="text-blue-500">$ 1.250.000</span>
+                            </div>
+                        </div>
+
+                        <div id="rub-cambio" class="divide-y divide-slate-50">
+                            <!-- ACCOUNT: MERCADERIAS -->
+                            <div class="bg-white">
+                                <div class="grid grid-cols-12 gap-4 px-6 py-4 items-center group">
+                                    <div class="col-span-5 flex items-center gap-3">
+                                        <div class="w-2 h-2 rounded-full bg-emerald-500" title="Origen Automático"></div>
+                                        <div>
+                                            <div class="font-bold text-sm">Mercaderías de Reventa</div>
+                                            <div class="text-[10px] text-slate-400 font-mono">1.1.3.01.001</div>
+                                        </div>
+                                        <button class="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded font-bold hover:bg-blue-600 hover:text-white transition-colors" onclick="toggleOrigins('origins-mercaderias')">
+                                            3 ORÍGENES <i class="ph ph-caret-down"></i>
+                                        </button>
+                                    </div>
+                                    <div class="col-span-2 text-right font-mono text-sm">$ 850.000,00</div>
+                                    <div class="col-span-2 text-right font-mono text-sm text-blue-600">$ 1.250.000,00</div>
+                                    <div class="col-span-2 text-right font-mono text-sm text-emerald-600">+ $ 400.000,00</div>
+                                    <div class="col-span-1 flex justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button class="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Editar"><i class="ph ph-pencil-simple-bold"></i></button>
+                                        <button class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded" title="Eliminar"><i class="ph ph-trash-bold"></i></button>
+                                    </div>
+                                </div>
+
+                                <!-- EXPANDED ORIGINS -->
+                                <div id="origins-mercaderias" class="hidden bg-slate-50/80 px-12 py-4 border-y border-slate-100">
+                                    <table class="w-full text-xs font-mono">
+                                        <thead>
+                                            <tr class="text-[10px] text-slate-400 uppercase">
+                                                <th class="text-left pb-2">Mes Origen</th>
+                                                <th class="text-right pb-2">V. Origen</th>
+                                                <th class="text-right pb-2">Índice O.</th>
+                                                <th class="text-right pb-2">Coef.</th>
+                                                <th class="text-right pb-2">V. Homogéneo</th>
+                                                <th class="text-right pb-2">Ajuste</th>
+                                                <th class="text-center pb-2"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-200">
+                                            <tr class="origin-row">
+                                                <td class="py-2 font-bold text-slate-700">2025-03</td>
+                                                <td class="py-2 text-right">$ 300.000,00</td>
+                                                <td class="py-2 text-right">1.250,50</td>
+                                                <td class="py-2 text-right">1.45</td>
+                                                <td class="py-2 text-right font-bold text-blue-600">$ 435.000,00</td>
+                                                <td class="py-2 text-right text-emerald-600">$ 135.000,00</td>
+                                                <td class="py-2 text-center text-slate-300">
+                                                    <i class="ph ph-pencil-simple cursor-pointer hover:text-blue-600"></i>
+                                                </td>
+                                            </tr>
+                                            <tr class="origin-row">
+                                                <td class="py-2 font-bold text-slate-700">2025-06</td>
+                                                <td class="py-2 text-right">$ 400.000,00</td>
+                                                <td class="py-2 text-right">1.820,10</td>
+                                                <td class="py-2 text-right">1.22</td>
+                                                <td class="py-2 text-right font-bold text-blue-600">$ 488.000,00</td>
+                                                <td class="py-2 text-right text-emerald-600">$ 88.000,00</td>
+                                                <td class="py-2 text-center text-slate-300">
+                                                    <i class="ph ph-pencil-simple cursor-pointer hover:text-blue-600"></i>
+                                                </td>
+                                            </tr>
+                                            <tr class="origin-row">
+                                                <td class="py-2 font-bold text-slate-700">2025-10</td>
+                                                <td class="py-2 text-right">$ 150.000,00</td>
+                                                <td class="py-2 text-right">2.105,40</td>
+                                                <td class="py-2 text-right">1.05</td>
+                                                <td class="py-2 text-right font-bold text-blue-600">$ 157.500,00</td>
+                                                <td class="py-2 text-right text-emerald-600">$ 7.500,00</td>
+                                                <td class="py-2 text-center text-slate-300">
+                                                    <i class="ph ph-pencil-simple cursor-pointer hover:text-blue-600"></i>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                        <tfoot>
+                                            <tr>
+                                                <td colspan="7" class="pt-3">
+                                                    <button class="text-[10px] font-bold text-blue-600 flex items-center gap-1 hover:underline">
+                                                        <i class="ph ph-plus-circle"></i> AGREGAR ORIGEN MANUAL
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- SPECIAL CASE: MONEDA EXTRANJERA -->
+                            <div class="bg-amber-50/30">
+                                <div class="grid grid-cols-12 gap-4 px-6 py-4 items-center group border-l-4 border-amber-400">
+                                    <div class="col-span-5 flex items-center gap-3">
+                                        <div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-bold text-sm">Banco Nación - USD</span>
+                                                <span class="badge-monetary-ne tooltip" data-tip="Monetaria. Se expresa en pesos y luego se valúa a T.C.">Monetaria no expuesta</span>
+                                            </div>
+                                            <div class="text-[10px] text-slate-400 font-mono">1.1.1.02.001</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-span-2 text-right font-mono text-sm">$ 120.000,00</div>
+                                    <div class="col-span-2 text-right font-mono text-sm text-blue-600">$ 120.000,00</div>
+                                    <div class="col-span-2 text-right font-mono text-sm text-slate-400">$ 0,00</div>
+                                    <div class="col-span-1 flex justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button class="p-1.5 text-slate-400 hover:text-blue-600 rounded"><i class="ph ph-pencil-simple-bold"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RUBRIC: BIENES DE USO -->
+                    <div class="rubric-block">
+                         <div class="rubric-header" onclick="toggleAccordion('rub-uso')">
+                            <div class="flex items-center gap-2 cursor-pointer">
+                                <i class="ph ph-caret-right text-xs"></i>
+                                <span>Bienes de Uso</span>
+                            </div>
+                            <div class="flex gap-8 font-mono text-[13px] text-slate-500">
+                                <span>$ 2.270.000</span>
+                                <span class="text-blue-500">$ 3.250.000</span>
+                            </div>
+                        </div>
+                        <div id="rub-uso" class="hidden px-8 py-4 text-xs text-slate-400 italic">
+                            Contenido de Bienes de Uso...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NATURE: PASIVO -->
+                <div class="nature-block">
+                    <div class="nature-header">
+                        <span>Pasivo</span>
+                        <div class="flex gap-8 font-mono text-sm tracking-normal font-medium">
+                            <span>$ 0</span>
+                            <span class="text-blue-600">$ 0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NATURE: PATRIMONIO NETO -->
+                <div class="nature-block">
+                    <div class="nature-header">
+                        <span>Patrimonio Neto</span>
+                        <div class="flex gap-8 font-mono text-sm tracking-normal font-medium">
+                            <span>$ 1.130.800</span>
+                            <span class="text-blue-600">$ 1.390.320</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- FOOTER TABLE -->
+            <div class="p-6 bg-slate-50 border-t border-slate-200">
+                <button class="border-2 border-dashed border-slate-300 w-full py-4 rounded-xl text-slate-400 font-bold text-sm hover:border-blue-400 hover:text-blue-600 hover:bg-white transition-all">
+                    <i class="ph ph-plus-circle"></i> AGREGAR CUENTA NO MONETARIA MANUAL
+                </button>
+            </div>
+        </div>
+
+        <!-- TAB CONTENT: MONETARIAS (HIDDEN BY DEFAULT) -->
+        <div id="tab-monetarias" class="hidden">
+             <div class="p-4 bg-slate-50 border-b border-slate-200">
+                <p class="text-xs text-slate-500">
+                    <i class="ph ph-warning-circle-fill"></i> 
+                    Las partidas monetarias no se reexpresan por índice. Su mantenimiento genera RECPAM por exposición a la inflación.
+                </p>
+            </div>
+            <div class="p-20 text-center">
+                <i class="ph ph-layout text-6xl text-slate-200"></i>
+                <h3 class="mt-4 font-bold text-slate-400 tracking-tight">Cuentas Monetarias</h3>
+                <p class="text-sm text-slate-400">Aquí se listarán Caja, Bancos y Créditos/Deudas en pesos.</p>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- LOADING OVERLAY (MOCK) -->
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] hidden flex items-center justify-center">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center gap-4 max-w-sm text-center">
+            <div class="w-12 h-12 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div>
+            <h3 class="font-display font-bold text-xl">Analizando Libro Mayor</h3>
+            <p class="text-sm text-slate-500">Estamos clasificando las cuentas y buscando orígenes de movimientos para el ajuste. Bancanos un toque...</p>
+        </div>
+    </div>
+
+    <!-- NOTAS PARA IMPLEMENTAR (VISIBLE PARA DEV) -->
+    <div class="max-w-7xl mx-auto mt-12 p-8 bg-slate-900 rounded-2xl text-slate-300 font-mono text-xs leading-relaxed">
+        <h4 class="text-blue-400 font-bold mb-4 uppercase text-[10px] tracking-widest">NOTAS PARA IMPLEMENTAR (React/TS)</h4>
+        
+        <p class="mb-2">// Componentes sugeridos:</p>
+        <ul class="list-disc ml-6 mb-4">
+            <li><span class="text-emerald-400">StepRT6View</span>: Contenedor principal con State de RT6.</li>
+            <li><span class="text-emerald-400">KpiSummary</span>: Row de las 4 cards (recibe `data`).</li>
+            <li><span class="text-emerald-400">NatureAccordion</span>: El bloque A/P/PN.</li>
+            <li><span class="text-emerald-400">AccountRow</span>: Fila de cuenta con lógica de expansión de orígenes.</li>
+            <li><span class="text-emerald-400">OriginSubTable</span>: La tabla de anticuación interna.</li>
+        </ul>
+
+        <p class="mb-2">// Data Shape (Interface):</p>
+        <pre class="bg-slate-800 p-4 rounded text-blue-200">
+interface RT6Account {
+  id: string;
+  code: string;
+  name: string;
+  isMonetary: boolean;
+  isForeignCurrency: boolean; // Si es true, va a No Monetarias con badge
+  origins: {
+    date: string; // YYYY-MM
+    amount: number;
+    indexOrigin: number;
+    indexClosing: number;
+    coefficient: number;
+    homogeneousValue: number;
+  }[];
+  totalHistorical: number;
+  totalAdjusted: number;
+}
+        </pre>
+
+        <p class="mt-4 mb-2">// Lógica "Analizar Mayor":</p>
+        <p>1. Fetch de cuentas con saldo no nulo al cierre.<br>
+           2. Clasificar por Plan de Cuentas (Caja/Bancos/Créditos = Monet.; Bienes/PN = No Monet.).<br>
+           3. Para No Monetarias: Buscar cada movimiento que compone el saldo final y agrupar por mes (Anticuación).<br>
+           4. Matchear Mes contra tabla de Índices (IPIM/IPC) para calcular Coeficiente.</p>
+    </div>
+
+    <script>
+        function toggleAccordion(id) {
+            const el = document.getElementById(id);
+            const icon = el.previousElementSibling.querySelector('.ph-caret-right, .ph-caret-down');
+            
+            if (el.classList.contains('hidden')) {
+                el.classList.remove('hidden');
+                icon.classList.replace('ph-caret-right', 'ph-caret-down');
+            } else {
+                el.classList.add('hidden');
+                icon.classList.replace('ph-caret-down', 'ph-caret-right');
+            }
+        }
+
+        function toggleOrigins(id) {
+            const el = document.getElementById(id);
+            el.classList.toggle('hidden');
+        }
+
+        function switchTab(tab) {
+            const tMon = document.getElementById('tab-monetarias');
+            const tNoMon = document.getElementById('tab-no-monetarias');
+            
+            // UI classes reset could be more elegant in React, here it's manual
+            if (tab === 'monetarias') {
+                tMon.classList.remove('hidden');
+                tNoMon.classList.add('hidden');
+            } else {
+                tMon.classList.add('hidden');
+                tNoMon.classList.remove('hidden');
+            }
+        }
+
+        function showLoading() {
+            const overlay = document.getElementById('loading-overlay');
+            overlay.classList.remove('hidden');
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+            }, 2500);
+        }
+    </script>
+</body>
+</html>
