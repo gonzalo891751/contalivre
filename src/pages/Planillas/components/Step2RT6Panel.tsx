@@ -8,7 +8,7 @@
  * - Expandable rows for account details
  */
 
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, Fragment, useCallback } from 'react';
 import type { Account } from '../../../core/models';
 import type { AccountBalance } from '../../../core/ledger/computeBalances';
 import type { ComputedPartidaRT6, AccountOverride, IndexRow } from '../../../core/cierre-valuacion/types';
@@ -46,6 +46,8 @@ interface Step2RT6PanelProps {
     onRecalculate: () => void;
     onOpenMetodoIndirecto: () => void;
     onToggleClassification: (accountId: string, currentClass: MonetaryClass) => void;
+    onExcludeAccount: (accountId: string) => void;
+    onAddMonetaryManual: (accountId: string) => void;
     onAddPartida: () => void;
     onEditPartida: (id: string) => void;
     onDeletePartida: (id: string) => void;
@@ -100,6 +102,8 @@ export function Step2RT6Panel({
     onRecalculate,
     onOpenMetodoIndirecto,
     onToggleClassification,
+    onExcludeAccount,
+    onAddMonetaryManual,
     onAddPartida,
     onEditPartida,
     onDeletePartida,
@@ -108,11 +112,20 @@ export function Step2RT6Panel({
     const [activeTab, setActiveTab] = useState<TabId>('monetarias');
     const [expandedRubros, setExpandedRubros] = useState<Set<string>>(new Set());
     const [expandedPartidas, setExpandedPartidas] = useState<Set<string>>(new Set());
+    const [showAccountPicker, setShowAccountPicker] = useState(false);
+
+    // ============================================
+    // Account picker handler
+    // ============================================
+    const handleAddManualMonetary = useCallback((accountId: string) => {
+        onAddMonetaryManual(accountId);
+        setShowAccountPicker(false);
+    }, [onAddMonetaryManual]);
 
     // ============================================
     // Classify accounts into Monetary / Non-Monetary
     // ============================================
-    const { activosMon, pasivosMon, totalsMon } = useMemo(() => {
+    const { activosMon, pasivosMon, totalsMon, availableToAddMon } = useMemo(() => {
         const activosMon: MonetaryAccount[] = [];
         const pasivosMon: MonetaryAccount[] = [];
 
@@ -147,10 +160,22 @@ export function Step2RT6Panel({
         const totalPasivosMon = pasivosMon.reduce((sum, a) => sum + a.balance, 0);
         const netoMon = totalActivosMon - totalPasivosMon;
 
+        // Accounts available to add as monetary (not already classified as monetary)
+        const monetaryIds = new Set([...activosMon, ...pasivosMon].map(a => a.account.id));
+        const availableToAddMon = accounts.filter(acc => {
+            if (acc.isHeader) return false;
+            if (isExcluded(acc.id, overrides)) return false;
+            if (monetaryIds.has(acc.id)) return false;
+            const bal = balances.get(acc.id);
+            if (!bal || bal.balance === 0) return false;
+            return true;
+        });
+
         return {
             activosMon,
             pasivosMon,
             totalsMon: { totalActivosMon, totalPasivosMon, netoMon },
+            availableToAddMon,
         };
     }, [accounts, balances, overrides]);
 
@@ -322,6 +347,48 @@ export function Step2RT6Panel({
                             </div>
                         </div>
 
+                        {/* Add Manual Monetary Button + Picker */}
+                        <div className="rt6-add-manual-section">
+                            <button
+                                className="rt6-btn-add-manual"
+                                onClick={() => setShowAccountPicker(!showAccountPicker)}
+                                disabled={availableToAddMon.length === 0}
+                            >
+                                <i className="ph-bold ph-plus" />
+                                Agregar monetaria manual
+                            </button>
+                            {showAccountPicker && availableToAddMon.length > 0 && (
+                                <div className="rt6-account-picker">
+                                    <div className="rt6-picker-header">
+                                        Seleccionar cuenta
+                                        <button
+                                            className="rt6-picker-close"
+                                            onClick={() => setShowAccountPicker(false)}
+                                        >
+                                            <i className="ph-bold ph-x" />
+                                        </button>
+                                    </div>
+                                    <div className="rt6-picker-list">
+                                        {availableToAddMon.slice(0, 20).map((acc) => (
+                                            <button
+                                                key={acc.id}
+                                                className="rt6-picker-item"
+                                                onClick={() => handleAddManualMonetary(acc.id)}
+                                            >
+                                                <span className="rt6-picker-code">{acc.code}</span>
+                                                <span className="rt6-picker-name">{acc.name}</span>
+                                            </button>
+                                        ))}
+                                        {availableToAddMon.length > 20 && (
+                                            <div className="rt6-picker-more">
+                                                +{availableToAddMon.length - 20} más...
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         {/* Empty State */}
                         {monetariasCount === 0 && (
                             <div className="rt6-empty-state">
@@ -358,6 +425,7 @@ export function Step2RT6Panel({
                                                         key={item.account.id}
                                                         item={item}
                                                         onToggle={() => onToggleClassification(item.account.id, item.classification)}
+                                                        onExclude={() => onExcludeAccount(item.account.id)}
                                                     />
                                                 ))}
                                             </tbody>
@@ -386,6 +454,7 @@ export function Step2RT6Panel({
                                                         key={item.account.id}
                                                         item={item}
                                                         onToggle={() => onToggleClassification(item.account.id, item.classification)}
+                                                        onExclude={() => onExcludeAccount(item.account.id)}
                                                     />
                                                 ))}
                                             </tbody>
@@ -1015,6 +1084,109 @@ export function Step2RT6Panel({
                     background: #FEF2F2;
                 }
 
+                /* Add Manual Monetary Section */
+                .rt6-add-manual-section {
+                    position: relative;
+                    margin-bottom: var(--space-md);
+                }
+                .rt6-btn-add-manual {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    padding: 8px 16px;
+                    font-size: 0.85rem;
+                    font-weight: 500;
+                    color: #3B82F6;
+                    background: #EFF6FF;
+                    border: 1px dashed #93C5FD;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    transition: all 0.15s;
+                }
+                .rt6-btn-add-manual:hover:not(:disabled) {
+                    background: #DBEAFE;
+                    border-color: #3B82F6;
+                }
+                .rt6-btn-add-manual:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+                .rt6-account-picker {
+                    position: absolute;
+                    top: 100%;
+                    left: 0;
+                    margin-top: 4px;
+                    min-width: 320px;
+                    max-height: 300px;
+                    background: white;
+                    border: 1px solid #E5E7EB;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    z-index: 50;
+                    overflow: hidden;
+                }
+                .rt6-picker-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 10px 12px;
+                    font-size: 0.8rem;
+                    font-weight: 600;
+                    color: #6B7280;
+                    border-bottom: 1px solid #E5E7EB;
+                    background: #F9FAFB;
+                }
+                .rt6-picker-close {
+                    background: none;
+                    border: none;
+                    padding: 4px;
+                    cursor: pointer;
+                    color: #9CA3AF;
+                }
+                .rt6-picker-close:hover {
+                    color: #374151;
+                }
+                .rt6-picker-list {
+                    max-height: 240px;
+                    overflow-y: auto;
+                }
+                .rt6-picker-item {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    width: 100%;
+                    padding: 10px 12px;
+                    text-align: left;
+                    background: none;
+                    border: none;
+                    border-bottom: 1px solid #F3F4F6;
+                    cursor: pointer;
+                    transition: background 0.1s;
+                }
+                .rt6-picker-item:hover {
+                    background: #F3F4F6;
+                }
+                .rt6-picker-code {
+                    font-family: var(--font-mono);
+                    font-size: 0.75rem;
+                    color: #6B7280;
+                    min-width: 80px;
+                }
+                .rt6-picker-name {
+                    font-size: 0.85rem;
+                    color: #374151;
+                    flex: 1;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                .rt6-picker-more {
+                    padding: 8px 12px;
+                    font-size: 0.75rem;
+                    color: #9CA3AF;
+                    text-align: center;
+                    background: #F9FAFB;
+                }
                 /* No Monetarias Header */
                 .rt6-nomon-header {
                     display: flex;
@@ -1283,7 +1455,6 @@ export function Step2RT6Panel({
         </div>
     );
 }
-
 // ============================================
 // Sub-Components
 // ============================================
@@ -1291,9 +1462,10 @@ export function Step2RT6Panel({
 interface MonetaryRowProps {
     item: MonetaryAccount;
     onToggle: () => void;
+    onExclude: () => void;
 }
 
-function MonetaryRow({ item, onToggle }: MonetaryRowProps) {
+function MonetaryRow({ item, onToggle, onExclude }: MonetaryRowProps) {
     const isPending = item.isAuto;
 
     return (
@@ -1315,9 +1487,18 @@ function MonetaryRow({ item, onToggle }: MonetaryRowProps) {
                     <button
                         className="rt6-action-btn"
                         onClick={onToggle}
-                        title="Reclasificar como No Monetaria"
+                        title="Editar clasificación"
+                        aria-label="Editar cuenta"
                     >
                         <i className="ph-bold ph-pencil-simple" />
+                    </button>
+                    <button
+                        className="rt6-action-btn rt6-action-btn-danger"
+                        onClick={onExclude}
+                        title="Eliminar de Monetarias"
+                        aria-label="Eliminar cuenta"
+                    >
+                        <i className="ph-bold ph-trash" />
                     </button>
                 </div>
             </td>

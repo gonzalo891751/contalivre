@@ -502,6 +502,39 @@ export default function CierreValuacionPage() {
         showToast('Planilla limpiada');
     }, []);
 
+    // Handler: Exclude account from RT6 calculations
+    const handleExcludeAccount = useCallback((accountId: string) => {
+        const confirmed = window.confirm(
+            '¿Excluir esta cuenta del cálculo RT6?\n\n' +
+            'La cuenta no aparecerá en Monetarias ni en \"Sin clasificar\".'
+        );
+        if (!confirmed) return;
+
+        updateState((prev) => {
+            const overrides = { ...(prev.accountOverrides || {}) };
+            overrides[accountId] = {
+                ...overrides[accountId],
+                exclude: true,
+            };
+            return { ...prev, accountOverrides: overrides };
+        });
+        showToast('Cuenta excluida');
+    }, [updateState]);
+
+    // Handler: Add account as manual monetary
+    const handleAddMonetaryManual = useCallback((accountId: string) => {
+        updateState((prev) => {
+            const overrides = { ...(prev.accountOverrides || {}) };
+            overrides[accountId] = {
+                ...overrides[accountId],
+                classification: 'MONETARY',
+                exclude: false,
+            };
+            return { ...prev, accountOverrides: overrides };
+        });
+        showToast('Cuenta agregada a Monetarias');
+    }, [updateState]);
+
     // =============================================
     // Render
     // =============================================
@@ -540,16 +573,18 @@ export default function CierreValuacionPage() {
                 </div>
 
                 <div className="cierre-header-right">
-                    <div className="cierre-date-picker">
+                    <label className="cierre-date-picker" htmlFor="cierre-date-input">
                         <i className={ICON_CLASSES.calendar} />
                         <span className="cierre-date-value">{new Date(closingDate + 'T00:00:00').toLocaleDateString('es-AR')}</span>
                         <input
+                            id="cierre-date-input"
                             type="date"
                             value={closingDate}
                             onChange={handleDateChange}
                             className="cierre-date-input"
+                            aria-label="Fecha de cierre"
                         />
-                    </div>
+                    </label>
 
                     {isMissingClosingIndex && (
                         <div className="cierre-warning-chip">
@@ -742,6 +777,8 @@ export default function CierreValuacionPage() {
                             onRecalculate={handleRecalculate}
                             onOpenMetodoIndirecto={handleOpenMetodoIndirecto}
                             onToggleClassification={handleToggleClassification}
+                            onExcludeAccount={handleExcludeAccount}
+                            onAddMonetaryManual={handleAddMonetaryManual}
                             onAddPartida={() => handleOpenRT6Drawer()}
                             onEditPartida={(id) => handleOpenRT6Drawer(id)}
                             onDeletePartida={(id) => setDeleteConfirm({ type: 'RT6', id })}
@@ -1048,12 +1085,18 @@ export default function CierreValuacionPage() {
                     border: 1px solid var(--color-border);
                     position: relative;
                     cursor: pointer;
+                    transition: border-color 0.15s, box-shadow 0.15s;
                 }
-                .cierre-date-picker i { color: var(--color-text-secondary); }
+                .cierre-date-picker:hover {
+                    border-color: var(--brand-primary);
+                    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+                }
+                .cierre-date-picker i { color: var(--color-text-secondary); pointer-events: none; }
                 .cierre-date-value {
                     font-family: var(--font-mono);
                     font-size: var(--font-size-sm);
                     color: var(--color-text);
+                    pointer-events: none;
                 }
                 .cierre-date-input {
                     position: absolute;
@@ -1061,6 +1104,8 @@ export default function CierreValuacionPage() {
                     opacity: 0;
                     cursor: pointer;
                     width: 100%;
+                    height: 100%;
+                    z-index: 1;
                 }
                 .btn-gradient {
                     display: flex;

@@ -1,5 +1,69 @@
 # ContaLivre - AI Handoff Protocol
 
+## CHECKPOINT #10 - RT6 REEXPRESIÓN UX IMPROVEMENTS
+**Fecha:** 2026-01-27
+**Estado:** ✅ COMPLETADO - Build limpio, todas las correcciones UX completadas
+
+---
+
+### RESUMEN DE CAMBIOS
+
+**A) Date Picker Fix:**
+- Problema: El botón de fecha no era clickeable en toda su área
+- Solución: Cambio de `<div>` a `<label>` con `htmlFor`, `pointer-events: none` en hijos, y hover states
+
+**B) Monetarias Actions:**
+- Agregado botón "Eliminar" (trash icon) en cada fila de cuenta monetaria
+- Agregado botón "+ Agregar monetaria manual" con dropdown picker de cuentas
+- Mejora de accesibilidad con aria-labels
+
+**D) RECPAM Drawer Values:**
+- Corregido cálculo de `overallCoef`: ahora usa el índice del período de inicio real, no `indices[0]`
+- Agregados nuevos campos: `inflationPeriod` e `inflationLastMonth`
+- Agregada fila "Inflación último mes" en el drawer
+
+---
+
+### ARCHIVOS MODIFICADOS
+
+| Archivo | Cambio |
+|---------|--------|
+| `CierreValuacionPage.tsx` | Date picker `<label>`, hover states, handlers `handleExcludeAccount` y `handleAddMonetaryManual` |
+| `Step2RT6Panel.tsx` | MonetaryRow con delete button, account picker dropdown, CSS para nuevos componentes |
+| `recpam-indirecto.ts` | Fix overallCoef, agregados inflationPeriod e inflationLastMonth |
+| `RecpamIndirectoDrawer.tsx` | Display de inflacionPeriod e inflactionLastMonth |
+
+---
+
+### VERIFICACIÓN
+
+```bash
+npm run build   # ✅ PASS
+```
+
+**QA manual:**
+1. `/planillas/cierre-valuacion` → Tab Reexpresión
+2. Click en date picker → debe abrir calendario en cualquier parte del botón
+3. Click "Analizar Mayor" → verificar que cada fila tiene botones edit/delete
+4. Click "+" Agregar monetaria manual → debe mostrar dropdown con cuentas disponibles
+5. Click "Método indirecto" → drawer debe mostrar:
+   - Activos/Pasivos Monetarios Prom. (valores numéricos)
+   - Posición Monetaria Neta (valor numérico)
+   - Inflación del período (% calculado)
+   - Inflación último mes (% calculado)
+   - RECPAM Estimado (valor numérico)
+
+---
+
+### NOTA: ITEMS DIFERIDOS
+
+- **C) Cuentas Sin Clasificar Card** - Sección para listar cuentas no clasificadas (para futura implementación)
+- **E) Column Alignment** - Mejoras de alineación de columnas (mejora visual menor)
+
+---
+
+---
+
 ## CHECKPOINT #9 - ÍCONOS PHOSPHOR VISIBLES
 **Fecha:** 2026-01-26
 **Estado:** ✅ COMPLETADO - Build limpio, íconos funcionando
