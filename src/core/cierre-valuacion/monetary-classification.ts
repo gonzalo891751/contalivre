@@ -345,7 +345,9 @@ export function applyOverrides(
     overrides: Record<string, AccountOverride>
 ): MonetaryClass {
     const override = overrides[accountId];
-    return override?.classification || initialClass;
+    if (!override) return initialClass;
+    if (override.isFxProtected) return 'FX_PROTECTED';
+    return override.classification || initialClass;
 }
 
 /**
@@ -499,10 +501,131 @@ export function getClassificationLabel(classification: MonetaryClass): string {
     const labels: Record<MonetaryClass, string> = {
         'MONETARY': 'Monetaria',
         'NON_MONETARY': 'No Monetaria',
-        'FX_PROTECTED': 'ME Protegida',
+        'FX_PROTECTED': 'Monetaria no expuesta',
         'INDEFINIDA': 'Sin clasificar',
     };
     return labels[classification] || classification;
+}
+
+/**
+ * Resolution result for valuation method suggestion
+ */
+export interface ValuationMethodResolution {
+    method: ValuationMethod;
+    reason: string;
+    help?: string;
+    fxRateType?: 'compra' | 'venta';
+}
+
+/**
+ * Resolve valuation method based on account characteristics and classification.
+ * This is the primary resolver used by RT17 Drawer.
+ */
+export function resolveValuationMethod(
+    account: Account,
+    classification: MonetaryClass,
+    override?: AccountOverride
+): ValuationMethodResolution {
+    // 0) User override wins
+    if (override?.valuationMethod) {
+        return {
+            method: override.valuationMethod,
+            reason: 'Metodo definido manualmente',
+        };
+    }
+
+    // 1) PN accounts don't require valuation
+    if (account.kind === 'EQUITY') {
+        return {
+            method: 'NA',
+            reason: 'Cuenta de Patrimonio Neto',
+        };
+    }
+
+    const normalize = (str: string) =>
+        str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const lowerName = normalize(account.name || '');
+    const accountType = getAccountType(account);
+
+    // 2) Foreign currency -> FX (monetaria no expuesta)
+    if (classification === 'FX_PROTECTED' || isForeignCurrencyAccount(account)) {
+        const fxRateType = accountType === 'PASIVO' ? 'compra' : 'venta';
+        return {
+            method: 'FX',
+            reason: 'Moneda extranjera',
+            fxRateType,
+            help: fxRateType === 'venta'
+                ? 'Activos: usar tipo de cambio vendedor/venta.'
+                : 'Pasivos: usar tipo de cambio comprador/compra.',
+        };
+    }
+
+    // 3) Inventories -> Replacement cost
+    if (
+        account.statementGroup === 'INVENTORIES' ||
+        account.code.startsWith('1.2.01') ||
+        lowerName.includes('mercader') ||
+        lowerName.includes('stock') ||
+        lowerName.includes('inventar')
+    ) {
+        return {
+            method: 'REPOSICION',
+            reason: 'Bienes de cambio / inventarios',
+        };
+    }
+
+    // 4) PPE -> Technical revaluation (unless depreciation/contra)
+    const isDepreciationLike =
+        account.isContra ||
+        lowerName.includes('amortiz') ||
+        lowerName.includes('depreciac') ||
+        lowerName.includes('agotam') ||
+        lowerName.includes('acumulad');
+    if (
+        account.statementGroup === 'PPE' ||
+        account.code.startsWith('1.2.02') ||
+        lowerName.includes('bienes de uso') ||
+        lowerName.includes('rodado') ||
+        lowerName.includes('inmueble') ||
+        lowerName.includes('maquinaria')
+    ) {
+        if (isDepreciationLike) {
+            return {
+                method: 'NA',
+                reason: 'Cuenta regularizadora / amortizacion acumulada',
+            };
+        }
+        return {
+            method: 'REVALUO',
+            reason: 'Bienes de uso',
+        };
+    }
+
+    // 5) Investments -> VPP or VNR/mercado
+    const looksLikeVPP =
+        lowerName.includes('particip') ||
+        lowerName.includes('control') ||
+        lowerName.includes('influencia') ||
+        lowerName.includes('vpp');
+    if (
+        account.statementGroup === 'INVESTMENTS' ||
+        account.code.startsWith('1.2.04') ||
+        account.code.startsWith('1.2.05') ||
+        lowerName.includes('inversion') ||
+        lowerName.includes('acciones') ||
+        lowerName.includes('bono') ||
+        lowerName.includes('titulo')
+    ) {
+        return looksLikeVPP
+            ? { method: 'VPP', reason: 'Participacion / influencia significativa' }
+            : { method: 'VNR', reason: 'Inversion con mercado / valor corriente' };
+    }
+
+    // 6) Default
+    return {
+        method: 'MANUAL',
+        reason: 'Sin heuristica especifica',
+    };
 }
 
 /**
@@ -512,38 +635,5 @@ export function suggestValuationMethod(
     account: Account,
     classification: MonetaryClass
 ): ValuationMethod {
-    // FX protected accounts use FX valuation
-    if (classification === 'FX_PROTECTED') {
-        return 'FX';
-    }
-
-    // Check account name for hints
-    const lowerName = account.name.toLowerCase();
-
-    // Inventories -> VNR or Reposicion
-    if (lowerName.includes('mercaderia') || lowerName.includes('stock') || lowerName.includes('inventario')) {
-        return 'REPOSICION';
-    }
-
-    // Investments / Participations -> VPP
-    if (lowerName.includes('participacion') || lowerName.includes('inversion') || lowerName.includes('acciones')) {
-        return 'VPP';
-    }
-
-    // PPE -> Revaluo or NA (depreciation follows base asset)
-    if (lowerName.includes('bienes de uso') || lowerName.includes('rodado') || lowerName.includes('inmueble')) {
-        // Check if it's accumulated depreciation
-        if (lowerName.includes('amortizacion') || lowerName.includes('depreciacion')) {
-            return 'NA'; // Follows base asset
-        }
-        return 'REVALUO';
-    }
-
-    // PN accounts don't need valuation
-    if (account.kind === 'EQUITY') {
-        return 'NA';
-    }
-
-    // Default to manual
-    return 'MANUAL';
+    return resolveValuationMethod(account, classification).method;
 }

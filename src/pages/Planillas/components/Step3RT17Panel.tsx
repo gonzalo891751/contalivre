@@ -14,6 +14,8 @@ import {
     getValuationProgress,
     type ValuationProgress,
 } from '../../../core/cierre-valuacion';
+import { isCapitalSocialAccount } from '../../../core/cierre-valuacion/auto-partidas-rt6';
+import type { ValuationMethod } from '../../../core/cierre-valuacion/monetary-classification';
 
 interface Step3RT17PanelProps {
     computedRT17: ComputedPartidaRT17[];
@@ -27,6 +29,16 @@ const GROUP_LABELS: Record<string, string> = {
     ACTIVO: 'ACTIVO',
     PASIVO: 'PASIVO',
     PN: 'PATRIMONIO NETO',
+};
+
+const METHOD_LABELS: Record<ValuationMethod, string> = {
+    FX: 'Tipo de cambio',
+    VNR: 'Valor de mercado / VNR',
+    VPP: 'VPP',
+    REPOSICION: 'Costo de reposicion',
+    REVALUO: 'Revaluo tecnico',
+    MANUAL: 'Manual',
+    NA: 'No requiere accion',
 };
 
 type StatusType = 'pending' | 'done' | 'na';
@@ -154,6 +166,16 @@ export function Step3RT17Panel({
                                 const statusConfig = STATUS_CONFIG[status];
                                 const homog = getRT6Homog(partida.sourcePartidaId);
                                 const isNA = status === 'na';
+                                const isCapitalSocial = isCapitalSocialAccount(partida.cuentaCodigo, partida.cuentaNombre);
+                                const fallbackMethodLabel =
+                                    partida.profileType === 'moneda_extranjera'
+                                        ? 'Cotizacion cierre'
+                                        : partida.profileType === 'mercaderias'
+                                            ? 'Costo de reposicion'
+                                            : isNA
+                                                ? 'No requiere accion'
+                                                : 'Manual';
+                                const methodLabel = partida.method ? METHOD_LABELS[partida.method] : fallbackMethodLabel;
 
                                 return (
                                     <div
@@ -188,16 +210,15 @@ export function Step3RT17Panel({
                                                 <span>
                                                     Método:{' '}
                                                     <span className="step3-method">
-                                                        {partida.profileType === 'moneda_extranjera'
-                                                            ? 'Cotización Cierre'
-                                                            : partida.profileType === 'mercaderias'
-                                                                ? 'Costo de Reposición'
-                                                                : isNA
-                                                                    ? 'No requiere acción'
-                                                                    : 'Manual'}
+                                                        {methodLabel}
                                                     </span>
                                                 </span>
                                             </div>
+                                            {isCapitalSocial && (
+                                                <div className="step3-capital-note">
+                                                    El Capital Social se mantiene historico. La reexpresion se registra en Ajuste de capital.
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Results Block */}
@@ -584,6 +605,15 @@ function getStyles(): string {
         .step3-method {
             color: var(--brand-primary);
             font-weight: 500;
+        }
+        .step3-capital-note {
+            margin-top: 6px;
+            padding: 6px 8px;
+            font-size: 0.8rem;
+            border-radius: 8px;
+            border: 1px solid #A7F3D0;
+            background: #ECFDF5;
+            color: #047857;
         }
 
         /* Results Block */

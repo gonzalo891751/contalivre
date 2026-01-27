@@ -39,6 +39,8 @@ interface Step2RT6PanelProps {
     closingDate: string;
     computedRT6: ComputedPartidaRT6[];
     lastAnalysis?: string;
+    closingEntriesDetected?: boolean;
+    closingEntriesCount?: number;
 
     // Handlers
     onAnalyzeMayor: () => void;
@@ -65,12 +67,23 @@ interface MonetaryAccount {
     isAuto: boolean;
 }
 
+interface FxProtectedAccount extends MonetaryAccount {
+    accountType: ReturnType<typeof getAccountType>;
+}
+
 const GROUP_ORDER = ['ACTIVO', 'PASIVO', 'PN'] as const;
 const GROUP_LABELS: Record<string, string> = {
     ACTIVO: 'ACTIVO',
     PASIVO: 'PASIVO',
     PN: 'PATRIMONIO NETO',
     RESULTADOS: 'RESULTADOS',
+};
+
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+    ACTIVO: 'Activo',
+    PASIVO: 'Pasivo',
+    PN: 'Patrimonio Neto',
+    RESULTADOS: 'Resultados',
 };
 
 const GROUP_COLORS: Record<string, { border: string; bg: string; text: string }> = {
@@ -95,10 +108,10 @@ export function Step2RT6Panel({
     accounts,
     balances,
     overrides,
-    indices: _indices,
-    closingDate: _closingDate,
     computedRT6,
     lastAnalysis,
+    closingEntriesDetected = false,
+    closingEntriesCount = 0,
     onAnalyzeMayor,
     onClearAll,
     onRecalculate,
@@ -129,9 +142,17 @@ export function Step2RT6Panel({
     // ============================================
     // Classify accounts into Monetary / Non-Monetary
     // ============================================
-    const { activosMon, pasivosMon, totalsMon, availableToAddMon, unclassifiedAccounts } = useMemo(() => {
+    const {
+        activosMon,
+        pasivosMon,
+        fxProtectedAccounts,
+        totalsMon,
+        availableToAddMon,
+        unclassifiedAccounts,
+    } = useMemo(() => {
         const activosMon: MonetaryAccount[] = [];
         const pasivosMon: MonetaryAccount[] = [];
+        const fxProtectedAccounts: FxProtectedAccount[] = [];
 
         for (const account of accounts) {
             if (account.isHeader) continue;
@@ -140,24 +161,32 @@ export function Step2RT6Panel({
             const initialClass = getInitialMonetaryClass(account);
             const finalClass = applyOverrides(account.id, initialClass, overrides);
 
-            // Only include strictly MONETARY accounts (not FX_PROTECTED or INDEFINIDA)
-            if (finalClass !== 'MONETARY') continue;
-
             const balance = balances.get(account.id);
             if (!balance || balance.balance === 0) continue;
 
-            const monetaryAcc: MonetaryAccount = {
+            const accountType = getAccountType(account);
+            const baseItem: MonetaryAccount = {
                 account,
                 balance: Math.abs(balance.balance),
                 classification: finalClass,
                 isAuto: !overrides[account.id]?.classification,
             };
 
-            const accountType = getAccountType(account);
+            if (finalClass === 'FX_PROTECTED') {
+                fxProtectedAccounts.push({
+                    ...baseItem,
+                    accountType,
+                });
+                continue;
+            }
+
+            // Only include strictly MONETARY accounts here (FX has its own bucket)
+            if (finalClass !== 'MONETARY') continue;
+
             if (accountType === 'ACTIVO') {
-                activosMon.push(monetaryAcc);
+                activosMon.push(baseItem);
             } else if (accountType === 'PASIVO') {
-                pasivosMon.push(monetaryAcc);
+                pasivosMon.push(baseItem);
             }
         }
 
@@ -167,10 +196,12 @@ export function Step2RT6Panel({
 
         // Accounts available to add as monetary (not already classified as monetary)
         const monetaryIds = new Set([...activosMon, ...pasivosMon].map(a => a.account.id));
+        const fxIds = new Set(fxProtectedAccounts.map(a => a.account.id));
+        const classifiedIds = new Set([...monetaryIds, ...fxIds]);
         const availableToAddMon = accounts.filter(acc => {
             if (acc.isHeader) return false;
             if (isExcluded(acc.id, overrides)) return false;
-            if (monetaryIds.has(acc.id)) return false;
+            if (classifiedIds.has(acc.id)) return false;
             const bal = balances.get(acc.id);
             if (!bal || bal.balance === 0) return false;
             return true;
@@ -183,7 +214,7 @@ export function Step2RT6Panel({
         const unclassifiedAccounts = accounts.filter(acc => {
             if (acc.isHeader) return false;
             if (isExcluded(acc.id, overrides)) return false;
-            if (monetaryIds.has(acc.id)) return false;
+            if (classifiedIds.has(acc.id)) return false;
             // Check if account code is in any RT6 partida
             if (noMonetariaIds.has(acc.code)) return false;
             const bal = balances.get(acc.id);
@@ -198,6 +229,7 @@ export function Step2RT6Panel({
         return {
             activosMon,
             pasivosMon,
+            fxProtectedAccounts,
             totalsMon: { totalActivosMon, totalPasivosMon, netoMon },
             availableToAddMon,
             unclassifiedAccounts,
@@ -245,9 +277,44 @@ export function Step2RT6Panel({
     }, [computedRT6]);
 
     // ============================================
+    // Resultados summary (neto, con signo por naturaleza)
+    // ============================================
+    const resultadosPartidas = useMemo(
+        () => computedRT6.filter(p => p.grupo === 'RESULTADOS'),
+        [computedRT6]
+    );
+
+    const resultadosSummary = useMemo(() => {
+        const getResultadosSign = (p: ComputedPartidaRT6): number => {
+            if (p.accountKind === 'EXPENSE') return -1;
+            if (p.accountKind === 'INCOME') return 1;
+            if (p.normalSide === 'DEBIT') return -1;
+            return 1;
+        };
+
+        let baseNet = 0;
+        let homogNet = 0;
+        let ajusteNet = 0;
+
+        for (const p of resultadosPartidas) {
+            const sign = getResultadosSign(p);
+            const delta = p.totalHomog - p.totalBase;
+            baseNet += sign * p.totalBase;
+            homogNet += sign * p.totalHomog;
+            ajusteNet += sign * delta;
+        }
+
+        return {
+            baseNet,
+            homogNet,
+            ajusteNet,
+        };
+    }, [resultadosPartidas]);
+
+    // ============================================
     // Counts
     // ============================================
-    const monetariasCount = activosMon.length + pasivosMon.length;
+    const monetariasCount = activosMon.length + pasivosMon.length + fxProtectedAccounts.length;
     const noMonetariasCount = computedRT6.filter(p => p.grupo !== 'RESULTADOS').length;
     const resultadosCount = Object.values(groupedResultados).reduce((sum, arr) => sum + arr.length, 0);
 
@@ -477,6 +544,7 @@ export function Step2RT6Panel({
 
                         {/* Two Column Grid */}
                         {monetariasCount > 0 && (
+                            <>
                             <div className="rt6-mon-grid">
                                 {/* Activos Monetarios */}
                                 <div className="rt6-mon-section">
@@ -539,6 +607,79 @@ export function Step2RT6Panel({
                                     </div>
                                 </div>
                             </div>
+                            {fxProtectedAccounts.length > 0 && (
+                                <div className="rt6-fx-section">
+                                    <div className="rt6-fx-callout">
+                                        <div className="rt6-fx-callout-title">
+                                            <i className="ph-fill ph-shield-check" />
+                                            Monetarias no expuestas (Moneda extranjera)
+                                        </div>
+                                        <p className="rt6-fx-callout-desc">
+                                            Se expresan en pesos y luego se valuan a tipo de cambio.
+                                            No participan del RECPAM como expuestas.
+                                        </p>
+                                    </div>
+                                    <div className="rt6-mon-table-wrap">
+                                        <table className="rt6-mon-table rt6-mon-table-fx">
+                                            <thead>
+                                                <tr>
+                                                    <th>Cuenta</th>
+                                                    <th className="text-center">Tipo</th>
+                                                    <th className="text-right">Saldo</th>
+                                                    <th className="text-center">Accion</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {fxProtectedAccounts.map((item) => (
+                                                    <tr key={item.account.id} className="rt6-mon-row rt6-mon-row-fx">
+                                                        <td>
+                                                            <div className="rt6-account-cell">
+                                                                <div className="rt6-account-name">
+                                                                    {item.account.name}
+                                                                    <span className="rt6-fx-badge">ME</span>
+                                                                </div>
+                                                                <div className="rt6-account-meta">
+                                                                    <span className="rt6-account-code">{item.account.code}</span>
+                                                                    {item.isAuto && <span className="rt6-badge-auto">AUTO</span>}
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="text-center">
+                                                            <span className="rt6-fx-type-badge">
+                                                                {ACCOUNT_TYPE_LABELS[item.accountType] || item.accountType}
+                                                            </span>
+                                                        </td>
+                                                        <td className="text-right font-mono">
+                                                            {formatCurrencyARS(item.balance)}
+                                                        </td>
+                                                        <td className="text-center">
+                                                            <div className="rt6-row-actions">
+                                                                <button
+                                                                    className="rt6-action-btn"
+                                                                    onClick={() => onToggleClassification(item.account.id, item.classification)}
+                                                                    title="Cambiar clasificacion"
+                                                                    aria-label="Cambiar clasificacion"
+                                                                >
+                                                                    <i className="ph-bold ph-pencil-simple" />
+                                                                </button>
+                                                                <button
+                                                                    className="rt6-action-btn rt6-action-btn-danger"
+                                                                    onClick={() => onExcludeAccount(item.account.id)}
+                                                                    title="Excluir cuenta"
+                                                                    aria-label="Excluir cuenta"
+                                                                >
+                                                                    <i className="ph-bold ph-trash" />
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                            </>
                         )}
                     </div>
                 )}
@@ -769,6 +910,44 @@ export function Step2RT6Panel({
                             </div>
                         </div>
 
+                        {closingEntriesDetected && (
+                            <div className="rt6-resultados-banner">
+                                <i className="ph-fill ph-warning" />
+                                <span>
+                                    Se detecto asiento de refundicion/cierre y se excluye del calculo RT6.
+                                </span>
+                                {closingEntriesCount > 0 && (
+                                    <span className="rt6-resultados-banner-count">{closingEntriesCount}</span>
+                                )}
+                            </div>
+                        )}
+
+                        {resultadosCount > 0 && (
+                            <div className="rt6-resultados-summary">
+                                <div className="rt6-resultados-summary-item">
+                                    <div className="rt6-resultados-summary-label">Resultado historico</div>
+                                    <div className="rt6-resultados-summary-value font-mono">
+                                        {formatCurrencyARS(resultadosSummary.baseNet)}
+                                    </div>
+                                </div>
+                                <div className="rt6-resultados-summary-item">
+                                    <div className="rt6-resultados-summary-label">Ajuste RT6</div>
+                                    <div
+                                        className={`rt6-resultados-summary-value font-mono font-bold ${resultadosSummary.ajusteNet >= 0 ? 'text-emerald-600' : 'text-red-600'}`}
+                                    >
+                                        {resultadosSummary.ajusteNet >= 0 ? '+' : ''}
+                                        {formatCurrencyARS(resultadosSummary.ajusteNet)}
+                                    </div>
+                                </div>
+                                <div className="rt6-resultados-summary-item rt6-resultados-summary-item-accent">
+                                    <div className="rt6-resultados-summary-label">Resultado ajustado</div>
+                                    <div className="rt6-resultados-summary-value font-mono font-bold">
+                                        {formatCurrencyARS(resultadosSummary.homogNet)}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Empty State */}
                         {resultadosCount === 0 && (
                             <div className="rt6-empty-state">
@@ -889,30 +1068,6 @@ export function Step2RT6Panel({
                             </div>
                         )}
 
-                        {/* Totals Summary */}
-                        {resultadosCount > 0 && (
-                            <div className="rt6-resultados-summary">
-                                <div className="rt6-resultados-summary-row">
-                                    <span className="rt6-resultados-summary-label">Total Resultado Historico:</span>
-                                    <span className="rt6-resultados-summary-value font-mono">
-                                        {formatCurrencyARS(computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalBase, 0))}
-                                    </span>
-                                </div>
-                                <div className="rt6-resultados-summary-row">
-                                    <span className="rt6-resultados-summary-label">Total Resultado Ajustado:</span>
-                                    <span className="rt6-resultados-summary-value font-mono text-blue-600 font-bold">
-                                        {formatCurrencyARS(computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalHomog, 0))}
-                                    </span>
-                                </div>
-                                <div className="rt6-resultados-summary-row">
-                                    <span className="rt6-resultados-summary-label">Ajuste por Inflacion (ER):</span>
-                                    <span className={`rt6-resultados-summary-value font-mono font-bold ${computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalRecpam, 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                        {computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalRecpam, 0) >= 0 ? '+' : ''}
-                                        {formatCurrencyARS(computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalRecpam, 0))}
-                                    </span>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 )}
             </div>
@@ -1329,6 +1484,60 @@ export function Step2RT6Panel({
                 }
                 .rt6-mon-row-pending:hover {
                     background: #F9FAFB;
+                }
+                .rt6-fx-section {
+                    margin-top: var(--space-lg);
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                }
+                .rt6-fx-callout {
+                    border: 1px solid #E0E7FF;
+                    background: #F8FAFF;
+                    border-radius: 10px;
+                    padding: 12px 14px;
+                }
+                .rt6-fx-callout-title {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    font-weight: 700;
+                    color: #3730A3;
+                }
+                .rt6-fx-callout-desc {
+                    margin: 4px 0 0;
+                    font-size: 0.85rem;
+                    color: #4B5563;
+                }
+                .rt6-mon-table-fx thead {
+                    background: #EEF2FF;
+                    border-bottom: 1px solid #E0E7FF;
+                }
+                .rt6-mon-row-fx {
+                    background: #F8FAFF;
+                }
+                .rt6-mon-row-fx:hover {
+                    background: #EEF2FF;
+                }
+                .rt6-fx-badge {
+                    margin-left: 8px;
+                    padding: 2px 6px;
+                    border-radius: 9999px;
+                    font-size: 0.65rem;
+                    font-weight: 700;
+                    color: #4338CA;
+                    background: #E0E7FF;
+                    border: 1px solid #C7D2FE;
+                }
+                .rt6-fx-type-badge {
+                    display: inline-block;
+                    padding: 2px 8px;
+                    border-radius: 9999px;
+                    font-size: 0.7rem;
+                    font-weight: 700;
+                    color: #3730A3;
+                    background: #E0E7FF;
+                    border: 1px solid #C7D2FE;
                 }
                 .rt6-account-cell {
                     display: flex;
@@ -1803,31 +2012,53 @@ export function Step2RT6Panel({
                 .rt6-resultados-info i {
                     color: #3B82F6;
                 }
-                .rt6-resultados-summary {
-                    margin-top: var(--space-lg);
-                    background: white;
-                    border: 1px solid #E5E7EB;
-                    border-radius: 8px;
-                    padding: var(--space-md);
-                }
-                .rt6-resultados-summary-row {
+                .rt6-resultados-banner {
+                    margin-top: var(--space-sm);
                     display: flex;
-                    justify-content: space-between;
-                    padding: 8px 0;
-                    border-bottom: 1px solid #F3F4F6;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 10px 12px;
+                    border-radius: 10px;
+                    border: 1px solid #FDE68A;
+                    background: #FFFBEB;
+                    color: #92400E;
+                    font-size: 0.9rem;
                 }
-                .rt6-resultados-summary-row:last-child {
-                    border-bottom: none;
-                    padding-top: 12px;
-                    margin-top: 4px;
-                    border-top: 2px solid #E5E7EB;
+                .rt6-resultados-banner-count {
+                    margin-left: auto;
+                    padding: 2px 8px;
+                    border-radius: 9999px;
+                    border: 1px solid #FCD34D;
+                    background: #FEF3C7;
+                    font-weight: 700;
+                    font-size: 0.8rem;
+                    color: #B45309;
+                }
+                .rt6-resultados-summary {
+                    margin-top: var(--space-md);
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                    gap: 12px;
+                }
+                .rt6-resultados-summary-item {
+                    border: 1px solid #E5E7EB;
+                    border-radius: 10px;
+                    padding: 12px;
+                    background: #F8FAFC;
+                }
+                .rt6-resultados-summary-item-accent {
+                    border-color: #C7D2FE;
+                    background: #EEF2FF;
                 }
                 .rt6-resultados-summary-label {
-                    font-size: 0.9rem;
-                    color: #374151;
+                    font-size: 0.75rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.04em;
+                    color: #6B7280;
+                    margin-bottom: 4px;
                 }
                 .rt6-resultados-summary-value {
-                    font-size: 0.95rem;
+                    font-size: 1rem;
                 }
 
                 /* Unclassified Card */

@@ -704,6 +704,196 @@ npm run dev     # Verificar UI visualmente
 
 ---
 
+## CHECKPOINT #F1 - FASE 1 (RT6 extracción + ME + V.Origen)
+**Fecha:** 2026-01-27
+**Estado:** ✅ Build verde. Cambios mínimos dentro del módulo.
+
+### Objetivo
+Destrabar RT6 correcto: incluir RESULTADOS con actividad aunque cierren en 0, respetar naturaleza contable (signo) y hacer visible el bucket de Moneda Extranjera como "Monetaria no expuesta".
+
+### Cambios clave
+1. Motor RT6 sign-aware por lado natural:
+- Lotes mensuales ahora usan el lado de incremento según `normalSide` (DEBIT → débitos, CREDIT → créditos).
+- `totalRecpam` ahora respeta naturaleza: DEBIT suma, CREDIT invierte signo.
+
+2. RESULTADOS no se pierden por saldo final 0:
+- Se incluyen cuentas de RESULTADOS si tienen actividad en el período, aunque el saldo cierre en 0.
+
+3. Refundición/cierre excluida (heurística existente):
+- En "Analizar mayor" se detectan asientos de cierre con `getClosingEntryIds(...)` y se excluyen para el análisis RT6 cuando aplica.
+
+4. Moneda extranjera como bucket explícito:
+- Se agregó sección "Monetarias no expuestas (Moneda extranjera)" dentro de la tab Monetarias.
+- Estas cuentas quedan fuera del neteo expuesto para RECPAM.
+
+5. Título unificado en Home:
+- "Ajuste por Inflación + Valuación" en la card del módulo.
+
+### Archivos tocados (Fase 1)
+- `src/core/cierre-valuacion/types.ts`
+- `src/core/cierre-valuacion/auto-partidas-rt6.ts`
+- `src/core/cierre-valuacion/calc.ts`
+- `src/core/cierre-valuacion/monetary-classification.ts`
+- `src/pages/Planillas/CierreValuacionPage.tsx`
+- `src/pages/Planillas/components/Step2RT6Panel.tsx`
+- `src/pages/Planillas/PlanillasHome.tsx`
+
+### Validación
+```bash
+npm run build  # PASS (tsc -b + vite build)
+npm run lint   # FAIL (errores preexistentes fuera de scope)
+```
+
+### Notas de diseño/criterio
+- No se cambió el shape global de `partidasRT6` para no romper el wiring existente; se corrigió la extracción y el signo en el motor actual.
+- La exclusión de cierre usa la heurística ya disponible en `resultsStatement.ts` (mínimo cambio, bajo riesgo).
+
+---
+
+## CHECKPOINT #F2 - FASE 2 (Asientos + Capital + Diagnóstico)
+**Fecha:** 2026-01-27
+**Estado:** ✅ Build verde. Sin refactors masivos.
+
+### Objetivo
+Asegurar que los asientos reflejen la naturaleza contable (especialmente PN/capital), mantener el split por signo y agregar diagnóstico claro cuando no balancea.
+
+### Cambios clave
+1. Signo contable coherente en asientos:
+- Se apoya en el fix sign-aware de RT6 (Fase 1): cuentas de naturaleza acreedora ahora generan ajustes con signo correcto.
+- Capital social sigue redirigiéndose a "Ajuste de capital".
+
+2. Diagnóstico cuando un asiento no balancea:
+- Se agregó un diagnóstico rápido en Paso 4 con causas frecuentes (sin RT6, sin RESULTADOS, sin PN, valuaciones pendientes, índice faltante).
+
+3. Nota explícita para Capital Social en Paso 3:
+- Si la cuenta es Capital Social, se muestra la aclaración:
+  "El Capital Social se mantiene histórico. La reexpresión se registra en Ajuste de capital."
+
+### Archivos tocados (Fase 2)
+- `src/pages/Planillas/CierreValuacionPage.tsx`
+- `src/pages/Planillas/components/Step3RT17Panel.tsx`
+
+### Validación
+```bash
+npm run build  # PASS
+npm run lint   # FAIL (errores preexistentes fuera de scope)
+```
+
+---
+
+## CHECKPOINT #F3 - FASE 3 (RT6 resultados mes a mes + exclusión refundición)
+**Fecha:** 2026-01-27
+**Estado:** ✅ Build verde. Heurística local para no romper otros módulos.
+
+### Objetivo
+Evitar que RESULTADOS quede en 0 por refundición/cierre y exponer una síntesis clara del Resultado del ejercicio ajustado por RT6.
+
+### Cambios clave
+1. Exclusión de refundición/cierre (heurística local):
+- Se implementó `detectClosingEntryIds(...)` dentro de `CierreValuacionPage`.
+- Criterios: fecha de cierre o memo con "cierre/refundición" + muchas cuentas de resultados + contrapartida en PN.
+- Se usa para excluir esos asientos al analizar el mayor.
+
+2. Banner informativo en tab Resultados:
+- Si se detectan asientos de cierre/refundición, se muestra:
+  "Se detectó asiento de refundición/cierre y se excluye del cálculo RT6."
+
+3. Resultado del ejercicio ajustado (neto, con signo):
+- Se agregó una síntesis con:
+  - Resultado histórico (neto)
+  - Ajuste RT6 (neto)
+  - Resultado ajustado (neto)
+- El signo se calcula por naturaleza (INCOME positivo, EXPENSE negativo).
+
+### Archivos tocados (Fase 3)
+- `src/pages/Planillas/CierreValuacionPage.tsx`
+- `src/pages/Planillas/components/Step2RT6Panel.tsx`
+
+### Validación
+```bash
+npm run build  # PASS
+npm run lint   # FAIL (errores preexistentes fuera de scope)
+```
+
+---
+
+## CHECKPOINT #F4 - FASE 4 (Resolver RT17 por cuenta + persistencia)
+**Fecha:** 2026-01-27
+**Estado:** ✅ Build verde. Resolver integrado sin dependencias nuevas.
+
+### Objetivo
+Que el drawer de RT17 sugiera el método correcto por cuenta y que la elección/inputs persistan.
+
+### Cambios clave
+1. Resolver de método de valuación:
+- Se implementó `resolveValuationMethod(...)` en `monetary-classification.ts`.
+- Cubre MVP: FX (ME), Reposición (inventarios), Revalúo (PPE), VPP/VNR (inversiones), NA (PN).
+- `suggestValuationMethod(...)` ahora delega al resolver.
+
+2. Drawer conectado al resolver + persistencia:
+- `RT17Drawer` ahora recibe `accounts` y `overrides`.
+- Resuelve la cuenta (por `accountId` o `code`), calcula clasificación y método sugerido.
+- Prefiere método guardado y carga metadata persistida.
+- Se persisten más campos por método (fechas, tipos de cambio, valores, notas).
+- Se agrega ayuda contextual (razón + hint) y sugerencia compra/venta para FX.
+
+3. Bridge RT6 → RT17 enriquecido:
+- `computeAllRT17Partidas` ahora lleva `accountId`, `accountKind`, `normalSide`, `method` y `metadata`.
+- Paso 3 muestra el método guardado/sugerido cuando existe.
+
+4. Método guardado por cuenta:
+- Al guardar una valuación, se persiste `valuationMethod` en `accountOverrides[accountId]` cuando hay mapeo.
+
+### Archivos tocados (Fase 4)
+- `src/core/cierre-valuacion/types.ts`
+- `src/core/cierre-valuacion/calc.ts`
+- `src/core/cierre-valuacion/monetary-classification.ts`
+- `src/pages/Planillas/components/RT17Drawer.tsx`
+- `src/pages/Planillas/components/Step3RT17Panel.tsx`
+- `src/pages/Planillas/CierreValuacionPage.tsx`
+
+### Validación
+```bash
+npm run build  # PASS
+npm run lint   # FAIL (errores preexistentes fuera de scope)
+```
+
+---
+
+## CHECKPOINT #FINAL - Ajuste por Inflación + Valuación (RT6/RT17)
+**Fecha:** 2026-01-27
+**Estado:** ✅ Build PASS. Cambios mínimos y verificables dentro del módulo.
+
+### Qué quedó resuelto (P0/P1)
+- RT6 ya no pierde RESULTADOS por saldo final 0 (actividad por período + exclusión de cierre detectado).
+- PN/capital respeta naturaleza contable y redirige a Ajuste de capital.
+- Moneda extranjera tiene bucket explícito como "Monetaria no expuesta".
+- Asientos mantienen split por signo y ahora tienen diagnóstico cuando no balancean.
+- RT17 sugiere método por cuenta y persiste método + inputs.
+
+### Validación ejecutada
+```bash
+npm run build  # PASS
+npm run lint   # FAIL (errores preexistentes fuera de scope)
+```
+
+### QA manual sugerido
+1. Ir a `/planillas/cierre-valuacion`.
+2. Click en "Analizar mayor".
+3. Ver tab Resultados:
+- Banner si hay refundición detectada.
+- Resultado histórico / Ajuste RT6 / Resultado ajustado.
+4. Ir a Paso 3:
+- Moneda extranjera → FX.
+- Mercaderías → Reposición.
+- Bienes de uso → Revalúo.
+- Capital social → nota de ajuste separado.
+5. Ir a Paso 4:
+- Ver asientos separados por signo.
+- Ver "Balanceado" (si corresponde).
+
+---
+
 ## CHECKPOINT #A - INSPECCIÓN INICIAL (RT6)
 **Fecha:** 2026-01-26
 **Estado:** Inspección completada sin cambios de código.

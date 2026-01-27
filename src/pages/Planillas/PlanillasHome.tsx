@@ -59,7 +59,7 @@ const PLANILLAS: PlanillaCard[] = [
     },
     {
         id: 'cierre',
-        title: 'Cierre: AxI + Valuación',
+        title: 'Ajuste por Inflación + Valuación',
         badge: 'CIERRE',
         badgeClass: 'bg-violet-50 text-violet-700 border border-violet-200/60',
         description: 'Ajuste por inflación contable y valuación de activos al cierre del ejercicio.',
