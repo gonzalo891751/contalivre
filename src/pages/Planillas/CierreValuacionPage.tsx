@@ -27,7 +27,7 @@ import {
     formatCoef,
     canGenerateAsientos,
 } from '../../core/cierre-valuacion';
-import { loadCierreValuacionState, saveCierreValuacionState } from '../../storage';
+import { loadCierreValuacionState, saveCierreValuacionState, clearCierreValuacionState } from '../../storage';
 import { getAllAccounts } from '../../storage/accounts';
 import { Account } from '../../core/models';
 import { RT6Drawer } from './components/RT6Drawer';
@@ -483,7 +483,24 @@ export default function CierreValuacionPage() {
         showToast('Clasificación actualizada');
     }, [updateState]);
 
-    // TODO: Add reset button to UI that calls clearCierreValuacionState()
+    // Handler: Clear all planilla data
+    const handleClearAll = useCallback(async () => {
+        const confirmed = window.confirm(
+            '¿Estás seguro que querés limpiar toda la planilla?\n\n' +
+            'Esto eliminará:\n' +
+            '• Todas las partidas RT6 (auto y manuales)\n' +
+            '• Todos los overrides de clasificación\n' +
+            '• Todas las valuaciones RT17\n\n' +
+            'Los índices se mantendrán.'
+        );
+        if (!confirmed) return;
+
+        await clearCierreValuacionState();
+        // Reload state
+        const freshState = await loadCierreValuacionState();
+        setState(freshState);
+        showToast('Planilla limpiada');
+    }, []);
 
     // =============================================
     // Render
@@ -565,7 +582,7 @@ export default function CierreValuacionPage() {
                     <div className="cierre-kpi-label">Ajustado al Cierre</div>
                     <div className="cierre-kpi-value cierre-kpi-primary">{formatCurrencyARS(rt6Totals.totalHomog)}</div>
                     <div className="cierre-kpi-sub cierre-kpi-sub-success">
-                        <i className={ICON_CLASSES.trending} /> {closingIndexValue ? `+${formatNumber((recpamCoef - 1) * 100, 0)}% Variación` : '-'}
+                        <i className={ICON_CLASSES.trending} /> {rt6Totals.totalBase > 0 ? `+${formatNumber(((rt6Totals.totalHomog / rt6Totals.totalBase) - 1) * 100, 1)}% Variación` : '-'}
                     </div>
                 </div>
                 <div className="cierre-kpi-card">
@@ -721,6 +738,7 @@ export default function CierreValuacionPage() {
                             computedRT6={computedRT6}
                             lastAnalysis={lastMayorAnalysis}
                             onAnalyzeMayor={handleAnalyzeMayor}
+                            onClearAll={handleClearAll}
                             onRecalculate={handleRecalculate}
                             onOpenMetodoIndirecto={handleOpenMetodoIndirecto}
                             onToggleClassification={handleToggleClassification}

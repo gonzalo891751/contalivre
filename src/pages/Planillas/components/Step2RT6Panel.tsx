@@ -22,6 +22,7 @@ import {
     applyOverrides,
     isExcluded,
     getAccountType,
+    isForeignCurrencyByCodeName,
     type MonetaryClass,
 } from '../../../core/cierre-valuacion/monetary-classification';
 
@@ -41,6 +42,7 @@ interface Step2RT6PanelProps {
 
     // Handlers
     onAnalyzeMayor: () => void;
+    onClearAll: () => void;
     onRecalculate: () => void;
     onOpenMetodoIndirecto: () => void;
     onToggleClassification: (accountId: string, currentClass: MonetaryClass) => void;
@@ -94,6 +96,7 @@ export function Step2RT6Panel({
     computedRT6,
     lastAnalysis,
     onAnalyzeMayor,
+    onClearAll,
     onRecalculate,
     onOpenMetodoIndirecto,
     onToggleClassification,
@@ -215,7 +218,7 @@ export function Step2RT6Panel({
             <div className="rt6-action-card">
                 <div className="rt6-action-left">
                     <div className="rt6-action-icon">
-                        <i className="ph-duotone ph-magic-wand" />
+                        <i className="ph-fill ph-magic-wand" />
                     </div>
                     <div className="rt6-action-text">
                         <h2 className="rt6-action-title">Calcular automáticamente</h2>
@@ -251,6 +254,15 @@ export function Step2RT6Panel({
                     >
                         <i className="ph-bold ph-arrows-clockwise" />
                         {isAnalyzing ? 'Analizando...' : 'Analizar Mayor'}
+                    </button>
+                    <button
+                        className="rt6-btn rt6-btn-danger"
+                        onClick={onClearAll}
+                        disabled={isAnalyzing}
+                        title="Limpiar toda la planilla"
+                    >
+                        <i className="ph-bold ph-trash" />
+                        Limpiar
                     </button>
                 </div>
             </div>
@@ -503,7 +515,7 @@ export function Step2RT6Panel({
 
                                                                     return (
                                                                         <Fragment key={partida.id}>
-                                                                            <tr className={`rt6-rubro-row ${hasMultipleLots ? 'rt6-row-expandable' : ''}`}>
+                                                                            <tr className={`rt6-rubro-row ${hasMultipleLots ? 'rt6-row-expandable' : ''} ${isForeignCurrencyByCodeName(partida.cuentaCodigo, partida.cuentaNombre) ? 'rt6-row-foreign-currency' : ''}`}>
                                                                                 <td className="rt6-cuenta-cell">
                                                                                     <div className="rt6-cuenta-flex">
                                                                                         {hasMultipleLots && (
@@ -516,6 +528,11 @@ export function Step2RT6Panel({
                                                                                             </button>
                                                                                         )}
                                                                                         <span>{partida.cuentaNombre}</span>
+                                                                                        {isForeignCurrencyByCodeName(partida.cuentaCodigo, partida.cuentaNombre) && (
+                                                                                            <span className="rt6-badge-monetary-ne" title="Monetaria. Se expresa en pesos y luego se valúa a T.C.">
+                                                                                                Monetaria no expuesta
+                                                                                            </span>
+                                                                                        )}
                                                                                     </div>
                                                                                 </td>
                                                                                 <td className="text-center font-mono text-muted">
@@ -619,15 +636,16 @@ export function Step2RT6Panel({
                     gap: var(--space-md);
                 }
                 .rt6-action-icon {
-                    display: none;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
                     padding: 12px;
                     background: #EFF6FF;
                     border-radius: 8px;
                     color: #3B82F6;
                     font-size: 1.5rem;
-                }
-                @media (min-width: 640px) {
-                    .rt6-action-icon { display: block; }
+                    min-width: 48px;
+                    min-height: 48px;
                 }
                 .rt6-action-title {
                     font-family: 'Outfit', sans-serif;
@@ -691,6 +709,15 @@ export function Step2RT6Panel({
                 }
                 .rt6-btn-secondary:hover:not(:disabled) {
                     background: #E2E8F0;
+                }
+                .rt6-btn-danger {
+                    background: #FEF2F2;
+                    color: #DC2626;
+                    border: 1px solid #FECACA;
+                }
+                .rt6-btn-danger:hover:not(:disabled) {
+                    background: #FEE2E2;
+                    border-color: #FCA5A5;
                 }
                 .rt6-btn-outline {
                     background: white;
@@ -922,11 +949,12 @@ export function Step2RT6Panel({
                 .rt6-mon-row:hover {
                     background: #F9FAFB;
                 }
+                /* Removed yellow background - use subtle border instead */
                 .rt6-mon-row-pending {
-                    background: rgba(251, 191, 36, 0.05);
+                    border-left: 2px solid #E5E7EB;
                 }
                 .rt6-mon-row-pending:hover {
-                    background: rgba(251, 191, 36, 0.1);
+                    background: #F9FAFB;
                 }
                 .rt6-account-cell {
                     display: flex;
@@ -957,30 +985,25 @@ export function Step2RT6Panel({
                     font-weight: 600;
                 }
 
-                /* Action Buttons (in rows) */
+                /* Action Buttons (in rows) - ALWAYS VISIBLE */
                 .rt6-row-actions {
                     display: flex;
                     gap: 4px;
-                    opacity: 0;
-                    transition: opacity 0.15s;
-                }
-                .rt6-mon-row:hover .rt6-row-actions,
-                .rt6-rubro-row:hover .rt6-action-btn {
                     opacity: 1;
                 }
                 .rt6-action-btn {
                     width: 28px;
                     height: 28px;
                     border: none;
-                    background: none;
-                    color: #6B7280;
+                    background: #F3F4F6;
+                    color: #9CA3AF;
                     cursor: pointer;
                     border-radius: 6px;
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
                     transition: all 0.15s;
-                    opacity: 0;
+                    opacity: 1;
                 }
                 .rt6-action-btn:hover {
                     background: white;
@@ -989,9 +1012,7 @@ export function Step2RT6Panel({
                 }
                 .rt6-action-btn-danger:hover {
                     color: #EF4444;
-                }
-                .rt6-rubro-row:hover .rt6-action-btn {
-                    opacity: 1;
+                    background: #FEF2F2;
                 }
 
                 /* No Monetarias Header */
@@ -1183,6 +1204,25 @@ export function Step2RT6Panel({
                     font-style: italic;
                     color: #9CA3AF;
                 }
+                /* Foreign Currency Badge (Monetaria no expuesta) */
+                .rt6-badge-monetary-ne {
+                    background: #E0F2FE;
+                    color: #0369A1;
+                    font-size: 0.65rem;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    white-space: nowrap;
+                    margin-left: 8px;
+                }
+                .rt6-row-foreign-currency {
+                    background: rgba(251, 191, 36, 0.05);
+                    border-left: 3px solid #F59E0B;
+                }
+                .rt6-row-foreign-currency:hover {
+                    background: rgba(251, 191, 36, 0.1);
+                }
                 .text-emerald-600 {
                     color: #059669;
                 }
@@ -1227,7 +1267,10 @@ export function Step2RT6Panel({
                 .text-center { text-align: center; }
                 .text-blue-600 { color: #2563EB; }
                 .text-amber-600 { color: #D97706; }
-                .font-mono { font-family: 'JetBrains Mono', monospace; }
+                .font-mono {
+                    font-family: 'JetBrains Mono', monospace;
+                    font-variant-numeric: tabular-nums;
+                }
                 .font-semibold { font-weight: 600; }
                 .font-bold { font-weight: 700; }
                 .bg-blue-50 { background: #EFF6FF; }

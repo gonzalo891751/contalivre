@@ -49,6 +49,13 @@ export function getInitialMonetaryClass(account: Account): MonetaryClass {
         return 'NON_MONETARY'; // Results always non-monetary
     }
 
+    // Rule 1.5: Foreign currency accounts => NON_MONETARY (BEFORE code prefix!)
+    // "Caja Moneda Extranjera" has code 1.1.01.* but needs NON_MONETARY treatment
+    // This takes priority over code prefix to ensure foreign currency is always reexpressed
+    if (isForeignCurrencyAccount(account)) {
+        return 'NON_MONETARY';
+    }
+
     // Rule 2: Statement Group (explicit mapping)
     if (account.statementGroup) {
         const groupClass = getMonetaryClassByStatementGroup(account.statementGroup);
@@ -360,6 +367,52 @@ export function isValidated(
     overrides: Record<string, AccountOverride>
 ): boolean {
     return overrides[accountId]?.validated === true;
+}
+
+/**
+ * Check if account is a foreign currency account
+ *
+ * For RT6 purposes, foreign currency accounts are:
+ * - Technically MONETARY (cash equivalents)
+ * - BUT shown in Non-Monetary tab as "Monetaria no expuesta"
+ * - They need special treatment: valuation at exchange rate, not index reexpression
+ *
+ * @param account - Account to check
+ * @returns true if account is a foreign currency account
+ */
+export function isForeignCurrencyAccount(account: Account): boolean {
+    const lowerName = account.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    const foreignCurrencyKeywords = [
+        'moneda extranjera',
+        'dolar',
+        'dolares',
+        'usd',
+        'euro',
+        'divisa',
+        'exterior',
+    ];
+
+    return foreignCurrencyKeywords.some(kw => lowerName.includes(kw));
+}
+
+/**
+ * Check if account is foreign currency by code and name (for partidas)
+ */
+export function isForeignCurrencyByCodeName(_code: string, name: string): boolean {
+    const lowerName = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    const foreignCurrencyKeywords = [
+        'moneda extranjera',
+        'dolar',
+        'dolares',
+        'usd',
+        'euro',
+        'divisa',
+        'exterior',
+    ];
+
+    return foreignCurrencyKeywords.some(kw => lowerName.includes(kw));
 }
 
 /**
