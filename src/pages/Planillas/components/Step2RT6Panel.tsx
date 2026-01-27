@@ -8,7 +8,7 @@
  * - Expandable rows for account details
  */
 
-import { useState, useMemo, Fragment, useCallback } from 'react';
+import { useState, useMemo, Fragment, useCallback, useEffect } from 'react';
 import type { Account } from '../../../core/models';
 import type { AccountBalance } from '../../../core/ledger/computeBalances';
 import type { ComputedPartidaRT6, AccountOverride, IndexRow } from '../../../core/cierre-valuacion/types';
@@ -113,6 +113,8 @@ export function Step2RT6Panel({
     const [expandedRubros, setExpandedRubros] = useState<Set<string>>(new Set());
     const [expandedPartidas, setExpandedPartidas] = useState<Set<string>>(new Set());
     const [showAccountPicker, setShowAccountPicker] = useState(false);
+    // Track if we've initialized expanded state for No Monetarias
+    const [noMonInitialized, setNoMonInitialized] = useState(false);
 
     // ============================================
     // Account picker handler
@@ -125,7 +127,7 @@ export function Step2RT6Panel({
     // ============================================
     // Classify accounts into Monetary / Non-Monetary
     // ============================================
-    const { activosMon, pasivosMon, totalsMon, availableToAddMon } = useMemo(() => {
+    const { activosMon, pasivosMon, totalsMon, availableToAddMon, unclassifiedAccounts } = useMemo(() => {
         const activosMon: MonetaryAccount[] = [];
         const pasivosMon: MonetaryAccount[] = [];
 
@@ -171,13 +173,33 @@ export function Step2RT6Panel({
             return true;
         });
 
+        // Account IDs that are already in No Monetaria partidas
+        const noMonetariaIds = new Set(computedRT6.map(p => p.cuentaCodigo));
+
+        // Unclassified accounts: have balance, not monetary, not in RT6 partidas, not excluded
+        const unclassifiedAccounts = accounts.filter(acc => {
+            if (acc.isHeader) return false;
+            if (isExcluded(acc.id, overrides)) return false;
+            if (monetaryIds.has(acc.id)) return false;
+            // Check if account code is in any RT6 partida
+            if (noMonetariaIds.has(acc.code)) return false;
+            const bal = balances.get(acc.id);
+            if (!bal || bal.balance === 0) return false;
+            return true;
+        }).map(acc => ({
+            account: acc,
+            balance: balances.get(acc.id)?.balance || 0,
+            accountType: getAccountType(acc),
+        }));
+
         return {
             activosMon,
             pasivosMon,
             totalsMon: { totalActivosMon, totalPasivosMon, netoMon },
             availableToAddMon,
+            unclassifiedAccounts,
         };
-    }, [accounts, balances, overrides]);
+    }, [accounts, balances, overrides, computedRT6]);
 
     // ============================================
     // Group No Monetarias by Grupo > Rubro
@@ -206,6 +228,29 @@ export function Step2RT6Panel({
     // ============================================
     const monetariasCount = activosMon.length + pasivosMon.length;
     const noMonetariasCount = computedRT6.length;
+
+    // ============================================
+    // Auto-expand No Monetarias on first visit to tab
+    // ============================================
+    useEffect(() => {
+        if (activeTab === 'nomonetarias' && !noMonInitialized && Object.keys(groupedNoMon).length > 0) {
+            // Expand all rubros and partidas
+            const allRubroKeys = new Set<string>();
+            const allPartidaIds = new Set<string>();
+            for (const grupo of Object.keys(groupedNoMon)) {
+                for (const rubro of Object.keys(groupedNoMon[grupo])) {
+                    const rubroKey = `${grupo}::${rubro}`;
+                    allRubroKeys.add(rubroKey);
+                    for (const partida of groupedNoMon[grupo][rubro]) {
+                        allPartidaIds.add(partida.id);
+                    }
+                }
+            }
+            setExpandedRubros(allRubroKeys);
+            setExpandedPartidas(allPartidaIds);
+            setNoMonInitialized(true);
+        }
+    }, [activeTab, noMonInitialized, groupedNoMon]);
 
     // ============================================
     // Handlers
@@ -543,14 +588,16 @@ export function Step2RT6Panel({
                                                             <div className="rt6-rubro-total">{formatCurrencyARS(rubroTotal)}</div>
                                                             <div className="rt6-rubro-label">V. Origen</div>
                                                         </div>
-                                                        {isCapital && rubroAjuste !== 0 && (
-                                                            <div className="rt6-rubro-col rt6-ajuste-col">
-                                                                <div className={`rt6-ajuste-value ${rubroAjuste >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                                    {rubroAjuste >= 0 ? '+' : ''}{formatCurrencyARS(rubroAjuste)}
-                                                                </div>
-                                                                <div className="rt6-rubro-label">Ajuste Capital</div>
+                                                        <div className="rt6-rubro-col">
+                                                            <div className="rt6-rubro-total rt6-metric-homog">{formatCurrencyARS(rubroHomog)}</div>
+                                                            <div className="rt6-rubro-label">V. Homog.</div>
+                                                        </div>
+                                                        <div className="rt6-rubro-col rt6-ajuste-col">
+                                                            <div className={`rt6-ajuste-value ${rubroAjuste >= 0 ? 'rt6-recpam-positive' : 'rt6-recpam-negative'}`}>
+                                                                {rubroAjuste >= 0 ? '+' : ''}{formatCurrencyARS(rubroAjuste)}
                                                             </div>
-                                                        )}
+                                                            <div className="rt6-rubro-label">RECPAM</div>
+                                                        </div>
                                                     </div>
                                                 </div>
 
@@ -677,6 +724,72 @@ export function Step2RT6Panel({
                     </div>
                 )}
             </div>
+
+            {/* Cuentas Sin Clasificar Card */}
+            {unclassifiedAccounts.length > 0 && (
+                <div className="rt6-unclassified-card">
+                    <div className="rt6-unclassified-header">
+                        <div>
+                            <h3 className="rt6-unclassified-title">
+                                <i className="ph-fill ph-warning" style={{ color: '#F59E0B' }} />
+                                Cuentas sin clasificar
+                            </h3>
+                            <p className="rt6-unclassified-desc">
+                                Estas cuentas tienen saldo pero no fueron clasificadas como monetarias ni no monetarias.
+                            </p>
+                        </div>
+                        <span className="rt6-unclassified-badge">{unclassifiedAccounts.length}</span>
+                    </div>
+                    <table className="rt6-unclassified-table">
+                        <thead>
+                            <tr>
+                                <th>Código</th>
+                                <th>Cuenta</th>
+                                <th>Tipo</th>
+                                <th className="text-right">Saldo</th>
+                                <th className="text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {unclassifiedAccounts.slice(0, 10).map(item => (
+                                <tr key={item.account.id}>
+                                    <td className="font-mono">{item.account.code}</td>
+                                    <td>{item.account.name}</td>
+                                    <td>
+                                        <span className={`rt6-tipo-badge ${item.accountType === 'ACTIVO' ? 'rt6-tipo-activo' : item.accountType === 'PASIVO' ? 'rt6-tipo-pasivo' : 'rt6-tipo-pn'}`}>
+                                            {item.accountType || '?'}
+                                        </span>
+                                    </td>
+                                    <td className="text-right font-mono">{formatCurrencyARS(item.balance)}</td>
+                                    <td className="text-center">
+                                        <div className="rt6-action-group">
+                                            <button
+                                                className="rt6-action-btn-small rt6-action-mon"
+                                                title="Agregar a Monetarias"
+                                                onClick={() => onAddMonetaryManual(item.account.id)}
+                                            >
+                                                <i className="ph-bold ph-currency-dollar" />
+                                            </button>
+                                            <button
+                                                className="rt6-action-btn-small rt6-action-nomon"
+                                                title="Agregar a No Monetarias"
+                                                onClick={() => onAddPartida()}
+                                            >
+                                                <i className="ph-bold ph-package" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    {unclassifiedAccounts.length > 10 && (
+                        <div className="rt6-unclassified-more">
+                            +{unclassifiedAccounts.length - 10} cuentas más...
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Styles */}
             <style>{`
@@ -1280,7 +1393,15 @@ export function Step2RT6Panel({
                     letter-spacing: 0.05em;
                     color: #9CA3AF;
                 }
-
+                .rt6-metric-homog {
+                    color: #2563EB !important;
+                }
+                .rt6-recpam-positive {
+                    color: #059669 !important;
+                }
+                .rt6-recpam-negative {
+                    color: #DC2626 !important;
+                }
                 /* Rubro Content */
                 .rt6-rubro-content {
                     border-top: 1px solid #F3F4F6;
@@ -1451,6 +1572,115 @@ export function Step2RT6Panel({
                 .border-l-blue-500 { border-left-color: #3B82F6; }
                 .border-l-amber-500 { border-left-color: #F59E0B; }
                 .border-l-emerald-500 { border-left-color: #10B981; }
+
+                /* Unclassified Card */
+                .rt6-unclassified-card {
+                    background: white;
+                    border: 1px solid #FED7AA;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-top: 24px;
+                }
+                .rt6-unclassified-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    margin-bottom: 16px;
+                }
+                .rt6-unclassified-title {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin: 0;
+                    font-size: 1rem;
+                    font-weight: 700;
+                    color: #92400E;
+                }
+                .rt6-unclassified-desc {
+                    margin: 4px 0 0;
+                    font-size: 0.85rem;
+                    color: #78716C;
+                }
+                .rt6-unclassified-badge {
+                    background: #FEF3C7;
+                    color: #B45309;
+                    padding: 4px 12px;
+                    border-radius: 12px;
+                    font-size: 0.8rem;
+                    font-weight: 700;
+                }
+                .rt6-unclassified-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                }
+                .rt6-unclassified-table th {
+                    font-size: 0.7rem;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                    color: #78716C;
+                    padding: 8px;
+                    border-bottom: 1px solid #FED7AA;
+                    text-align: left;
+                }
+                .rt6-unclassified-table td {
+                    padding: 10px 8px;
+                    border-bottom: 1px solid #FEF3C7;
+                    font-size: 0.9rem;
+                    color: #44403C;
+                }
+                .rt6-unclassified-more {
+                    padding: 12px;
+                    text-align: center;
+                    font-size: 0.85rem;
+                    color: #78716C;
+                    background: #FFFBEB;
+                    border-radius: 0 0 6px 6px;
+                    margin: 0 -16px -16px;
+                }
+                .rt6-tipo-badge {
+                    display: inline-block;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    font-size: 0.65rem;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                }
+                .rt6-tipo-activo { background: #DBEAFE; color: #1D4ED8; }
+                .rt6-tipo-pasivo { background: #FEF3C7; color: #B45309; }
+                .rt6-tipo-pn { background: #D1FAE5; color: #047857; }
+                .rt6-action-group {
+                    display: flex;
+                    gap: 4px;
+                    justify-content: center;
+                }
+                .rt6-action-btn-small {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 6px;
+                    border: none;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 0.8rem;
+                    transition: all 0.15s;
+                }
+                .rt6-action-mon {
+                    background: #DBEAFE;
+                    color: #2563EB;
+                }
+                .rt6-action-mon:hover {
+                    background: #BFDBFE;
+                }
+                .rt6-action-nomon {
+                    background: #E0E7FF;
+                    color: #4F46E5;
+                }
+                .rt6-action-nomon:hover {
+                    background: #C7D2FE;
+                }
             `}</style>
         </div>
     );
