@@ -104,9 +104,17 @@ export function RecpamIndirectoDrawer({
                                     <tr>
                                         <td>Inflación del período</td>
                                         <td className="text-right font-mono">
-                                            {isNaN(result.overallCoef) || result.overallCoef === 1
+                                            {isNaN(result.inflationPeriod) || result.inflationPeriod === 0
                                                 ? '—'
-                                                : `${((result.overallCoef - 1) * 100).toFixed(1)}%`}
+                                                : `${(result.inflationPeriod * 100).toFixed(1)}%`}
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>Inflación último mes</td>
+                                        <td className="text-right font-mono">
+                                            {isNaN(result.inflationLastMonth) || result.inflationLastMonth === 0
+                                                ? '—'
+                                                : `${(result.inflationLastMonth * 100).toFixed(1)}%`}
                                         </td>
                                     </tr>
                                     <tr className="recpam-summary-total">

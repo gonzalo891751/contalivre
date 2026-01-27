@@ -50,6 +50,10 @@ export interface RecpamIndirectoResult {
     avgPmn: number;
     /** Overall inflation coefficient */
     overallCoef: number;
+    /** Inflation for the entire period (as decimal, e.g., 0.25 = 25%) */
+    inflationPeriod: number;
+    /** Inflation for the last month only */
+    inflationLastMonth: number;
     /** Missing indices (if any) */
     missingIndices: string[];
 }
@@ -135,9 +139,21 @@ export function calculateRecpamIndirecto(
     const avgActivoMon = monthly.reduce((sum, m) => sum + m.activeMon, 0) / monthly.length;
     const avgPasivoMon = monthly.reduce((sum, m) => sum + m.pasivoMon, 0) / monthly.length;
     const avgPmn = avgActivoMon - avgPasivoMon;
-    const overallCoef = closingIndex && indices.length > 0
-        ? closingIndex / indices[0].value
+
+    // Fix: Get start period index from actual start date, not first array item
+    const startPeriod = getPeriodFromDate(startOfPeriod);
+    const startIndex = getIndexForPeriod(indices, startPeriod);
+    const overallCoef = closingIndex && startIndex
+        ? closingIndex / startIndex
         : 1;
+    const inflationPeriod = overallCoef - 1;
+
+    // Calculate last month inflation
+    const prevMonthPeriod = months.length >= 2 ? months[months.length - 2] : null;
+    const prevMonthIndex = prevMonthPeriod ? getIndexForPeriod(indices, prevMonthPeriod) : null;
+    const inflationLastMonth = closingIndex && prevMonthIndex
+        ? (closingIndex / prevMonthIndex) - 1
+        : (monthly.length > 0 ? monthly[monthly.length - 1].coef - 1 : 0);
 
     return {
         monthly,
@@ -146,6 +162,8 @@ export function calculateRecpamIndirecto(
         avgPasivoMon,
         avgPmn,
         overallCoef,
+        inflationPeriod,
+        inflationLastMonth,
         missingIndices,
     };
 }
