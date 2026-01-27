@@ -4,6 +4,8 @@
  * TypeScript types for the RT6 (Ajuste por Inflación) and RT17 (Valuación) module.
  */
 
+import type { AccountKind, NormalSide } from '../models';
+
 // ============================================
 // Enums & Basic Types
 // ============================================
@@ -83,6 +85,12 @@ export interface PartidaRT6 {
     usdAmount?: number;
     /** For moneda extranjera profile: exchange rate at ingreso */
     tcIngreso?: number;
+    /** Account ID (when available from plan de cuentas) */
+    accountId?: string;
+    /** Natural balance side of the account (for correct RT6 sign) */
+    normalSide?: NormalSide;
+    /** Account kind (ASSET/LIABILITY/EQUITY/INCOME/EXPENSE) */
+    accountKind?: AccountKind;
 }
 
 /** Computed lot with calculated values */
@@ -126,6 +134,34 @@ export interface LotUSD {
     tcCierre: number;
 }
 
+/** Persisted metadata for RT17 valuation methods */
+export interface RT17ValuationMetadata {
+    // FX
+    fxAmount?: number;
+    fxCurrency?: string;
+    fxRateSource?: string;
+    fxRateDate?: string;
+    fxRateType?: 'compra' | 'venta';
+    // VNR
+    vnrPrice?: number;
+    vnrQuantity?: number;
+    vnrCosts?: number;
+    vnrSource?: string;
+    // VPP
+    vppPercentage?: number;
+    vppEquity?: number;
+    vppDate?: string;
+    // Reposicion
+    reposicionValue?: number;
+    reposicionSource?: string;
+    // Revaluo
+    revaluoValue?: number;
+    revaluoDate?: string;
+    revaluoExpert?: string;
+    // Manual
+    manualNotes?: string;
+}
+
 /** RT17 partida (valuation item) */
 export interface PartidaRT17 {
     id: string;
@@ -139,12 +175,22 @@ export interface PartidaRT17 {
     cuentaCodigo: string;
     /** Account name */
     cuentaNombre: string;
+    /** Account ID when available */
+    accountId?: string;
+    /** Natural balance side (from RT6 bridge) */
+    normalSide?: NormalSide;
+    /** Account kind (ASSET/LIABILITY/EQUITY/INCOME/EXPENSE) */
+    accountKind?: AccountKind;
     /** USD lots (for type 'USD') */
     usdItems?: LotUSD[];
     /** Manual current value (for type 'Otros') */
     manualCurrentValue?: number;
     /** Reference for manual value */
     manualReference?: string;
+    /** Valuation method used (if already saved) */
+    method?: 'FX' | 'VNR' | 'VPP' | 'REPOSICION' | 'REVALUO' | 'MANUAL' | 'NA';
+    /** Persisted method metadata (if any) */
+    metadata?: RT17ValuationMetadata;
     /** 
      * ID of the source RT6 partida.
      * If present, baseReference is derived from that RT6 item.
@@ -173,18 +219,7 @@ export interface RT17Valuation {
     // Valuation method used
     method?: 'FX' | 'VNR' | 'VPP' | 'REPOSICION' | 'REVALUO' | 'MANUAL' | 'NA';
     // Additional metadata for each method
-    metadata?: {
-        fxAmount?: number;
-        fxCurrency?: string;
-        fxRateSource?: string;
-        vnrPrice?: number;
-        vnrQuantity?: number;
-        vnrCosts?: number;
-        vppPercentage?: number;
-        vppEquity?: number;
-        reposicionSource?: string;
-        revaluoExpert?: string;
-    };
+    metadata?: RT17ValuationMetadata;
 }
 
 /** Fully computed RT17 partida */
@@ -260,13 +295,17 @@ export interface RecpamInputs {
  */
 export interface AccountOverride {
     /** Manual monetary classification override */
-    classification?: 'MONETARY' | 'NON_MONETARY';
+    classification?: 'MONETARY' | 'NON_MONETARY' | 'FX_PROTECTED' | 'INDEFINIDA';
+    /** Mark as FX protected (monetaria no expuesta) */
+    isFxProtected?: boolean;
     /** Manual origin date for all movements */
     manualOriginDate?: string;
     /** Exclude from automatic calculation */
     exclude?: boolean;
     /** User has validated this classification */
     validated?: boolean;
+    /** Suggested valuation method for RT17 */
+    valuationMethod?: 'FX' | 'VNR' | 'VPP' | 'REPOSICION' | 'REVALUO' | 'MANUAL' | 'NA';
 }
 
 /** Full page state */

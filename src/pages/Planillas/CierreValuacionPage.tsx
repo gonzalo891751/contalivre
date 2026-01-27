@@ -29,7 +29,7 @@ import {
 } from '../../core/cierre-valuacion';
 import { loadCierreValuacionState, saveCierreValuacionState, clearCierreValuacionState } from '../../storage';
 import { getAllAccounts } from '../../storage/accounts';
-import { Account } from '../../core/models';
+import type { Account, JournalEntry } from '../../core/models';
 import { RT6Drawer } from './components/RT6Drawer';
 import { RT17Drawer } from './components/RT17Drawer';
 import { IndicesImportWizard } from './components/IndicesImportWizard';
@@ -41,6 +41,7 @@ import { autoGeneratePartidasRT6 } from '../../core/cierre-valuacion/auto-partid
 import { calculateRecpamIndirecto, type RecpamIndirectoResult } from '../../core/cierre-valuacion/recpam-indirecto';
 import type { MonetaryClass } from '../../core/cierre-valuacion/monetary-classification';
 import { getInitialMonetaryClass, applyOverrides, isExcluded, getAccountType } from '../../core/cierre-valuacion/monetary-classification';
+import { computeBalances } from '../../core/ledger/computeBalances';
 import { createEntry, updateEntry } from '../../storage/entries';
 import { computeVoucherHash, findEntryByVoucherKey } from '../../core/cierre-valuacion/sync';
 
@@ -62,6 +63,75 @@ const ICON_CLASSES = {
     scales: 'ph-fill ph-scales',
     database: 'ph-fill ph-database',
 };
+
+// Heuristic detection of refundicion/cierre entries (local to this module)
+function detectClosingEntryIds(
+    entries: JournalEntry[] | undefined,
+    accounts: Account[],
+    closingDate: string
+): string[] {
+    if (!entries || entries.length === 0 || accounts.length === 0 || !closingDate) {
+        return [];
+    }
+
+    const normalize = (str: string) =>
+        str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+    const closingKeywords = ['cierre', 'refundicion', 'refuncion', 'cierre ejercicio'];
+    const resultContraKeywords = [
+        'resultado del ejercicio',
+        'resultados del ejercicio',
+        'resultados no asignados',
+        'resultados acumulados',
+        'resultado acumulado',
+    ];
+
+    const accountMap = new Map(accounts.map(a => [a.id, a]));
+    const closingIds: string[] = [];
+
+    for (const entry of entries) {
+        const memoNorm = normalize(entry.memo || '');
+        const memoHasClosingHint = closingKeywords.some(kw => memoNorm.includes(kw));
+
+        // Require either matching closing date or an explicit closing hint in memo
+        if (entry.date !== closingDate && !memoHasClosingHint) {
+            continue;
+        }
+
+        let resultLines = 0;
+        let equityLines = 0;
+        let hasResultContra = false;
+
+        for (const line of entry.lines) {
+            const acc = accountMap.get(line.accountId);
+            if (!acc) continue;
+
+            if (acc.kind === 'INCOME' || acc.kind === 'EXPENSE') {
+                resultLines++;
+                continue;
+            }
+
+            if (acc.kind === 'EQUITY') {
+                equityLines++;
+                const nameNorm = normalize(acc.name || '');
+                if (resultContraKeywords.some(kw => nameNorm.includes(kw))) {
+                    hasResultContra = true;
+                }
+            }
+        }
+
+        const looksLikeClosing =
+            resultLines >= 3 &&
+            equityLines >= 1 &&
+            (hasResultContra || memoHasClosingHint);
+
+        if (looksLikeClosing || (memoHasClosingHint && resultLines >= 1 && equityLines >= 1)) {
+            closingIds.push(entry.id);
+        }
+    }
+
+    return closingIds;
+}
 
 export default function CierreValuacionPage() {
     const navigate = useNavigate();
@@ -213,8 +283,49 @@ export default function CierreValuacionPage() {
         [computedRT6, computedRT17, allAccounts]
     );
 
+    // Diagnostico rapido para asientos no balanceados
+    const asientosDiagnostics = useMemo(() => {
+        const reasons: string[] = [];
+
+        if (asientosDraft.length === 0) {
+            reasons.push('No hay asientos generados. Verifica RT6/RT17.');
+        }
+        if (computedRT6.length === 0) {
+            reasons.push('No hay partidas RT6. Usa "Analizar mayor" en el Paso 2.');
+        }
+
+        const resultadosCount = computedRT6.filter(p => p.grupo === 'RESULTADOS').length;
+        if (computedRT6.length > 0 && resultadosCount === 0) {
+            reasons.push('RT6 no incluye cuentas de resultados (posible refundicion/cierre).');
+        }
+
+        const pnCount = computedRT6.filter(p => p.grupo === 'PN').length;
+        if (computedRT6.length > 0 && pnCount === 0) {
+            reasons.push('RT6 no incluye Patrimonio Neto (capital/resultados acumulados/reservas).');
+        }
+
+        const pendingValuations = computedRT17.filter(
+            p => p.grupo !== 'PN' && p.valuationStatus !== 'done' && p.valuationStatus !== 'na'
+        ).length;
+        if (pendingValuations > 0) {
+            reasons.push(`Hay ${pendingValuations} valuacion(es) pendientes en el Paso 3.`);
+        }
+
+        if (isMissingClosingIndex) {
+            reasons.push(`Falta el indice de cierre para ${closingPeriod}.`);
+        }
+
+        return reasons;
+    }, [asientosDraft.length, computedRT6, computedRT17, isMissingClosingIndex, closingPeriod]);
+
     // REAL-TIME SYNC with Ledger
     const allJournalEntries = useLiveQuery(() => db.entries.reverse().toArray(), []);
+
+    // Detect closing/refundicion entries to exclude from RT6 resultados
+    const closingEntryIdsDetected = useMemo(
+        () => detectClosingEntryIds(allJournalEntries, allAccounts, closingDate),
+        [allJournalEntries, allAccounts, closingDate]
+    );
 
     // Ledger balances for RT6 classification
     const ledgerBalances = useLedgerBalances(allJournalEntries, allAccounts, { closingDate });
@@ -405,13 +516,31 @@ export default function CierreValuacionPage() {
     };
 
     const handleSaveValuation = (valuation: RT17Valuation) => {
-        updateState((prev) => ({
-            ...prev,
-            valuations: {
-                ...prev.valuations,
-                [valuation.rt6ItemId]: valuation,
-            },
-        }));
+        updateState((prev) => {
+            const rt6Item = computedRT6.find(p => p.id === valuation.rt6ItemId);
+            const accountId = rt6Item?.accountId;
+
+            let accountOverrides = prev.accountOverrides;
+            if (accountId && valuation.method) {
+                const existingOverride = accountOverrides?.[accountId] || {};
+                accountOverrides = {
+                    ...(accountOverrides || {}),
+                    [accountId]: {
+                        ...existingOverride,
+                        valuationMethod: valuation.method,
+                    },
+                };
+            }
+
+            return {
+                ...prev,
+                valuations: {
+                    ...prev.valuations,
+                    [valuation.rt6ItemId]: valuation,
+                },
+                accountOverrides,
+            };
+        });
         setRT17DrawerOpen(false);
         showToast('Valuación guardada');
     };
@@ -439,9 +568,16 @@ export default function CierreValuacionPage() {
         const startOfPeriod = `${year}-01-01`;
 
         try {
+            // Exclude refundicion/cierre entries when detected to avoid RESULTADOS = 0
+            const closingEntryIds = closingEntryIdsDetected;
+            const entriesForAnalysis = closingEntryIds.length > 0
+                ? allJournalEntries.filter(e => !closingEntryIds.includes(e.id))
+                : allJournalEntries;
+            const balancesForAnalysis = computeBalances(entriesForAnalysis, allAccounts, closingDate);
+
             const result = autoGeneratePartidasRT6(
                 allAccounts,
-                ledgerBalances.byAccount,
+                balancesForAnalysis,
                 state.accountOverrides || {},
                 {
                     startOfPeriod,
@@ -457,14 +593,15 @@ export default function CierreValuacionPage() {
             }));
 
             setLastMayorAnalysis(new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }));
-            showToast(`Generadas ${result.stats.partidasGenerated} partidas RT6`);
+            const closingNote = closingEntryIds.length > 0 ? ' (sin refundicion)' : '';
+            showToast(`Generadas ${result.stats.partidasGenerated} partidas RT6${closingNote}`);
         } catch (err) {
             console.error('Error analyzing mayor:', err);
             showToast('Error al analizar el mayor');
         } finally {
             setAnalyzingMayor(false);
         }
-    }, [state, allJournalEntries, allAccounts, ledgerBalances.byAccount, closingDate, updateState]);
+    }, [state, allJournalEntries, allAccounts, closingDate, updateState, closingEntryIdsDetected]);
 
     const handleRecalculate = useCallback(() => {
         // Recalculate is essentially the same as analyze but without re-generating partidas
@@ -500,16 +637,22 @@ export default function CierreValuacionPage() {
         }
     }, [state, allJournalEntries, allAccounts, indices, closingDate]);
 
-    const handleToggleClassification = useCallback((accountId: string, _currentClass: MonetaryClass) => {
+    const handleToggleClassification = useCallback((accountId: string, currentClass: MonetaryClass) => {
         updateState((prev) => {
             const overrides = { ...(prev.accountOverrides || {}) };
             const existing = overrides[accountId] || {};
 
-            // Toggle between MONETARY and NON_MONETARY
-            const newClass = existing.classification === 'NON_MONETARY' ? 'MONETARY' : 'NON_MONETARY';
+            // Cycle: MONETARY -> FX_PROTECTED -> NON_MONETARY -> MONETARY
+            const getNextClass = (cls: MonetaryClass): MonetaryClass => {
+                if (cls === 'MONETARY') return 'FX_PROTECTED';
+                if (cls === 'FX_PROTECTED') return 'NON_MONETARY';
+                return 'MONETARY';
+            };
+            const newClass = getNextClass(currentClass);
             overrides[accountId] = {
                 ...existing,
-                classification: newClass as 'MONETARY' | 'NON_MONETARY',
+                classification: newClass,
+                isFxProtected: newClass === 'FX_PROTECTED',
             };
 
             return { ...prev, accountOverrides: overrides };
@@ -829,6 +972,8 @@ export default function CierreValuacionPage() {
                             closingDate={closingDate}
                             computedRT6={computedRT6}
                             lastAnalysis={lastMayorAnalysis}
+                            closingEntriesDetected={closingEntryIdsDetected.length > 0}
+                            closingEntriesCount={closingEntryIdsDetected.length}
                             onAnalyzeMayor={handleAnalyzeMayor}
                             onClearAll={handleClearAll}
                             onRecalculate={handleRecalculate}
@@ -895,6 +1040,20 @@ export default function CierreValuacionPage() {
                                     {voucher.warning && (
                                         <div className="cierre-warning-banner mb-4">
                                             <i className={ICON_CLASSES.warning} /> {voucher.warning}
+                                        </div>
+                                    )}
+
+                                    {!voucher.isValid && asientosDiagnostics.length > 0 && (
+                                        <div className="cierre-error-banner mb-4">
+                                            <i className={ICON_CLASSES.warning} />
+                                            <div>
+                                                <strong>Diagnostico rapido</strong>
+                                                <ul>
+                                                    {asientosDiagnostics.map((reason, i) => (
+                                                        <li key={i}>{reason}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
                                         </div>
                                     )}
 
@@ -976,6 +1135,8 @@ export default function CierreValuacionPage() {
                 onClose={() => setRT17DrawerOpen(false)}
                 editingPartida={computedRT17.find((p) => p.id === editingRT17Id)}
                 onSave={handleSaveValuation}
+                accounts={allAccounts}
+                overrides={state?.accountOverrides || {}}
             />
 
             <IndicesImportWizard
@@ -1514,6 +1675,20 @@ export default function CierreValuacionPage() {
                     padding: 0;
                 }
                 .cierre-callout li { margin-bottom: var(--space-xs); }
+                .cierre-error-banner {
+                    display: flex;
+                    gap: var(--space-md);
+                    padding: var(--space-sm) var(--space-md);
+                    border-radius: var(--radius-md);
+                    background: #FEF2F2;
+                    border: 1px solid #FECACA;
+                    color: #991B1B;
+                }
+                .cierre-error-banner ul {
+                    margin: var(--space-xs) 0 0 var(--space-md);
+                    padding: 0;
+                }
+                .cierre-error-banner li { margin-bottom: 4px; }
                 .cierre-recpam-card { background: var(--surface-2); }
                 .cierre-recpam-grid {
                     display: flex;

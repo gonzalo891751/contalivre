@@ -13,6 +13,7 @@ import {
     applyOverrides,
     isExcluded,
     getAccountType,
+    type MonetaryClass,
 } from './monetary-classification';
 import { getAccountMetadata } from './classification';
 import { getPeriodFromDate } from './calc';
@@ -103,6 +104,7 @@ export function autoGeneratePartidasRT6(
         // Determine account grupo for special handling
         const accountGrupo = getAccountType(account);
         const isPNAccount = accountGrupo === 'PN';
+        const isResultadosAccount = accountGrupo === 'RESULTADOS';
 
         // Skip accounts with zero balance, EXCEPT for PN accounts
         // PN accounts may have historical balance from previous periods
@@ -110,10 +112,21 @@ export function autoGeneratePartidasRT6(
             continue;
         }
 
+        // Some RESULTADOS accounts end with balance 0 due to refundición/cierre,
+        // but still have meaningful activity in the period.
+        const normalSide = getEffectiveNormalSide(account);
+        const hasPeriodActivity = hasPeriodActivityForAccount(
+            balance.movements,
+            startOfPeriod,
+            closingDate,
+            normalSide
+        );
+
         // For non-PN accounts, skip if balance is zero
         // For PN accounts, we include them even with zero current-period balance
-        // because they may have accumulated balance from prior periods
-        if (balance.balance === 0 && !isPNAccount) {
+        // because they may have accumulated balance from prior periods.
+        // For RESULTADOS, include if there was period activity.
+        if (balance.balance === 0 && !isPNAccount && !(isResultadosAccount && hasPeriodActivity)) {
             continue;
         }
 
@@ -124,6 +137,7 @@ export function autoGeneratePartidasRT6(
             startOfPeriod,
             closingDate,
             overrides,
+            finalClass,
             groupByMonth,
             minLotAmount
         );
@@ -147,11 +161,13 @@ function generatePartidaForAccount(
     startOfPeriod: string,
     closingDate: string,
     overrides: Record<string, AccountOverride>,
+    finalClass: MonetaryClass,
     groupByMonth: boolean,
     minLotAmount: number
 ): PartidaRT6 | null {
     const lots: LotRT6[] = [];
     const accountGrupo = getAccountType(account);
+    const normalSide = getEffectiveNormalSide(account);
 
     // Check if user specified manual origin date (single lot mode)
     const manualOriginDate = overrides[account.id]?.manualOriginDate;
@@ -170,7 +186,8 @@ function generatePartidaForAccount(
             startOfPeriod,
             closingDate,
             groupByMonth,
-            minLotAmount
+            minLotAmount,
+            normalSide
         );
         lots.push(...generatedLots);
 
@@ -199,6 +216,7 @@ function generatePartidaForAccount(
     // RESULTADOS accounts are now included for RT6 (they need monthly reexpression)
     // Map grupo to rubro (legacy enum)
     const rubro = mapGrupoToRubro(grupoExtended, rubroLabel);
+    const profileType = resolveProfileType(account, finalClass, rubroLabel);
 
     return {
         id: generateId(),
@@ -208,7 +226,10 @@ function generatePartidaForAccount(
         cuentaCodigo: account.code,
         cuentaNombre: account.name,
         items: lots,
-        profileType: 'generic', // Default profile
+        profileType,
+        accountId: account.id,
+        normalSide,
+        accountKind: account.kind,
     };
 }
 
@@ -228,7 +249,8 @@ function generateLotsFromMovements(
     startOfPeriod: string,
     closingDate: string,
     groupByMonth: boolean,
-    minLotAmount: number
+    minLotAmount: number,
+    normalSide: 'DEBIT' | 'CREDIT'
 ): LotRT6[] {
     const lots: LotRT6[] = [];
 
@@ -259,27 +281,32 @@ function generateLotsFromMovements(
         const monthlyGroups = groupMovementsByMonth(periodMovements);
 
         for (const [month, monthMovements] of monthlyGroups) {
-            // Sum DEBIT movements (increases for ASSET/EXPENSE)
-            const totalDebit = monthMovements.reduce((sum, m) => sum + m.debit, 0);
+            // Sum "increases" according to the account's natural balance side.
+            // This keeps RESULTADOS and PN coherent (credit-side accounts increase on credit).
+            const totalIncrease = monthMovements.reduce(
+                (sum, m) => sum + getIncreaseAmount(m, normalSide),
+                0
+            );
 
-            if (totalDebit >= minLotAmount) {
+            if (totalIncrease >= minLotAmount) {
                 const firstDate = monthMovements[0].date;
                 lots.push({
                     id: generateId(),
                     fechaOrigen: firstDate,
-                    importeBase: totalDebit,
+                    importeBase: totalIncrease,
                     notas: `Compras del mes ${month} (${monthMovements.length} mov.)`,
                 });
             }
         }
     } else {
-        // Individual lots for each DEBIT movement
+        // Individual lots for each increase movement
         for (const movement of periodMovements) {
-            if (movement.debit >= minLotAmount) {
+            const increase = getIncreaseAmount(movement, normalSide);
+            if (increase >= minLotAmount) {
                 lots.push({
                     id: generateId(),
                     fechaOrigen: movement.date,
-                    importeBase: movement.debit,
+                    importeBase: increase,
                     notas: movement.memo || movement.description,
                 });
             }
@@ -311,6 +338,67 @@ function groupMovementsByMonth(
     );
 
     return sorted;
+}
+
+/**
+ * Get the "increase" side for a movement based on natural balance side
+ */
+function getIncreaseAmount(movement: LedgerMovement, normalSide: 'DEBIT' | 'CREDIT'): number {
+    return normalSide === 'DEBIT' ? movement.debit : movement.credit;
+}
+
+/**
+ * Determine if the account had period activity even if ending balance is 0
+ */
+function hasPeriodActivityForAccount(
+    movements: LedgerMovement[],
+    startOfPeriod: string,
+    closingDate: string,
+    normalSide: 'DEBIT' | 'CREDIT'
+): boolean {
+    const periodMovements = movements.filter(
+        m => m.date >= startOfPeriod && m.date <= closingDate
+    );
+    const totalIncrease = periodMovements.reduce(
+        (sum, m) => sum + getIncreaseAmount(m, normalSide),
+        0
+    );
+    return totalIncrease > 0;
+}
+
+/**
+ * Ensure we always have a natural balance side to work with
+ */
+function getEffectiveNormalSide(account: Account): 'DEBIT' | 'CREDIT' {
+    if (account.normalSide) return account.normalSide;
+    return account.kind === 'ASSET' || account.kind === 'EXPENSE' ? 'DEBIT' : 'CREDIT';
+}
+
+/**
+ * Resolve RT6 profile type for downstream RT17 valuation UX
+ */
+function resolveProfileType(
+    account: Account,
+    finalClass: MonetaryClass,
+    rubroLabel: string
+): PartidaRT6['profileType'] {
+    if (finalClass === 'FX_PROTECTED') {
+        return 'moneda_extranjera';
+    }
+
+    const label = rubroLabel.toLowerCase();
+    const name = account.name.toLowerCase();
+    if (
+        label.includes('mercader') ||
+        label.includes('stock') ||
+        label.includes('inventar') ||
+        name.includes('mercader') ||
+        name.includes('stock')
+    ) {
+        return 'mercaderias';
+    }
+
+    return 'generic';
 }
 
 /**

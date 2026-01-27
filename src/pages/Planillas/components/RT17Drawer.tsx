@@ -13,13 +13,23 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ComputedPartidaRT17, RT17Valuation } from '../../../core/cierre-valuacion';
 import { formatCurrencyARS } from '../../../core/cierre-valuacion';
-import type { ValuationMethod } from '../../../core/cierre-valuacion/monetary-classification';
+import type { Account } from '../../../core/models';
+import type { AccountOverride } from '../../../core/cierre-valuacion/types';
+import {
+    applyOverrides,
+    getInitialMonetaryClass,
+    resolveValuationMethod,
+    type ValuationMethod,
+    type ValuationMethodResolution,
+} from '../../../core/cierre-valuacion/monetary-classification';
 
 interface RT17DrawerProps {
     isOpen: boolean;
     onClose: () => void;
     editingPartida?: ComputedPartidaRT17;
     onSave: (valuation: RT17Valuation) => void;
+    accounts: Account[];
+    overrides: Record<string, AccountOverride>;
 }
 
 // Method labels for UI
@@ -78,39 +88,83 @@ export function RT17Drawer({
     onClose,
     editingPartida,
     onSave,
+    accounts,
+    overrides,
 }: RT17DrawerProps) {
     const [temp, setTemp] = useState<ComputedPartidaRT17 | null>(null);
     const [methodState, setMethodState] = useState<MethodState>({ method: 'MANUAL' });
+    const [resolutionInfo, setResolutionInfo] = useState<ValuationMethodResolution | null>(null);
     const [isFetchingRate, setIsFetchingRate] = useState(false);
+
+    const resolveAccount = useCallback((partida: ComputedPartidaRT17): Account | undefined => {
+        if (partida.accountId) {
+            return accounts.find(a => a.id === partida.accountId);
+        }
+        return accounts.find(a => a.code === partida.cuentaCodigo);
+    }, [accounts]);
 
     // Initialize state when drawer opens
     useEffect(() => {
         if (isOpen && editingPartida) {
             setTemp(JSON.parse(JSON.stringify(editingPartida)));
 
-            // Determine suggested method
-            let suggestedMethod: ValuationMethod = 'MANUAL';
+            const account = resolveAccount(editingPartida);
+            const metadata = editingPartida.metadata || {};
 
-            if (editingPartida.profileType === 'moneda_extranjera' || editingPartida.type === 'USD') {
-                suggestedMethod = 'FX';
-            } else if (editingPartida.profileType === 'mercaderias') {
-                suggestedMethod = 'REPOSICION';
-            } else if (editingPartida.grupo === 'PN') {
-                suggestedMethod = 'NA';
+            // Determine suggested method using resolver when possible
+            let resolution: ValuationMethodResolution | null = null;
+            let suggestedMethod: ValuationMethod | undefined = editingPartida.method;
+
+            if (account) {
+                const initialClass = getInitialMonetaryClass(account);
+                const finalClass = applyOverrides(account.id, initialClass, overrides);
+                resolution = resolveValuationMethod(account, finalClass, overrides[account.id]);
+                suggestedMethod = suggestedMethod || resolution.method;
             }
 
+            // Fallback heuristics if we couldn't resolve via account
+            if (!suggestedMethod) {
+                if (editingPartida.profileType === 'moneda_extranjera' || editingPartida.type === 'USD') {
+                    suggestedMethod = 'FX';
+                } else if (editingPartida.profileType === 'mercaderias') {
+                    suggestedMethod = 'REPOSICION';
+                } else if (editingPartida.grupo === 'PN') {
+                    suggestedMethod = 'NA';
+                } else {
+                    suggestedMethod = 'MANUAL';
+                }
+            }
+
+            setResolutionInfo(resolution);
             setMethodState({
                 method: suggestedMethod,
-                fxAmount: editingPartida.sourceUsdAmount,
-                fxCurrency: 'USD',
+                fxAmount: metadata.fxAmount ?? editingPartida.sourceUsdAmount,
+                fxCurrency: metadata.fxCurrency || 'USD',
                 fxRate: editingPartida.tcCierre,
+                fxRateSource: metadata.fxRateSource,
+                fxRateDate: metadata.fxRateDate,
+                fxRateType: metadata.fxRateType ?? resolution?.fxRateType,
+                vnrPrice: metadata.vnrPrice,
+                vnrQuantity: metadata.vnrQuantity,
+                vnrCosts: metadata.vnrCosts,
+                vnrSource: metadata.vnrSource,
+                vppPercentage: metadata.vppPercentage,
+                vppEquity: metadata.vppEquity,
+                vppDate: metadata.vppDate,
+                reposicionValue: metadata.reposicionValue,
+                reposicionSource: metadata.reposicionSource,
+                revaluoValue: metadata.revaluoValue,
+                revaluoDate: metadata.revaluoDate,
+                revaluoExpert: metadata.revaluoExpert,
                 manualValue: editingPartida.manualCurrentValue,
+                manualNotes: metadata.manualNotes,
             });
         } else {
             setTemp(null);
             setMethodState({ method: 'MANUAL' });
+            setResolutionInfo(null);
         }
-    }, [isOpen, editingPartida]);
+    }, [isOpen, editingPartida, overrides, resolveAccount]);
 
     // Calculate current value based on method
     const calculateCurrentValue = useCallback((): number => {
@@ -167,20 +221,28 @@ export function RT17Drawer({
             valCorriente: currentValue,
             resTenencia: resultadoTenencia,
             status: 'done',
-            tcCierre: methodState.fxRate,
-            manualCurrentValue: methodState.manualValue,
+            tcCierre: methodState.method === 'FX' ? methodState.fxRate : undefined,
+            manualCurrentValue: methodState.method === 'MANUAL' ? methodState.manualValue : undefined,
             method: methodState.method,
             metadata: {
                 fxAmount: methodState.fxAmount,
                 fxCurrency: methodState.fxCurrency,
                 fxRateSource: methodState.fxRateSource,
+                fxRateDate: methodState.fxRateDate,
+                fxRateType: methodState.fxRateType,
                 vnrPrice: methodState.vnrPrice,
                 vnrQuantity: methodState.vnrQuantity,
                 vnrCosts: methodState.vnrCosts,
+                vnrSource: methodState.vnrSource,
                 vppPercentage: methodState.vppPercentage,
                 vppEquity: methodState.vppEquity,
+                vppDate: methodState.vppDate,
+                reposicionValue: methodState.reposicionValue,
                 reposicionSource: methodState.reposicionSource,
+                revaluoValue: methodState.revaluoValue,
+                revaluoDate: methodState.revaluoDate,
                 revaluoExpert: methodState.revaluoExpert,
+                manualNotes: methodState.manualNotes,
             },
         });
     };
@@ -236,6 +298,15 @@ export function RT17Drawer({
                                 ))}
                             </select>
                             <p className="method-description">{METHOD_DESCRIPTIONS[methodState.method]}</p>
+                            {resolutionInfo && (
+                                <div className="method-resolution">
+                                    <i className="ph-fill ph-info" />
+                                    <span>{resolutionInfo.reason}</span>
+                                    {resolutionInfo.help && (
+                                        <span className="method-resolution-help">{resolutionInfo.help}</span>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -294,6 +365,11 @@ export function RT17Drawer({
                                             <i className="ph-fill ph-info" />
                                             <span>Fuente: {methodState.fxRateSource}</span>
                                             {methodState.fxRateDate && <span> | {methodState.fxRateDate}</span>}
+                                        </div>
+                                    )}
+                                    {methodState.fxRateType && (
+                                        <div className="fx-rate-hint">
+                                            Sugerencia RT17: usar tipo de cambio {methodState.fxRateType === 'venta' ? 'vendedor/venta' : 'comprador/compra'}.
                                         </div>
                                     )}
                                 </div>
@@ -594,6 +670,21 @@ export function RT17Drawer({
                     margin-top: 6px;
                     font-style: italic;
                 }
+                .method-resolution {
+                    margin-top: 8px;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 0.8rem;
+                    padding: 8px 10px;
+                    border-radius: 8px;
+                    border: 1px solid #C7D2FE;
+                    background: #EEF2FF;
+                    color: #3730A3;
+                }
+                .method-resolution-help {
+                    color: var(--color-text-muted);
+                }
 
                 /* FX Specific */
                 .fx-origin-card {
@@ -639,6 +730,15 @@ export function RT17Drawer({
                     background: #F9FAFB;
                     padding: 6px 10px;
                     border-radius: 4px;
+                }
+                .fx-rate-hint {
+                    margin-top: 8px;
+                    font-size: 0.8rem;
+                    padding: 8px 10px;
+                    border-radius: 8px;
+                    border: 1px solid #BFDBFE;
+                    background: #EFF6FF;
+                    color: #1D4ED8;
                 }
 
                 /* VPP Note */

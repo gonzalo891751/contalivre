@@ -115,12 +115,16 @@ export function computeRT6Partida(
         status = 'error';
     }
 
+    const delta = totalHomog - totalBase;
+    const normalSide = deriveNormalSide(partida);
+    const totalRecpam = normalSide === 'DEBIT' ? delta : -delta;
+
     return {
         ...partida,
         itemsComputed,
         totalBase,
         totalHomog,
-        totalRecpam: totalHomog - totalBase,
+        totalRecpam,
         status,
     };
 }
@@ -134,6 +138,27 @@ export function computeAllRT6Partidas(
     closingPeriod: string
 ): ComputedPartidaRT6[] {
     return partidas.map((p) => computeRT6Partida(p, indices, closingPeriod));
+}
+
+/**
+ * Derive natural balance side for correct RT6 sign handling.
+ * If we know the account kind/normalSide, use that; otherwise fallback by grupo.
+ */
+function deriveNormalSide(partida: PartidaRT6): 'DEBIT' | 'CREDIT' {
+    if (partida.normalSide) {
+        return partida.normalSide;
+    }
+
+    if (partida.accountKind) {
+        return partida.accountKind === 'ASSET' || partida.accountKind === 'EXPENSE'
+            ? 'DEBIT'
+            : 'CREDIT';
+    }
+
+    // Fallback by grupo (best-effort)
+    if (partida.grupo === 'ACTIVO') return 'DEBIT';
+    if (partida.grupo === 'RESULTADOS') return 'CREDIT';
+    return 'CREDIT';
 }
 
 // ============================================
@@ -209,9 +234,14 @@ export function computeAllRT17Partidas(
             rubroLabel: p6.rubroLabel,
             cuentaCodigo: p6.cuentaCodigo,
             cuentaNombre: p6.cuentaNombre,
+            accountId: p6.accountId,
+            normalSide: p6.normalSide,
+            accountKind: p6.accountKind,
             sourcePartidaId: p6.id,
             valuationStatus: status,
             profileType: p6.profileType,
+            method: val?.method,
+            metadata: val?.metadata,
 
             // Persisted inputs for the drawer
             tcCierre: val?.tcCierre,
