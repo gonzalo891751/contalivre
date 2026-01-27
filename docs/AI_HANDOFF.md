@@ -1,5 +1,151 @@
 # ContaLivre - AI Handoff Protocol
 
+## CHECKPOINT #IMPL-COMPLETE - IMPLEMENTACION END-TO-END COMPLETADA
+**Fecha:** 27/01/2026
+**Estado:** COMPLETADO - Build exitoso (tsc + vite)
+
+---
+
+### OBJETIVO
+Implementacion end-to-end del cierre "Ajuste por Inflacion + Valuacion" (RT6 + Valuacion + Asientos)
+
+### CRITERIOS DE LISTO (CHECKLIST)
+- [x] Titulo unificado: "Ajuste por Inflacion + Valuacion" en todos lados
+- [x] Paso 2 incluye RESULTADOS (tab "Resultados RT6")
+- [x] Capital/PN con V.Origen correcto (no 0 si hay saldo real)
+- [x] Clasificacion robusta con enum + overrides + lista "Pendientes"
+- [x] Moneda extranjera como "FX_PROTECTED" (no por keywords unicamente)
+- [x] Paso 3: drawer con metodo correcto por cuenta (FX/VNR/VPP/Reposicion/Revaluo/Manual)
+- [x] Paso 4: borradores separados (RECPAM vs Tenencia), por signo, balanceados
+- [x] Capital social NO se asienta; usar "Ajuste de capital"
+- [x] Bloqueos: funcion validateDraftsForSubmission() implementada
+
+### ARCHIVOS MODIFICADOS
+| Archivo | Cambios Realizados |
+|---------|-------------------|
+| `CierreValuacionPage.tsx` | Titulo cambiado a "Ajuste por Inflacion + Valuacion" |
+| `auto-partidas-rt6.ts` | Removido filtro RESULTADOS, corregido balance 0 para PN |
+| `monetary-classification.ts` | Nuevo enum (MONETARY/NON_MONETARY/FX_PROTECTED/INDEFINIDA), suggestValuationMethod() |
+| `types.ts` | GrupoContable incluye RESULTADOS, RT17Valuation con method/metadata, AsientoBorrador con capitalRedirected |
+| `Step2RT6Panel.tsx` | Nueva tab "Resultados (RT6)" con UI completa, estilos violet |
+| `RT17Drawer.tsx` | Reescrito con selector de metodo y formularios especificos (FX/VNR/VPP/Reposicion/Revaluo/Manual) |
+| `asientos.ts` | Cuenta AJUSTE_CAPITAL, isCapitalSocialAccount(), validateDraftsForSubmission(), getDraftsSummary() |
+
+### RESUMEN DE CAMBIOS POR FASE
+
+**FASE 1: Fixes P0/P1 RT6 + UX**
+- Titulo unificado en CierreValuacionPage.tsx
+- Removido filtro `grupoExtended === 'RESULTADOS'` en auto-partidas-rt6.ts
+- Cuentas PN ya no se descartan con balance 0 (incluye saldo historico)
+- Tooltip en Capital social indicando que usa "Ajuste de capital"
+
+**FASE 2: Clasificacion robusta**
+- Nuevo enum MonetaryClass con INDEFINIDA como default
+- FX_PROTECTED para cuentas de moneda extranjera
+- Funciones helper: needsClassification(), getClassificationLabel(), suggestValuationMethod()
+
+**FASE 3: Drawer valuacion inteligente**
+- Selector de metodo de valuacion en RT17Drawer
+- Formularios especificos: FX (con boton traer TC), VNR (precio-gastos), VPP (% x PN), Reposicion, Revaluo (RT31), Manual
+- Preview de RxT en tiempo real
+- Metadata persistida para trazabilidad
+
+**FASE 4: Asientos correctos**
+- Capital Social redirigido automaticamente a Ajuste de Capital
+- Funcion validateDraftsForSubmission() para bloqueos
+- getDraftsSummary() para resumen de asientos
+
+### RIESGOS MITIGADOS
+1. **Compatibilidad**: Tipos extendidos son backwards-compatible
+2. **Resultados RT6**: Tab dedicada con coeficiente promedio por cuenta
+3. **Ajuste de capital**: Fallback automatico con warning si cuenta no existe
+
+---
+
+## CHECKPOINT #AUDIT-1 - AUDITORÍA FUNCIONAL RT6
+**Fecha:** 27/01/2026
+**Estado:** DOCUMENTACIÓN LISTA - Sin cambios de código
+
+---
+
+### Resumen
+Se realizó una auditoría funcional profunda del módulo `Cierre: AxI + Valuación`.
+Se documentaron hallazgos críticos en `docs/AUDIT_CIERRE_VALUACION.md`.
+
+### Archivos Afectados
+- `docs/AUDIT_CIERRE_VALUACION.md` (Nuevo)
+- `docs/AI_HANDOFF.md` (Actualizado)
+
+### Hallazgos Principales (Bloqueantes)
+1. **Exclusión de Resultados:** `auto-partidas-rt6.ts` filtra explícitamente el grupo `RESULTADOS`, impidiendo el ajuste del Estado de Resultados.
+2. **Capital Inicial 0:** Cuentas sin movimientos en el período pueden ser ignoradas erróneamente.
+3. **Clasificación ME:** Dependencia de keywords fijas, riesgoso para cuentas sin nombre explícito.
+
+### Próximos Pasos (Implementación)
+- [ ] Remover filtro de RESULTADOS en `auto-partidas-rt6.ts`.
+- [ ] Corregir lógica de balance 0 para cuentas Patrimoniales.
+- [ ] Unificar títulos en UX.
+- [ ] Implementar select de Métodos en Valuación.
+
+---
+
+## CHECKPOINT #11 - RT6 UX FIXES ROUND 2
+**Fecha:** 2026-01-27
+**Estado:** ✅ COMPLETADO - Build limpio (tsc + vite 35.88s)
+
+---
+
+### RESUMEN DE CAMBIOS
+
+**BLOQUE 1: Date Picker Robusto**
+- Implementado `showPicker()` con ref para compatibilidad cross-browser
+- Agregado label "Fecha de cierre" visible sobre la fecha
+- Agregado ícono caret-down para indicar dropdown
+- Eliminadas zonas muertas / overlay issues
+
+**BLOQUE 2: Método Indirecto sin "—"**
+- Fix división por cero cuando `monthly.length === 0`
+- Agregado `fallbackTotals` prop al drawer (usa totales actuales de Monetarias)
+- RECPAM estimado utiliza fórmula `-PMN * inflationPeriod` como fallback
+
+**BLOQUE 3: No Monetarias Expandido + Header Métricas**
+- useEffect auto-expande todos los rubros/partidas al entrar al tab
+- Todos los rubro headers ahora muestran: V.ORIGEN (neutral), V.HOMOG (azul), RECPAM (verde/rojo)
+
+**BLOQUE 4: Card "Cuentas Sin Clasificar"**
+- Computed list: cuentas con saldo que no están en Monetarias ni en RT6 partidas
+- Card UI con tabla (código, cuenta, tipo, saldo)
+- Botones de acción: 💲 Monetarias / 📦 No Monetarias
+
+---
+
+### ARCHIVOS MODIFICADOS
+
+| Archivo | Cambio |
+|---------|--------|
+| `CierreValuacionPage.tsx` | `dateInputRef`, `showPicker()` onClick, `monetaryFallbackTotals` useMemo, date picker CSS |
+| `Step2RT6Panel.tsx` | `unclassifiedAccounts` compute, auto-expand useEffect, rubro header 3-column metrics, Sin Clasificar card UI/CSS |
+| `recpam-indirecto.ts` | Guard `monthly.length > 0` para evitar NaN |
+| `RecpamIndirectoDrawer.tsx` | `fallbackTotals` prop, display logic con fallback |
+
+---
+
+### VERIFICACIÓN
+
+```bash
+npm run build   # ✅ PASS (35.88s)
+```
+
+**QA manual:**
+1. Date picker: click en cualquier parte abre calendario
+2. Tab "No Monetarias": rubros expandidos por defecto, headers muestran V.ORIGEN / V.HOMOG / RECPAM
+3. Drawer "Método indirecto": muestra valores numéricos (no "—")
+4. Card "Cuentas sin clasificar": aparece si hay cuentas no clasificadas con botones de acción
+
+---
+
+---
+
 ## CHECKPOINT #10 - RT6 REEXPRESIÓN UX IMPROVEMENTS
 **Fecha:** 2026-01-27
 **Estado:** ✅ COMPLETADO - Build limpio, todas las correcciones UX completadas

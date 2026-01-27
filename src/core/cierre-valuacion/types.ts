@@ -11,8 +11,11 @@
 /** Rubro types for RT6 (legacy, kept for compatibility) */
 export type RubroType = 'Mercaderias' | 'BienesUso' | 'Capital' | 'Otros';
 
-/** Grupo contable for ACTIVO/PASIVO/PN classification */
-export type GrupoContable = 'ACTIVO' | 'PASIVO' | 'PN';
+/** Grupo contable for ACTIVO/PASIVO/PN/RESULTADOS classification */
+export type GrupoContable = 'ACTIVO' | 'PASIVO' | 'PN' | 'RESULTADOS';
+
+/** Extended grupo including RESULTADOS for full RT6 */
+export type ExtendedGrupoContable = GrupoContable;
 
 /** RT17 valuation types */
 export type RT17Type = 'USD' | 'Otros';
@@ -167,6 +170,21 @@ export interface RT17Valuation {
     // Input persistence
     tcCierre?: number;
     manualCurrentValue?: number;
+    // Valuation method used
+    method?: 'FX' | 'VNR' | 'VPP' | 'REPOSICION' | 'REVALUO' | 'MANUAL' | 'NA';
+    // Additional metadata for each method
+    metadata?: {
+        fxAmount?: number;
+        fxCurrency?: string;
+        fxRateSource?: string;
+        vnrPrice?: number;
+        vnrQuantity?: number;
+        vnrCosts?: number;
+        vppPercentage?: number;
+        vppEquity?: number;
+        reposicionSource?: string;
+        revaluoExpert?: string;
+    };
 }
 
 /** Fully computed RT17 partida */
@@ -220,6 +238,8 @@ export interface AsientoBorrador {
     warning?: string;
     /** Is the entry balanced and complete? */
     isValid: boolean;
+    /** True if Capital Social was redirected to Ajuste de Capital */
+    capitalRedirected?: boolean;
 }
 
 // ============================================

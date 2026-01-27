@@ -88,7 +88,9 @@ export function autoGeneratePartidasRT6(
         const initialClass = getInitialMonetaryClass(account);
         const finalClass = applyOverrides(account.id, initialClass, overrides);
 
-        // Skip monetary accounts
+        // Skip purely monetary accounts (but include FX_PROTECTED and INDEFINIDA)
+        // FX_PROTECTED: shown in No Monetarias but need FX valuation
+        // INDEFINIDA: need user classification, shown in "Pendientes"
         if (finalClass === 'MONETARY') {
             continue;
         }
@@ -97,8 +99,21 @@ export function autoGeneratePartidasRT6(
 
         // Get balance
         const balance = ledgerBalances.get(account.id);
-        if (!balance || balance.balance === 0) {
-            // Skip accounts with zero balance
+
+        // Determine account grupo for special handling
+        const accountGrupo = getAccountType(account);
+        const isPNAccount = accountGrupo === 'PN';
+
+        // Skip accounts with zero balance, EXCEPT for PN accounts
+        // PN accounts may have historical balance from previous periods
+        if (!balance) {
+            continue;
+        }
+
+        // For non-PN accounts, skip if balance is zero
+        // For PN accounts, we include them even with zero current-period balance
+        // because they may have accumulated balance from prior periods
+        if (balance.balance === 0 && !isPNAccount) {
             continue;
         }
 
@@ -136,6 +151,7 @@ function generatePartidaForAccount(
     minLotAmount: number
 ): PartidaRT6 | null {
     const lots: LotRT6[] = [];
+    const accountGrupo = getAccountType(account);
 
     // Check if user specified manual origin date (single lot mode)
     const manualOriginDate = overrides[account.id]?.manualOriginDate;
@@ -145,7 +161,7 @@ function generatePartidaForAccount(
             id: generateId(),
             fechaOrigen: manualOriginDate,
             importeBase: Math.abs(balance.balance),
-            notas: 'Saldo único (fecha manual)',
+            notas: 'Saldo unico (fecha manual)',
         });
     } else {
         // Auto-generate lots from movements
@@ -157,6 +173,18 @@ function generatePartidaForAccount(
             minLotAmount
         );
         lots.push(...generatedLots);
+
+        // Special handling for PN accounts: if no lots were generated
+        // but there's a balance, create a single lot dated at the start of period
+        // This handles PN accounts with accumulated balance but no period movements
+        if (lots.length === 0 && accountGrupo === 'PN' && Math.abs(balance.balance) >= minLotAmount) {
+            lots.push({
+                id: generateId(),
+                fechaOrigen: startOfPeriod,
+                importeBase: Math.abs(balance.balance),
+                notas: 'Saldo acumulado historico (PN)',
+            });
+        }
     }
 
     if (lots.length === 0) {
@@ -168,18 +196,14 @@ function generatePartidaForAccount(
     const grupoExtended = getAccountType(account);
     const rubroLabel = account.group || deriveRubroLabel(account.code, metadata.group);
 
-    // Skip RESULTADOS accounts (they are flow, not stock)
-    if (grupoExtended === 'RESULTADOS') {
-        return null;
-    }
-
+    // RESULTADOS accounts are now included for RT6 (they need monthly reexpression)
     // Map grupo to rubro (legacy enum)
     const rubro = mapGrupoToRubro(grupoExtended, rubroLabel);
 
     return {
         id: generateId(),
         rubro,
-        grupo: grupoExtended as GrupoContable, // Safe cast after filtering RESULTADOS
+        grupo: grupoExtended as GrupoContable, // Now includes RESULTADOS
         rubroLabel,
         cuentaCodigo: account.code,
         cuentaNombre: account.name,
@@ -345,7 +369,7 @@ export function isAjusteCapitalAccount(code: string, name: string): boolean {
 /**
  * Map GrupoContable to legacy RubroType enum
  */
-function mapGrupoToRubro(_grupo: GrupoContable | 'RESULTADOS', rubroLabel: string): RubroType {
+function mapGrupoToRubro(grupo: GrupoContable | 'RESULTADOS', rubroLabel: string): RubroType {
     // Try to infer from rubro label keywords
     const label = rubroLabel.toLowerCase();
 
@@ -357,6 +381,11 @@ function mapGrupoToRubro(_grupo: GrupoContable | 'RESULTADOS', rubroLabel: strin
     }
     if (label.includes('capital')) {
         return 'Capital';
+    }
+
+    // RESULTADOS accounts map to Otros (they have special treatment in UI)
+    if (grupo === 'RESULTADOS') {
+        return 'Otros';
     }
 
     // Default fallback

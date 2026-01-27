@@ -134,10 +134,14 @@ export function calculateRecpamIndirecto(
         });
     }
 
-    // Calculate totals and averages
+    // Calculate totals and averages (guard against empty monthly array)
     const total = monthly.reduce((sum, m) => sum + m.recpam, 0);
-    const avgActivoMon = monthly.reduce((sum, m) => sum + m.activeMon, 0) / monthly.length;
-    const avgPasivoMon = monthly.reduce((sum, m) => sum + m.pasivoMon, 0) / monthly.length;
+    const avgActivoMon = monthly.length > 0
+        ? monthly.reduce((sum, m) => sum + m.activeMon, 0) / monthly.length
+        : 0;
+    const avgPasivoMon = monthly.length > 0
+        ? monthly.reduce((sum, m) => sum + m.pasivoMon, 0) / monthly.length
+        : 0;
     const avgPmn = avgActivoMon - avgPasivoMon;
 
     // Fix: Get start period index from actual start date, not first array item

@@ -12,6 +12,12 @@ interface RecpamIndirectoDrawerProps {
     onClose: () => void;
     result: RecpamIndirectoResult | null;
     loading: boolean;
+    /** Fallback totals from Monetarias tab (used when monthly is empty) */
+    fallbackTotals?: {
+        totalActivosMon: number;
+        totalPasivosMon: number;
+        netoMon: number;
+    };
 }
 
 export function RecpamIndirectoDrawer({
@@ -19,6 +25,7 @@ export function RecpamIndirectoDrawer({
     onClose,
     result,
     loading,
+    fallbackTotals,
 }: RecpamIndirectoDrawerProps) {
     if (!isOpen) return null;
 
@@ -81,50 +88,66 @@ export function RecpamIndirectoDrawer({
                             </div>
 
                             {/* Summary Table */}
-                            <table className="recpam-summary-table">
-                                <tbody>
-                                    <tr>
-                                        <td>Activos Monetarios Prom.</td>
-                                        <td className="text-right font-mono font-medium">
-                                            {isNaN(result.avgActivoMon) ? '—' : formatCurrencyARS(result.avgActivoMon)}
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td>Pasivos Monetarios Prom.</td>
-                                        <td className="text-right font-mono font-medium text-warning">
-                                            {isNaN(result.avgPasivoMon) ? '—' : `(${formatCurrencyARS(result.avgPasivoMon)})`}
-                                        </td>
-                                    </tr>
-                                    <tr className="recpam-summary-highlight">
-                                        <td className="font-semibold">Posición Monetaria Neta</td>
-                                        <td className="text-right font-mono font-semibold">
-                                            {isNaN(result.avgPmn) ? '—' : formatCurrencyARS(result.avgPmn)}
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td>Inflación del período</td>
-                                        <td className="text-right font-mono">
-                                            {isNaN(result.inflationPeriod) || result.inflationPeriod === 0
-                                                ? '—'
-                                                : `${(result.inflationPeriod * 100).toFixed(1)}%`}
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td>Inflación último mes</td>
-                                        <td className="text-right font-mono">
-                                            {isNaN(result.inflationLastMonth) || result.inflationLastMonth === 0
-                                                ? '—'
-                                                : `${(result.inflationLastMonth * 100).toFixed(1)}%`}
-                                        </td>
-                                    </tr>
-                                    <tr className="recpam-summary-total">
-                                        <td className="recpam-summary-total-label">RECPAM Estimado</td>
-                                        <td className="recpam-summary-total-value">
-                                            {isNaN(result.total) ? '—' : formatCurrencyARS(result.total)}
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                            {(() => {
+                                // Use fallback if result has empty monthly and fallback is available
+                                const useFallback = result.monthly.length === 0 && fallbackTotals;
+                                const displayActivo = useFallback ? fallbackTotals!.totalActivosMon : result.avgActivoMon;
+                                const displayPasivo = useFallback ? fallbackTotals!.totalPasivosMon : result.avgPasivoMon;
+                                const displayPmn = useFallback ? fallbackTotals!.netoMon : result.avgPmn;
+                                // Estimate RECPAM: -PMN * inflationPeriod
+                                const estimatedRecpam = result.total !== 0
+                                    ? result.total
+                                    : (displayPmn !== 0 && result.inflationPeriod !== 0
+                                        ? -displayPmn * result.inflationPeriod
+                                        : 0);
+
+                                return (
+                                    <table className="recpam-summary-table">
+                                        <tbody>
+                                            <tr>
+                                                <td>Activos Monetarios {useFallback ? '(actual)' : 'Prom.'}</td>
+                                                <td className="text-right font-mono font-medium">
+                                                    {formatCurrencyARS(displayActivo)}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>Pasivos Monetarios {useFallback ? '(actual)' : 'Prom.'}</td>
+                                                <td className="text-right font-mono font-medium text-warning">
+                                                    ({formatCurrencyARS(displayPasivo)})
+                                                </td>
+                                            </tr>
+                                            <tr className="recpam-summary-highlight">
+                                                <td className="font-semibold">Posición Monetaria Neta</td>
+                                                <td className="text-right font-mono font-semibold">
+                                                    {formatCurrencyARS(displayPmn)}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>Inflación del período</td>
+                                                <td className="text-right font-mono">
+                                                    {result.inflationPeriod === 0
+                                                        ? '—'
+                                                        : `${(result.inflationPeriod * 100).toFixed(1)}%`}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>Inflación último mes</td>
+                                                <td className="text-right font-mono">
+                                                    {result.inflationLastMonth === 0
+                                                        ? '—'
+                                                        : `${(result.inflationLastMonth * 100).toFixed(1)}%`}
+                                                </td>
+                                            </tr>
+                                            <tr className="recpam-summary-total">
+                                                <td className="recpam-summary-total-label">RECPAM Estimado</td>
+                                                <td className="recpam-summary-total-value">
+                                                    {estimatedRecpam === 0 ? '—' : formatCurrencyARS(estimatedRecpam)}
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                );
+                            })()}
 
                             {/* Monthly Breakdown (Optional) */}
                             {result.monthly.length > 0 && (

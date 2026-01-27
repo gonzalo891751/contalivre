@@ -11,9 +11,19 @@ import type { Account, AccountKind, StatementGroup } from '../models';
 import type { ExtendedGrupo } from './classification';
 
 /**
- * Monetary classification type
+ * Monetary classification type (robust enum)
+ *
+ * - MONETARY: Exposed to inflation (cash, receivables, payables)
+ * - NON_MONETARY: Requires coefficient reexpression (PPE, inventory, equity)
+ * - FX_PROTECTED: Foreign currency monetary items (need FX valuation, not inflation adj)
+ * - INDEFINIDA: Unclassified - requires user action
  */
-export type MonetaryClass = 'MONETARY' | 'NON_MONETARY';
+export type MonetaryClass = 'MONETARY' | 'NON_MONETARY' | 'FX_PROTECTED' | 'INDEFINIDA';
+
+/**
+ * Valuation method for RT17
+ */
+export type ValuationMethod = 'FX' | 'VNR' | 'VPP' | 'REPOSICION' | 'REVALUO' | 'MANUAL' | 'NA';
 
 /**
  * Account override settings
@@ -21,12 +31,16 @@ export type MonetaryClass = 'MONETARY' | 'NON_MONETARY';
 export interface AccountOverride {
     /** Manual monetary classification override */
     classification?: MonetaryClass;
+    /** Mark as FX protected (foreign currency) */
+    isFxProtected?: boolean;
     /** Manual origin date for all movements */
     manualOriginDate?: string;
     /** Exclude from automatic calculation */
     exclude?: boolean;
     /** User has validated this classification */
     validated?: boolean;
+    /** Suggested valuation method for RT17 */
+    valuationMethod?: ValuationMethod;
 }
 
 /**
@@ -49,11 +63,11 @@ export function getInitialMonetaryClass(account: Account): MonetaryClass {
         return 'NON_MONETARY'; // Results always non-monetary
     }
 
-    // Rule 1.5: Foreign currency accounts => NON_MONETARY (BEFORE code prefix!)
-    // "Caja Moneda Extranjera" has code 1.1.01.* but needs NON_MONETARY treatment
-    // This takes priority over code prefix to ensure foreign currency is always reexpressed
+    // Rule 1.5: Foreign currency accounts => FX_PROTECTED (BEFORE code prefix!)
+    // "Caja Moneda Extranjera" has code 1.1.01.* but needs special FX treatment
+    // They maintain value but need FX valuation, not inflation coefficient
     if (isForeignCurrencyAccount(account)) {
-        return 'NON_MONETARY';
+        return 'FX_PROTECTED';
     }
 
     // Rule 2: Statement Group (explicit mapping)
@@ -70,9 +84,9 @@ export function getInitialMonetaryClass(account: Account): MonetaryClass {
     const nameClass = getMonetaryClassByName(account.name);
     if (nameClass) return nameClass;
 
-    // Rule 5: Default to MONETARY (requires user validation)
-    // This is safer as unclassified assets/liabilities are typically monetary
-    return 'MONETARY';
+    // Rule 5: Default to INDEFINIDA (requires user action)
+    // This ensures unclassified accounts are visible and require user classification
+    return 'INDEFINIDA';
 }
 
 /**
@@ -207,7 +221,7 @@ function getMonetaryClassByName(name: string): MonetaryClass | null {
     // RT6 SPECIAL RULES (highest priority within name matching)
     // ==========================================
 
-    // Foreign currency accounts => NON_MONETARY in RT6 (they need reexpression)
+    // Foreign currency accounts => FX_PROTECTED (they need FX valuation)
     const foreignCurrencyKeywords = [
         'moneda extranjera',
         'dolar',
@@ -218,7 +232,7 @@ function getMonetaryClassByName(name: string): MonetaryClass | null {
         'exterior',
     ];
     if (foreignCurrencyKeywords.some(kw => lowerName.includes(kw))) {
-        return 'NON_MONETARY';
+        return 'FX_PROTECTED';
     }
 
     // IVA accounts => MONETARY (they are typical exposed items)
@@ -421,6 +435,8 @@ export function isForeignCurrencyByCodeName(_code: string, name: string): boolea
 export interface MonetaryClassificationResult {
     monetary: Account[];
     nonMonetary: Account[];
+    fxProtected: Account[];
+    indefinida: Account[];
     excluded: Account[];
 }
 
@@ -434,6 +450,8 @@ export function classifyAccounts(
     const result: MonetaryClassificationResult = {
         monetary: [],
         nonMonetary: [],
+        fxProtected: [],
+        indefinida: [],
         excluded: [],
     };
 
@@ -449,12 +467,83 @@ export function classifyAccounts(
         const finalClass = applyOverrides(account.id, initialClass, overrides);
 
         // Group by classification
-        if (finalClass === 'MONETARY') {
-            result.monetary.push(account);
-        } else {
-            result.nonMonetary.push(account);
+        switch (finalClass) {
+            case 'MONETARY':
+                result.monetary.push(account);
+                break;
+            case 'FX_PROTECTED':
+                result.fxProtected.push(account);
+                break;
+            case 'INDEFINIDA':
+                result.indefinida.push(account);
+                break;
+            default:
+                result.nonMonetary.push(account);
         }
     }
 
     return result;
+}
+
+/**
+ * Check if classification needs user attention
+ */
+export function needsClassification(classification: MonetaryClass): boolean {
+    return classification === 'INDEFINIDA';
+}
+
+/**
+ * Get human-readable label for classification
+ */
+export function getClassificationLabel(classification: MonetaryClass): string {
+    const labels: Record<MonetaryClass, string> = {
+        'MONETARY': 'Monetaria',
+        'NON_MONETARY': 'No Monetaria',
+        'FX_PROTECTED': 'ME Protegida',
+        'INDEFINIDA': 'Sin clasificar',
+    };
+    return labels[classification] || classification;
+}
+
+/**
+ * Suggest valuation method based on account characteristics
+ */
+export function suggestValuationMethod(
+    account: Account,
+    classification: MonetaryClass
+): ValuationMethod {
+    // FX protected accounts use FX valuation
+    if (classification === 'FX_PROTECTED') {
+        return 'FX';
+    }
+
+    // Check account name for hints
+    const lowerName = account.name.toLowerCase();
+
+    // Inventories -> VNR or Reposicion
+    if (lowerName.includes('mercaderia') || lowerName.includes('stock') || lowerName.includes('inventario')) {
+        return 'REPOSICION';
+    }
+
+    // Investments / Participations -> VPP
+    if (lowerName.includes('participacion') || lowerName.includes('inversion') || lowerName.includes('acciones')) {
+        return 'VPP';
+    }
+
+    // PPE -> Revaluo or NA (depreciation follows base asset)
+    if (lowerName.includes('bienes de uso') || lowerName.includes('rodado') || lowerName.includes('inmueble')) {
+        // Check if it's accumulated depreciation
+        if (lowerName.includes('amortizacion') || lowerName.includes('depreciacion')) {
+            return 'NA'; // Follows base asset
+        }
+        return 'REVALUO';
+    }
+
+    // PN accounts don't need valuation
+    if (account.kind === 'EQUITY') {
+        return 'NA';
+    }
+
+    // Default to manual
+    return 'MANUAL';
 }

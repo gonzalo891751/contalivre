@@ -40,6 +40,7 @@ import { useLedgerBalances } from '../../hooks/useLedgerBalances';
 import { autoGeneratePartidasRT6 } from '../../core/cierre-valuacion/auto-partidas-rt6';
 import { calculateRecpamIndirecto, type RecpamIndirectoResult } from '../../core/cierre-valuacion/recpam-indirecto';
 import type { MonetaryClass } from '../../core/cierre-valuacion/monetary-classification';
+import { getInitialMonetaryClass, applyOverrides, isExcluded, getAccountType } from '../../core/cierre-valuacion/monetary-classification';
 import { createEntry, updateEntry } from '../../storage/entries';
 import { computeVoucherHash, findEntryByVoucherKey } from '../../core/cierre-valuacion/sync';
 
@@ -99,6 +100,7 @@ export default function CierreValuacionPage() {
 
     // Refs
     const saveTimeoutRef = useRef<number | null>(null);
+    const dateInputRef = useRef<HTMLInputElement>(null);
 
     // =============================================
     // Load & Save
@@ -216,6 +218,38 @@ export default function CierreValuacionPage() {
 
     // Ledger balances for RT6 classification
     const ledgerBalances = useLedgerBalances(allJournalEntries, allAccounts, { closingDate });
+
+    // Compute monetary totals for drawer fallback
+    const monetaryFallbackTotals = useMemo(() => {
+        const overrides = state?.accountOverrides || {};
+        let totalActivosMon = 0;
+        let totalPasivosMon = 0;
+
+        for (const account of allAccounts) {
+            if (account.isHeader) continue;
+            if (isExcluded(account.id, overrides)) continue;
+
+            const initialClass = getInitialMonetaryClass(account);
+            const finalClass = applyOverrides(account.id, initialClass, overrides);
+            if (finalClass !== 'MONETARY') continue;
+
+            const balance = ledgerBalances.byAccount.get(account.id)?.balance || 0;
+            if (balance === 0) continue;
+
+            const type = getAccountType(account);
+            if (type === 'ACTIVO') {
+                totalActivosMon += balance;
+            } else if (type === 'PASIVO') {
+                totalPasivosMon += balance;
+            }
+        }
+
+        return {
+            totalActivosMon,
+            totalPasivosMon,
+            netoMon: totalActivosMon - totalPasivosMon,
+        };
+    }, [allAccounts, ledgerBalances.byAccount, state?.accountOverrides]);
 
     // Compute Sync Status for each voucher
     const voucherSyncData = useMemo(() => {
@@ -567,24 +601,47 @@ export default function CierreValuacionPage() {
                         <i className={ICON_CLASSES.back} />
                     </button>
                     <div>
-                        <h1 className="cierre-title">Reexpresión y Valuación</h1>
-                        <p className="cierre-subtitle">Ajuste por Inflación + Valuación • Periodo {closingDate.substring(0, 4)}</p>
+                        <h1 className="cierre-title">Ajuste por Inflación + Valuación</h1>
+                        <p className="cierre-subtitle">Cierre contable RT6 + RT17 • Periodo {closingDate.substring(0, 4)}</p>
                     </div>
                 </div>
 
                 <div className="cierre-header-right">
-                    <label className="cierre-date-picker" htmlFor="cierre-date-input">
+                    <div
+                        className="cierre-date-picker"
+                        onClick={() => {
+                            const input = dateInputRef.current;
+                            if (input) {
+                                // Chrome/modern: use showPicker
+                                if (typeof input.showPicker === 'function') {
+                                    try { input.showPicker(); } catch { input.focus(); }
+                                } else {
+                                    // Fallback for older browsers
+                                    input.focus();
+                                    input.click();
+                                }
+                            }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        style={{ cursor: 'pointer' }}
+                    >
                         <i className={ICON_CLASSES.calendar} />
-                        <span className="cierre-date-value">{new Date(closingDate + 'T00:00:00').toLocaleDateString('es-AR')}</span>
+                        <div className="cierre-date-content">
+                            <span className="cierre-date-label">Fecha de cierre</span>
+                            <span className="cierre-date-value">{new Date(closingDate + 'T00:00:00').toLocaleDateString('es-AR')}</span>
+                        </div>
+                        <i className="ph ph-caret-down" style={{ marginLeft: 'auto', color: '#9CA3AF', fontSize: '12px' }} />
                         <input
-                            id="cierre-date-input"
+                            ref={dateInputRef}
                             type="date"
                             value={closingDate}
                             onChange={handleDateChange}
                             className="cierre-date-input"
                             aria-label="Fecha de cierre"
+                            tabIndex={-1}
                         />
-                    </label>
+                    </div>
 
                     {isMissingClosingIndex && (
                         <div className="cierre-warning-chip">
@@ -932,6 +989,7 @@ export default function CierreValuacionPage() {
                 onClose={() => setMetodoIndirectoOpen(false)}
                 result={recpamIndirectoResult}
                 loading={recpamIndirectoLoading}
+                fallbackTotals={monetaryFallbackTotals}
             />
 
             {/* INDEX EDIT MODAL */}
@@ -1092,20 +1150,33 @@ export default function CierreValuacionPage() {
                     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
                 }
                 .cierre-date-picker i { color: var(--color-text-secondary); pointer-events: none; }
+                .cierre-date-content {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                    pointer-events: none;
+                }
+                .cierre-date-label {
+                    font-size: 0.65rem;
+                    font-weight: 500;
+                    color: #9CA3AF;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                }
                 .cierre-date-value {
                     font-family: var(--font-mono);
                     font-size: var(--font-size-sm);
                     color: var(--color-text);
+                    font-weight: 600;
                     pointer-events: none;
                 }
                 .cierre-date-input {
                     position: absolute;
                     inset: 0;
                     opacity: 0;
-                    cursor: pointer;
+                    pointer-events: none;
                     width: 100%;
                     height: 100%;
-                    z-index: 1;
                 }
                 .btn-gradient {
                     display: flex;

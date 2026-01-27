@@ -8,7 +8,7 @@
  * - Expandable rows for account details
  */
 
-import { useState, useMemo, Fragment, useCallback } from 'react';
+import { useState, useMemo, Fragment, useCallback, useEffect } from 'react';
 import type { Account } from '../../../core/models';
 import type { AccountBalance } from '../../../core/ledger/computeBalances';
 import type { ComputedPartidaRT6, AccountOverride, IndexRow } from '../../../core/cierre-valuacion/types';
@@ -56,7 +56,7 @@ interface Step2RT6PanelProps {
     isAnalyzing?: boolean;
 }
 
-type TabId = 'monetarias' | 'nomonetarias';
+type TabId = 'monetarias' | 'nomonetarias' | 'resultados';
 
 interface MonetaryAccount {
     account: Account;
@@ -70,12 +70,14 @@ const GROUP_LABELS: Record<string, string> = {
     ACTIVO: 'ACTIVO',
     PASIVO: 'PASIVO',
     PN: 'PATRIMONIO NETO',
+    RESULTADOS: 'RESULTADOS',
 };
 
 const GROUP_COLORS: Record<string, { border: string; bg: string; text: string }> = {
     ACTIVO: { border: 'border-l-blue-500', bg: 'bg-blue-50', text: 'text-blue-600' },
     PASIVO: { border: 'border-l-amber-500', bg: 'bg-amber-50', text: 'text-amber-600' },
     PN: { border: 'border-l-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-600' },
+    RESULTADOS: { border: 'border-l-violet-500', bg: 'bg-violet-50', text: 'text-violet-600' },
 };
 
 // Special rubros that need visual emphasis
@@ -113,6 +115,8 @@ export function Step2RT6Panel({
     const [expandedRubros, setExpandedRubros] = useState<Set<string>>(new Set());
     const [expandedPartidas, setExpandedPartidas] = useState<Set<string>>(new Set());
     const [showAccountPicker, setShowAccountPicker] = useState(false);
+    // Track if we've initialized expanded state for No Monetarias
+    const [noMonInitialized, setNoMonInitialized] = useState(false);
 
     // ============================================
     // Account picker handler
@@ -125,7 +129,7 @@ export function Step2RT6Panel({
     // ============================================
     // Classify accounts into Monetary / Non-Monetary
     // ============================================
-    const { activosMon, pasivosMon, totalsMon, availableToAddMon } = useMemo(() => {
+    const { activosMon, pasivosMon, totalsMon, availableToAddMon, unclassifiedAccounts } = useMemo(() => {
         const activosMon: MonetaryAccount[] = [];
         const pasivosMon: MonetaryAccount[] = [];
 
@@ -136,6 +140,7 @@ export function Step2RT6Panel({
             const initialClass = getInitialMonetaryClass(account);
             const finalClass = applyOverrides(account.id, initialClass, overrides);
 
+            // Only include strictly MONETARY accounts (not FX_PROTECTED or INDEFINIDA)
             if (finalClass !== 'MONETARY') continue;
 
             const balance = balances.get(account.id);
@@ -171,16 +176,36 @@ export function Step2RT6Panel({
             return true;
         });
 
+        // Account IDs that are already in No Monetaria partidas
+        const noMonetariaIds = new Set(computedRT6.map(p => p.cuentaCodigo));
+
+        // Unclassified accounts: have balance, not monetary, not in RT6 partidas, not excluded
+        const unclassifiedAccounts = accounts.filter(acc => {
+            if (acc.isHeader) return false;
+            if (isExcluded(acc.id, overrides)) return false;
+            if (monetaryIds.has(acc.id)) return false;
+            // Check if account code is in any RT6 partida
+            if (noMonetariaIds.has(acc.code)) return false;
+            const bal = balances.get(acc.id);
+            if (!bal || bal.balance === 0) return false;
+            return true;
+        }).map(acc => ({
+            account: acc,
+            balance: balances.get(acc.id)?.balance || 0,
+            accountType: getAccountType(acc),
+        }));
+
         return {
             activosMon,
             pasivosMon,
             totalsMon: { totalActivosMon, totalPasivosMon, netoMon },
             availableToAddMon,
+            unclassifiedAccounts,
         };
-    }, [accounts, balances, overrides]);
+    }, [accounts, balances, overrides, computedRT6]);
 
     // ============================================
-    // Group No Monetarias by Grupo > Rubro
+    // Group No Monetarias by Grupo > Rubro (excluding RESULTADOS)
     // ============================================
     const groupedNoMon = useMemo(() => {
         const groups: Record<string, Record<string, ComputedPartidaRT6[]>> = {};
@@ -189,8 +214,8 @@ export function Step2RT6Panel({
         }
 
         for (const partida of computedRT6) {
-            const grupo = getGroupFromCode(partida.cuentaCodigo || '') || 'ACTIVO';
-            if (grupo === 'RESULTADOS') continue; // Skip results
+            const grupo = partida.grupo || getGroupFromCode(partida.cuentaCodigo || '') || 'ACTIVO';
+            if (grupo === 'RESULTADOS') continue; // RESULTADOS go to separate tab
 
             const rubro = partida.rubroLabel || 'Sin rubro';
             if (!groups[grupo]) groups[grupo] = {};
@@ -202,10 +227,52 @@ export function Step2RT6Panel({
     }, [computedRT6]);
 
     // ============================================
+    // Group RESULTADOS by Rubro (Ventas, Costos, Gastos, etc.)
+    // ============================================
+    const groupedResultados = useMemo(() => {
+        const groups: Record<string, ComputedPartidaRT6[]> = {};
+
+        for (const partida of computedRT6) {
+            const grupo = partida.grupo || getGroupFromCode(partida.cuentaCodigo || '') || 'ACTIVO';
+            if (grupo !== 'RESULTADOS') continue;
+
+            const rubro = partida.rubroLabel || 'Sin rubro';
+            if (!groups[rubro]) groups[rubro] = [];
+            groups[rubro].push(partida);
+        }
+
+        return groups;
+    }, [computedRT6]);
+
+    // ============================================
     // Counts
     // ============================================
     const monetariasCount = activosMon.length + pasivosMon.length;
-    const noMonetariasCount = computedRT6.length;
+    const noMonetariasCount = computedRT6.filter(p => p.grupo !== 'RESULTADOS').length;
+    const resultadosCount = Object.values(groupedResultados).reduce((sum, arr) => sum + arr.length, 0);
+
+    // ============================================
+    // Auto-expand No Monetarias on first visit to tab
+    // ============================================
+    useEffect(() => {
+        if (activeTab === 'nomonetarias' && !noMonInitialized && Object.keys(groupedNoMon).length > 0) {
+            // Expand all rubros and partidas
+            const allRubroKeys = new Set<string>();
+            const allPartidaIds = new Set<string>();
+            for (const grupo of Object.keys(groupedNoMon)) {
+                for (const rubro of Object.keys(groupedNoMon[grupo])) {
+                    const rubroKey = `${grupo}::${rubro}`;
+                    allRubroKeys.add(rubroKey);
+                    for (const partida of groupedNoMon[grupo][rubro]) {
+                        allPartidaIds.add(partida.id);
+                    }
+                }
+            }
+            setExpandedRubros(allRubroKeys);
+            setExpandedPartidas(allPartidaIds);
+            setNoMonInitialized(true);
+        }
+    }, [activeTab, noMonInitialized, groupedNoMon]);
 
     // ============================================
     // Handlers
@@ -314,6 +381,16 @@ export function Step2RT6Panel({
                         Partidas No Monetarias
                         <span className={`rt6-tab-badge ${activeTab === 'nomonetarias' ? 'active' : ''}`}>
                             {noMonetariasCount}
+                        </span>
+                    </button>
+                    <button
+                        className={`rt6-tab ${activeTab === 'resultados' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('resultados')}
+                    >
+                        <i className="ph ph-chart-line-up" />
+                        Resultados (RT6)
+                        <span className={`rt6-tab-badge ${activeTab === 'resultados' ? 'active' : ''}`}>
+                            {resultadosCount}
                         </span>
                     </button>
                 </div>
@@ -528,8 +605,9 @@ export function Step2RT6Panel({
                                                                 </span>
                                                                 {rubro}
                                                                 {isCapital && (
-                                                                    <span className="rt6-capital-badge">
+                                                                    <span className="rt6-capital-badge" title="Capital social no se modifica. La reexpresion se registra en 'Ajuste de capital'.">
                                                                         <i className="ph-fill ph-bank" />
+                                                                        <span className="rt6-capital-tooltip-text">Ajuste separado</span>
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -543,14 +621,16 @@ export function Step2RT6Panel({
                                                             <div className="rt6-rubro-total">{formatCurrencyARS(rubroTotal)}</div>
                                                             <div className="rt6-rubro-label">V. Origen</div>
                                                         </div>
-                                                        {isCapital && rubroAjuste !== 0 && (
-                                                            <div className="rt6-rubro-col rt6-ajuste-col">
-                                                                <div className={`rt6-ajuste-value ${rubroAjuste >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                                    {rubroAjuste >= 0 ? '+' : ''}{formatCurrencyARS(rubroAjuste)}
-                                                                </div>
-                                                                <div className="rt6-rubro-label">Ajuste Capital</div>
+                                                        <div className="rt6-rubro-col">
+                                                            <div className="rt6-rubro-total rt6-metric-homog">{formatCurrencyARS(rubroHomog)}</div>
+                                                            <div className="rt6-rubro-label">V. Homog.</div>
+                                                        </div>
+                                                        <div className="rt6-rubro-col rt6-ajuste-col">
+                                                            <div className={`rt6-ajuste-value ${rubroAjuste >= 0 ? 'rt6-recpam-positive' : 'rt6-recpam-negative'}`}>
+                                                                {rubroAjuste >= 0 ? '+' : ''}{formatCurrencyARS(rubroAjuste)}
                                                             </div>
-                                                        )}
+                                                            <div className="rt6-rubro-label">RECPAM</div>
+                                                        </div>
                                                     </div>
                                                 </div>
 
@@ -676,7 +756,232 @@ export function Step2RT6Panel({
                         })}
                     </div>
                 )}
+
+                {/* Tab Content: Resultados (RT6) */}
+                {activeTab === 'resultados' && (
+                    <div className="rt6-tab-content rt6-tab-content-resultados">
+                        {/* Header */}
+                        <div className="rt6-resultados-header">
+                            <h3 className="rt6-nomon-title">Estado de Resultados (RT6)</h3>
+                            <div className="rt6-resultados-info">
+                                <i className="ph-fill ph-info" />
+                                <span>Las cuentas de resultados se reexpresan mes a mes segun RT6</span>
+                            </div>
+                        </div>
+
+                        {/* Empty State */}
+                        {resultadosCount === 0 && (
+                            <div className="rt6-empty-state">
+                                <i className="ph-duotone ph-chart-line-up rt6-empty-icon" />
+                                <p>No hay cuentas de resultados cargadas.</p>
+                                <p className="text-muted">Las cuentas del Estado de Resultados aparecen automaticamente al analizar el mayor.</p>
+                            </div>
+                        )}
+
+                        {/* Resultados by Rubro */}
+                        {Object.keys(groupedResultados).length > 0 && (
+                            <div className="rt6-grupo-section">
+                                {Object.entries(groupedResultados).map(([rubro, partidas]) => {
+                                    const rubroKey = `RESULTADOS-${rubro}`;
+                                    const isExpanded = expandedRubros.has(rubroKey);
+                                    const rubroTotal = partidas.reduce((s, p) => s + p.totalBase, 0);
+                                    const rubroHomog = partidas.reduce((s, p) => s + p.totalHomog, 0);
+                                    const rubroAjuste = rubroHomog - rubroTotal;
+                                    const colors = GROUP_COLORS['RESULTADOS'];
+
+                                    return (
+                                        <div
+                                            key={rubroKey}
+                                            className={`rt6-rubro-card border-l-4 ${colors.border}`}
+                                        >
+                                            {/* Rubro Header */}
+                                            <div
+                                                className="rt6-rubro-header"
+                                                onClick={() => toggleRubro(rubroKey)}
+                                            >
+                                                <div className="rt6-rubro-left">
+                                                    <button className="rt6-rubro-caret">
+                                                        <i className={`ph-bold ph-caret-right ${isExpanded ? 'rotate-90' : ''}`} />
+                                                    </button>
+                                                    <div className="rt6-rubro-info">
+                                                        <div className="rt6-rubro-title">
+                                                            <span className={`rt6-grupo-badge ${colors.bg} ${colors.text}`}>
+                                                                RESULTADOS
+                                                            </span>
+                                                            {rubro}
+                                                        </div>
+                                                        <div className="rt6-rubro-meta">
+                                                            {partidas.length} cuenta{partidas.length !== 1 ? 's' : ''}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="rt6-rubro-right-multi">
+                                                    <div className="rt6-rubro-col">
+                                                        <div className="rt6-rubro-total">{formatCurrencyARS(rubroTotal)}</div>
+                                                        <div className="rt6-rubro-label">V. Origen</div>
+                                                    </div>
+                                                    <div className="rt6-rubro-col">
+                                                        <div className="rt6-rubro-total rt6-metric-homog">{formatCurrencyARS(rubroHomog)}</div>
+                                                        <div className="rt6-rubro-label">V. Homog.</div>
+                                                    </div>
+                                                    <div className="rt6-rubro-col rt6-ajuste-col">
+                                                        <div className={`rt6-ajuste-value ${rubroAjuste >= 0 ? 'rt6-recpam-positive' : 'rt6-recpam-negative'}`}>
+                                                            {rubroAjuste >= 0 ? '+' : ''}{formatCurrencyARS(rubroAjuste)}
+                                                        </div>
+                                                        <div className="rt6-rubro-label">Ajuste</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Rubro Content (Expanded) */}
+                                            {isExpanded && (
+                                                <div className="rt6-rubro-content">
+                                                    <table className="rt6-rubro-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Cuenta</th>
+                                                                <th className="text-center">Periodo</th>
+                                                                <th className="text-right">V. Origen</th>
+                                                                <th className="text-right">Coef. Aprox.</th>
+                                                                <th className="text-right">V. Homog.</th>
+                                                                <th className="text-right">Ajuste</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {partidas.map((partida) => {
+                                                                const avgCoef = partida.itemsComputed.length > 0
+                                                                    ? partida.itemsComputed.reduce((sum, lot) => sum + lot.coef, 0) / partida.itemsComputed.length
+                                                                    : 1;
+
+                                                                return (
+                                                                    <tr key={partida.id} className="rt6-rubro-row">
+                                                                        <td className="rt6-cuenta-cell">
+                                                                            <div className="rt6-cuenta-flex">
+                                                                                <span>{partida.cuentaNombre}</span>
+                                                                            </div>
+                                                                            <span className="rt6-account-code">{partida.cuentaCodigo}</span>
+                                                                        </td>
+                                                                        <td className="text-center font-mono text-muted">
+                                                                            {partida.itemsComputed.length} mes{partida.itemsComputed.length !== 1 ? 'es' : ''}
+                                                                        </td>
+                                                                        <td className="text-right font-mono">
+                                                                            {formatCurrencyARS(partida.totalBase)}
+                                                                        </td>
+                                                                        <td className="text-right font-mono text-muted">
+                                                                            {formatCoef(avgCoef)}
+                                                                        </td>
+                                                                        <td className="text-right font-mono font-semibold text-blue-600">
+                                                                            {formatCurrencyARS(partida.totalHomog)}
+                                                                        </td>
+                                                                        <td className={`text-right font-mono ${partida.totalRecpam >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                                            {partida.totalRecpam >= 0 ? '+' : ''}{formatCurrencyARS(partida.totalRecpam)}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {/* Totals Summary */}
+                        {resultadosCount > 0 && (
+                            <div className="rt6-resultados-summary">
+                                <div className="rt6-resultados-summary-row">
+                                    <span className="rt6-resultados-summary-label">Total Resultado Historico:</span>
+                                    <span className="rt6-resultados-summary-value font-mono">
+                                        {formatCurrencyARS(computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalBase, 0))}
+                                    </span>
+                                </div>
+                                <div className="rt6-resultados-summary-row">
+                                    <span className="rt6-resultados-summary-label">Total Resultado Ajustado:</span>
+                                    <span className="rt6-resultados-summary-value font-mono text-blue-600 font-bold">
+                                        {formatCurrencyARS(computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalHomog, 0))}
+                                    </span>
+                                </div>
+                                <div className="rt6-resultados-summary-row">
+                                    <span className="rt6-resultados-summary-label">Ajuste por Inflacion (ER):</span>
+                                    <span className={`rt6-resultados-summary-value font-mono font-bold ${computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalRecpam, 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalRecpam, 0) >= 0 ? '+' : ''}
+                                        {formatCurrencyARS(computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalRecpam, 0))}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
+
+            {/* Cuentas Sin Clasificar Card */}
+            {unclassifiedAccounts.length > 0 && (
+                <div className="rt6-unclassified-card">
+                    <div className="rt6-unclassified-header">
+                        <div>
+                            <h3 className="rt6-unclassified-title">
+                                <i className="ph-fill ph-warning" style={{ color: '#F59E0B' }} />
+                                Cuentas sin clasificar
+                            </h3>
+                            <p className="rt6-unclassified-desc">
+                                Estas cuentas tienen saldo pero no fueron clasificadas como monetarias ni no monetarias.
+                            </p>
+                        </div>
+                        <span className="rt6-unclassified-badge">{unclassifiedAccounts.length}</span>
+                    </div>
+                    <table className="rt6-unclassified-table">
+                        <thead>
+                            <tr>
+                                <th>Código</th>
+                                <th>Cuenta</th>
+                                <th>Tipo</th>
+                                <th className="text-right">Saldo</th>
+                                <th className="text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {unclassifiedAccounts.slice(0, 10).map(item => (
+                                <tr key={item.account.id}>
+                                    <td className="font-mono">{item.account.code}</td>
+                                    <td>{item.account.name}</td>
+                                    <td>
+                                        <span className={`rt6-tipo-badge ${item.accountType === 'ACTIVO' ? 'rt6-tipo-activo' : item.accountType === 'PASIVO' ? 'rt6-tipo-pasivo' : 'rt6-tipo-pn'}`}>
+                                            {item.accountType || '?'}
+                                        </span>
+                                    </td>
+                                    <td className="text-right font-mono">{formatCurrencyARS(item.balance)}</td>
+                                    <td className="text-center">
+                                        <div className="rt6-action-group">
+                                            <button
+                                                className="rt6-action-btn-small rt6-action-mon"
+                                                title="Agregar a Monetarias"
+                                                onClick={() => onAddMonetaryManual(item.account.id)}
+                                            >
+                                                <i className="ph-bold ph-currency-dollar" />
+                                            </button>
+                                            <button
+                                                className="rt6-action-btn-small rt6-action-nomon"
+                                                title="Agregar a No Monetarias"
+                                                onClick={() => onAddPartida()}
+                                            >
+                                                <i className="ph-bold ph-package" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    {unclassifiedAccounts.length > 10 && (
+                        <div className="rt6-unclassified-more">
+                            +{unclassifiedAccounts.length - 10} cuentas más...
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Styles */}
             <style>{`
@@ -1280,7 +1585,15 @@ export function Step2RT6Panel({
                     letter-spacing: 0.05em;
                     color: #9CA3AF;
                 }
-
+                .rt6-metric-homog {
+                    color: #2563EB !important;
+                }
+                .rt6-recpam-positive {
+                    color: #059669 !important;
+                }
+                .rt6-recpam-negative {
+                    color: #DC2626 !important;
+                }
                 /* Rubro Content */
                 .rt6-rubro-content {
                     border-top: 1px solid #F3F4F6;
@@ -1410,12 +1723,20 @@ export function Step2RT6Panel({
                     align-items: center;
                     gap: 4px;
                     padding: 2px 6px;
+                    cursor: help;
+                    position: relative;
                     background: rgba(16, 185, 129, 0.1);
                     color: #059669;
                     border-radius: 4px;
                     font-size: 0.7rem;
                     font-weight: 600;
                     margin-left: 8px;
+                }
+                .rt6-capital-tooltip-text {
+                    font-size: 0.6rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.02em;
+                    white-space: nowrap;
                 }
                 .rt6-rubro-right-multi {
                     display: flex;
@@ -1451,6 +1772,172 @@ export function Step2RT6Panel({
                 .border-l-blue-500 { border-left-color: #3B82F6; }
                 .border-l-amber-500 { border-left-color: #F59E0B; }
                 .border-l-emerald-500 { border-left-color: #10B981; }
+                .border-l-violet-500 { border-left-color: #8B5CF6; }
+                .bg-violet-50 { background: #F5F3FF; }
+                .text-violet-600 { color: #7C3AED; }
+
+                /* Resultados Tab Styles */
+                .rt6-tab-content-resultados {
+                    background: #F9FAFB;
+                    min-height: 500px;
+                }
+                .rt6-resultados-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: var(--space-md);
+                    flex-wrap: wrap;
+                    gap: var(--space-sm);
+                }
+                .rt6-resultados-info {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 0.8rem;
+                    color: #6B7280;
+                    background: #EFF6FF;
+                    padding: 6px 12px;
+                    border-radius: 6px;
+                    border: 1px solid #DBEAFE;
+                }
+                .rt6-resultados-info i {
+                    color: #3B82F6;
+                }
+                .rt6-resultados-summary {
+                    margin-top: var(--space-lg);
+                    background: white;
+                    border: 1px solid #E5E7EB;
+                    border-radius: 8px;
+                    padding: var(--space-md);
+                }
+                .rt6-resultados-summary-row {
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 8px 0;
+                    border-bottom: 1px solid #F3F4F6;
+                }
+                .rt6-resultados-summary-row:last-child {
+                    border-bottom: none;
+                    padding-top: 12px;
+                    margin-top: 4px;
+                    border-top: 2px solid #E5E7EB;
+                }
+                .rt6-resultados-summary-label {
+                    font-size: 0.9rem;
+                    color: #374151;
+                }
+                .rt6-resultados-summary-value {
+                    font-size: 0.95rem;
+                }
+
+                /* Unclassified Card */
+                .rt6-unclassified-card {
+                    background: white;
+                    border: 1px solid #FED7AA;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-top: 24px;
+                }
+                .rt6-unclassified-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    margin-bottom: 16px;
+                }
+                .rt6-unclassified-title {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin: 0;
+                    font-size: 1rem;
+                    font-weight: 700;
+                    color: #92400E;
+                }
+                .rt6-unclassified-desc {
+                    margin: 4px 0 0;
+                    font-size: 0.85rem;
+                    color: #78716C;
+                }
+                .rt6-unclassified-badge {
+                    background: #FEF3C7;
+                    color: #B45309;
+                    padding: 4px 12px;
+                    border-radius: 12px;
+                    font-size: 0.8rem;
+                    font-weight: 700;
+                }
+                .rt6-unclassified-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                }
+                .rt6-unclassified-table th {
+                    font-size: 0.7rem;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                    color: #78716C;
+                    padding: 8px;
+                    border-bottom: 1px solid #FED7AA;
+                    text-align: left;
+                }
+                .rt6-unclassified-table td {
+                    padding: 10px 8px;
+                    border-bottom: 1px solid #FEF3C7;
+                    font-size: 0.9rem;
+                    color: #44403C;
+                }
+                .rt6-unclassified-more {
+                    padding: 12px;
+                    text-align: center;
+                    font-size: 0.85rem;
+                    color: #78716C;
+                    background: #FFFBEB;
+                    border-radius: 0 0 6px 6px;
+                    margin: 0 -16px -16px;
+                }
+                .rt6-tipo-badge {
+                    display: inline-block;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    font-size: 0.65rem;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                }
+                .rt6-tipo-activo { background: #DBEAFE; color: #1D4ED8; }
+                .rt6-tipo-pasivo { background: #FEF3C7; color: #B45309; }
+                .rt6-tipo-pn { background: #D1FAE5; color: #047857; }
+                .rt6-action-group {
+                    display: flex;
+                    gap: 4px;
+                    justify-content: center;
+                }
+                .rt6-action-btn-small {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 6px;
+                    border: none;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 0.8rem;
+                    transition: all 0.15s;
+                }
+                .rt6-action-mon {
+                    background: #DBEAFE;
+                    color: #2563EB;
+                }
+                .rt6-action-mon:hover {
+                    background: #BFDBFE;
+                }
+                .rt6-action-nomon {
+                    background: #E0E7FF;
+                    color: #4F46E5;
+                }
+                .rt6-action-nomon:hover {
+                    background: #C7D2FE;
+                }
             `}</style>
         </div>
     );
