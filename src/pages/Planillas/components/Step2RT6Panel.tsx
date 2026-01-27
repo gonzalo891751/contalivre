@@ -56,7 +56,7 @@ interface Step2RT6PanelProps {
     isAnalyzing?: boolean;
 }
 
-type TabId = 'monetarias' | 'nomonetarias';
+type TabId = 'monetarias' | 'nomonetarias' | 'resultados';
 
 interface MonetaryAccount {
     account: Account;
@@ -70,12 +70,14 @@ const GROUP_LABELS: Record<string, string> = {
     ACTIVO: 'ACTIVO',
     PASIVO: 'PASIVO',
     PN: 'PATRIMONIO NETO',
+    RESULTADOS: 'RESULTADOS',
 };
 
 const GROUP_COLORS: Record<string, { border: string; bg: string; text: string }> = {
     ACTIVO: { border: 'border-l-blue-500', bg: 'bg-blue-50', text: 'text-blue-600' },
     PASIVO: { border: 'border-l-amber-500', bg: 'bg-amber-50', text: 'text-amber-600' },
     PN: { border: 'border-l-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-600' },
+    RESULTADOS: { border: 'border-l-violet-500', bg: 'bg-violet-50', text: 'text-violet-600' },
 };
 
 // Special rubros that need visual emphasis
@@ -138,6 +140,7 @@ export function Step2RT6Panel({
             const initialClass = getInitialMonetaryClass(account);
             const finalClass = applyOverrides(account.id, initialClass, overrides);
 
+            // Only include strictly MONETARY accounts (not FX_PROTECTED or INDEFINIDA)
             if (finalClass !== 'MONETARY') continue;
 
             const balance = balances.get(account.id);
@@ -202,7 +205,7 @@ export function Step2RT6Panel({
     }, [accounts, balances, overrides, computedRT6]);
 
     // ============================================
-    // Group No Monetarias by Grupo > Rubro
+    // Group No Monetarias by Grupo > Rubro (excluding RESULTADOS)
     // ============================================
     const groupedNoMon = useMemo(() => {
         const groups: Record<string, Record<string, ComputedPartidaRT6[]>> = {};
@@ -211,8 +214,8 @@ export function Step2RT6Panel({
         }
 
         for (const partida of computedRT6) {
-            const grupo = getGroupFromCode(partida.cuentaCodigo || '') || 'ACTIVO';
-            if (grupo === 'RESULTADOS') continue; // Skip results
+            const grupo = partida.grupo || getGroupFromCode(partida.cuentaCodigo || '') || 'ACTIVO';
+            if (grupo === 'RESULTADOS') continue; // RESULTADOS go to separate tab
 
             const rubro = partida.rubroLabel || 'Sin rubro';
             if (!groups[grupo]) groups[grupo] = {};
@@ -224,10 +227,29 @@ export function Step2RT6Panel({
     }, [computedRT6]);
 
     // ============================================
+    // Group RESULTADOS by Rubro (Ventas, Costos, Gastos, etc.)
+    // ============================================
+    const groupedResultados = useMemo(() => {
+        const groups: Record<string, ComputedPartidaRT6[]> = {};
+
+        for (const partida of computedRT6) {
+            const grupo = partida.grupo || getGroupFromCode(partida.cuentaCodigo || '') || 'ACTIVO';
+            if (grupo !== 'RESULTADOS') continue;
+
+            const rubro = partida.rubroLabel || 'Sin rubro';
+            if (!groups[rubro]) groups[rubro] = [];
+            groups[rubro].push(partida);
+        }
+
+        return groups;
+    }, [computedRT6]);
+
+    // ============================================
     // Counts
     // ============================================
     const monetariasCount = activosMon.length + pasivosMon.length;
-    const noMonetariasCount = computedRT6.length;
+    const noMonetariasCount = computedRT6.filter(p => p.grupo !== 'RESULTADOS').length;
+    const resultadosCount = Object.values(groupedResultados).reduce((sum, arr) => sum + arr.length, 0);
 
     // ============================================
     // Auto-expand No Monetarias on first visit to tab
@@ -359,6 +381,16 @@ export function Step2RT6Panel({
                         Partidas No Monetarias
                         <span className={`rt6-tab-badge ${activeTab === 'nomonetarias' ? 'active' : ''}`}>
                             {noMonetariasCount}
+                        </span>
+                    </button>
+                    <button
+                        className={`rt6-tab ${activeTab === 'resultados' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('resultados')}
+                    >
+                        <i className="ph ph-chart-line-up" />
+                        Resultados (RT6)
+                        <span className={`rt6-tab-badge ${activeTab === 'resultados' ? 'active' : ''}`}>
+                            {resultadosCount}
                         </span>
                     </button>
                 </div>
@@ -573,8 +605,9 @@ export function Step2RT6Panel({
                                                                 </span>
                                                                 {rubro}
                                                                 {isCapital && (
-                                                                    <span className="rt6-capital-badge">
+                                                                    <span className="rt6-capital-badge" title="Capital social no se modifica. La reexpresion se registra en 'Ajuste de capital'.">
                                                                         <i className="ph-fill ph-bank" />
+                                                                        <span className="rt6-capital-tooltip-text">Ajuste separado</span>
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -721,6 +754,165 @@ export function Step2RT6Panel({
                                 </div>
                             );
                         })}
+                    </div>
+                )}
+
+                {/* Tab Content: Resultados (RT6) */}
+                {activeTab === 'resultados' && (
+                    <div className="rt6-tab-content rt6-tab-content-resultados">
+                        {/* Header */}
+                        <div className="rt6-resultados-header">
+                            <h3 className="rt6-nomon-title">Estado de Resultados (RT6)</h3>
+                            <div className="rt6-resultados-info">
+                                <i className="ph-fill ph-info" />
+                                <span>Las cuentas de resultados se reexpresan mes a mes segun RT6</span>
+                            </div>
+                        </div>
+
+                        {/* Empty State */}
+                        {resultadosCount === 0 && (
+                            <div className="rt6-empty-state">
+                                <i className="ph-duotone ph-chart-line-up rt6-empty-icon" />
+                                <p>No hay cuentas de resultados cargadas.</p>
+                                <p className="text-muted">Las cuentas del Estado de Resultados aparecen automaticamente al analizar el mayor.</p>
+                            </div>
+                        )}
+
+                        {/* Resultados by Rubro */}
+                        {Object.keys(groupedResultados).length > 0 && (
+                            <div className="rt6-grupo-section">
+                                {Object.entries(groupedResultados).map(([rubro, partidas]) => {
+                                    const rubroKey = `RESULTADOS-${rubro}`;
+                                    const isExpanded = expandedRubros.has(rubroKey);
+                                    const rubroTotal = partidas.reduce((s, p) => s + p.totalBase, 0);
+                                    const rubroHomog = partidas.reduce((s, p) => s + p.totalHomog, 0);
+                                    const rubroAjuste = rubroHomog - rubroTotal;
+                                    const colors = GROUP_COLORS['RESULTADOS'];
+
+                                    return (
+                                        <div
+                                            key={rubroKey}
+                                            className={`rt6-rubro-card border-l-4 ${colors.border}`}
+                                        >
+                                            {/* Rubro Header */}
+                                            <div
+                                                className="rt6-rubro-header"
+                                                onClick={() => toggleRubro(rubroKey)}
+                                            >
+                                                <div className="rt6-rubro-left">
+                                                    <button className="rt6-rubro-caret">
+                                                        <i className={`ph-bold ph-caret-right ${isExpanded ? 'rotate-90' : ''}`} />
+                                                    </button>
+                                                    <div className="rt6-rubro-info">
+                                                        <div className="rt6-rubro-title">
+                                                            <span className={`rt6-grupo-badge ${colors.bg} ${colors.text}`}>
+                                                                RESULTADOS
+                                                            </span>
+                                                            {rubro}
+                                                        </div>
+                                                        <div className="rt6-rubro-meta">
+                                                            {partidas.length} cuenta{partidas.length !== 1 ? 's' : ''}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="rt6-rubro-right-multi">
+                                                    <div className="rt6-rubro-col">
+                                                        <div className="rt6-rubro-total">{formatCurrencyARS(rubroTotal)}</div>
+                                                        <div className="rt6-rubro-label">V. Origen</div>
+                                                    </div>
+                                                    <div className="rt6-rubro-col">
+                                                        <div className="rt6-rubro-total rt6-metric-homog">{formatCurrencyARS(rubroHomog)}</div>
+                                                        <div className="rt6-rubro-label">V. Homog.</div>
+                                                    </div>
+                                                    <div className="rt6-rubro-col rt6-ajuste-col">
+                                                        <div className={`rt6-ajuste-value ${rubroAjuste >= 0 ? 'rt6-recpam-positive' : 'rt6-recpam-negative'}`}>
+                                                            {rubroAjuste >= 0 ? '+' : ''}{formatCurrencyARS(rubroAjuste)}
+                                                        </div>
+                                                        <div className="rt6-rubro-label">Ajuste</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Rubro Content (Expanded) */}
+                                            {isExpanded && (
+                                                <div className="rt6-rubro-content">
+                                                    <table className="rt6-rubro-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Cuenta</th>
+                                                                <th className="text-center">Periodo</th>
+                                                                <th className="text-right">V. Origen</th>
+                                                                <th className="text-right">Coef. Aprox.</th>
+                                                                <th className="text-right">V. Homog.</th>
+                                                                <th className="text-right">Ajuste</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {partidas.map((partida) => {
+                                                                const avgCoef = partida.itemsComputed.length > 0
+                                                                    ? partida.itemsComputed.reduce((sum, lot) => sum + lot.coef, 0) / partida.itemsComputed.length
+                                                                    : 1;
+
+                                                                return (
+                                                                    <tr key={partida.id} className="rt6-rubro-row">
+                                                                        <td className="rt6-cuenta-cell">
+                                                                            <div className="rt6-cuenta-flex">
+                                                                                <span>{partida.cuentaNombre}</span>
+                                                                            </div>
+                                                                            <span className="rt6-account-code">{partida.cuentaCodigo}</span>
+                                                                        </td>
+                                                                        <td className="text-center font-mono text-muted">
+                                                                            {partida.itemsComputed.length} mes{partida.itemsComputed.length !== 1 ? 'es' : ''}
+                                                                        </td>
+                                                                        <td className="text-right font-mono">
+                                                                            {formatCurrencyARS(partida.totalBase)}
+                                                                        </td>
+                                                                        <td className="text-right font-mono text-muted">
+                                                                            {formatCoef(avgCoef)}
+                                                                        </td>
+                                                                        <td className="text-right font-mono font-semibold text-blue-600">
+                                                                            {formatCurrencyARS(partida.totalHomog)}
+                                                                        </td>
+                                                                        <td className={`text-right font-mono ${partida.totalRecpam >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                                            {partida.totalRecpam >= 0 ? '+' : ''}{formatCurrencyARS(partida.totalRecpam)}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {/* Totals Summary */}
+                        {resultadosCount > 0 && (
+                            <div className="rt6-resultados-summary">
+                                <div className="rt6-resultados-summary-row">
+                                    <span className="rt6-resultados-summary-label">Total Resultado Historico:</span>
+                                    <span className="rt6-resultados-summary-value font-mono">
+                                        {formatCurrencyARS(computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalBase, 0))}
+                                    </span>
+                                </div>
+                                <div className="rt6-resultados-summary-row">
+                                    <span className="rt6-resultados-summary-label">Total Resultado Ajustado:</span>
+                                    <span className="rt6-resultados-summary-value font-mono text-blue-600 font-bold">
+                                        {formatCurrencyARS(computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalHomog, 0))}
+                                    </span>
+                                </div>
+                                <div className="rt6-resultados-summary-row">
+                                    <span className="rt6-resultados-summary-label">Ajuste por Inflacion (ER):</span>
+                                    <span className={`rt6-resultados-summary-value font-mono font-bold ${computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalRecpam, 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalRecpam, 0) >= 0 ? '+' : ''}
+                                        {formatCurrencyARS(computedRT6.filter(p => p.grupo === 'RESULTADOS').reduce((sum, p) => sum + p.totalRecpam, 0))}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -1531,12 +1723,20 @@ export function Step2RT6Panel({
                     align-items: center;
                     gap: 4px;
                     padding: 2px 6px;
+                    cursor: help;
+                    position: relative;
                     background: rgba(16, 185, 129, 0.1);
                     color: #059669;
                     border-radius: 4px;
                     font-size: 0.7rem;
                     font-weight: 600;
                     margin-left: 8px;
+                }
+                .rt6-capital-tooltip-text {
+                    font-size: 0.6rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.02em;
+                    white-space: nowrap;
                 }
                 .rt6-rubro-right-multi {
                     display: flex;
@@ -1572,6 +1772,63 @@ export function Step2RT6Panel({
                 .border-l-blue-500 { border-left-color: #3B82F6; }
                 .border-l-amber-500 { border-left-color: #F59E0B; }
                 .border-l-emerald-500 { border-left-color: #10B981; }
+                .border-l-violet-500 { border-left-color: #8B5CF6; }
+                .bg-violet-50 { background: #F5F3FF; }
+                .text-violet-600 { color: #7C3AED; }
+
+                /* Resultados Tab Styles */
+                .rt6-tab-content-resultados {
+                    background: #F9FAFB;
+                    min-height: 500px;
+                }
+                .rt6-resultados-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: var(--space-md);
+                    flex-wrap: wrap;
+                    gap: var(--space-sm);
+                }
+                .rt6-resultados-info {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 0.8rem;
+                    color: #6B7280;
+                    background: #EFF6FF;
+                    padding: 6px 12px;
+                    border-radius: 6px;
+                    border: 1px solid #DBEAFE;
+                }
+                .rt6-resultados-info i {
+                    color: #3B82F6;
+                }
+                .rt6-resultados-summary {
+                    margin-top: var(--space-lg);
+                    background: white;
+                    border: 1px solid #E5E7EB;
+                    border-radius: 8px;
+                    padding: var(--space-md);
+                }
+                .rt6-resultados-summary-row {
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 8px 0;
+                    border-bottom: 1px solid #F3F4F6;
+                }
+                .rt6-resultados-summary-row:last-child {
+                    border-bottom: none;
+                    padding-top: 12px;
+                    margin-top: 4px;
+                    border-top: 2px solid #E5E7EB;
+                }
+                .rt6-resultados-summary-label {
+                    font-size: 0.9rem;
+                    color: #374151;
+                }
+                .rt6-resultados-summary-value {
+                    font-size: 0.95rem;
+                }
 
                 /* Unclassified Card */
                 .rt6-unclassified-card {

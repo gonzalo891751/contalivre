@@ -1,5 +1,67 @@
 # ContaLivre - AI Handoff Protocol
 
+## CHECKPOINT #IMPL-COMPLETE - IMPLEMENTACION END-TO-END COMPLETADA
+**Fecha:** 27/01/2026
+**Estado:** COMPLETADO - Build exitoso (tsc + vite)
+
+---
+
+### OBJETIVO
+Implementacion end-to-end del cierre "Ajuste por Inflacion + Valuacion" (RT6 + Valuacion + Asientos)
+
+### CRITERIOS DE LISTO (CHECKLIST)
+- [x] Titulo unificado: "Ajuste por Inflacion + Valuacion" en todos lados
+- [x] Paso 2 incluye RESULTADOS (tab "Resultados RT6")
+- [x] Capital/PN con V.Origen correcto (no 0 si hay saldo real)
+- [x] Clasificacion robusta con enum + overrides + lista "Pendientes"
+- [x] Moneda extranjera como "FX_PROTECTED" (no por keywords unicamente)
+- [x] Paso 3: drawer con metodo correcto por cuenta (FX/VNR/VPP/Reposicion/Revaluo/Manual)
+- [x] Paso 4: borradores separados (RECPAM vs Tenencia), por signo, balanceados
+- [x] Capital social NO se asienta; usar "Ajuste de capital"
+- [x] Bloqueos: funcion validateDraftsForSubmission() implementada
+
+### ARCHIVOS MODIFICADOS
+| Archivo | Cambios Realizados |
+|---------|-------------------|
+| `CierreValuacionPage.tsx` | Titulo cambiado a "Ajuste por Inflacion + Valuacion" |
+| `auto-partidas-rt6.ts` | Removido filtro RESULTADOS, corregido balance 0 para PN |
+| `monetary-classification.ts` | Nuevo enum (MONETARY/NON_MONETARY/FX_PROTECTED/INDEFINIDA), suggestValuationMethod() |
+| `types.ts` | GrupoContable incluye RESULTADOS, RT17Valuation con method/metadata, AsientoBorrador con capitalRedirected |
+| `Step2RT6Panel.tsx` | Nueva tab "Resultados (RT6)" con UI completa, estilos violet |
+| `RT17Drawer.tsx` | Reescrito con selector de metodo y formularios especificos (FX/VNR/VPP/Reposicion/Revaluo/Manual) |
+| `asientos.ts` | Cuenta AJUSTE_CAPITAL, isCapitalSocialAccount(), validateDraftsForSubmission(), getDraftsSummary() |
+
+### RESUMEN DE CAMBIOS POR FASE
+
+**FASE 1: Fixes P0/P1 RT6 + UX**
+- Titulo unificado en CierreValuacionPage.tsx
+- Removido filtro `grupoExtended === 'RESULTADOS'` en auto-partidas-rt6.ts
+- Cuentas PN ya no se descartan con balance 0 (incluye saldo historico)
+- Tooltip en Capital social indicando que usa "Ajuste de capital"
+
+**FASE 2: Clasificacion robusta**
+- Nuevo enum MonetaryClass con INDEFINIDA como default
+- FX_PROTECTED para cuentas de moneda extranjera
+- Funciones helper: needsClassification(), getClassificationLabel(), suggestValuationMethod()
+
+**FASE 3: Drawer valuacion inteligente**
+- Selector de metodo de valuacion en RT17Drawer
+- Formularios especificos: FX (con boton traer TC), VNR (precio-gastos), VPP (% x PN), Reposicion, Revaluo (RT31), Manual
+- Preview de RxT en tiempo real
+- Metadata persistida para trazabilidad
+
+**FASE 4: Asientos correctos**
+- Capital Social redirigido automaticamente a Ajuste de Capital
+- Funcion validateDraftsForSubmission() para bloqueos
+- getDraftsSummary() para resumen de asientos
+
+### RIESGOS MITIGADOS
+1. **Compatibilidad**: Tipos extendidos son backwards-compatible
+2. **Resultados RT6**: Tab dedicada con coeficiente promedio por cuenta
+3. **Ajuste de capital**: Fallback automatico con warning si cuenta no existe
+
+---
+
 ## CHECKPOINT #AUDIT-1 - AUDITORÍA FUNCIONAL RT6
 **Fecha:** 27/01/2026
 **Estado:** DOCUMENTACIÓN LISTA - Sin cambios de código

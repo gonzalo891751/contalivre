@@ -601,8 +601,8 @@ export default function CierreValuacionPage() {
                         <i className={ICON_CLASSES.back} />
                     </button>
                     <div>
-                        <h1 className="cierre-title">Reexpresión y Valuación</h1>
-                        <p className="cierre-subtitle">Ajuste por Inflación + Valuación • Periodo {closingDate.substring(0, 4)}</p>
+                        <h1 className="cierre-title">Ajuste por Inflación + Valuación</h1>
+                        <p className="cierre-subtitle">Cierre contable RT6 + RT17 • Periodo {closingDate.substring(0, 4)}</p>
                     </div>
                 </div>
 

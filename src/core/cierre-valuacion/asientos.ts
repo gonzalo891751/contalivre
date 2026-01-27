@@ -29,8 +29,28 @@ export const SPECIAL_ACCOUNT_HINTS = {
         patterns: ['resultado por tenencia', 'rxt', 'tenencia'],
         fallbackCode: '4.6.06',
         fallbackName: 'Resultado por Tenencia (Auto)'
+    },
+    AJUSTE_CAPITAL: {
+        codes: ['3.1.02', '3.1.03'],
+        patterns: ['ajuste de capital', 'ajuste capital', 'reexpresion capital'],
+        fallbackCode: '3.1.02',
+        fallbackName: 'Ajuste de Capital (Auto-crear)'
     }
 };
+
+/** Detect if account is "Capital Social" (should not be modified directly) */
+const CAPITAL_SOCIAL_PATTERNS = ['capital social', 'capital suscripto', 'capital autorizado'];
+
+function isCapitalSocialAccount(accountCode: string, accountName: string): boolean {
+    const nameLower = accountName.toLowerCase();
+    // Match by name patterns
+    if (CAPITAL_SOCIAL_PATTERNS.some(p => nameLower.includes(p))) {
+        return true;
+    }
+    // Match by typical capital codes (3.1.01, 3.01.01)
+    const codePatterns = [/^3\.1\.01/, /^3\.01\.01/, /^3\.1\.1$/];
+    return codePatterns.some(pattern => pattern.test(accountCode));
+}
 
 // ============================================
 // Helpers
@@ -62,7 +82,7 @@ function consolidateByAccount(lines: AsientoLine[]): AsientoLine[] {
 }
 
 /** Find special account with fallback info */
-export function getSpecialAccount(accounts: Account[], type: 'RECPAM' | 'RXT') {
+export function getSpecialAccount(accounts: Account[], type: 'RECPAM' | 'RXT' | 'AJUSTE_CAPITAL') {
     const hint = SPECIAL_ACCOUNT_HINTS[type];
 
     // 1. Try codes
@@ -161,8 +181,12 @@ function buildVoucher(params: BuilderParams): AsientoBorrador | null {
     const { partidas, type, direction, contraAcc, allAccounts } = params;
     if (partidas.length === 0) return null;
 
+    // Get Ajuste de Capital account for redirection
+    const ajusteCapital = getSpecialAccount(allAccounts, 'AJUSTE_CAPITAL');
+
     const baseLines: AsientoLine[] = [];
     let sumImpact = 0;
+    let hasCapitalRedirection = false;
 
     partidas.forEach(p => {
         const val = type === 'RT6' ? (p as ComputedPartidaRT6).totalRecpam : (p as ComputedPartidaRT17).resTenencia;
@@ -172,13 +196,28 @@ function buildVoucher(params: BuilderParams): AsientoBorrador | null {
         // Find exact account in plan
         const acc = allAccounts.find(a => a.code === p.cuentaCodigo);
 
-        baseLines.push({
-            accountId: acc?.id,
-            cuentaCodigo: acc?.code || p.cuentaCodigo,
-            cuentaNombre: acc?.name || p.cuentaNombre,
-            debe: roundedVal > 0 ? roundedVal : 0,
-            haber: roundedVal < 0 ? Math.abs(roundedVal) : 0,
-        });
+        // Check if this is Capital Social - redirect to Ajuste de Capital
+        const isCapitalSocial = isCapitalSocialAccount(p.cuentaCodigo, p.cuentaNombre);
+
+        if (isCapitalSocial) {
+            hasCapitalRedirection = true;
+            // Use Ajuste de Capital account instead
+            baseLines.push({
+                accountId: ajusteCapital.account.id,
+                cuentaCodigo: ajusteCapital.account.code,
+                cuentaNombre: ajusteCapital.account.name,
+                debe: roundedVal > 0 ? roundedVal : 0,
+                haber: roundedVal < 0 ? Math.abs(roundedVal) : 0,
+            });
+        } else {
+            baseLines.push({
+                accountId: acc?.id,
+                cuentaCodigo: acc?.code || p.cuentaCodigo,
+                cuentaNombre: acc?.name || p.cuentaNombre,
+                debe: roundedVal > 0 ? roundedVal : 0,
+                haber: roundedVal < 0 ? Math.abs(roundedVal) : 0,
+            });
+        }
 
         sumImpact += roundedVal;
     });
@@ -225,6 +264,12 @@ function buildVoucher(params: BuilderParams): AsientoBorrador | null {
         RT17_DEBE: 'Ajuste valuación RxT (pérdida)',
     };
 
+    // Build combined warning
+    let warning = contraAcc.warning;
+    if (hasCapitalRedirection && ajusteCapital.warning) {
+        warning = warning ? `${warning}; ${ajusteCapital.warning}` : ajusteCapital.warning;
+    }
+
     return {
         numero: 0, // Assigned by caller
         key,
@@ -233,7 +278,93 @@ function buildVoucher(params: BuilderParams): AsientoBorrador | null {
         tipo: type,
         totalDebe,
         totalHaber,
-        warning: contraAcc.warning,
-        isValid: totalDebe === totalHaber && totalDebe > 0
+        warning,
+        isValid: totalDebe === totalHaber && totalDebe > 0,
+        capitalRedirected: hasCapitalRedirection // Flag for UI
+    };
+}
+
+// ============================================
+// Validation for UI Blocking
+// ============================================
+
+export interface ValidationResult {
+    isValid: boolean;
+    errors: string[];
+    warnings: string[];
+}
+
+/**
+ * Validate all drafts before allowing submission to Libro Diario
+ */
+export function validateDraftsForSubmission(
+    drafts: AsientoBorrador[],
+    pendingClassificationCount: number,
+    pendingValuationCount: number
+): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // 1. Check all drafts are balanced
+    for (const draft of drafts) {
+        if (!draft.isValid) {
+            errors.push(`Asiento "${draft.descripcion}" no esta balanceado (D: ${draft.totalDebe}, H: ${draft.totalHaber})`);
+        }
+    }
+
+    // 2. Check no pending classifications
+    if (pendingClassificationCount > 0) {
+        errors.push(`Hay ${pendingClassificationCount} cuenta(s) sin clasificar. Debe resolver antes de continuar.`);
+    }
+
+    // 3. Check no pending valuations (warning, not blocking)
+    if (pendingValuationCount > 0) {
+        warnings.push(`Hay ${pendingValuationCount} cuenta(s) pendientes de valuacion. Se usara el valor homogeneo como valor corriente.`);
+    }
+
+    // 4. Check drafts have warnings about missing accounts
+    for (const draft of drafts) {
+        if (draft.warning) {
+            warnings.push(draft.warning);
+        }
+    }
+
+    // 5. Check there are drafts to submit
+    if (drafts.length === 0) {
+        errors.push('No hay asientos para enviar al Libro Diario.');
+    }
+
+    return {
+        isValid: errors.length === 0,
+        errors,
+        warnings,
+    };
+}
+
+/**
+ * Get summary of all drafts
+ */
+export function getDraftsSummary(drafts: AsientoBorrador[]) {
+    const rt6Drafts = drafts.filter(d => d.tipo === 'RT6');
+    const rt17Drafts = drafts.filter(d => d.tipo === 'RT17');
+
+    const rt6Total = rt6Drafts.reduce((sum, d) => {
+        const net = d.lineas.find(l => l.cuentaCodigo.includes('4.6') || l.cuentaNombre.toLowerCase().includes('recpam'));
+        return sum + (net?.haber || 0) - (net?.debe || 0);
+    }, 0);
+
+    const rt17Total = rt17Drafts.reduce((sum, d) => {
+        const net = d.lineas.find(l => l.cuentaCodigo.includes('4.6') || l.cuentaNombre.toLowerCase().includes('tenencia'));
+        return sum + (net?.haber || 0) - (net?.debe || 0);
+    }, 0);
+
+    return {
+        rt6Count: rt6Drafts.length,
+        rt17Count: rt17Drafts.length,
+        totalCount: drafts.length,
+        rt6NetResult: round(rt6Total),
+        rt17NetResult: round(rt17Total),
+        allValid: drafts.every(d => d.isValid),
+        hasWarnings: drafts.some(d => d.warning),
     };
 }
