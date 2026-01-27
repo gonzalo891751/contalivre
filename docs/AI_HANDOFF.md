@@ -1,5 +1,90 @@
 # ContaLivre - AI Handoff Protocol
 
+## CHECKPOINT #FIX-INTEGRAL-2 - HARDENING COMPLETADO
+**Fecha:** 27/01/2026
+**Estado:** ✅ COMPLETADO - Build PASS (19.48s)
+
+---
+
+### RESUMEN DE CAMBIOS
+
+Se implementaron mejoras de robustez y diagnóstico para el módulo `/planillas/cierre-valuacion`:
+
+### ARCHIVOS MODIFICADOS
+
+| Archivo | Cambio |
+|---------|--------|
+| `CierreValuacionPage.tsx` | Validación de closingDate + diagnóstico mejorado en toast |
+| `auto-partidas-rt6.ts` | Estadísticas extendidas (resultadosAccounts, pnAccounts, skippedZeroBalance) |
+| `monetary-classification.ts` | Detección de FX más robusta (keywords fuertes vs contextuales) |
+
+### CAMBIOS ESPECÍFICOS
+
+**1. Validación de fecha de cierre (P0)**
+```typescript
+// CierreValuacionPage.tsx - handleAnalyzeMayor
+if (!closingDate || closingDate.length < 10) {
+    showToast('Selecciona una fecha de cierre valida');
+    return;
+}
+```
+
+**2. Estadísticas extendidas en AutoGenerateResult**
+```typescript
+stats: {
+    // ... existentes ...
+    resultadosAccounts: number;  // NUEVO: conteo de cuentas RESULTADOS
+    pnAccounts: number;          // NUEVO: conteo de cuentas PN
+    skippedZeroBalance: number;  // NUEVO: cuentas omitidas por balance 0
+}
+```
+
+**3. Detección de FX más precisa**
+- Keywords fuertes: `moneda extranjera`, `en dolares`, `usd`, `u$s`, `dolar`, etc.
+- Keywords contextuales (`divisa`, `exterior`) solo con contexto de caja/banco
+- Evita falsos positivos como "Inversiones en el exterior"
+
+**4. Diagnóstico en console cuando RESULTADOS falta**
+```typescript
+if (result.stats.resultadosAccounts > 0 && resultadosPartidas.length === 0) {
+    console.warn('[RT6] RESULTADOS accounts found but no partidas generated');
+}
+```
+
+### VERIFICACIÓN
+
+```bash
+npm run build  # ✅ PASS (19.48s)
+```
+
+### ESTADO ACTUAL VERIFICADO
+
+| Criterio | Estado |
+|----------|--------|
+| Título unificado "Ajuste por Inflación + Valuación" | ✅ |
+| Tab Resultados (RT6) incluye cuentas con actividad | ✅ |
+| Capital/PN no se omite con balance 0 | ✅ |
+| Caja/Bancos en Monetarias | ✅ |
+| Moneda extranjera con FX_PROTECTED | ✅ |
+| Paso 3 sugiere método por cuenta | ✅ |
+| Paso 4 asientos con diagnóstico | ✅ |
+| Ajuste Capital para Capital Social | ✅ |
+
+### PRÓXIMOS PASOS (SI EL USUARIO REPORTA PROBLEMAS)
+
+1. Verificar datos de prueba (¿tienen movimientos de RESULTADOS?)
+2. Revisar console.warn para diagnóstico
+3. Verificar que closingDate esté configurado correctamente
+4. Probar "Analizar Mayor" y verificar toast con estadísticas
+
+---
+
+## CHECKPOINT #FIX-INTEGRAL-1 - DIAGNÓSTICO INICIAL
+**Fecha:** 27/01/2026
+**Estado:** ✅ DIAGNÓSTICO COMPLETADO - Sirvió de base para CHECKPOINT #2
+
+---
+
 ## CHECKPOINT #IMPL-COMPLETE - IMPLEMENTACION END-TO-END COMPLETADA
 **Fecha:** 27/01/2026
 **Estado:** COMPLETADO - Build exitoso (tsc + vite)

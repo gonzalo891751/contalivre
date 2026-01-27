@@ -222,16 +222,26 @@ function getMonetaryClassByName(name: string): MonetaryClass | null {
     // ==========================================
 
     // Foreign currency accounts => FX_PROTECTED (they need FX valuation)
-    const foreignCurrencyKeywords = [
+    // Use improved detection with strong vs contextual keywords
+    const strongFxKeywords = [
         'moneda extranjera',
+        'en dolares',
+        'en euros',
+        'usd',
+        'u$s',
+        'us$',
+        'eur',
         'dolar',
         'dolares',
-        'usd',
-        'euro',
-        'divisa',
-        'exterior',
     ];
-    if (foreignCurrencyKeywords.some(kw => lowerName.includes(kw))) {
+    if (strongFxKeywords.some(kw => lowerName.includes(kw))) {
+        return 'FX_PROTECTED';
+    }
+    // Contextual keywords only with cash/bank context
+    const contextualFxKeywords = ['divisa', 'exterior'];
+    const cashBankKeywords = ['caja', 'banco', 'cuenta corriente', 'ahorro'];
+    const isCashBank = cashBankKeywords.some(kw => lowerName.includes(kw));
+    if (isCashBank && contextualFxKeywords.some(kw => lowerName.includes(kw))) {
         return 'FX_PROTECTED';
     }
 
@@ -399,17 +409,35 @@ export function isValidated(
 export function isForeignCurrencyAccount(account: Account): boolean {
     const lowerName = account.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-    const foreignCurrencyKeywords = [
+    // Strong indicators of foreign currency account
+    const strongFxKeywords = [
         'moneda extranjera',
-        'dolar',
-        'dolares',
+        'en dolares',
+        'en euros',
         'usd',
-        'euro',
-        'divisa',
-        'exterior',
+        'u$s',
+        'us$',
+        'eur',
+        'dolar',  // Keep for "Caja Dolar", "Banco Dolar"
+        'dolares',
     ];
 
-    return foreignCurrencyKeywords.some(kw => lowerName.includes(kw));
+    // These require additional context (must be with caja/banco/etc)
+    const contextualFxKeywords = ['divisa', 'exterior'];
+    const cashBankKeywords = ['caja', 'banco', 'cuenta corriente', 'ahorro'];
+
+    // Check strong keywords first
+    if (strongFxKeywords.some(kw => lowerName.includes(kw))) {
+        return true;
+    }
+
+    // Check contextual keywords only if it's a cash/bank account
+    const isCashBankAccount = cashBankKeywords.some(kw => lowerName.includes(kw));
+    if (isCashBankAccount && contextualFxKeywords.some(kw => lowerName.includes(kw))) {
+        return true;
+    }
+
+    return false;
 }
 
 /**
@@ -418,17 +446,35 @@ export function isForeignCurrencyAccount(account: Account): boolean {
 export function isForeignCurrencyByCodeName(_code: string, name: string): boolean {
     const lowerName = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-    const foreignCurrencyKeywords = [
+    // Strong indicators of foreign currency account
+    const strongFxKeywords = [
         'moneda extranjera',
+        'en dolares',
+        'en euros',
+        'usd',
+        'u$s',
+        'us$',
+        'eur',
         'dolar',
         'dolares',
-        'usd',
-        'euro',
-        'divisa',
-        'exterior',
     ];
 
-    return foreignCurrencyKeywords.some(kw => lowerName.includes(kw));
+    // These require additional context (must be with caja/banco/etc)
+    const contextualFxKeywords = ['divisa', 'exterior'];
+    const cashBankKeywords = ['caja', 'banco', 'cuenta corriente', 'ahorro'];
+
+    // Check strong keywords first
+    if (strongFxKeywords.some(kw => lowerName.includes(kw))) {
+        return true;
+    }
+
+    // Check contextual keywords only if it's a cash/bank account
+    const isCashBankAccount = cashBankKeywords.some(kw => lowerName.includes(kw));
+    if (isCashBankAccount && contextualFxKeywords.some(kw => lowerName.includes(kw))) {
+        return true;
+    }
+
+    return false;
 }
 
 /**

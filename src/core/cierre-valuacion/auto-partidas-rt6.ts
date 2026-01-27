@@ -46,6 +46,12 @@ export interface AutoGenerateResult {
         partidasGenerated: number;
         lotsGenerated: number;
         excludedAccounts: number;
+        /** Count of RESULTADOS accounts processed (for diagnostics) */
+        resultadosAccounts: number;
+        /** Count of PN accounts processed */
+        pnAccounts: number;
+        /** Accounts skipped due to zero balance and no period activity */
+        skippedZeroBalance: number;
     };
 }
 
@@ -73,6 +79,9 @@ export function autoGeneratePartidasRT6(
         partidasGenerated: 0,
         lotsGenerated: 0,
         excludedAccounts: 0,
+        resultadosAccounts: 0,
+        pnAccounts: 0,
+        skippedZeroBalance: 0,
     };
 
     // Filter accounts to imputable (non-header) only
@@ -106,6 +115,10 @@ export function autoGeneratePartidasRT6(
         const isPNAccount = accountGrupo === 'PN';
         const isResultadosAccount = accountGrupo === 'RESULTADOS';
 
+        // Track PN and RESULTADOS counts
+        if (isPNAccount) stats.pnAccounts++;
+        if (isResultadosAccount) stats.resultadosAccounts++;
+
         // Skip accounts with zero balance, EXCEPT for PN accounts
         // PN accounts may have historical balance from previous periods
         if (!balance) {
@@ -127,6 +140,7 @@ export function autoGeneratePartidasRT6(
         // because they may have accumulated balance from prior periods.
         // For RESULTADOS, include if there was period activity.
         if (balance.balance === 0 && !isPNAccount && !(isResultadosAccount && hasPeriodActivity)) {
+            stats.skippedZeroBalance++;
             continue;
         }
 
