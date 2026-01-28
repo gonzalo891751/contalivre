@@ -32,16 +32,16 @@ const normalizeText = (value: string) => value
     .replace(/[\u0300-\u036f]/g, '')
 
 const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
-    cajaME: { code: '1.1.02.01', names: ['Caja ME', 'Caja Moneda Extranjera', 'Caja USD', 'Caja Dolares'] },
-    bancoME: { code: '1.1.02.02', names: ['Banco ME', 'Banco Moneda Extranjera', 'Banco USD'] },
-    inversionME: { code: '1.2.02.01', names: ['Inversiones ME', 'Inversiones USD'] },
-    pasivoME: { code: '2.1.04.01', names: ['Pasivo ME', 'Deudas ME', 'Prestamos ME'] },
-    diferenciaCambio: { code: '4.2.01.05', names: ['Diferencia de cambio', 'Diferencias de cambio', 'Resultado por tenencia'] },
-    interesesGanados: { code: '4.2.01.01', names: ['Intereses ganados', 'Intereses cobrados'] },
-    interesesPerdidos: { code: '5.2.01.01', names: ['Intereses perdidos', 'Intereses pagados'] },
-    cajaARS: { code: '1.1.01.01', names: ['Caja', 'Caja ARS', 'Caja Pesos'] },
-    bancoARS: { code: '1.1.01.02', names: ['Banco', 'Bancos', 'Banco ARS', 'Banco cuenta corriente'] },
-    comisionesBancarias: { code: '5.1.02.01', names: ['Comisiones bancarias', 'Gastos bancarios', 'Comisiones'] },
+    cajaME: { code: '1.1.01.10', names: ['Caja ME', 'Caja Moneda Extranjera', 'Caja USD', 'Caja Dolares'] },
+    bancoME: { code: '1.1.01.11', names: ['Banco ME', 'Banco Moneda Extranjera', 'Banco USD'] },
+    inversionME: { code: '1.1.05.03', names: ['Inversiones ME', 'Inversiones USD'] },
+    pasivoME: { code: '2.1.01.10', names: ['Pasivo ME', 'Deudas ME', 'Prestamos ME', 'Deuda en USD'] },
+    diferenciaCambio: { code: '4.6.03', names: ['Diferencia de cambio', 'Diferencias de cambio', 'Resultado por tenencia'] },
+    interesesGanados: { code: '4.6.01', names: ['Intereses ganados', 'Intereses cobrados'] },
+    interesesPerdidos: { code: '4.6.02', names: ['Intereses perdidos', 'Intereses pagados'] },
+    cajaARS: { code: '1.1.01.01', names: ['Caja', 'Caja ARS', 'Caja Pesos', 'Caja moneda nacional'] },
+    bancoARS: { code: '1.1.01.02', names: ['Banco', 'Bancos', 'Banco ARS', 'Banco cuenta corriente', 'Banco c/c ARS'] },
+    comisionesBancarias: { code: '4.6.04', names: ['Comisiones bancarias', 'Gastos bancarios', 'Comisiones', 'Comisiones y gastos bancarios'] },
 }
 
 const resolveAccountByIdOrCode = (accounts: Account[], idOrCode?: string) => {

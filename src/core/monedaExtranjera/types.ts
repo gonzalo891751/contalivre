@@ -550,16 +550,16 @@ export function createEmptyFxLiability(
  * Default account code mappings (Argentine chart of accounts)
  */
 export const DEFAULT_FX_ACCOUNT_CODES: Record<FxAccountMappingKey, string> = {
-    cajaME: '1.1.02.01',
-    bancoME: '1.1.02.02',
-    inversionME: '1.2.02.01',
-    pasivoME: '2.1.04.01',
-    diferenciaCambio: '4.2.01.05',
-    interesesGanados: '4.2.01.01',
-    interesesPerdidos: '5.2.01.01',
+    cajaME: '1.1.01.10',
+    bancoME: '1.1.01.11',
+    inversionME: '1.1.05.03',
+    pasivoME: '2.1.01.10',
+    diferenciaCambio: '4.6.03',
+    interesesGanados: '4.6.01',
+    interesesPerdidos: '4.6.02',
     cajaARS: '1.1.01.01',
     bancoARS: '1.1.01.02',
-    comisionesBancarias: '5.1.02.01',
+    comisionesBancarias: '4.6.04',
 }
 
 /**

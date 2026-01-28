@@ -2,6 +2,62 @@
 
 ---
 
+## CHECKPOINT #PLAN-DE-CUENTAS-AJUSTE-ME
+**Fecha:** 2026-01-28
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Ajustar Plan de Cuentas genérico para soportar mejor el módulo ME (Moneda Extranjera) sin romper compatibilidad.
+
+---
+
+### Resumen de Cambios
+
+1.  **Renombres en Plan de Cuentas (ARS):**
+    *   `1.1.01.01`: "Caja" -> **"Caja ARS"**
+    *   `1.1.01.02`: "Bancos cuenta corriente" -> **"Banco c/c ARS"**
+    *   `4.6.04`: "Gastos bancarios" -> **"Comisiones y gastos bancarios"**
+
+2.  **Nuevas Cuentas (ME/USD):**
+    *   `1.1.01.10`: **"Caja USD"**
+    *   `1.1.01.11`: **"Banco c/c USD"**
+    *   `2.1.01.10`: **"Deuda en moneda extranjera (USD)"**
+    *   `4.6.07`: **"Diferencias de cambio (Ganancia)"**
+    *   `4.6.08`: **"Diferencias de cambio (Pérdida)"**
+
+3.  **Migración / Reparación Automática:**
+    *   Se implemento `repairDefaultFxAccounts()` en `storage/seed.ts`.
+    *   Se ejecuta al inicio de la app (`MainLayout.tsx`) de forma **idempotente**.
+    *   Renombra cuentas viejas si existen y crea las faltantes.
+
+4.  **Mejoras en Módulo ME:**
+    *   **Heurísticas:** Selectores ARS ahora omiten correctamente cuentas con "ME", "USD", "Dólar" o "Extranjera".
+    *   **Configuración:** Modal de Configuración ME ahora muestra todos los mappings (Cajas, Bancos, Pasivos, Intereses, Diferencia, Comisiones).
+    *   **Mantenimiento:** `DEFAULT_FX_ACCOUNT_CODES` y `ACCOUNT_FALLBACKS` actualizados con los nuevos códigos ARS/USD.
+
+---
+
+### Archivos Modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/storage/seed.ts` | SEED_ACCOUNTS actualizado + repairDefaultFxAccounts() |
+| `src/storage/index.ts` | Export de repairDefaultFxAccounts |
+| `src/ui/Layout/MainLayout.tsx` | Llamada a repairDefaultFxAccounts() en init |
+| `src/core/monedaExtranjera/types.ts` | DEFAULT_FX_ACCOUNT_CODES actualizados |
+| `src/storage/fx.ts` | ACCOUNT_FALLBACKS actualizados |
+| `src/pages/Operaciones/MonedaExtranjeraPage.tsx` | Heurísticas ARS + SettingsModal completo |
+
+---
+
+### Verificación
+
+- [x] Las nuevas cuentas aparecen en el Libro Mayor y Balances.
+- [x] El módulo ME detecta por defecto "Banco c/c ARS" o "Caja ARS" como contrapartida.
+- [x] El selector de "Cartera ME" muestra claramente qué cuenta del libro mayor está usando (o usará por defecto).
+- [x] `npm run build` PASS.
+
+---
+
+
 ## CHECKPOINT #OPERACIONES-ME-MEJORAS-V2
 **Fecha:** 2026-01-28
 **Estado:** COMPLETADO - Build PASS

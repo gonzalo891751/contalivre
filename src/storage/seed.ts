@@ -37,12 +37,15 @@ const SEED_ACCOUNTS: SeedAccount[] = [
 
     // 1.1.01 - Caja y Bancos
     { code: '1.1.01', name: 'Caja y Bancos', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1', isHeader: true },
-    { code: '1.1.01.01', name: 'Caja', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
-    { code: '1.1.01.02', name: 'Bancos cuenta corriente', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
-    { code: '1.1.01.03', name: 'Moneda extranjera', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
+    { code: '1.1.01.01', name: 'Caja ARS', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
+    { code: '1.1.01.02', name: 'Banco c/c ARS', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
+    { code: '1.1.01.03', name: 'Moneda extranjera (Otras)', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
     { code: '1.1.01.04', name: 'Valores a depositar', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
     { code: '1.1.01.05', name: 'Valores a depositar diferidos', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
     { code: '1.1.01.06', name: 'Fondo fijo', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
+    // Cuentas USD específicas
+    { code: '1.1.01.10', name: 'Caja USD', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
+    { code: '1.1.01.11', name: 'Banco c/c USD', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01' },
     // Regularizadoras de Caja y Bancos
     { code: '1.1.01.90', name: 'Valores a depositar endosados', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01', isContra: true, normalSide: 'CREDIT' },
     { code: '1.1.01.91', name: 'Valores a depositar dif. endosados', kind: 'ASSET', section: 'CURRENT', group: 'Caja y Bancos', statementGroup: 'CASH_AND_BANKS', parentCode: '1.1.01', isContra: true, normalSide: 'CREDIT' },
@@ -144,6 +147,7 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     // Acreedores varios movido a 2.1.06 Otras deudas
     { code: '2.1.01.04', name: 'Valores a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'TRADE_PAYABLES', parentCode: '2.1.01' },
     { code: '2.1.01.05', name: 'Valores a pagar diferidos', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'TRADE_PAYABLES', parentCode: '2.1.01' },
+    { code: '2.1.01.10', name: 'Deuda en moneda extranjera (USD)', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'TRADE_PAYABLES', parentCode: '2.1.01' },
 
     // 2.1.02 - Deudas laborales
     { code: '2.1.02', name: 'Deudas laborales', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas laborales', statementGroup: 'PAYROLL_LIABILITIES', parentCode: '2.1', isHeader: true },
@@ -268,10 +272,12 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '4.6', name: 'Resultados financieros y tenencia', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4', isHeader: true },
     { code: '4.6.01', name: 'Intereses ganados', kind: 'INCOME', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_INCOME', parentCode: '4.6' },
     { code: '4.6.02', name: 'Intereses perdidos', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6' },
-    { code: '4.6.03', name: 'Diferencia de cambio', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6' },
-    { code: '4.6.04', name: 'Gastos bancarios', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6' },
+    { code: '4.6.03', name: 'Diferencia de cambio', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6', allowOppositeBalance: true },
+    { code: '4.6.04', name: 'Comisiones y gastos bancarios', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6' },
     { code: '4.6.05', name: 'RECPAM', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6', allowOppositeBalance: true },
     { code: '4.6.06', name: 'Resultado por tenencia', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6', allowOppositeBalance: true },
+    { code: '4.6.07', name: 'Diferencias de cambio (Ganancia)', kind: 'INCOME', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_INCOME', parentCode: '4.6' },
+    { code: '4.6.08', name: 'Diferencias de cambio (Pérdida)', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6' },
 
     // 4.7 - Otros ingresos y egresos
     { code: '4.7', name: 'Otros ingresos y egresos', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_EXPENSES', parentCode: '4', isHeader: true },
@@ -419,4 +425,60 @@ export async function getAccountTree(): Promise<Account[]> {
  */
 export async function getChildAccounts(parentId: string): Promise<Account[]> {
     return db.accounts.where('parentId').equals(parentId).sortBy('code')
+}
+
+/**
+ * Asegura que existan las cuentas por defecto para Moneda Extranjera.
+ * Renombra cuentas viejas si existen y crea las faltantes.
+ * Idempotente y seguro (no borra datos).
+ */
+export async function repairDefaultFxAccounts(): Promise<void> {
+    const accounts = await db.accounts.toArray()
+
+    const findByCode = (code: string) => accounts.find(a => a.code === code)
+    const findByExactName = (name: string) => accounts.find(a => a.name === name)
+
+    // A - RENOMBRES
+    // 1.1.01.01: "Caja" o "Caja moneda nacional" -> "Caja ARS"
+    const caja = findByCode('1.1.01.01')
+    if (caja && (caja.name === 'Caja' || caja.name === 'Caja moneda nacional')) {
+        await db.accounts.update(caja.id, { name: 'Caja ARS' })
+        console.log('✓ Renombrado: Caja -> Caja ARS')
+    }
+
+    // 1.1.01.02: "Bancos cuenta corriente" -> "Banco c/c ARS"
+    const bancoArs = findByCode('1.1.01.02')
+    if (bancoArs && bancoArs.name === 'Bancos cuenta corriente') {
+        await db.accounts.update(bancoArs.id, { name: 'Banco c/c ARS' })
+        console.log('✓ Renombrado: Bancos cuenta corriente -> Banco c/c ARS')
+    }
+
+    // 4.6.04: "Gastos bancarios" -> "Comisiones y gastos bancarios"
+    const gastosBancarios = findByCode('4.6.04')
+    if (gastosBancarios && gastosBancarios.name === 'Gastos bancarios') {
+        await db.accounts.update(gastosBancarios.id, { name: 'Comisiones y gastos bancarios' })
+        console.log('✓ Renombrado: Gastos bancarios -> Comisiones y gastos bancarios')
+    }
+
+    // B - ALTAS SI FALTAN
+    const accountsToEnsure = SEED_ACCOUNTS.filter(s =>
+        ['1.1.01.10', '1.1.01.11', '2.1.01.10', '4.6.07', '4.6.08'].includes(s.code)
+    )
+
+    const codeToId = new Map(accounts.map(a => [a.code, a.id]))
+    const newAccounts: Account[] = []
+
+    for (const seed of accountsToEnsure) {
+        if (!findByCode(seed.code) && !findByExactName(seed.name)) {
+            // No existe ni por código ni por nombre exacto -> crear
+            const account = seedToAccount(seed, codeToId)
+            codeToId.set(seed.code, account.id)
+            newAccounts.push(account)
+            console.log(`+ Creada cuenta faltante: ${seed.code} - ${seed.name}`)
+        }
+    }
+
+    if (newAccounts.length > 0) {
+        await db.accounts.bulkAdd(newAccounts)
+    }
 }

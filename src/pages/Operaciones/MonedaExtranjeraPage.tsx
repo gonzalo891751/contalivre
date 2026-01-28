@@ -380,7 +380,8 @@ function MovementModal({ open, onClose, onSave, editing, accounts, ledgerAccount
             a.kind === 'ASSET' && // Assets only for contrapartida
             !a.name.toLowerCase().includes('me') &&
             !a.name.toLowerCase().includes('usd') &&
-            !a.name.toLowerCase().includes('dolar')
+            !a.name.toLowerCase().includes('dolar') &&
+            !a.name.toLowerCase().includes('extranjera')
         ),
         [ledgerAccounts]
     )
@@ -941,12 +942,15 @@ function SettingsModal({ open, onClose, settings, onSave, accounts }: SettingsMo
     if (!open) return null
 
     const mappingFields: { key: FxAccountMappingKey; label: string }[] = [
-        { key: 'cajaME', label: 'Caja Moneda Extranjera' },
-        { key: 'bancoME', label: 'Banco Moneda Extranjera' },
-        { key: 'pasivoME', label: 'Pasivo ME / Prestamos' },
+        { key: 'cajaME', label: 'Caja Moneda Extranjera (USD)' },
+        { key: 'bancoME', label: 'Banco Moneda Extranjera (USD)' },
+        { key: 'pasivoME', label: 'Pasivo ME (Dólares/USD)' },
         { key: 'diferenciaCambio', label: 'Diferencias de Cambio' },
-        { key: 'cajaARS', label: 'Caja ARS (contrapartida)' },
-        { key: 'bancoARS', label: 'Banco ARS (contrapartida)' },
+        { key: 'interesesGanados', label: 'Intereses Ganados ME' },
+        { key: 'interesesPerdidos', label: 'Intereses Perdidos ME' },
+        { key: 'cajaARS', label: 'Contrapartida Caja ARS' },
+        { key: 'bancoARS', label: 'Contrapartida Banco ARS' },
+        { key: 'comisionesBancarias', label: 'Gastos y Comisiones' },
     ]
 
     return (
@@ -1396,11 +1400,10 @@ export default function MonedaExtranjeraPage() {
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
-                            className={`pb-3 border-b-2 font-medium transition-colors flex items-center gap-2 ${
-                                activeTab === tab.id
-                                    ? 'border-blue-600 text-blue-600'
-                                    : 'border-transparent text-slate-500 hover:text-slate-700'
-                            }`}
+                            className={`pb-3 border-b-2 font-medium transition-colors flex items-center gap-2 ${activeTab === tab.id
+                                ? 'border-blue-600 text-blue-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                                }`}
                         >
                             {tab.label}
                             {tab.id === 'conciliacion' && reconciliationData.totalPending > 0 && (
@@ -1942,9 +1945,8 @@ export default function MonedaExtranjeraPage() {
 
             {/* Toast */}
             {toast && (
-                <div className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium ${
-                    toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'
-                }`}>
+                <div className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'
+                    }`}>
                     {toast.message}
                 </div>
             )}

@@ -4,7 +4,7 @@ import Sidebar from './Sidebar'
 import { TopHeader } from './TopHeader'
 import MobileDrawer from './MobileDrawer'
 import MobileBottomNav from './MobileBottomNav'
-import { loadSeedDataIfNeeded } from '../../storage'
+import { loadSeedDataIfNeeded, repairDefaultFxAccounts } from '../../storage'
 import { useMobileBreakpoint } from '../../hooks/useMobileBreakpoint'
 
 interface Props {
@@ -48,6 +48,7 @@ export default function MainLayout({ children }: Props) {
         async function init() {
             try {
                 await loadSeedDataIfNeeded()
+                await repairDefaultFxAccounts()
                 setIsLoading(false)
             } catch (err) {
                 console.error('Error initializing app:', err)

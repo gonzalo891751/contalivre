@@ -3,7 +3,7 @@ export { db, generateId, cleanupDuplicateAccounts, hasDuplicateCodes } from './d
 export type { Settings } from './db'
 
 // Seed data
-export { loadSeedDataIfNeeded, resetDatabase, getAccountsByKind, getAccountTree, getChildAccounts } from './seed'
+export { loadSeedDataIfNeeded, resetDatabase, getAccountsByKind, getAccountTree, getChildAccounts, repairDefaultFxAccounts } from './seed'
 
 // Accounts CRUD
 export {
