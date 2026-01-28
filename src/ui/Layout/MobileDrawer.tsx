@@ -2,12 +2,14 @@ import { useEffect, useRef, useCallback } from 'react'
 import { NavLink, useLocation, Link } from 'react-router-dom'
 import {
     SquaresFour,
+    RocketLaunch,
     TreeStructure,
     Notebook,
     BookBookmark,
     Scales,
     ChartLineUp,
     Table,
+    Package,
     Robot,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
@@ -16,11 +18,19 @@ interface NavItem {
     path: string
     label: string
     icon: PhosphorIcon
-    children?: { path: string; label: string }[]
+    children?: { path: string; label: string; icon?: PhosphorIcon }[]
 }
 
 const navItems: NavItem[] = [
     { path: '/', label: 'Dashboard', icon: SquaresFour },
+    {
+        path: '/operaciones',
+        label: 'Operaciones',
+        icon: RocketLaunch,
+        children: [
+            { path: '/operaciones/inventario', label: 'Inventario', icon: Package },
+        ],
+    },
     { path: '/cuentas', label: 'Plan de Cuentas', icon: TreeStructure },
     { path: '/asientos', label: 'Libro Diario', icon: Notebook },
     { path: '/mayor', label: 'Libro Mayor', icon: BookBookmark },
@@ -31,7 +41,6 @@ const navItems: NavItem[] = [
         label: 'Planillas',
         icon: Table,
         children: [
-            { path: '/planillas/inventario', label: 'Inventario' },
             { path: '/planillas/conciliaciones', label: 'Conciliaciones' },
             { path: '/planillas/amortizaciones', label: 'Amortizaciones' },
             { path: '/planillas/cierre-valuacion', label: 'Cierre: AxI + Valuación' },
@@ -152,7 +161,9 @@ export default function MobileDrawer({ isOpen, onClose }: MobileDrawerProps) {
                                 </NavLink>
                                 {item.children && (
                                     <div className="mobile-drawer-children">
-                                        {item.children.map((child) => (
+                                        {item.children.map((child) => {
+                                            const ChildIcon = child.icon
+                                            return (
                                             <NavLink
                                                 key={child.path}
                                                 to={child.path}
@@ -160,9 +171,11 @@ export default function MobileDrawer({ isOpen, onClose }: MobileDrawerProps) {
                                                     `mobile-drawer-link mobile-drawer-child ${isActive ? 'active' : ''}`
                                                 }
                                             >
+                                                {ChildIcon && <ChildIcon size={16} className="mobile-drawer-icon" />}
                                                 {child.label}
                                             </NavLink>
-                                        ))}
+                                            )
+                                        })}
                                     </div>
                                 )}
                             </div>

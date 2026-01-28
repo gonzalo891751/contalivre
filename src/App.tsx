@@ -3,13 +3,14 @@ import MainLayout from './ui/Layout/MainLayout'
 import CleanLayout from './layouts/CleanLayout'
 import CleanPrototype from './pages/clean/CleanPrototype'
 import Dashboard from './pages/Dashboard'
+import OperacionesPage from './pages/OperacionesPage'
 import Cuentas from './pages/Cuentas'
 import Asientos from './pages/Asientos'
 import Mayor from './pages/Mayor'
 import Balance from './pages/Balance'
 import Estados from './pages/Estados'
 import AmortizacionesPage from './pages/Planillas/AmortizacionesPage'
-import InventarioPage from './pages/Planillas/InventarioPage'
+import InventarioBienesPage from './pages/Planillas/InventarioBienesPage'
 import ConciliacionesPage from './pages/Planillas/Conciliaciones/ConciliacionesPage'
 import CierreValuacionPage from './pages/Planillas/CierreValuacionPage'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
@@ -36,6 +37,8 @@ function App() {
         <Routes>
             <Route element={<MainLayoutRoute />}>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/operaciones" element={<OperacionesPage />} />
+                <Route path="/operaciones/inventario" element={<InventarioBienesPage />} />
                 <Route path="/cuentas" element={<Cuentas />} />
                 <Route path="/asientos" element={<Asientos />} />
                 <Route path="/mayor" element={<Mayor />} />
@@ -44,7 +47,7 @@ function App() {
                 <Route path="/practica" element={<Navigate to="/" replace />} />
                 <Route path="/planillas" element={<PlanillasLayout />}>
                     <Route index element={<PlanillasHome />} />
-                    <Route path="inventario" element={<InventarioPage />} />
+                    <Route path="inventario" element={<Navigate to="/operaciones/inventario" replace />} />
                     <Route path="conciliaciones" element={<ConciliacionesPage />} />
                     <Route path="amortizaciones" element={<AmortizacionesPage />} />
                     <Route path="cierre-valuacion" element={<CierreValuacionPage />} />

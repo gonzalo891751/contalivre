@@ -153,6 +153,7 @@ export type AccountMappingKey =
     | 'devolVentas'
     | 'ivaCF'
     | 'ivaDF'
+    | 'diferenciaInventario'
 
 /**
  * Module configuration
@@ -276,4 +277,235 @@ export const DEFAULT_ACCOUNT_CODES: Record<AccountMappingKey, string> = {
     devolVentas: '4.1.04',
     ivaCF: '1.1.03.01',
     ivaDF: '2.1.03.01',
+    diferenciaInventario: '4.3.02',
+}
+
+// ========================================
+// BIENES DE CAMBIO - New Costing Model
+// ========================================
+
+/**
+ * Costing method for inventory valuation
+ */
+export type CostingMethod = 'FIFO' | 'LIFO' | 'PPP'
+
+/**
+ * Movement type for bienes de cambio (extended)
+ */
+export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT'
+
+/**
+ * Journal integration status for inventory movements
+ */
+export type JournalStatus = 'generated' | 'linked' | 'none' | 'error' | 'missing' | 'desync'
+
+/**
+ * IVA rate for Argentina
+ */
+export type IVARate = 21 | 10.5 | 0
+
+/**
+ * Product category
+ */
+export type ProductCategory = 'MERCADERIA' | 'MATERIA_PRIMA' | 'PRODUCTO_TERMINADO' | 'OTROS'
+
+/**
+ * Product for bienes de cambio with costing support
+ */
+export interface BienesProduct {
+    id: string
+    sku: string
+    name: string
+    description?: string
+    unit: UnidadMedida
+    category: ProductCategory
+    reorderPoint: number           // Stock minimo para alerta
+    ivaRate: IVARate
+    periodId?: string              // Ejercicio/periodo asociado (YYYY)
+    // Cuentas contables asociadas (para Etapa 2)
+    accountMercaderias?: string    // Cuenta de activo (ej: 1.1.04.01)
+    accountCMV?: string            // Cuenta CMV (ej: 5.1.01)
+    accountVentas?: string         // Cuenta ventas (ej: 4.1.01)
+    // Inventario inicial
+    openingQty: number
+    openingUnitCost: number
+    openingDate: string            // ISO date
+    // Metadata
+    createdAt: string
+    updatedAt: string
+}
+
+/**
+ * Cost layer for FIFO/LIFO tracking
+ */
+export interface CostLayer {
+    date: string                   // Date of purchase
+    quantity: number               // Remaining quantity in layer
+    unitCost: number               // Unit cost of this layer
+    movementId: string             // Reference to original purchase movement
+}
+
+/**
+ * Movement for bienes de cambio with full costing
+ */
+export interface BienesMovement {
+    id: string
+    date: string                   // ISO date (YYYY-MM-DD)
+    type: BienesMovementType
+    productId: string
+    quantity: number               // Always positive
+    periodId?: string              // Ejercicio/periodo asociado (YYYY)
+    // For purchases
+    unitCost?: number              // Cost per unit (for PURCHASE)
+    // For sales
+    unitPrice?: number             // Selling price per unit (for SALE)
+    // IVA
+    ivaRate: IVARate
+    ivaAmount: number              // Calculated IVA
+    subtotal: number               // quantity * (unitCost or unitPrice)
+    total: number                  // subtotal + ivaAmount
+    // Costing (calculated at save time)
+    costMethod: CostingMethod      // Snapshot of method at transaction time
+    costUnitAssigned: number       // Assigned cost per unit (for SALE/ADJUSTMENT)
+    costTotalAssigned: number      // Total cost assigned (for CMV calculation)
+    // Additional info
+    counterparty?: string          // Supplier name (PURCHASE) or Customer (SALE)
+    paymentMethod?: string         // Efectivo, Cuenta Corriente, etc.
+    notes?: string
+    reference?: string             // Invoice number, receipt, etc.
+    // For Etapa 2: Journal integration
+    autoJournal: boolean           // Flag: should generate journal entry
+    linkedJournalEntryIds: string[] // References to generated entries (Etapa 2)
+    journalStatus: JournalStatus   // Estado real del asiento
+    journalMissingReason?: 'entry_deleted' | 'manual_unlinked'
+    // Metadata
+    createdAt: string
+    updatedAt: string
+}
+
+/**
+ * Settings for bienes de cambio module
+ */
+export interface BienesSettings {
+    id: string                     // Fixed: 'bienes-settings'
+    costMethod: CostingMethod      // Global costing method
+    costMethodLocked: boolean      // True if there are exits (sales/adjustments)
+    allowNegativeStock: boolean
+    defaultIVARate: IVARate
+    // Account mappings (for Etapa 2)
+    accountMappings: Partial<Record<AccountMappingKey, string>>
+    periodGoals?: Record<string, { salesTarget?: number; marginTarget?: number }>
+    lastUpdated: string
+}
+
+/**
+ * Stock valuation result for a product
+ */
+export interface ProductValuation {
+    product: BienesProduct
+    currentStock: number           // Units on hand
+    layers: CostLayer[]            // Cost layers (for FIFO/LIFO)
+    averageCost: number            // Weighted average cost (for PPP)
+    totalValue: number             // Stock value
+    hasAlert: boolean              // Stock below reorder point
+}
+
+/**
+ * KPIs for bienes de cambio dashboard
+ */
+export interface BienesKPIs {
+    totalProducts: number
+    totalUnits: number
+    stockValue: number             // Total inventory value
+    cmvPeriod: number              // CMV in current period
+    salesPeriod: number            // Sales in current period
+    grossMargin: number            // (Sales - CMV) / Sales * 100
+    lowStockAlerts: number         // Products below reorder point
+}
+
+// ========================================
+// Factory Functions - Bienes de Cambio
+// ========================================
+
+/**
+ * Create empty bienes product
+ */
+export function createEmptyBienesProduct(): BienesProduct {
+    const now = new Date().toISOString()
+    return {
+        id: generateInventoryId('bprod'),
+        sku: '',
+        name: '',
+        unit: 'u',
+        category: 'MERCADERIA',
+        reorderPoint: 0,
+        ivaRate: 21,
+        openingQty: 0,
+        openingUnitCost: 0,
+        openingDate: now.split('T')[0],
+        createdAt: now,
+        updatedAt: now,
+    }
+}
+
+/**
+ * Create empty bienes movement
+ */
+export function createEmptyBienesMovement(
+    productId: string,
+    type: BienesMovementType,
+    costMethod: CostingMethod
+): BienesMovement {
+    const now = new Date().toISOString()
+    return {
+        id: generateInventoryId('bmov'),
+        date: now.split('T')[0],
+        type,
+        productId,
+        quantity: 0,
+        ivaRate: 21,
+        ivaAmount: 0,
+        subtotal: 0,
+        total: 0,
+        costMethod,
+        costUnitAssigned: 0,
+        costTotalAssigned: 0,
+        autoJournal: false,
+        linkedJournalEntryIds: [],
+        journalStatus: 'none',
+        createdAt: now,
+        updatedAt: now,
+    }
+}
+
+/**
+ * Create default bienes settings
+ */
+export function createDefaultBienesSettings(): BienesSettings {
+    return {
+        id: 'bienes-settings',
+        costMethod: 'PPP',
+        costMethodLocked: false,
+        allowNegativeStock: false,
+        defaultIVARate: 21,
+        accountMappings: {},
+        periodGoals: {},
+        lastUpdated: new Date().toISOString(),
+    }
+}
+
+/**
+ * Generate auto SKU from product name
+ */
+export function generateAutoSKU(name: string, existingSKUs: string[]): string {
+    // Take first 3 letters of first 2 words + random suffix
+    const words = name.toUpperCase().replace(/[^A-Z0-9\s]/g, '').split(/\s+/)
+    const prefix = words.slice(0, 2).map(w => w.slice(0, 3)).join('')
+    let suffix = 1
+    let sku = `${prefix}-${String(suffix).padStart(3, '0')}`
+    while (existingSKUs.includes(sku)) {
+        suffix++
+        sku = `${prefix}-${String(suffix).padStart(3, '0')}`
+    }
+    return sku
 }

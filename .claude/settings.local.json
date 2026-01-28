@@ -8,7 +8,9 @@
       "Bash(gh pr list:*)",
       "Bash(gh pr:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git mv:*)",
+      "Bash(timeout 15 npm run dev:*)"
     ]
   }
 }

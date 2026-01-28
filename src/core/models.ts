@@ -109,6 +109,11 @@ export interface JournalEntry {
     date: string // ISO date string (YYYY-MM-DD)
     memo: string
     lines: EntryLine[]
+    // Traceability (optional)
+    sourceModule?: string
+    sourceId?: string
+    sourceType?: string
+    createdAt?: string
     metadata?: Record<string, any>
 }
 

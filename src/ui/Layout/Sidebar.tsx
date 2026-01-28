@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
     SquaresFour,
+    RocketLaunch,
     TreeStructure,
     Notebook,
     BookBookmark,
     Scales,
     ChartLineUp,
     Table,
+    Package,
     CaretRight,
     CaretLeft,
     type Icon as PhosphorIcon,
@@ -17,7 +19,7 @@ interface NavItem {
     path: string
     label: string
     icon: PhosphorIcon
-    children?: { path: string; label: string }[]
+    children?: { path: string; label: string; icon?: PhosphorIcon }[]
 }
 
 interface NavGroup {
@@ -39,7 +41,15 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
         {
             label: 'PRINCIPAL',
             items: [
-                { path: '/', label: 'Dashboard', icon: SquaresFour }
+                { path: '/', label: 'Dashboard', icon: SquaresFour },
+                {
+                    path: '/operaciones',
+                    label: 'Operaciones',
+                    icon: RocketLaunch,
+                    children: [
+                        { path: '/operaciones/inventario', label: 'Inventario', icon: Package },
+                    ],
+                },
             ]
         },
         {
@@ -60,7 +70,6 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                     label: 'Planillas',
                     icon: Table,
                     children: [
-                        { path: '/planillas/inventario', label: 'Inventario' },
                         { path: '/planillas/conciliaciones', label: 'Conciliaciones' },
                         { path: '/planillas/amortizaciones', label: 'Amortizaciones' },
                         { path: '/planillas/cierre-valuacion', label: 'Cierre: AxI + Valuación' },
@@ -164,7 +173,9 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                                             } : undefined}
                                         >
                                             {isCollapsed && <div className="flyout-header">{item.label}</div>}
-                                            {item.children!.map(child => (
+                                            {item.children!.map(child => {
+                                                const ChildIcon = child.icon
+                                                return (
                                                 <NavLink
                                                     key={child.path}
                                                     to={child.path}
@@ -172,9 +183,11 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                                                         `sidebar-link sub-link ${isActive ? 'active' : ''}`
                                                     }
                                                 >
+                                                    {ChildIcon && <ChildIcon size={16} className="icon" />}
                                                     {child.label}
                                                 </NavLink>
-                                            ))}
+                                                )
+                                            })}
                                         </div>
                                     )}
                                 </div>

@@ -76,3 +76,38 @@ export {
     clearCierreValuacionState,
 } from './cierre-valuacion'
 
+// Bienes de Cambio (new costing model)
+export {
+    // Settings
+    loadBienesSettings,
+    saveBienesSettings,
+    updateCostingMethod,
+    // Products
+    getAllBienesProducts,
+    getBienesProductById,
+    getBienesProductBySku,
+    createBienesProduct,
+    updateBienesProduct,
+    deleteBienesProduct,
+    // Movements
+    getAllBienesMovements,
+    getBienesMovementsByProduct,
+    getBienesMovementsByDateRange,
+    createBienesMovement,
+    generateJournalForMovement,
+    linkMovementToEntries,
+    updateBienesMovement,
+    updateBienesMovementWithJournal,
+    deleteBienesMovement,
+    deleteBienesMovementWithJournal,
+    deleteBienesProductWithMovements,
+    reconcileMovementJournalLinks,
+    // Bulk
+    clearAllBienesData,
+    clearBienesPeriodData,
+    importBienesProducts,
+    // Queries
+    getProductsWithLowStock,
+    getAllBienesSKUs,
+} from './bienes'
+
