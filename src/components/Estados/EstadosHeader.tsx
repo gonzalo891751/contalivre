@@ -1,9 +1,9 @@
-import { Scale, TrendingUp, Coins, PieChart, LockKeyhole, Building2 } from 'lucide-react'
+import { Scale, TrendingUp, Coins, PieChart, LockKeyhole, Building2, FileText } from 'lucide-react'
 
 // ============================================
 // Types
 // ============================================
-export type EstadosTab = 'ESP' | 'ER' | 'EFE' | 'EPN'
+export type EstadosTab = 'ESP' | 'ER' | 'EFE' | 'EPN' | 'NA'
 
 interface TabConfig {
     id: EstadosTab
@@ -23,7 +23,8 @@ const TABS: TabConfig[] = [
     { id: 'ESP', label: 'Situación Patrimonial', icon: Scale },
     { id: 'ER', label: 'Resultados', icon: TrendingUp },
     { id: 'EFE', label: 'Flujo de Efectivo', icon: Coins, disabled: true, tooltip: 'Próximamente' },
-    { id: 'EPN', label: 'Evolución PN', icon: PieChart, disabled: true, tooltip: 'Próximamente' },
+    { id: 'EPN', label: 'Evolución PN', icon: PieChart },
+    { id: 'NA', label: 'Notas y Anexos', icon: FileText },
 ]
 
 // ============================================

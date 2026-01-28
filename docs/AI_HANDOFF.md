@@ -1,5 +1,244 @@
 # ContaLivre - AI Handoff Protocol
 
+## CHECKPOINT #NOTAS-ANEXOS-1 - NOTAS Y ANEXOS A LOS ESTADOS CONTABLES
+**Fecha:** 27/01/2026
+**Estado:** ✅ COMPLETADO - Build PASS
+
+---
+
+### RESUMEN DE IMPLEMENTACION
+
+Se implemento la 5ta pestana "Notas y Anexos" en `/estados`, incluyendo:
+- Sub-pestanas: Notas / Anexo de Gastos / Anexo de Costos
+- Motor de calculo puro basado en statementGroups del plan de cuentas
+- Asignacion de gastos por funcion (Costo/Admin/Comercializacion) con heuristicas
+- Determinacion del CMV con formula completa
+- Persistencia de narrativas, asignaciones y overrides en localStorage
+- Impresion/PDF formal con @media print
+
+### ARCHIVOS CREADOS
+
+| Archivo | Descripcion |
+|---------|-------------|
+| `src/core/notas-anexos/types.ts` | Definiciones de tipos para notas y anexos |
+| `src/core/notas-anexos/definitions.ts` | Definiciones de notas y heuristicas de asignacion |
+| `src/core/notas-anexos/compute.ts` | Motor de calculo puro |
+| `src/core/notas-anexos/index.ts` | Exports del modulo |
+| `src/storage/notasAnexosStore.ts` | Servicio de persistencia localStorage |
+| `src/components/Estados/NotasAnexosTab.tsx` | Componente UI completo |
+
+### ARCHIVOS MODIFICADOS
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/components/Estados/EstadosHeader.tsx` | +Tab 'NA' con icono FileText |
+| `src/pages/Estados.tsx` | +Import y renderizado de NotasAnexosTab |
+
+### MAPEO DE NOTAS A CUENTAS/RUBROS
+
+Las notas se mapean por `statementGroup` del plan de cuentas:
+
+| Nota | Titulo | StatementGroups |
+|------|--------|-----------------|
+| 4 | Caja y Bancos | CASH_AND_BANKS |
+| 5 | Inversiones Temporarias | INVESTMENTS (section CURRENT) |
+| 6 | Creditos por Ventas | TRADE_RECEIVABLES |
+| 7 | Otros Creditos | OTHER_RECEIVABLES, TAX_CREDITS |
+| 8 | Bienes de Cambio | INVENTORIES |
+| 9 | Bienes de Uso | PPE |
+| 10 | Deudas Comerciales | TRADE_PAYABLES |
+| 11 | Prestamos | LOANS |
+| 12 | Deudas Sociales | PAYROLL_LIABILITIES |
+| 13 | Deudas Fiscales | TAX_LIABILITIES |
+| 15 | Resultados Financieros | FINANCIAL_INCOME, FINANCIAL_EXPENSES |
+
+### HEURISTICAS DE ASIGNACION DE GASTOS
+
+El sistema detecta automaticamente la funcion de cada gasto por keywords:
+
+- **COSTO (80%):** flete, combustible, produccion, fabricacion, manufactura
+- **COMERCIALIZACION (90%):** publicidad, propaganda, comision, venta, marketing
+- **ADMINISTRACION (100%):** honorarios, oficina, servicios, alquiler, sueldo, amortizacion
+
+### PERSISTENCIA
+
+Las ediciones se guardan en localStorage con el patron:
+```
+notas-anexos:{empresaId}:{periodKey}
+```
+
+Campos persistidos:
+- `narratives`: Map<noteNumber, text>
+- `expenseAllocations`: Map<accountCode, allocation + isManual>
+- `costOverrides`: Map<componentId, value>
+
+### FUNCIONALIDADES IMPLEMENTADAS
+
+- ✅ Tab "Notas y Anexos" habilitada en /estados
+- ✅ Sub-tabs: Notas / Anexo de Gastos / Anexo de Costos
+- ✅ Action bar con toggles Comparativo/Detallado
+- ✅ Indice de notas navegable (scroll suave)
+- ✅ Tablas de notas con totales
+- ✅ Narrativas editables por nota
+- ✅ Validacion vs Balance (warning si difiere)
+- ✅ Tabla de gastos con sliders de asignacion %
+- ✅ Badge "M" para ediciones manuales
+- ✅ Formula CMV (EI + Compras + Gastos - EF)
+- ✅ Card destacado con total CMV
+- ✅ Boton Restablecer para limpiar overrides
+- ✅ Impresion formal con @media print
+
+### FORMULA CMV
+
+```
+CMV = Existencia Inicial
+    + Compras del ejercicio
+    + Gastos incorporados al costo (desde Anexo Gastos)
+    - Existencia Final
+```
+
+### VERIFICACION
+
+```bash
+npm run build  # ✅ PASS
+```
+
+**QA manual:**
+1. Ir a `/estados` -> Tab "Notas y Anexos"
+2. Verificar sub-tabs Notas/Gastos/Costos
+3. En Notas: editar narrativa -> persistida al recargar
+4. En Gastos: click slider de asignacion -> badge "M" aparece
+5. En Costos: verificar formula CMV
+6. Click "Imprimir" -> formato formal A4
+
+### PENDIENTES CONOCIDOS (P2)
+
+| Item | Prioridad | Descripcion |
+|------|-----------|-------------|
+| Comparativo real | P2 | Requiere datos del ejercicio anterior |
+| Subtotales Corriente/No Corriente | P2 | Para notas 11 y 13 |
+| Tests unitarios | P3 | Cubrir compute.ts y definitions.ts |
+
+---
+
+## CHECKPOINT #EEPN-1 - ESTADO DE EVOLUCIÓN DEL PATRIMONIO NETO
+**Fecha:** 27/01/2026
+**Estado:** ✅ COMPLETADO - Build PASS
+
+---
+
+### RESUMEN DE IMPLEMENTACIÓN
+
+Se implementó el Estado de Evolución del Patrimonio Neto (EEPN) completo en `/estados`, incluyendo:
+- Motor de cálculo puro con clasificación heurística de movimientos
+- UI interactiva con edición de celdas y overrides manuales
+- Reconciliación con Balance y Estado de Resultados
+- Impresión/PDF formal con @media print
+
+### ARCHIVOS CREADOS
+
+| Archivo | Descripción |
+|---------|-------------|
+| `src/core/eepn/types.ts` | Definiciones de tipos para EEPN |
+| `src/core/eepn/columns.ts` | Definición de columnas por código de cuenta |
+| `src/core/eepn/compute.ts` | Motor de cálculo puro |
+| `src/core/eepn/index.ts` | Exports del módulo |
+| `src/components/Estados/EvolucionPNTab.tsx` | Componente UI completo |
+
+### ARCHIVOS MODIFICADOS
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/storage/seed.ts` | +4 cuentas AREA y dividendos (versión 9→10) |
+| `src/components/Estados/EstadosHeader.tsx` | Tab EPN habilitado (removido disabled) |
+| `src/pages/Estados.tsx` | Import y renderizado de EvolucionPNTab |
+
+### DECISIONES DE DISEÑO
+
+1. **Mapeo por código, no por statementGroup:**
+   - Columnas definidas por prefijos de código (3.1.01, 3.2.*, etc.)
+   - Evita modificar el modelo de datos existente
+   - Permite flexibilidad futura
+
+2. **Clasificación heurística de movimientos:**
+   - AREA: cualquier movimiento en 3.3.03.*
+   - Distribuciones: toca 3.3.04.* o 2.1.06.05 (Dividendos a pagar)
+   - Capitalizaciones: solo cuentas 3.* sin contrapartida externa
+   - Reservas: mueve entre 3.3.01 (RNA) y 3.2.* (Reservas)
+   - Aportes: acredita capital con débito en caja/bancos
+   - Resultado: usa valor del ER si disponible
+
+3. **Columnas EEPN:**
+   - Capital Suscripto (3.1.01 + contras)
+   - Ajuste de Capital (3.1.02)
+   - Aportes No Capitalizados (3.1.03, 3.1.04)
+   - Reservas (3.2.*)
+   - RNA (3.3.01)
+   - Resultado del Ejercicio (3.3.02)
+   - AREA (3.3.03.*)
+   - Distribuciones (3.3.04.*)
+
+4. **Filas EEPN:**
+   - Saldos al inicio
+   - Modificación saldo inicio (AREA)
+   - Saldo al inicio ajustado
+   - Variaciones del ejercicio (detalladas)
+   - Total variaciones
+   - Saldos al cierre
+
+### FUNCIONALIDADES IMPLEMENTADAS
+
+- ✅ Tab "Evolución PN" habilitada en /estados
+- ✅ Matriz EEPN con columnas por componente de PN
+- ✅ Filas de variaciones clasificadas automáticamente
+- ✅ Celdas editables con doble click
+- ✅ Overrides manuales con badge "M"
+- ✅ Restablecer celda individual y todo
+- ✅ Toggle detallado/resumido
+- ✅ Toggle comparativo (placeholder)
+- ✅ KPI cards con totales
+- ✅ Panel de breakdown (origen del cálculo)
+- ✅ Reconciliación con warnings
+- ✅ Impresión formal con @media print
+
+### CUENTAS AGREGADAS AL SEED
+
+```typescript
+// AREA genéricas
+{ code: '3.3.03.10', name: 'Corrección de errores (AREA)' }
+{ code: '3.3.03.20', name: 'Cambios de políticas contables (AREA)' }
+{ code: '3.3.03.99', name: 'Ajustes ejercicios anteriores (Genérico)' }
+
+// Distribuciones
+{ code: '3.3.04.02', name: 'Dividendos declarados (en efectivo)' }
+
+// Renombrada
+1.1.03.13: 'Aportes a integrar' → 'Accionistas - Integración pendiente'
+```
+
+### PENDIENTES CONOCIDOS
+
+| Item | Prioridad | Descripción |
+|------|-----------|-------------|
+| Comparativo real | P2 | Actualmente usa placeholder 85% |
+| Persistencia overrides | P2 | Guardar en localStorage/IndexedDB |
+| Tests unitarios | P3 | Cubrir compute.ts y columns.ts |
+
+### VERIFICACIÓN
+
+```bash
+npm run build  # ✅ PASS
+```
+
+**QA manual:**
+1. Ir a `/estados` → Tab "Evolución PN"
+2. Verificar que aparece la matriz EEPN
+3. Doble click en celda → editar → Enter → badge "M" aparece
+4. Click en badge "M" → restablecer celda
+5. Click "Imprimir" → verificar formato formal
+
+---
+
 ## CHECKPOINT #FIX-INTEGRAL-2 - HARDENING COMPLETADO
 **Fecha:** 27/01/2026
 **Estado:** ✅ COMPLETADO - Build PASS (19.48s)
