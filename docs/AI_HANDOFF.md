@@ -2,6 +2,314 @@
 
 ---
 
+## CHECKPOINT #OPERACIONES-ME-MEJORAS-V2
+**Fecha:** 2026-01-28
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Mejorar modulo Moneda Extranjera: TC correcto (compra/venta segun tipo), contrapartida seleccionable, comisiones, previewde asiento, FIFO cost para ventas, tablas mejoradas.
+
+---
+
+### Resumen de Mejoras (V2)
+
+Se mejoro significativamente el modulo **Moneda Extranjera**:
+
+1. **TC Correcto por Tipo de Operacion**:
+   - COMPRA: usa TC **VENTA** (comprás divisa, te la venden)
+   - VENTA: usa TC **COMPRA** (vendés divisa, te la compran)
+   - PAGO_DEUDA: usa TC **VENTA** (necesitás comprar divisa)
+
+2. **Modal de Movimientos Mejorado**:
+   - Selector de **contrapartida contable** (Banco/Caja ARS)
+   - Campo de **comisiones ARS** con cuenta de gasto seleccionable
+   - **Preview de asiento** en tiempo real cuando autoJournal=ON
+   - Muestra Debe/Haber balanceados antes de guardar
+   - Bloquea guardado si preview tiene error
+
+3. **FIFO Cost para Ventas**:
+   - Calculo automatico de costo por lotes FIFO
+   - Muestra costo, producido y resultado por diferencia de cambio
+   - Persiste costoARS y resultadoARS en el movimiento
+
+4. **Generacion de Asientos Corregida**:
+   - Usa cuenta ME de la cartera (fxAccount.accountId) obligatoriamente
+   - Usa contrapartida seleccionada por usuario
+   - Incluye linea de comision si aplica
+   - Para ventas: registra costo FIFO y resultado
+
+5. **Tablas Mejoradas**:
+   - Pasivos ahora muestra columna "Diferencia ARS"
+   - Ambas tablas consistentes con 9 columnas
+
+6. **Nuevos Types**:
+   - `RateSide`: 'compra' | 'venta' en movimientos
+   - `FxLot`: tracking de lotes FIFO
+   - `FxDebt`: deudas estructuradas (preparado para futuro)
+   - `FxDebtInstallment`: cuotas de deuda
+   - `LoanSystem`: FRANCES | ALEMAN | AMERICANO | BULLET
+
+---
+
+### Archivos Modificados
+
+| Archivo | Cambios |
+|---------|---------|
+| `src/core/monedaExtranjera/types.ts` | +RateSide, +FxLot, +FxDebt, +campos en FxMovement |
+| `src/storage/fx.ts` | +previewFxMovementJournal, +calculateFIFOCost, asientos corregidos |
+| `src/storage/index.ts` | +exports nuevas funciones |
+| `src/pages/Operaciones/MonedaExtranjeraPage.tsx` | Modal mejorado, preview, contrapartida, comisiones |
+
+---
+
+### Nuevos Campos en FxMovement
+
+```typescript
+rateSide: 'compra' | 'venta'       // Lado del TC usado
+contrapartidaAccountId?: string    // Cuenta ARS (Banco/Caja)
+comisionARS?: number               // Comision en ARS
+comisionAccountId?: string         // Cuenta de gasto
+costoARS?: number                  // Costo FIFO (ventas)
+resultadoARS?: number              // Ganancia/perdida (ventas)
+interestARS?: number               // Intereses (pago deuda)
+debtId?: string                    // Link a FxDebt
+```
+
+---
+
+### Nuevas Funciones Storage
+
+| Funcion | Descripcion |
+|---------|-------------|
+| `previewFxMovementJournal()` | Preview de asiento sin persistir |
+| `calculateFIFOCost()` | Calcula costo FIFO para ventas |
+| `findOrphanFxEntries()` | Busca asientos huerfanos |
+| `getReconciliationData()` | Datos completos de conciliacion |
+
+---
+
+### Logica de Asientos (Corregida)
+
+**COMPRA:**
+```
+D: Cuenta ME (cartera)     = montoME * TC
+D: Comisiones (si hay)     = comisionARS
+C: Contrapartida ARS       = total
+```
+
+**VENTA:**
+```
+D: Contrapartida ARS       = producido neto
+D: Comisiones (si hay)     = comisionARS
+C: Cuenta ME (cartera)     = costoFIFO
+D/C: Diferencia de Cambio  = resultado
+```
+
+---
+
+### Build
+
+```bash
+npm run build  # PASS
+```
+
+---
+
+### QA Manual Sugerido
+
+1. Ir a `/operaciones/moneda-extranjera`
+2. Crear cartera "Caja USD" con cuenta contable asociada
+3. Registrar compra 100 USD:
+   - Ver que TC usa precio VENTA del provider
+   - Seleccionar contrapartida (ej: Banco ARS)
+   - Agregar comision $500
+   - Ver preview del asiento (debe balancear)
+   - Guardar -> verificar asiento en Libro Diario
+4. Registrar venta parcial 50 USD:
+   - Ver que TC usa precio COMPRA del provider
+   - Ver preview con costo FIFO y resultado
+   - Guardar -> verificar asiento con diferencia de cambio
+5. Borrar asiento desde Libro Diario
+6. Volver a ME -> Conciliacion muestra movimiento como "missing"
+7. Click en "Generar Asiento" -> se regenera correctamente
+
+---
+
+### Pendientes Conocidos (P2/P3)
+
+| Item | Prioridad | Descripcion |
+|------|-----------|-------------|
+| Alta de deuda estructurada | P2 | UI para FxDebt con cuotas/intereses |
+| Pago de cuota con interes | P2 | Modal especifico para pagos |
+| Conciliacion huerfanos externos | P2 | Detectar asientos manuales que toquen ME |
+| Graficos de tendencia | P3 | Evolucion de cotizaciones |
+
+---
+
+## CHECKPOINT #OPERACIONES-MONEDA-EXTRANJERA-MVP
+**Fecha:** 2026-01-28
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Implementar modulo "Moneda Extranjera" completo con gestion de activos/pasivos ME, cotizaciones en tiempo real, movimientos con asientos automaticos y conciliacion bidireccional.
+
+---
+
+### Resumen de Implementacion
+
+Se implemento el modulo **Moneda Extranjera** como submenu de Operaciones, siguiendo el patron establecido en Inventario (Bienes de Cambio):
+
+1. **Dashboard**: KPIs (Activos ME, Pasivos ME, Posicion Neta) en USD con equivalentes ARS oficial
+2. **Barra de Cotizaciones**: Oficial/Blue/MEP/CCL/Cripto desde DolarAPI con cache 15min
+3. **Toggle Contable/Gestion**: Permite ver valuaciones con diferentes cotizaciones
+4. **Activos**: CRUD de carteras (Caja/Banco/Inversion/Cripto) con TC historico y actual
+5. **Pasivos**: CRUD de deudas ME con soporte de cuotas y creditor
+6. **Movimientos**: Compra/Venta/Ingreso/Egreso/Transferencia/Ajuste/Pago Deuda
+7. **Asientos Automaticos**: Generacion opcional con trazabilidad completa
+8. **Conciliacion**: Panel A (movimientos sin asiento) y Panel B (asientos huerfanos)
+9. **Configuracion**: Modal para mapeo de cuentas contables
+
+---
+
+### Data Model (Dexie v7)
+
+**Nuevas tablas:**
+- `fxAccounts`: Carteras ME (activos y pasivos)
+- `fxMovements`: Operaciones con TC historico
+- `fxLiabilities`: Deudas estructuradas (opcional)
+- `fxSettings`: Configuracion del modulo
+- `fxRatesCache`: Cache de cotizaciones
+
+**Campos de trazabilidad:**
+- `sourceModule: 'fx'`
+- `sourceType: 'compra' | 'venta' | 'ingreso' | ...`
+- `sourceId: movement.id`
+- `metadata.journalRole: 'FX_BUY' | 'FX_SELL' | ...`
+
+---
+
+### Archivos Creados
+
+| Archivo | Descripcion |
+|---------|-------------|
+| `src/core/monedaExtranjera/types.ts` | Tipos, factories, constantes |
+| `src/core/monedaExtranjera/index.ts` | Exports del modulo |
+| `src/services/exchangeRates.ts` | Service DolarAPI + cache |
+| `src/storage/fx.ts` | CRUD + asientos + reconciliacion |
+| `src/pages/Operaciones/MonedaExtranjeraPage.tsx` | Pagina principal con 5 tabs |
+
+---
+
+### Archivos Modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/storage/db.ts` | +Dexie v7 con tablas FX + imports de tipos |
+| `src/storage/index.ts` | +exports de storage/fx.ts |
+| `src/App.tsx` | +ruta /operaciones/moneda-extranjera |
+| `src/pages/OperacionesPage.tsx` | Card ME activa con navegacion |
+
+---
+
+### Cotizaciones (DolarAPI)
+
+**Endpoint:** `https://dolarapi.com/v1/dolares`
+
+**Tipos soportados:**
+- Oficial (BNA)
+- Blue (Mercado)
+- MEP (Bolsa)
+- CCL (Contado con Liquidacion)
+- Cripto (USDT/Binance)
+
+**Cache:**
+- TTL: 15 minutos
+- Fallback: Muestra ultima cotizacion cacheada + warning
+- Persistencia: IndexedDB (fxRatesCache)
+
+---
+
+### Valuacion
+
+**Reglas por defecto:**
+- Activos usan TC **compra**
+- Pasivos usan TC **venta**
+- Equivalente ARS siempre con **Oficial** (modo contable)
+
+**Diferencia calculada:**
+- Activos: `arsActual - arsHistorico` (positivo = ganancia)
+- Pasivos: `arsHistorico - arsActual` (positivo = la deuda "bajo")
+
+**Metodo de costeo:** PPP (Promedio Ponderado) por defecto
+
+---
+
+### Asientos Automaticos
+
+**Tipos de asiento por movimiento:**
+
+| Tipo | Asiento |
+|------|---------|
+| COMPRA | D: Caja ME, C: Caja/Banco ARS |
+| VENTA | D: Caja/Banco ARS, C: Caja ME |
+| INGRESO | D: Caja ME, C: Diferencia Cambio |
+| EGRESO | D: Diferencia Cambio, C: Caja ME |
+| TRANSFERENCIA | D: Destino ME, C: Origen ME |
+| PAGO_DEUDA | D: Pasivo ME + Intereses, C: Caja ARS |
+| AJUSTE | D/C: Caja ME, C/D: Diferencia Cambio |
+
+**Trazabilidad completa:**
+- `entry.sourceModule = 'fx'`
+- `entry.sourceId = movement.id`
+- `entry.metadata.journalRole = 'FX_BUY' | ...`
+
+---
+
+### Reconciliacion
+
+**Estados de journalStatus:**
+- `generated`: Asiento creado automaticamente
+- `linked`: Asiento manual vinculado
+- `none`: Sin asiento (toggle OFF)
+- `missing`: Asiento fue borrado desde Libro Diario
+- `desync`: Movimiento editado con asiento manual (se mantuvo)
+
+**Funcion `reconcileFxJournalLinks(periodId)`:**
+- Verifica que `linkedJournalEntryIds` existan en `db.entries`
+- Limpia IDs huerfanos
+- Actualiza `journalStatus` a `missing` si corresponde
+
+---
+
+### Build
+
+```bash
+npm run build  # PASS
+```
+
+---
+
+### QA Manual Sugerido
+
+1. Ir a `/operaciones` -> Click en "Moneda Extranjera"
+2. Ver cotizaciones en barra superior (o cache si offline)
+3. Crear cuenta "Caja USD" -> Guardar
+4. Registrar "Compra 100 USD" con TC oficial -> Asiento generado
+5. Ver tabla Activos: saldo 100 USD, TC hist, TC actual, diferencia
+6. Ir a Libro Diario -> Verificar asiento con memo "Compra USD - Caja USD"
+7. Borrar el asiento desde Libro Diario
+8. Volver a Moneda Extranjera -> El movimiento muestra "Falta asiento"
+9. Click en badge -> Regenerar asiento
+
+---
+
+### Pendientes Conocidos (P2/P3)
+
+| Item | Prioridad | Descripcion |
+|------|-----------|-------------|
+| Cuotas de deuda | P2 | Cronograma de pagos con intereses |
+| Graficos de tendencia | P3 | Evolucion de cotizaciones |
+| Import masivo | P3 | Importar movimientos desde CSV |
+| Diferencia de cambio al cierre | P2 | Asiento automatico de RxT |
+
+---
+
 ## CHECKPOINT #OPERACIONES-INVENTARIO-ETAPA4-FINAL
 **Fecha:** 2026-01-28  
 **Estado:** COMPLETADO - Build PASS  

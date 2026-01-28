@@ -111,3 +111,46 @@ export {
     getAllBienesSKUs,
 } from './bienes'
 
+// Moneda Extranjera
+export {
+    // Settings
+    loadFxSettings,
+    saveFxSettings,
+    // Accounts
+    getAllFxAccounts,
+    getFxAccountsByType,
+    getFxAccountById,
+    createFxAccount,
+    updateFxAccount,
+    deleteFxAccount,
+    // Movements
+    getAllFxMovements,
+    getFxMovementsByAccount,
+    createFxMovement,
+    updateFxMovementWithJournal,
+    generateJournalForFxMovement,
+    linkFxMovementToEntries,
+    deleteFxMovementWithJournal,
+    // Preview
+    previewFxMovementJournal,
+    // FIFO
+    calculateFIFOCost,
+    // Reconciliation
+    reconcileFxJournalLinks,
+    findOrphanFxEntries,
+    getReconciliationData,
+    // Liabilities
+    getAllFxLiabilities,
+    createFxLiability,
+    updateFxLiability,
+    deleteFxLiability,
+    // Balance
+    calculateFxAccountBalance,
+    // Bulk
+    clearFxPeriodData,
+    clearAllFxData,
+} from './fx'
+
+// Export types from fx
+export type { FxJournalPreview, FxReconciliationData } from './fx'
+
