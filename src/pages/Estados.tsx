@@ -25,6 +25,8 @@ import {
     clearESPComparative,
     createComparativeLookup
 } from '../storage/espComparativeStore'
+import { EvolucionPNTab } from '../components/Estados/EvolucionPNTab'
+import { NotasAnexosTab } from '../components/Estados/NotasAnexosTab'
 
 // ============================================
 // Data Adapter: BalanceSheet → Gemini Format
@@ -141,9 +143,9 @@ function adaptBalanceSheetToGemini(bs: BalanceSheet, comparativeData?: Map<strin
 // Main Component
 // ============================================
 export default function Estados() {
-    // Tab control (extended to support all 4 states)
+    // Tab control (extended to support all 5 states)
     const [activeTab, setActiveTab] = useState<EstadosTab>('ESP')
-    const viewMode = activeTab === 'ESP' ? 'ESP' : activeTab === 'ER' ? 'ER' : 'ESP'
+    const viewMode = activeTab === 'ESP' ? 'ESP' : activeTab === 'ER' ? 'ER' : activeTab === 'EPN' ? 'EPN' : activeTab === 'NA' ? 'NA' : 'ESP'
 
     const [isExporting, setIsExporting] = useState(false)
 
@@ -470,6 +472,36 @@ export default function Estados() {
                             onImportComparative={() => setErImportModalOpen(true)}
                             onDeleteComparative={handleErDeleteComparative}
                             hasComparativeData={erComparativeOverrides.size > 0}
+                        />
+                    </div>
+                )}
+
+                {/* EPN View - Evolución del Patrimonio Neto */}
+                {viewMode === 'EPN' && accounts && entries && (
+                    <div className="animate-slide-up">
+                        <EvolucionPNTab
+                            accounts={accounts}
+                            entries={entries}
+                            fiscalYear={currentYear}
+                            empresaName={empresaName}
+                            netIncomeFromER={estadoResultadosData?.resultadoNeto}
+                            pnFromBalance={statements?.balanceSheet.totalEquity}
+                        />
+                    </div>
+                )}
+
+                {/* NA View - Notas y Anexos */}
+                {viewMode === 'NA' && statements && accounts && entries && (
+                    <div className="animate-slide-up">
+                        <NotasAnexosTab
+                            balanceSheet={statements.balanceSheet}
+                            incomeStatement={statements.incomeStatement}
+                            accounts={accounts}
+                            entries={entries}
+                            fiscalYear={currentYear}
+                            empresaName={empresaName}
+                            empresaId={empresaId}
+                            comparativeData={espShowComparative && hasEspComparativeData ? espComparativeData ?? undefined : undefined}
                         />
                     </div>
                 )}

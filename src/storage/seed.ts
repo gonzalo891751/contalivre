@@ -2,7 +2,7 @@ import { db, generateId, cleanupDuplicateAccounts } from './db'
 import type { Account, AccountKind, AccountSection, StatementGroup, NormalSide } from '../core/models'
 
 // Current seed version - increment when seed structure changes
-const SEED_VERSION = 9
+const SEED_VERSION = 10
 
 /**
  * Definición de cuenta para el seed
@@ -74,7 +74,7 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '1.1.03.10', name: 'Créditos con socios y personal', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03', isHeader: true },
     { code: '1.1.03.11', name: 'Anticipos de personal', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.10' },
     { code: '1.1.03.12', name: 'Créditos a socios (CP)', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.10' },
-    { code: '1.1.03.13', name: 'Aportes a integrar', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.10' },
+    { code: '1.1.03.13', name: 'Accionistas - Integración pendiente', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.10' },
     // 1.1.03.20 - Prepagos
     { code: '1.1.03.20', name: 'Prepagos', kind: 'ASSET', section: 'CURRENT', group: 'Prepagos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03', isHeader: true },
     { code: '1.1.03.21', name: 'Alquileres pagados por adelantado', kind: 'ASSET', section: 'CURRENT', group: 'Prepagos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.20' },
@@ -210,9 +210,13 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '3.3.03.01', name: 'Deudores incobrables AREA', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03', normalSide: 'DEBIT' },
     { code: '3.3.03.02', name: 'Recupero previsión AREA', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03', normalSide: 'CREDIT' },
     { code: '3.3.03.03', name: 'Recupero incobrables AREA', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03', normalSide: 'CREDIT' },
+    { code: '3.3.03.10', name: 'Corrección de errores (AREA)', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03' },
+    { code: '3.3.03.20', name: 'Cambios de políticas contables (AREA)', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03' },
+    { code: '3.3.03.99', name: 'Ajustes ejercicios anteriores (Genérico)', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03' },
     // 3.3.04 - Distribuciones y retiros
     { code: '3.3.04', name: 'Distribuciones y retiros', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3', isHeader: true },
     { code: '3.3.04.01', name: 'Retiros de socios / Distribución', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.04', normalSide: 'DEBIT' },
+    { code: '3.3.04.02', name: 'Dividendos declarados (en efectivo)', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.04', normalSide: 'DEBIT' },
 
     // ============================================
     // 4 - RESULTADOS

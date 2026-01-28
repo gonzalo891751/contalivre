@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Evolución PN</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@600;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        :root {
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            --border-light: #E2E8F0;
+            --radius-md: 12px;
+            --radius-sm: 6px;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg-app);
+            font-family: var(--font-body);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* LAYOUT SIMULADO */
+        .app-container { display: flex; min-height: 100vh; }
+        
+        .sidebar-mock {
+            width: 260px;
+            background: white;
+            border-right: 1px solid var(--border-light);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .main-content { flex: 1; padding: 2rem; max-width: 1400px; margin: 0 auto; width: 100%; }
+
+        /* TABS */
+        .tabs-container {
+            display: flex;
+            gap: 2rem;
+            border-bottom: 1px solid var(--border-light);
+            margin-bottom: 2rem;
+        }
+        .tab {
+            padding: 1rem 0;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s;
+        }
+        .tab:hover { color: var(--text-secondary); }
+        .tab.active { color: var(--brand-primary); }
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--brand-primary);
+        }
+
+        /* HEADER & ACTIONS */
+        .report-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
+        .header-titles h1 { font-family: var(--font-display); font-size: 1.75rem; font-weight: 800; margin-bottom: 0.25rem; }
+        .header-titles p { color: var(--text-secondary); font-size: 0.95rem; }
+
+        .action-bar {
+            background: white;
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .action-group { display: flex; align-items: center; gap: 1rem; }
+        
+        /* CONTROLS */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1rem;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid var(--border-light);
+            background: white;
+        }
+        .btn-primary { background: var(--brand-gradient); color: white; border: none; }
+        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn-ghost { border: none; background: transparent; color: var(--text-secondary); }
+        .btn-ghost:hover { background: var(--bg-app); color: var(--text-main); }
+        .btn-danger { color: #EF4444; border: none; background: transparent; }
+        .btn-danger:hover { background: #FEF2F2; }
+
+        .toggle-control { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); cursor: pointer; }
+        .switch { width: 36px; height: 20px; background: #CBD5E1; border-radius: 20px; position: relative; transition: .3s; }
+        .switch::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: .3s; }
+        input:checked + .switch { background: var(--brand-secondary); }
+        input:checked + .switch::before { transform: translateX(16px); }
+        input { display: none; }
+
+        /* KPI CARDS */
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .kpi-card { background: white; padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border-light); box-shadow: var(--shadow-sm); }
+        .kpi-label { font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; margin-bottom: 0.5rem; }
+        .kpi-value { font-family: var(--font-mono); font-size: 1.25rem; font-weight: 600; }
+        .kpi-delta { font-size: 0.75rem; margin-top: 0.25rem; display: flex; align-items: center; gap: 0.25rem; }
+        .up { color: var(--brand-secondary); }
+        .down { color: #EF4444; }
+
+        /* TABLE STYLES */
+        .table-container { 
+            background: white; 
+            border-radius: var(--radius-md); 
+            border: 1px solid var(--border-light); 
+            overflow-x: auto;
+            box-shadow: var(--shadow-sm);
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th { background: #F1F5F9; color: var(--text-secondary); font-weight: 700; text-transform: uppercase; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-light); border-right: 1px solid var(--border-light); }
+        td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-light); border-right: 1px solid var(--border-light); position: relative; }
+        
+        .row-section { background: #F8FAFC; font-weight: 700; color: var(--text-main); }
+        .row-total { background: #F0FDF4; font-weight: 700; }
+        
+        .num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+        .negative { color: #EF4444; }
+        
+        /* Interactive Cells */
+        .editable { cursor: pointer; transition: background 0.2s; }
+        .editable:hover { background: #EFF6FF; }
+        .editable:focus { outline: 2px solid var(--brand-primary); background: white; z-index: 10; }
+        
+        .badge-manual {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            font-size: 9px;
+            background: #DBEAFE;
+            color: #1E40AF;
+            padding: 1px 3px;
+            border-radius: 3px;
+            font-weight: 800;
+            pointer-events: none;
+        }
+
+        /* NOTES ACCORDION */
+        .notes-section { margin-top: 3rem; }
+        .note-item { border-top: 1px solid var(--border-light); padding: 1rem 0; cursor: pointer; }
+        .note-header { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+        .note-content { margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem; display: none; }
+        .note-item.open .note-content { display: block; }
+
+        /* PRINT STYLES */
+        @media print {
+            body { background: white; padding: 0; color: black; }
+            .sidebar-mock, .action-bar, .kpi-grid, .tabs-container, .btn, .notes-section, .badge-manual, .ph { display: none !important; }
+            .main-content { padding: 0; margin: 0; max-width: 100%; }
+            .table-container { border: none; box-shadow: none; overflow: visible; }
+            table { font-size: 9pt; border: 0.5pt solid #000; width: 100%; }
+            th, td { border: 0.5pt solid #000; padding: 4pt; color: black !important; background: transparent !important; }
+            .row-section, .row-total { font-weight: bold; }
+            .num { text-align: right; }
+            
+            .print-header { display: block !important; margin-bottom: 20pt; border-bottom: 1pt solid black; padding-bottom: 10pt; }
+            .print-header h1 { font-size: 14pt; text-transform: uppercase; margin-bottom: 4pt; }
+            .print-header p { font-size: 10pt; margin-bottom: 2pt; }
+            .page-break { page-break-after: always; }
+        }
+
+        .print-header { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <!-- Sidebar Simulada -->
+    <aside class="sidebar-mock">
+        <div style="font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; color: var(--brand-primary);">
+            ContaLivre
+        </div>
+        <nav style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <div style="padding: 0.5rem; color: var(--text-tertiary); font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Contabilidad</div>
+            <div class="btn btn-ghost" style="justify-content: flex-start;"><i class="ph ph-notebook"></i> Libro Diario</div>
+            <div class="btn btn-ghost" style="justify-content: flex-start;"><i class="ph ph-scales"></i> Balance SyS</div>
+            <div class="btn btn-primary" style="justify-content: flex-start;"><i class="ph ph-chart-line-up"></i> Estados Contables</div>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <!-- HEADER FORMAL PARA IMPRESIÓN -->
+        <div class="print-header">
+            <h1>Estado de Evolución del Patrimonio Neto</h1>
+            <p><strong>Razón Social:</strong> EMPRESA DEMO S.A.</p>
+            <p><strong>Ejercicio finalizado el:</strong> 31/12/2025</p>
+            <p><strong>Cifras expresadas en:</strong> Moneda Homogénea ($)</p>
+        </div>
+
+        <!-- TABS UI -->
+        <div class="tabs-container">
+            <div class="tab">Situación Patrimonial</div>
+            <div class="tab">Estado de Resultados</div>
+            <div class="tab">Flujo de Efectivo</div>
+            <div class="tab active">Evolución del Patrimonio Neto</div>
+        </div>
+
+        <!-- HEADER UI -->
+        <div class="report-header">
+            <div class="header-titles">
+                <h1>Evolución del Patrimonio Neto</h1>
+                <p>Análisis de variaciones del ejercicio actual vs. anterior</p>
+            </div>
+            <div class="header-meta" style="text-align: right;">
+                <div style="font-weight: 600; font-size: 0.85rem;">Empresa Demo S.A.</div>
+                <div style="color: var(--text-tertiary); font-size: 0.75rem;">CUIT: 30-71234567-8</div>
+            </div>
+        </div>
+
+        <!-- BARRA DE ACCIONES -->
+        <div class="action-bar">
+            <div class="action-group">
+                <label class="toggle-control">
+                    <input type="checkbox" id="toggleDetail" checked onchange="renderTable()">
+                    <span class="switch"></span>
+                    Detallado
+                </label>
+                <label class="toggle-control">
+                    <input type="checkbox" id="toggleCompare" onchange="renderTable()">
+                    <span class="switch"></span>
+                    Comparativo
+                </label>
+                <div style="width: 1px; height: 20px; background: var(--border-light);"></div>
+                <div style="font-size: 0.85rem; font-weight: 600;">Ejercicio 2025</div>
+            </div>
+            <div class="action-group">
+                <button class="btn btn-danger" onclick="resetOverrides()"><i class="ph ph-arrow-counter-clockwise"></i> Restablecer</button>
+                <button class="btn" onclick="renderTable()"><i class="ph ph-arrows-clockwise"></i> Recalcular</button>
+                <button class="btn btn-primary" onclick="window.print()"><i class="ph ph-file-pdf"></i> Imprimir PDF</button>
+            </div>
+        </div>
+
+        <!-- KPI CARDS -->
+        <div class="kpi-grid" id="kpiGrid">
+            <!-- Dynamic Content -->
+        </div>
+
+        <!-- TABLA PRINCIPAL -->
+        <div class="table-container" id="tableContainer">
+            <!-- Dynamic Table -->
+        </div>
+
+        <!-- NOTAS / AYUDA -->
+        <div class="notes-section">
+            <h3 style="margin-bottom: 1rem; font-family: var(--font-display);">Notas al Estado</h3>
+            <div class="note-item" onclick="this.classList.toggle('open')">
+                <div class="note-header">¿Qué informa este estado? <i class="ph ph-caret-down"></i></div>
+                <div class="note-content">Informa la composición del Patrimonio Neto y las causas de los cambios producidos durante el ejercicio en las cuentas que lo integran. Se divide principalmente en Aportes de Propietarios y Resultados Acumulados.</div>
+            </div>
+            <div class="note-item" onclick="this.classList.toggle('open')">
+                <div class="note-header">Sobre el AREA (Ajuste de Resultados de Ejercicios Anteriores) <i class="ph ph-caret-down"></i></div>
+                <div class="note-content">Se utiliza cuando existen correcciones de errores de ejercicios anteriores o cambios en normas contables que afectan los saldos iniciales del Patrimonio Neto.</div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+    // --- DATA MODEL ---
+    let mockData = {
+        columns: [
+            { id: 'cap', label: 'Capital Social', group: 'aportes' },
+            { id: 'ajust', label: 'Ajuste Capital', group: 'aportes' },
+            { id: 'irrev', label: 'Aportes Irrev.', group: 'aportes' },
+            { id: 'res_leg', label: 'Reserva Legal', group: 'reservas' },
+            { id: 'res_est', label: 'Reserva Est.', group: 'reservas' },
+            { id: 'rna', label: 'Result. No Asig.', group: 'resultados' },
+            { id: 'reje', label: 'Result. Ejercicio', group: 'resultados' }
+        ],
+        saldosInicio: {
+            cap: 1000000, ajust: 500000, irrev: 0, res_leg: 200000, res_est: 100000, rna: 850000, reje: 0
+        },
+        area: { rna: -45000 },
+        movimientos: [
+            { label: 'Distribución de Utilidades', cap: 0, ajust: 0, irrev: 0, res_leg: 42500, res_est: 20000, rna: -300000, reje: 0 },
+            { label: 'Aportes de Capital', cap: 200000, ajust: 100000, irrev: 50000, res_leg: 0, res_est: 0, rna: 0, reje: 0 },
+            { label: 'Resultado del Ejercicio', cap: 0, ajust: 0, irrev: 0, res_leg: 0, res_est: 0, rna: 0, reje: 420500 }
+        ],
+        comparativo: { total: 2450000 }
+    };
+
+    let overrides = {};
+
+    function formatARS(val) {
+        return new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+    }
+
+    function getCellValue(rowKey, colId, defaultVal) {
+        const key = `${rowKey}_${colId}`;
+        return overrides[key] !== undefined ? overrides[key] : defaultVal;
+    }
+
+    function setOverride(rowKey, colId, val) {
+        const cleanVal = parseFloat(val.replace(/\./g, '').replace(',', '.'));
+        if (isNaN(cleanVal)) return;
+        overrides[`${rowKey}_${colId}`] = cleanVal;
+        renderTable();
+    }
+
+    function resetOverrides() {
+        overrides = {};
+        renderTable();
+    }
+
+    function renderTable() {
+        const detail = document.getElementById('toggleDetail').checked;
+        const compare = document.getElementById('toggleCompare').checked;
+        const container = document.getElementById('tableContainer');
+        
+        // Estructura de columnas procesada
+        let visibleCols = [];
+        if (detail) {
+            visibleCols = [...mockData.columns];
+        } else {
+            visibleCols = [
+                { id: 'total_aportes', label: 'Total Aportes' },
+                { id: 'total_reservas', label: 'Ganancias Reservadas' },
+                { id: 'total_rna', label: 'Resultados Acum.' }
+            ];
+        }
+
+        let html = `<table><thead><tr><th rowspan="2">Conceptos</th>`;
+        
+        // Headers de Grupos
+        if (detail) {
+            html += `<th colspan="3">Aportes Propietarios</th><th colspan="2">Ganancias Reservadas</th><th colspan="2">Resultados Acum.</th>`;
+        } else {
+            html += `<th colspan="3">Composición del PN</th>`;
+        }
+        
+        html += `<th rowspan="2">TOTAL PN</th>`;
+        if (compare) html += `<th rowspan="2">COMP. 2024</th>`;
+        html += `</tr><tr>`;
+        
+        visibleCols.forEach(c => html += `<th>${c.label}</th>`);
+        html += `</tr></thead><tbody>`;
+
+        // Filas: Saldos al Inicio
+        html += renderRow('Saldos al Inicio', 'inicio', mockData.saldosInicio, visibleCols, detail, compare, 'row-section');
+        
+        // Fila: AREA
+        html += renderRow('Modificación Saldo Inicio (AREA)', 'area', mockData.area, visibleCols, detail, compare);
+
+        // Fila: Saldo Inicio Ajustado (Calculado)
+        let saldoAjustado = {};
+        mockData.columns.forEach(c => {
+            saldoAjustado[c.id] = (mockData.saldosInicio[c.id] || 0) + (mockData.area[c.id] || 0);
+        });
+        html += renderRow('Saldo al Inicio Ajustado', 'inicio_ajustado', saldoAjustado, visibleCols, detail, compare, 'row-section');
+
+        // Variaciones
+        html += `<tr class="row-section"><td colspan="${visibleCols.length + (compare ? 3 : 2)}">Variaciones del Ejercicio</td></tr>`;
+        
+        let subtotalVariaciones = {};
+        mockData.movimientos.forEach((m, idx) => {
+            html += renderRow(m.label, `mov_${idx}`, m, visibleCols, detail, compare);
+            mockData.columns.forEach(c => {
+                subtotalVariaciones[c.id] = (subtotalVariaciones[c.id] || 0) + (m[c.id] || 0);
+            });
+        });
+
+        // Totales al Cierre
+        let saldoCierre = {};
+        mockData.columns.forEach(c => {
+            const valInicio = (mockData.saldosInicio[c.id] || 0) + (mockData.area[c.id] || 0);
+            const valVar = subtotalVariaciones[c.id] || 0;
+            // Aplicar overrides locales
+            saldoCierre[c.id] = valInicio + valVar;
+        });
+        
+        html += renderRow('SALDOS AL CIERRE', 'cierre', saldoCierre, visibleCols, detail, compare, 'row-total');
+
+        html += `</tbody></table>`;
+        container.innerHTML = html;
+        updateKPIs(saldoCierre);
+    }
+
+    function renderRow(label, rowKey, data, visibleCols, isDetail, showCompare, cssClass = '') {
+        let rowHtml = `<tr class="${cssClass}"><td>${label}</td>`;
+        let totalFila = 0;
+
+        visibleCols.forEach(col => {
+            let val = 0;
+            if (isDetail) {
+                val = getCellValue(rowKey, col.id, data[col.id] || 0);
+            } else {
+                // Sumarizar grupos si no hay detalle
+                const groupMap = { 'total_aportes': 'aportes', 'total_reservas': 'reservas', 'total_rna': 'resultados' };
+                const targetGroup = groupMap[col.id];
+                mockData.columns.forEach(c => {
+                    if (c.group === targetGroup) val += getCellValue(rowKey, c.id, data[c.id] || 0);
+                });
+            }
+
+            totalFila += val;
+            const isManual = isDetail && overrides[`${rowKey}_${col.id}`] !== undefined;
+            
+            rowHtml += `<td class="num editable ${val < 0 ? 'negative' : ''}" 
+                        ${isDetail ? `contenteditable="true" onblur="setOverride('${rowKey}', '${col.id}', this.innerText)"` : ''}>
+                        ${formatARS(val)}
+                        ${isManual ? '<span class="badge-manual">M</span>' : ''}
+                        </td>`;
+        });
+
+        rowHtml += `<td class="num" style="background:rgba(59,130,246,0.05); font-weight:700;">${formatARS(totalFila)}</td>`;
+        if (showCompare) {
+            // Valor simulado para comparativo
+            const compVal = totalFila * 0.85; 
+            rowHtml += `<td class="num" style="color:var(--text-tertiary)">${formatARS(compVal)}</td>`;
+        }
+        rowHtml += `</tr>`;
+        return rowHtml;
+    }
+
+    function updateKPIs(saldoCierre) {
+        const total = Object.values(saldoCierre).reduce((a, b) => a + b, 0);
+        const kpis = [
+            { label: 'Patrimonio Neto', val: total, delta: '+12.5%', up: true },
+            { label: 'Resultados RNA', val: (saldoCierre.rna || 0) + (saldoCierre.reje || 0), delta: '+5.2%', up: true },
+            { label: 'Capital Social', val: saldoCierre.cap || 0, delta: '0%', up: null },
+            { label: 'Resultado Ejercicio', val: saldoCierre.reje || 0, delta: '-2.1%', up: false }
+        ];
+
+        document.getElementById('kpiGrid').innerHTML = kpis.map(k => `
+            <div class="kpi-card">
+                <div class="kpi-label">${k.label}</div>
+                <div class="kpi-value">${formatARS(k.val)}</div>
+                <div class="kpi-delta ${k.up === true ? 'up' : k.up === false ? 'down' : ''}">
+                    ${k.up !== null ? `<i class="ph ph-trend-${k.up ? 'up' : 'down'}"></i> ${k.delta}` : '--'}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // Init
+    window.onload = renderTable;
+</script>
+
+</body>
+</html>

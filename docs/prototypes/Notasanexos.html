@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notas y Anexos — ContaLivre</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        :root {
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            --border-light: #E2E8F0;
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --radius-md: 12px;
+            --radius-sm: 6px;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        /* Basic Reset */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-app);
+            color: var(--text-main);
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* --- SIDEBAR MOCK --- */
+        .sidebar {
+            width: 260px;
+            background: white;
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            padding: 1.5rem 1rem;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+        }
+        .logo { font-family: var(--font-display); font-weight: 800; font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 2rem; color: var(--text-main); }
+        .logo i { color: var(--brand-primary); font-size: 1.5rem; }
+        .nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; border-radius: var(--radius-sm); color: var(--text-secondary); text-decoration: none; font-size: 0.9rem; font-weight: 500; transition: 0.2s; }
+        .nav-item:hover { background: var(--bg-app); }
+        .nav-item.active { background: #EFF6FF; color: var(--brand-primary); }
+
+        /* --- MAIN LAYOUT --- */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; }
+        .top-bar { padding: 1.5rem 2rem; background: white; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between; align-items: center; }
+        .breadcrumb { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem; }
+        .page-title { font-family: var(--font-display); font-size: 1.75rem; font-weight: 700; }
+
+        .container { padding: 2rem; max-width: 1400px; margin: 0 auto; width: 100%; }
+
+        /* --- ACTION BAR --- */
+        .action-bar {
+            background: white;
+            padding: 1rem 1.5rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-sm);
+        }
+        .action-group { display: flex; gap: 1rem; align-items: center; }
+        
+        .toggle-btn {
+            background: #F1F5F9;
+            border: 1px solid var(--border-light);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .toggle-btn.active { background: var(--text-main); color: white; border-color: var(--text-main); }
+        
+        .btn { padding: 0.6rem 1.2rem; border-radius: var(--radius-sm); font-weight: 600; border: none; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-body); font-size: 0.85rem; transition: 0.2s; }
+        .btn-primary { background: var(--brand-gradient); color: white; }
+        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn-outline { background: white; border: 1px solid var(--border-light); color: var(--text-secondary); }
+        .btn-outline:hover { background: var(--bg-app); border-color: var(--text-tertiary); }
+
+        /* --- SUB-TABS --- */
+        .subtabs { display: flex; gap: 2rem; border-bottom: 1px solid var(--border-light); margin-bottom: 2rem; }
+        .tab { padding: 1rem 0.5rem; color: var(--text-secondary); cursor: pointer; font-weight: 600; position: relative; font-size: 0.95rem; }
+        .tab.active { color: var(--brand-primary); }
+        .tab.active::after { content: ""; position: absolute; bottom: -1px; left: 0; right: 0; height: 3px; background: var(--brand-primary); border-radius: 3px 3px 0 0; }
+
+        /* --- TABLES & CONTENT --- */
+        .content-card { background: white; border-radius: var(--radius-md); border: 1px solid var(--border-light); box-shadow: var(--shadow-sm); overflow: hidden; }
+        .table-header { padding: 1.5rem; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between; align-items: center; }
+        .acc-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .acc-table th { background: #F8FAFC; text-align: left; padding: 0.75rem 1rem; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border-light); }
+        .acc-table td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
+        .acc-table tr:last-child td { border-bottom: none; font-weight: 700; background: #F1F5F9; }
+        .num { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+        
+        .badge-m { background: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; font-weight: 800; margin-left: 0.5rem; vertical-align: middle; }
+        
+        /* --- NOTAS VIEW --- */
+        .notas-layout { display: grid; grid-template-columns: 280px 1fr; gap: 2rem; }
+        .notas-index { position: sticky; top: 2rem; height: fit-content; }
+        .index-item { padding: 0.75rem 1rem; border-radius: var(--radius-sm); cursor: pointer; font-size: 0.85rem; color: var(--text-secondary); transition: 0.2s; }
+        .index-item:hover { background: white; box-shadow: var(--shadow-sm); color: var(--text-main); }
+        .index-item.active { background: white; color: var(--brand-primary); font-weight: 600; box-shadow: var(--shadow-sm); }
+
+        .nota-card { margin-bottom: 2rem; scroll-margin-top: 2rem; }
+        .nota-title { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+        .nota-narrative { margin-top: 1rem; padding: 1rem; background: #F1F5F9; border-radius: var(--radius-sm); }
+        .nota-narrative textarea { width: 100%; background: transparent; border: none; font-family: var(--font-body); font-size: 0.9rem; color: var(--text-secondary); resize: vertical; min-height: 60px; line-height: 1.5; }
+        .nota-narrative textarea:focus { outline: none; color: var(--text-main); }
+
+        /* --- POPOVER ALLOCATION --- */
+        .allocation-popover {
+            position: absolute;
+            background: white;
+            border: 1px solid var(--border-light);
+            box-shadow: var(--shadow-md);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            width: 240px;
+            z-index: 100;
+            display: none;
+        }
+        .alloc-row { margin-bottom: 0.75rem; }
+        .alloc-row label { display: block; font-size: 0.75rem; margin-bottom: 0.25rem; font-weight: 600; color: var(--text-secondary); }
+        .alloc-input { display: flex; align-items: center; gap: 0.5rem; }
+        .alloc-input input { width: 100%; height: 6px; border-radius: 3px; accent-color: var(--brand-primary); }
+        .alloc-val { font-family: var(--font-mono); font-size: 0.8rem; width: 40px; text-align: right; }
+
+        /* --- PRINT STYLES --- */
+        @media print {
+            @page { size: A4; margin: 15mm; }
+            body { background: white; color: black; display: block; }
+            .sidebar, .top-bar, .action-bar, .subtabs, .btn, .index-item, .allocation-popover, .badge-m { display: none !important; }
+            .main-content, .container { padding: 0 !important; margin: 0 !important; width: 100% !important; max-width: 100% !important; }
+            .content-card { border: none !important; box-shadow: none !important; overflow: visible !important; }
+            
+            /* Formal Header */
+            .print-header { display: block !important; margin-bottom: 2rem; border-bottom: 2px solid black; padding-bottom: 1rem; }
+            .print-header .co-name { font-size: 1.25rem; font-weight: 800; text-transform: uppercase; }
+            .print-header .report-title { font-size: 1.1rem; font-weight: 700; margin-top: 0.5rem; }
+            
+            .acc-table { font-size: 8pt; border: 1px solid #ccc; }
+            .acc-table th { background: #eee !important; color: black; border: 1px solid #ccc; }
+            .acc-table td { border: 1px solid #eee; }
+            .nota-card { break-inside: avoid; border-bottom: 1px solid #eee; padding-bottom: 2rem; }
+            .nota-narrative { background: none; padding: 0; border: none; font-style: italic; }
+            .nota-narrative textarea { overflow: visible; height: auto; border: none; resize: none; }
+        }
+        .print-header { display: none; }
+
+        /* Hidden Utility */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body id="app">
+
+    <!-- SIDEBAR MOCK -->
+    <aside class="sidebar">
+        <div class="logo">
+            <i class="ph-duotone ph-robot"></i>
+            ContaLivre
+        </div>
+        <nav>
+            <a href="#" class="nav-item"><i class="ph ph-squares-four"></i> Dashboard</a>
+            <a href="#" class="nav-item active"><i class="ph ph-notebook"></i> Estados Contables</a>
+            <a href="#" class="nav-item"><i class="ph ph-tree-structure"></i> Plan de Cuentas</a>
+            <a href="#" class="nav-item"><i class="ph ph-scales"></i> Balance SyS</a>
+            <a href="#" class="nav-item"><i class="ph ph-gear"></i> Configuración</a>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <!-- TOP BAR -->
+        <header class="top-bar">
+            <div>
+                <div class="breadcrumb">Reportes / Estados Contables</div>
+                <h1 class="page-title">Notas y Anexos</h1>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <span style="background: #ECFDF5; color: #065F46; padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.75rem; font-weight: 700;">
+                    Estado: Cerrado
+                </span>
+                <span id="global-status" style="background: #EFF6FF; color: #1E40AF; padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.75rem; font-weight: 700;">
+                    Auto
+                </span>
+            </div>
+        </header>
+
+        <div class="container">
+
+            <!-- ACTION BAR -->
+            <div class="action-bar">
+                <div class="action-group">
+                    <button class="toggle-btn" id="btn-comp" onclick="toggleComparative()">
+                        <i class="ph ph-columns"></i> Comparativo
+                    </button>
+                    <button class="toggle-btn" id="btn-detail" onclick="toggleDetailed()">
+                        <i class="ph ph-list-magnifying-glass"></i> Detallado
+                    </button>
+                    <div style="height: 24px; width: 1px; background: var(--border-light); margin: 0 0.5rem;"></div>
+                    <select style="border: none; background: transparent; font-family: var(--font-body); font-weight: 600; color: var(--text-secondary); cursor: pointer;">
+                        <option>Ejercicio 2017</option>
+                        <option>Ejercicio 2016</option>
+                    </select>
+                </div>
+                <div class="action-group">
+                    <button class="btn btn-outline" onclick="recalculate()">
+                        <i class="ph ph-arrows-clockwise"></i> Recalcular
+                    </button>
+                    <button class="btn btn-primary" onclick="window.print()">
+                        <i class="ph ph-printer"></i> Imprimir / PDF
+                    </button>
+                </div>
+            </div>
+
+            <!-- SUBTABS -->
+            <div class="subtabs">
+                <div class="tab active" onclick="switchTab('notas', this)">Notas</div>
+                <div class="tab" onclick="switchTab('gastos', this)">Anexo de Gastos</div>
+                <div class="tab" onclick="switchTab('costos', this)">Anexo de Costos</div>
+            </div>
+
+            <!-- FORMAL PRINT HEADER (HIDDEN ON SCREEN) -->
+            <div class="print-header">
+                <div class="co-name" id="p-co-name">COSQUIN S.R.L.</div>
+                <div id="p-exercise">ESTADOS CONTABLES AL 31/12/2017</div>
+                <div class="report-title" id="p-report-title">NOTAS A LOS ESTADOS CONTABLES</div>
+                <div style="font-size: 0.85rem; margin-top: 0.5rem;">Cifras expresadas en Pesos argentinos ($)</div>
+            </div>
+
+            <!-- TAB: NOTAS -->
+            <section id="section-notas" class="notas-layout">
+                <div class="notas-index">
+                    <div style="font-size: 0.7rem; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 1rem; padding-left: 1rem;">Índice de Notas</div>
+                    <div id="index-container">
+                        <!-- Dynamic index -->
+                    </div>
+                </div>
+                <div id="notas-container">
+                    <!-- Dynamic notes -->
+                </div>
+            </section>
+
+            <!-- TAB: GASTOS -->
+            <section id="section-gastos" class="hidden">
+                <div class="content-card">
+                    <div class="table-header">
+                        <div>
+                            <h3 style="font-size: 1rem; font-weight: 700;">Anexo de Gastos (Cuadro por función)</h3>
+                            <p style="font-size: 0.8rem; color: var(--text-secondary);">Asignación de gastos a Costos, Administración y Comercialización.</p>
+                        </div>
+                    </div>
+                    <table class="acc-table" id="table-gastos">
+                        <thead>
+                            <tr>
+                                <th>Cta / Concepto</th>
+                                <th class="num">Importe Total</th>
+                                <th class="num">Costo</th>
+                                <th class="num">Admin.</th>
+                                <th class="num">Comerc.</th>
+                                <th style="text-align: center;">Asignación</th>
+                            </tr>
+                        </thead>
+                        <tbody id="gastos-body">
+                            <!-- Rows injected JS -->
+                        </tbody>
+                        <tfoot>
+                            <tr id="gastos-footer">
+                                <!-- Totals -->
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </section>
+
+            <!-- TAB: COSTOS -->
+            <section id="section-costos" class="hidden">
+                <div style="max-width: 800px; margin: 0 auto;">
+                    <div class="content-card">
+                        <div class="table-header">
+                            <h3 style="font-size: 1rem; font-weight: 700;">Costo de Mercadería Vendida (CMV)</h3>
+                        </div>
+                        <table class="acc-table">
+                            <tbody id="costos-body">
+                                <!-- Formulas injected JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div style="margin-top: 2rem; background: var(--brand-gradient); padding: 2rem; border-radius: var(--radius-md); color: white; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h4 style="font-family: var(--font-display); opacity: 0.9;">Total CMV Determinado</h4>
+                            <p style="font-size: 0.85rem; opacity: 0.8;">Correspondiente al ejercicio finalizado el 31/12/2017</p>
+                        </div>
+                        <div id="total-cmv-highlight" style="font-size: 2.5rem; font-weight: 800; font-family: var(--font-mono);">$ 0,00</div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- POPOVER PARA ASIGNACIÓN -->
+    <div id="alloc-popover" class="allocation-popover">
+        <h4 style="font-size: 0.85rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-light); padding-bottom: 0.5rem;">Asignar Gastos %</h4>
+        <div class="alloc-row">
+            <label>Costo</label>
+            <div class="alloc-input">
+                <input type="range" id="rng-cost" min="0" max="100" oninput="updateAlloc(this)">
+                <span class="alloc-val" id="val-cost">0%</span>
+            </div>
+        </div>
+        <div class="alloc-row">
+            <label>Administración</label>
+            <div class="alloc-input">
+                <input type="range" id="rng-admin" min="0" max="100" oninput="updateAlloc(this)">
+                <span class="alloc-val" id="val-admin">0%</span>
+            </div>
+        </div>
+        <div class="alloc-row">
+            <label>Comercialización</label>
+            <div class="alloc-input">
+                <input type="range" id="rng-comerc" min="0" max="100" oninput="updateAlloc(this)">
+                <span class="alloc-val" id="val-comerc">0%</span>
+            </div>
+        </div>
+        <div style="margin-top: 1rem; padding-top: 0.5rem; border-top: 1px solid var(--border-light); display: flex; justify-content: flex-end;">
+            <button class="btn btn-primary" style="padding: 0.3rem 0.6rem; font-size: 0.75rem;" onclick="saveAllocation()">Aplicar</button>
+        </div>
+    </div>
+
+    <script>
+        // --- DATA MOCK ---
+        const state = {
+            company: { name: "COSQUIN S.R.L.", currency: "$" },
+            period: { current: "31/12/2017", prior: "31/12/2016" },
+            settings: { comparative: false, detailed: true },
+            notes: [
+                { id: 4, title: "Caja y Bancos", text: "El saldo incluye efectivo en moneda nacional y depósitos en cuenta corriente bancaria sin restricciones de uso.", rows: [
+                    { account: "Caja Pesos", current: 45000, prior: 38000 },
+                    { account: "Banco Macro Cta Cte", current: 155000, prior: 120000 }
+                ]},
+                { id: 5, title: "Inversiones Temporarias", text: "Representa colocaciones de excedentes financieros a plazo fijo con vencimiento menor a 90 días.", rows: [
+                    { account: "Plazo Fijo Banco Galicia", current: 300000, prior: 250000 }
+                ]},
+                { id: 6, title: "Créditos por Ventas", text: "Saldos a cobrar por la actividad comercial principal de la sociedad.", rows: [
+                    { account: "Deudores por Ventas", current: 850000, prior: 720000 },
+                    { account: "Documentos a Cobrar", current: 120000, prior: 95000 }
+                ]},
+                { id: 10, title: "Deudas Comerciales", text: "Obligaciones con proveedores locales por compra de insumos.", rows: [
+                    { account: "Proveedores Varios", current: 420000, prior: 390000 },
+                    { account: "Obligaciones a Pagar", current: 150000, prior: 180000 }
+                ]},
+                { id: 13, title: "Deudas Fiscales", text: "Saldos pendientes con organismos de recaudación.", rows: [
+                    { account: "IVA a Pagar", current: 85000, prior: 62000 },
+                    { account: "Ganancias a Pagar", current: 120000, prior: 110000 },
+                    { account: "Plan de Pagos AFIP (C)", current: 45000, prior: 0 },
+                    { account: "Plan de Pagos AFIP (NC)", current: 180000, prior: 220000 }
+                ]}
+            ],
+            expenses: [
+                { name: "Sueldos y Jornales", total: 450000, alloc: { cost: 60, admin: 20, comm: 20 }, manual: false },
+                { name: "Cargas Sociales", total: 110000, alloc: { cost: 60, admin: 20, comm: 20 }, manual: false },
+                { name: "Alquileres", total: 85000, alloc: { cost: 0, admin: 100, comm: 0 }, manual: false },
+                { name: "Luz, Gas y Teléfono", total: 15400, alloc: { cost: 40, admin: 30, comm: 30 }, manual: false },
+                { name: "Publicidad y Propaganda", total: 42000, alloc: { cost: 0, admin: 0, comm: 100 }, manual: false },
+                { name: "Amortizaciones", total: 28000, alloc: { cost: 100, admin: 0, comm: 0 }, manual: false }
+            ],
+            costAnnex: {
+                opening: { val: 850000, manual: false },
+                purchases: { val: 2450000, manual: false },
+                closing: { val: 920000, manual: false }
+            }
+        };
+
+        let currentAllocIndex = -1;
+
+        // --- UTILS ---
+        const fmt = (num) => new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+
+        // --- INITIALIZATION ---
+        function init() {
+            renderNotas();
+            renderGastos();
+            renderCostos();
+            updateUIState();
+        }
+
+        // --- RENDERERS ---
+        function renderNotas() {
+            const container = document.getElementById('notas-container');
+            const indexContainer = document.getElementById('index-container');
+            container.innerHTML = '';
+            indexContainer.innerHTML = '';
+
+            state.notes.forEach((n, idx) => {
+                const totalCurrent = n.rows.reduce((acc, r) => acc + r.current, 0);
+                const totalPrior = n.rows.reduce((acc, r) => acc + r.prior, 0);
+
+                // Add to index
+                const idxEl = document.createElement('div');
+                idxEl.className = `index-item ${idx === 0 ? 'active' : ''}`;
+                idxEl.innerHTML = `Nota ${n.id} – ${n.title}`;
+                idxEl.onclick = () => {
+                    document.querySelectorAll('.index-item').forEach(i => i.classList.remove('active'));
+                    idxEl.classList.add('active');
+                    document.getElementById(`nota-${n.id}`).scrollIntoView({ behavior: 'smooth' });
+                };
+                indexContainer.appendChild(idxEl);
+
+                // Add card
+                const card = document.createElement('div');
+                card.id = `nota-${n.id}`;
+                card.className = 'nota-card content-card';
+                
+                let tableRows = n.rows.map(r => `
+                    <tr>
+                        <td>${r.account}</td>
+                        <td class="num">${fmt(r.current)}</td>
+                        ${state.settings.comparative ? `<td class="num" style="color:var(--text-tertiary)">${fmt(r.prior)}</td>` : ''}
+                    </tr>
+                `).join('');
+
+                card.innerHTML = `
+                    <div class="table-header">
+                        <div class="nota-title">NOTA ${n.id} - ${n.title.toUpperCase()}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-tertiary);">Al ${state.period.current}</div>
+                    </div>
+                    <table class="acc-table">
+                        <thead>
+                            <tr>
+                                <th>Cuenta</th>
+                                <th class="num">${state.period.current}</th>
+                                ${state.settings.comparative ? `<th class="num">${state.period.prior}</th>` : ''}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td>TOTAL ${n.title.toUpperCase()}</td>
+                                <td class="num">${fmt(totalCurrent)}</td>
+                                ${state.settings.comparative ? `<td class="num">${fmt(totalPrior)}</td>` : ''}
+                            </tr>
+                        </tfoot>
+                    </table>
+                    <div class="nota-narrative">
+                        <label style="display:block; font-size: 0.65rem; font-weight: 700; color: var(--brand-primary); margin-bottom: 0.25rem;">NARRATIVA (EDITABLE)</label>
+                        <textarea placeholder="Ingresar aclaraciones para esta nota...">${n.text}</textarea>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function renderGastos() {
+            const body = document.getElementById('gastos-body');
+            const footer = document.getElementById('gastos-footer');
+            body.innerHTML = '';
+
+            let totals = { full: 0, cost: 0, admin: 0, comm: 0 };
+
+            state.expenses.forEach((e, idx) => {
+                const c = e.total * (e.alloc.cost / 100);
+                const a = e.total * (e.alloc.admin / 100);
+                const k = e.total * (e.alloc.comm / 100);
+
+                totals.full += e.total;
+                totals.cost += c;
+                totals.admin += a;
+                totals.comm += k;
+
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td style="font-weight: 500;">${e.name} ${e.manual ? '<span class="badge-m">M</span>' : ''}</td>
+                    <td class="num">${fmt(e.total)}</td>
+                    <td class="num" style="color: var(--brand-primary); background: #F0F9FF;">${fmt(c)}</td>
+                    <td class="num">${fmt(a)}</td>
+                    <td class="num">${fmt(k)}</td>
+                    <td style="text-align: center;">
+                        <button class="btn btn-outline" style="padding: 0.3rem 0.5rem; display: inline-flex;" onclick="openAlloc(event, ${idx})">
+                            <i class="ph ph-sliders"></i>
+                        </button>
+                    </td>
+                `;
+                body.appendChild(row);
+            });
+
+            footer.innerHTML = `
+                <td>TOTALES</td>
+                <td class="num">${fmt(totals.full)}</td>
+                <td class="num" style="color: var(--brand-primary); background: #E0F2FE;">${fmt(totals.cost)}</td>
+                <td class="num">${fmt(totals.admin)}</td>
+                <td class="num">${fmt(totals.comm)}</td>
+                <td></td>
+            `;
+
+            // Vincular con costos
+            state.calculatedCostFromExpenses = totals.cost;
+            renderCostos();
+        }
+
+        function renderCostos() {
+            const body = document.getElementById('costos-body');
+            body.innerHTML = '';
+
+            const items = [
+                { label: "Existencia Inicial al inicio del ejercicio", val: state.costAnnex.opening.val, manual: state.costAnnex.opening.manual, id: 'opening' },
+                { label: "(+) Compras del ejercicio", val: state.costAnnex.purchases.val, manual: state.costAnnex.purchases.manual, id: 'purchases' },
+                { label: "(+) Gastos de fabricación incorporados", val: state.calculatedCostFromExpenses || 0, manual: false, id: 'expenses', auto: true },
+                { label: "(-) Existencia Final al cierre", val: state.costAnnex.closing.val, manual: state.costAnnex.closing.manual, id: 'closing' }
+            ];
+
+            let cmv = items[0].val + items[1].val + items[2].val - items[3].val;
+
+            items.forEach(it => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td style="${it.auto ? 'color: var(--brand-primary); font-weight: 600;' : ''}">${it.label} ${it.manual ? '<span class="badge-m">M</span>' : ''}</td>
+                    <td class="num" style="width: 200px;">
+                        ${it.auto ? fmt(it.val) : `<input type="text" class="num" style="border: none; background: transparent; width: 100%; font-family: inherit; font-size: inherit;" value="${fmt(it.val)}" onchange="updateCostItem('${it.id}', this.value)">`}
+                    </td>
+                `;
+                body.appendChild(row);
+            });
+
+            const footer = document.createElement('tr');
+            footer.innerHTML = `
+                <td style="font-weight: 800; font-size: 1rem;">COSTO DE MERCADERÍA VENDIDA (CMV)</td>
+                <td class="num" style="font-weight: 800; font-size: 1rem;">${fmt(cmv)}</td>
+            `;
+            body.appendChild(footer);
+            document.getElementById('total-cmv-highlight').innerText = `${state.company.currency} ${fmt(cmv)}`;
+        }
+
+        // --- LOGIC ---
+        function switchTab(tabId, el) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
+
+            document.getElementById('section-notas').classList.add('hidden');
+            document.getElementById('section-gastos').classList.add('hidden');
+            document.getElementById('section-costos').classList.add('hidden');
+
+            document.getElementById(`section-${tabId}`).classList.remove('hidden');
+
+            // Print Header update
+            const titles = { 'notas': 'NOTAS A LOS ESTADOS CONTABLES', 'gastos': 'ANEXO I - GASTOS POR FUNCIÓN', 'costos': 'ANEXO II - DETERMINACIÓN DEL CMV' };
+            document.getElementById('p-report-title').innerText = titles[tabId];
+        }
+
+        function toggleComparative() {
+            state.settings.comparative = !state.settings.comparative;
+            document.getElementById('btn-comp').classList.toggle('active');
+            renderNotas();
+        }
+
+        function toggleDetailed() {
+            state.settings.detailed = !state.settings.detailed;
+            document.getElementById('btn-detail').classList.toggle('active');
+            // Mock behavior: in a real app, this would filter sub-accounts
+        }
+
+        function recalculate() {
+            // Reset manual flags to demonstrate "Auto"
+            state.expenses.forEach(e => e.manual = false);
+            state.costAnnex.opening.manual = false;
+            init();
+        }
+
+        function updateUIState() {
+            const isManual = state.expenses.some(e => e.manual) || state.costAnnex.opening.manual;
+            const badge = document.getElementById('global-status');
+            if (isManual) {
+                badge.innerText = "Manual";
+                badge.style.background = "#FFF7ED";
+                badge.style.color = "#C2410C";
+            } else {
+                badge.innerText = "Auto";
+                badge.style.background = "#EFF6FF";
+                badge.style.color = "#1E40AF";
+            }
+        }
+
+        // --- POPOVER ALLOC LOGIC ---
+        function openAlloc(e, index) {
+            e.stopPropagation();
+            currentAllocIndex = index;
+            const expense = state.expenses[index];
+            
+            document.getElementById('rng-cost').value = expense.alloc.cost;
+            document.getElementById('rng-admin').value = expense.alloc.admin;
+            document.getElementById('rng-comerc').value = expense.alloc.comm;
+            
+            updateAllocLabels();
+
+            const pop = document.getElementById('alloc-popover');
+            const rect = e.currentTarget.getBoundingClientRect();
+            pop.style.top = (rect.top + window.scrollY - 150) + 'px';
+            pop.style.left = (rect.left - 250) + 'px';
+            pop.style.display = 'block';
+        }
+
+        function updateAlloc(el) {
+            // Basic logic: adjust others to maintain 100% (Simplified for mock)
+            updateAllocLabels();
+        }
+
+        function updateAllocLabels() {
+            document.getElementById('val-cost').innerText = document.getElementById('rng-cost').value + '%';
+            document.getElementById('val-admin').innerText = document.getElementById('rng-admin').value + '%';
+            document.getElementById('val-comerc').innerText = document.getElementById('rng-comerc').value + '%';
+        }
+
+        function saveAllocation() {
+            const exp = state.expenses[currentAllocIndex];
+            exp.alloc.cost = parseInt(document.getElementById('rng-cost').value);
+            exp.alloc.admin = parseInt(document.getElementById('rng-admin').value);
+            exp.alloc.comm = parseInt(document.getElementById('rng-comerc').value);
+            exp.manual = true;
+            
+            document.getElementById('alloc-popover').style.display = 'none';
+            renderGastos();
+            updateUIState();
+        }
+
+        function updateCostItem(id, value) {
+            const cleanVal = parseFloat(value.replace(/\./g, '').replace(',', '.'));
+            if (!isNaN(cleanVal)) {
+                state.costAnnex[id].val = cleanVal;
+                state.costAnnex[id].manual = true;
+                renderCostos();
+                updateUIState();
+            }
+        }
+
+        // Close popover when clicking outside
+        document.addEventListener('click', () => {
+            document.getElementById('alloc-popover').style.display = 'none';
+        });
+        document.getElementById('alloc-popover').addEventListener('click', (e) => e.stopPropagation());
+
+        window.onload = init;
+    </script>
+</body>
+</html>

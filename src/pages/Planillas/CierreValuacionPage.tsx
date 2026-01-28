@@ -561,6 +561,12 @@ export default function CierreValuacionPage() {
     const handleAnalyzeMayor = useCallback(() => {
         if (!state || !allJournalEntries) return;
 
+        // Validate closingDate before proceeding
+        if (!closingDate || closingDate.length < 10) {
+            showToast('Selecciona una fecha de cierre valida');
+            return;
+        }
+
         setAnalyzingMayor(true);
 
         // Default to start of year based on closingDate
@@ -593,8 +599,22 @@ export default function CierreValuacionPage() {
             }));
 
             setLastMayorAnalysis(new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }));
-            const closingNote = closingEntryIds.length > 0 ? ' (sin refundicion)' : '';
-            showToast(`Generadas ${result.stats.partidasGenerated} partidas RT6${closingNote}`);
+
+            // Build informative toast message
+            const parts: string[] = [];
+            parts.push(`${result.stats.partidasGenerated} partidas RT6`);
+            if (closingEntryIds.length > 0) {
+                parts.push(`(${closingEntryIds.length} cierre excluido)`);
+            }
+            // Add diagnostic info if RESULTADOS are missing
+            const resultadosPartidas = result.partidas.filter(p => p.grupo === 'RESULTADOS');
+            if (result.stats.resultadosAccounts > 0 && resultadosPartidas.length === 0) {
+                console.warn('[RT6] RESULTADOS accounts found but no partidas generated:', {
+                    resultadosAccountsProcessed: result.stats.resultadosAccounts,
+                    skippedZeroBalance: result.stats.skippedZeroBalance,
+                });
+            }
+            showToast(parts.join(' '));
         } catch (err) {
             console.error('Error analyzing mayor:', err);
             showToast('Error al analizar el mayor');
