@@ -1,5 +1,495 @@
 # ContaLivre - AI Handoff Protocol
 
+---
+
+## CHECKPOINT #OPERACIONES-INVENTARIO-ETAPA4-FINAL
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Build PASS  
+**Objetivo ETAPA 4:** Hotfix + UX: editar/eliminar movimientos/productos con sync contable, reparar links huérfanos, mover config de cuentas a modal.
+
+---
+
+### Causa Raiz Bug "Vinculado fantasma"
+
+- El `movement.linkedJournalEntryIds` quedaba persistido en `bienesMovements` y **no se revalidaba contra `entries`** cuando un asiento se eliminaba desde Libro Diario.
+- La UI leía ese link almacenado y seguía mostrando **“Vinculado”** aunque el asiento ya no existiera.
+
+---
+
+### Solucion Implementada
+
+1. **Reconciliacion de links huérfanos** en storage (`reconcileMovementJournalLinks`): limpia IDs inexistentes y setea `journalStatus="missing"`.
+2. **Edicion de movimientos con sync real**: si hay asientos generados se regeneran; si hay manuales se elige entre **mantener** (status `desync`) o **desvincular + generar nuevo**.
+3. **Eliminacion de movimientos**: borra asientos generados y/o conserva manuales segun confirmacion (todo en transaccion).
+4. **Eliminacion de productos con movimientos**: cascada segura (borra movimientos + asientos generados y desvincula manuales).
+5. **Cierre UX**: configuracion de “Cuentas Bienes de Cambio” movida a modal con resumen + estado.
+
+---
+
+### Archivos Tocados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/storage/bienes.ts` | Reconciliacion links, editar/eliminar con asientos, borrado cascada |
+| `src/storage/index.ts` | Export nuevas funciones de bienes |
+| `src/core/inventario/types.ts` | JournalStatus + `journalMissingReason` |
+| `src/pages/Planillas/InventarioBienesPage.tsx` | UI editar/eliminar, chips “Asiento eliminado”, modal cuentas |
+| `src/pages/Planillas/components/MovementModal.tsx` | Modo edicion |
+
+---
+
+### Build
+
+```bash
+npm run build  # PASS
+```
+
+## CHECKPOINT #OPERACIONES-INVENTARIO-ETAPA5-FINAL
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Build PASS  
+**Objetivo ETAPA 5:** KPIs reales, objetivos por periodo, limpiar inventario, costeo desbloqueable y periodo dinamico.
+
+---
+
+### Resumen
+
+- KPIs de Inventario con datos reales (ventas, CMV, stock, margen) sin porcentajes falsos.
+- Objetivos por periodo (ventas y margen) con modal de edicion y barra de progreso con significado.
+- Metodo de costeo desbloqueable cuando no hay ventas; boton Limpiar con opciones de borrado de asientos.
+- Inventario y Operaciones usan el periodo global y guardan periodId en nuevos registros.
+
+---
+
+### Archivos Tocados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/pages/Planillas/InventarioBienesPage.tsx` | KPIs reales, objetivos, limpieza, periodo dinamico |
+| `src/storage/bienes.ts` | Filtros por periodo, limpieza por periodo, reconcile scoping |
+| `src/storage/index.ts` | Export clearBienesPeriodData |
+| `src/core/inventario/types.ts` | periodId + periodGoals en settings |
+| `src/pages/OperacionesPage.tsx` | Filtros por periodo en KPIs |
+
+---
+
+### Build
+
+```bash
+npm run build  # PASS
+```
+
+## CHECKPOINT #OPERACIONES-INVENTARIO-ETAPA3-1 - FASE 0 (INSPECCION)
+**Fecha:** 2026-01-28  
+**Estado:** EN PROGRESO  
+**Objetivo ETAPA 3:** Conciliacion 2.0 (cuentas transitorias Bienes de Cambio), KPIs reales en Operaciones, UX de punto de reorden, hardening.
+
+---
+
+### Causa Raiz Exacta
+
+- La conciliacion de Inventario (Bienes de Cambio) solo detecta asientos que tocan **Mercaderias** via `entryTouchesMercaderias` en `src/pages/Planillas/InventarioBienesPage.tsx`.
+- Asientos que afectan **cuentas transitorias** (Compras, Bonif/Dev compras, CMV, etc.) no se consideran “de inventario”, por lo tanto **no aparecen en Panel B**.
+
+---
+
+### Estrategia Elegida
+
+- **Universo Bienes de Cambio** basado en cuentas configurables:
+  - Preferir **configuracion explicita** via `BienesSettings.accountMappings` (Mercaderias, Compras, Bonif/Dev Compras, CMV; opcionales: Gastos Compras y Ventas).
+  - **Fallback heuristico** por codigo/nombre cuando no hay config (keywords: mercader/compra/bonif/devol/cmv).
+- Conciliacion:
+  - Incluir asientos `sourceModule="inventory"` **siempre**.
+  - Detectar entradas que toquen **cualquier cuenta del universo** y etiquetar tipo + cuenta disparadora.
+  - Mejorar matching por tipo de cuenta (compra vs cmv/ventas).
+- UX:
+  - Seccion “Cuentas Bienes de Cambio” en tab Cierre para guardar mappings.
+  - Banner si se usan heuristicas.
+
+---
+
+### Archivos a Tocar (Plan)
+
+- `src/pages/Planillas/InventarioBienesPage.tsx` (conciliacion 2.0 + config cuentas + matching)
+- `src/pages/OperacionesPage.tsx` (KPIs reales sin mocks)
+- `src/pages/Planillas/components/ProductModal.tsx` (Punto de reorden label + ayuda)
+- `src/core/inventario/costing.ts` (alerta reorderPoint > 0)
+- `src/storage/bienes.ts` (hardening delete / idempotencia)
+
+---
+
+## CHECKPOINT #OPERACIONES-INVENTARIO-ETAPA3-FINAL - ETAPA 3 COMPLETADA
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Build PASS  
+**Objetivo ETAPA 3:** Conciliacion contable real con cuentas transitorias, KPIs reales, UX de punto de reorden, hardening.
+
+---
+
+### Resumen de Implementacion
+
+1. **Conciliacion 2.0:** Universo de cuentas Bienes de Cambio (Mercaderias, Compras, Bonif/Dev Compras, CMV; opcionales) + deteccion por config o heuristica.
+2. **Panel B enriquecido:** Tipo de asiento y cuenta disparadora visibles; banner cuando se usa heuristica.
+3. **Matching mejorado:** scoring por tipo de cuenta + fechas + monto (sale vs compras/CMV).
+4. **Operaciones sin mocks:** ventas/CMV/margen desde movimientos o asientos; caja solo si hay ledger confiable; stock y alertas reales.
+5. **UX y hardening:** Punto de reorden con ayuda, alertas bajo stock minimo, idempotencia al generar asientos, bloqueo delete con asientos.
+
+---
+
+### Decisiones Clave
+
+1. **Bonif/Dev Compras** se modelan como **Ajuste de salida** (ADJUSTMENT OUT).
+2. **Ventas** solo entran a conciliacion si el usuario las configura (evita falsos positivos).
+3. **Heuristica** por nombre/codigo solo para cuentas principales (y gastos de compras opcional).
+
+---
+
+### Archivos Tocados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/pages/Planillas/InventarioBienesPage.tsx` | Conciliacion 2.0 + config cuentas + matching + hardening |
+| `src/pages/OperacionesPage.tsx` | KPIs reales (ventas/CMV/margen/caja) + alertas stock |
+| `src/pages/Planillas/components/ProductModal.tsx` | Punto de reorden + ayuda |
+| `src/core/inventario/costing.ts` | hasAlert solo si reorderPoint > 0 |
+| `src/storage/bienes.ts` | Bloqueo delete con asientos |
+
+---
+
+### Build
+
+```bash
+npm run build  # PASS
+```
+
+---
+
+## CHECKPOINT #OPERACIONES-INVENTARIO-ETAPA2-1 - FASE 0 (INSPECCION)
+**Fecha:** 2026-01-28
+**Estado:** EN PROGRESO
+**Objetivo ETAPA 2:** Conectar Inventario (Bienes de Cambio) con Libro Diario, habilitar conciliacion real, generar asiento de ajuste por diferencias y mover Inventario como submodulo de Operaciones (no Planillas).
+
+---
+
+### Arquitectura Actual (Libro Diario / Asientos)
+
+- **Modelo de Asiento:** `src/core/models.ts` -> interfaz `JournalEntry` con `id/date/memo/lines/metadata`.
+- **Persistencia:** Dexie (`src/storage/db.ts`) usa tabla `entries` con indices `id, date, memo`.
+- **Creacion de asientos (API):** `src/storage/entries.ts` -> `createEntry()` (valida con `validateEntry`).
+- **Usos actuales de createEntry / db.entries:**
+  - `src/pages/AsientosDesktop.tsx` y `src/pages/AsientosMobile.tsx` (alta manual)
+  - `src/components/ImportAsientosUX.tsx` (importacion)
+  - `src/pages/Planillas/CierreValuacionPage.tsx` (envio a libro diario)
+  - `src/pages/Planillas/InventarioLegacyPage.tsx` (cierre inventario legacy)
+
+---
+
+### Archivos Probables a Tocar (Etapa 2)
+
+| Archivo | Motivo |
+|---------|--------|
+| `src/App.tsx` | Nueva ruta canonica `/operaciones/inventario` + redirect legacy |
+| `src/ui/Layout/Sidebar.tsx` | Mover Inventario como subitem de Operaciones |
+| `src/ui/Layout/MobileDrawer.tsx` | Reflejar nuevo submodulo en menu mobile |
+| `src/pages/Planillas/PlanillasHome.tsx` | Quitar tarjeta principal de Inventario (no mas Planillas) |
+| `src/pages/OperacionesPage.tsx` | CTA hacia ruta canonica |
+| `src/pages/Planillas/InventarioBienesPage.tsx` | Asientos, conciliacion y cierre reales |
+| `src/pages/Planillas/components/MovementModal.tsx` | Toggle auto-asiento activo + validaciones |
+| `src/core/inventario/types.ts` | Campos de trazabilidad (journalStatus, etc.) |
+| `src/storage/bienes.ts` | Transacciones inventario + asientos |
+| `src/core/models.ts` | Metadata/tags en JournalEntry para trazabilidad |
+
+---
+
+### Estrategia de Integracion (Decision)
+
+- **Asientos por movimientos**: Generar entries reales desde inventario cuando `autoJournal` esta ON.
+- **Trazabilidad**: Guardar metadata en `JournalEntry` (sourceModule="inventory", sourceId=movementId, sourceType=..., createdAt).
+- **Transaccion**: Usar `db.transaction('rw', db.bienesMovements, db.entries, ...)` para que movimiento + asiento se graben atomicos.
+- **Venta**: Generar 2 asientos (Venta + CMV) y guardar ambos IDs en `linkedJournalEntryIds`.
+- **Conciliacion**: Detectar movimientos sin asiento y asientos sin movimiento usando metadata y/o cuenta Mercaderias.
+- **Cierre por diferencias**: Generar asiento real desde tab Cierre y linkearlo.
+
+---
+
+### Riesgos / Alertas
+
+1. **Mapeo de cuentas**: Dependemos de codigos existentes (Mercaderias, IVA, CMV, Diferencia inventario). Si no existen, bloquear generacion y avisar.
+2. **Doble asiento en ventas**: Manejo de dos IDs por movimiento (venta + CMV) debe reflejarse en UI y conciliacion.
+3. **Consistencia**: Si falla la creacion del asiento, no debe persistirse movimiento autoJournal (requisito transaccional).
+4. **UX**: Mantener estilo prototipo; evitar degradacion visual en conciliacion y cierre.
+
+---
+
+## CHECKPOINT #OPERACIONES-INVENTARIO-ETAPA2-FINAL - ETAPA 2 COMPLETADA
+**Fecha:** 2026-01-28
+**Estado:** COMPLETADO - Build PASS
+**Objetivo ETAPA 2:** Integracion Inventario (Bienes de Cambio) con Libro Diario + conciliacion real + cierre por diferencias + navegacion bajo Operaciones.
+
+---
+
+### Resumen de Implementacion
+
+1. **Navegacion**: Ruta canonica `/operaciones/inventario`, redirect desde `/planillas/inventario`, Inventario como submodulo de Operaciones (sidebar + mobile).
+2. **Asientos automaticos**: Generacion real desde movimientos con trazabilidad (sourceModule/sourceId/sourceType/createdAt).
+3. **Conciliacion real**: Panel A (movimientos sin asiento) y Panel B (asientos sin movimiento), con matching sugerido y acciones.
+4. **Cierre por diferencias**: Asiento real desde tab Cierre con ajuste Mercaderias vs Diferencia de inventario.
+
+---
+
+### Archivos Tocados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/App.tsx` | Ruta canonica + redirect legacy |
+| `src/ui/Layout/Sidebar.tsx` | Inventario como subitem de Operaciones |
+| `src/ui/Layout/MobileDrawer.tsx` | Operaciones + Inventario en menu mobile |
+| `src/pages/Planillas/PlanillasHome.tsx` | Inventario removido de Planillas |
+| `src/pages/OperacionesPage.tsx` | CTA a /operaciones/inventario |
+| `src/pages/Planillas/InventarioBienesPage.tsx` | Asientos, conciliacion y cierre real |
+| `src/pages/Planillas/components/MovementModal.tsx` | AutoJournal ON + ajustes entrada/salida |
+| `src/core/models.ts` | Campos de trazabilidad en JournalEntry |
+| `src/core/inventario/types.ts` | JournalStatus + diferenciaInventario |
+| `src/core/inventario/index.ts` | Export JournalStatus |
+| `src/storage/bienes.ts` | Transacciones movimiento+asiento, linkeo |
+| `src/storage/entries.ts` | createdAt default |
+| `src/storage/index.ts` | Export helpers de asientos |
+
+---
+
+### Decisiones Clave
+
+1. **Ventas generan 2 asientos**: (Venta) + (CMV), ambos linkeados al movimiento.
+2. **Transaccion Dexie**: movimientos + asientos se guardan juntos (sin movimiento huerfano).
+3. **Migracion**: Sin bump de schema; nuevos campos con defaults y tolerancia a datos legacy.
+4. **Cierre**: Asiento de ajuste solo Mercaderias vs Diferencia de inventario (sin asiento extra de CMV).
+
+---
+
+### Pendientes Etapa 3
+
+- Selector de cuenta contrapartida configurable (Caja/Banco/Deudores/Proveedores).
+- Mejorar matching (referencias/SKU, montos multi-linea, fuzzy text).
+- Conteo fisico por producto + import masivo.
+- Exportaciones CSV/Excel de movimientos y conciliacion.
+
+---
+
+## CHECKPOINT #OPERACIONES-INVENTARIO-FINAL — ETAPA 1 COMPLETADA
+**Fecha:** 2026-01-28
+**Estado:** COMPLETADO - Build PASS
+**Objetivo ETAPA 1:** Implementar Hub Operaciones + Nuevo Inventario (Bienes de Cambio) funcional con FIFO/UEPS/PPP
+
+---
+
+### Resumen de Implementacion
+
+Se implemento la ETAPA 1 completa del modulo de Operaciones e Inventario de Bienes de Cambio:
+
+1. **Hub Operaciones** (`/operaciones`) - Pagina central con KPIs y accesos rapidos
+2. **Inventario Bienes de Cambio** - 5 tabs: Dashboard, Productos, Movimientos, Conciliacion (scaffold), Cierre
+3. **Motor de Costeo** - FIFO, LIFO (UEPS), y PPP (Promedio Ponderado Movil) funcionales
+4. **Persistencia** - Dexie v6 con tablas separadas para bienes de cambio
+5. **CRUD completo** - Productos y Movimientos con validaciones
+
+### Archivos Creados
+
+| Archivo | Descripcion |
+|---------|-------------|
+| `src/pages/OperacionesPage.tsx` | Hub de operaciones con KPIs y cards |
+| `src/pages/Planillas/InventarioBienesPage.tsx` | Pagina principal con 5 tabs |
+| `src/pages/Planillas/components/ProductModal.tsx` | Modal CRUD de productos |
+| `src/pages/Planillas/components/MovementModal.tsx` | Modal registro de movimientos |
+| `src/core/inventario/costing.ts` | Motor de costeo FIFO/LIFO/PPP |
+| `src/storage/bienes.ts` | Capa de persistencia para bienes |
+
+### Archivos Modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/App.tsx` | +ruta /operaciones, import nuevo inventario |
+| `src/ui/Layout/Sidebar.tsx` | +item Operaciones con icono RocketLaunch |
+| `src/core/inventario/types.ts` | +tipos BienesProduct, BienesMovement, BienesSettings, etc. |
+| `src/core/inventario/index.ts` | +exports de costing y nuevos tipos |
+| `src/storage/db.ts` | +Dexie v6 con tablas bienesProducts/Movements/Settings |
+| `src/storage/index.ts` | +exports de storage/bienes.ts |
+
+### Archivos Preservados (Legacy)
+
+| Archivo | Descripcion |
+|---------|-------------|
+| `src/pages/Planillas/InventarioLegacyPage.tsx` | Inventario viejo renombrado (backup) |
+
+---
+
+### Criterios de Aceptacion (Checklist)
+
+- [x] Existe ruta /operaciones y aparece en sidebar debajo de Dashboard
+- [x] /operaciones replica el layout del prototipo (cards, secciones, CTAs)
+- [x] "Bienes de Cambio (Inventario)" navega al Inventario nuevo
+- [x] En Inventario: puedo crear un producto y persiste al recargar
+- [x] Puedo registrar una compra y aumenta stock + recalcula valor
+- [x] Puedo registrar una venta y baja stock + calcula CMV segun metodo
+- [x] No permite vender mas stock del disponible (alerta clara)
+- [x] FIFO/UEPS/PPP afecta el CMV y el valor final coherentemente
+- [x] Cierre por diferencias muestra calculo coherente
+- [x] No hay emojis; iconos Phosphor unicamente
+- [x] npm run build pasa
+
+---
+
+### Decisiones de Diseno
+
+1. **Metodo PPP:** Promedio Ponderado Movil (recalcula despues de cada compra)
+2. **Bloqueo de metodo:** Una vez hay ventas, no se puede cambiar el metodo de costeo
+3. **Capas de costo:** FIFO/LIFO usan capas ordenadas por fecha
+4. **IVA:** Se calcula automaticamente segun alicuota del producto (21%, 10.5%, exento)
+5. **Conciliacion:** Scaffold UI presente, funcionalidad real en Etapa 2
+6. **Asientos:** Flags autoJournal y linkedJournalEntryIds guardados pero NO generan asientos (Etapa 2)
+
+---
+
+### Verificacion
+
+```bash
+npm run build  # PASS (39.42s)
+```
+
+### QA Manual Sugerido
+
+1. Abrir app y entrar a /operaciones
+2. Verificar UI (cards, KPIs, secciones)
+3. Click en "Bienes de Cambio (Inventario)" -> abre Inventario
+4. Crear producto (SKU auto) + guardar -> aparece en lista
+5. Registrar compra -> stock sube y KPIs cambian
+6. Registrar venta -> stock baja, CMV se calcula, margen cambia
+7. Cambiar metodo FIFO <-> PPP <-> UEPS -> verificar que CMV/valor cambian
+8. Intentar vender mas de lo que hay -> debe bloquear con mensaje
+9. Cierre por diferencias -> ver CMV/diferencia (sin crashear)
+
+---
+
+### Pendientes para ETAPA 2
+
+| Item | Prioridad | Descripcion |
+|------|-----------|-------------|
+| Generacion de asientos | P0 | Crear asientos contables automaticos al registrar movimientos |
+| Conciliacion real | P0 | Comparar inventario fisico vs contable |
+| Integracion Libro Diario | P1 | Conectar con modulo de asientos existente |
+| Ajuste por diferencias | P1 | Generar asiento de ajuste cuando hay diferencia |
+| Conteo fisico (COUNT) | P2 | Implementar funcionalidad de conteo para cierre |
+| Export CSV/Excel | P2 | Exportar productos y movimientos |
+| Graficos sparklines | P3 | Mini graficos en dashboard |
+
+---
+
+---
+
+## CHECKPOINT #OPERACIONES-INVENTARIO-1 — Post-Diagnostico (FASE 0)
+**Fecha:** 2026-01-28
+**Estado:** SUPERADO (ver CHECKPOINT FINAL arriba)
+
+---
+
+### Hallazgos Clave
+
+#### Stack Confirmado
+- React 18.3.1 + TypeScript 5.6.2 + Vite 6.0.1
+- Tailwind CSS 4.1.18
+- React Router DOM 6.28.0
+- Dexie 4.0.10 (IndexedDB) — BD: "EntrenadorContable" v5
+- Phosphor Icons 2.1.10
+
+#### Archivos Candidatos a Tocar
+
+| Archivo | Acción | Razón |
+|---------|--------|-------|
+| `src/App.tsx` | EDITAR | Agregar ruta /operaciones |
+| `src/ui/Layout/Sidebar.tsx` | EDITAR | Agregar item "Operaciones" en sidebar |
+| `src/pages/Planillas/InventarioPage.tsx` | PRESERVAR/RENOMBRAR | Inventario viejo (sistema periódico) |
+| `src/pages/OperacionesPage.tsx` | CREAR | Hub de operaciones nuevo |
+| `src/pages/InventarioBienesPage.tsx` | CREAR | Inventario nuevo (bienes de cambio) |
+| `src/core/inventario/types.ts` | EDITAR | Extender modelos con costeo FIFO/UEPS/PPP |
+| `src/core/inventario/costing.ts` | CREAR | Motor de costeo (calcular CMV por capas) |
+| `src/storage/db.ts` | EDITAR | Bump versión schema + nuevas tablas |
+| `src/storage/inventario.ts` | EDITAR | CRUD extendido para nuevos modelos |
+
+#### Inventario Actual vs. Nuevo
+
+| Característica | Actual | Nuevo (Prototipo) |
+|----------------|--------|-------------------|
+| Tabs | 3 (Movimientos, Cierre, Config) | 5 (Dashboard, Productos, Movimientos, Conciliación, Cierre) |
+| Productos | Sin tabla separada | CRUD completo con SKU, categoría, costo, precio |
+| Costeo | Sin costeo por capas | FIFO/UEPS/PPP seleccionable |
+| KPIs | No | Stock valuado, Unidades, Ventas, Margen |
+| Movimientos | ENTRADA/SALIDA/AJUSTE básico | Compra/Venta/Ajuste con IVA y contrapartida |
+| Valoración | Manual | Automática por método |
+
+---
+
+### Riesgos Detectados
+
+1. **Schema Migration:** Hay que bumpar Dexie sin romper datos existentes de otras tablas (accounts, entries, etc.)
+2. **Rutas legacy:** El inventario actual está en `/planillas/inventario` — hay que decidir si redirigir o coexistir
+3. **Componentes compartidos:** El inventario actual tiene modales inline — el nuevo requiere modales más complejos
+4. **Método de costeo global:** El contrato exige que sea global por período, no por producto — hay que bloquear cambio si hay salidas
+5. **IVA:** Los movimientos nuevos requieren calcular IVA (21%, 10.5%, exento) — no existía antes
+6. **Conciliación:** Tab requerida pero puede ser scaffold en Etapa 1 (sin integración real con asientos)
+
+---
+
+### Plan de Ejecución
+
+#### FASE 1A — Routing + Sidebar + Hub Operaciones
+1. Agregar `/operaciones` a App.tsx
+2. Agregar item "Operaciones" en Sidebar.tsx (debajo de Dashboard, con icono RocketLaunch)
+3. Crear `OperacionesPage.tsx` replicando layout del prototipo
+
+#### FASE 1B — Nuevo Inventario UI
+1. Renombrar `InventarioPage.tsx` → `InventarioLegacyPage.tsx` (preservar)
+2. Crear `InventarioBienesPage.tsx` con 5 tabs
+3. Implementar componentes: Dashboard, ProductsTab, MovementsTab, ConciliacionTab, CierreTab
+4. Modales: ProductModal, MovementModal
+
+#### FASE 1C — Modelo de Datos + Costeo
+1. Extender tipos en `core/inventario/types.ts`:
+   - `Product`: id, name, sku, unit, category, reorderPoint, ivaRate, openingQty, openingUnitCost
+   - `Movement`: id, date, type, productId, quantity, unitCost, unitPrice, ivaRate, ivaAmount, costMethod, costUnitAssigned, costTotalAssigned, autoJournal, linkedJournalEntryIds
+   - `InventorySettings`: costMethod (FIFO|UEPS|PPP), locked
+2. Crear `core/inventario/costing.ts`:
+   - `calculateFIFO()`, `calculateLIFO()`, `calculatePPP()`
+   - `getStockValuation()`, `getCMV()`
+3. Actualizar Dexie schema (v6) con nuevas tablas/índices
+
+#### FASE 1D — Persistencia + CRUD
+1. Actualizar `storage/inventario.ts` con CRUD completo
+2. Integrar cálculos de costeo en movimientos
+
+#### FASE 2 — Hardening
+- Estados vacíos
+- Validaciones (stock negativo, etc.)
+- Memoización de cálculos
+
+#### FASE 3 — QA + Limpieza
+- Build pass
+- QA manual
+- Limpieza de imports no usados
+
+---
+
+### Decisiones Tomadas
+
+1. **Preservar inventario viejo:** Se renombrará a `InventarioLegacyPage.tsx` y no se ruteará (solo backup)
+2. **Método PPP:** Se usará Promedio Ponderado Móvil (recalcula después de cada compra)
+3. **Ruta del nuevo inventario:** Mantener `/planillas/inventario` para el nuevo, redirigir si hay URL vieja
+4. **Conciliación:** Scaffold UI en Etapa 1, funcionalidad real en Etapa 2
+5. **Asientos:** Guardar flags (autoJournal, linkedJournalEntryIds) pero NO generar asientos reales en Etapa 1
+
+---
+
+### Próximo Paso
+Comenzar FASE 1A: Routing + Sidebar + Hub Operaciones
+
+---
+
 ## CHECKPOINT #NOTAS-ANEXOS-1 - NOTAS Y ANEXOS A LOS ESTADOS CONTABLES
 **Fecha:** 27/01/2026
 **Estado:** ✅ COMPLETADO - Build PASS

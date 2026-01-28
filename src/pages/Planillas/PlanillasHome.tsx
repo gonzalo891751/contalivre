@@ -7,7 +7,6 @@ import {
     CheckSquareOffset,
     Clock,
     MagnifyingGlass,
-    Package,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
 
@@ -24,17 +23,6 @@ interface PlanillaCard {
 }
 
 const PLANILLAS: PlanillaCard[] = [
-    {
-        id: 'inventario',
-        title: 'Inventario periódico',
-        badge: 'STOCK',
-        badgeClass: 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
-        description: 'Gestión de existencias, valuación FIFO/PPP y ajustes de stock manuales.',
-        features: ['Ficha de stock', 'Reporte de valuación', 'Importación masiva'],
-        lastUsed: '12/01/2026',
-        href: '/planillas/inventario',
-        icon: Package,
-    },
     {
         id: 'conciliaciones',
         title: 'Conciliaciones',

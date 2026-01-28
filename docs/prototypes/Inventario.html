@@ -1,0 +1,854 @@
+<!-- 
+CONTA LIVRE — PROTOTIPO DE INVENTARIO (BIENES DE CAMBIO)
+Versión: 1.0.0
+Author: ContaLivre Canvas Builder
+
+INSTRUCCIONES DE PRUEBA:
+1. Navegación: Hacé clic en las tabs superiores (Dashboard, Productos, Movimientos...) para cambiar de vista.
+2. Nuevo Movimiento: En la tab "Movimientos", clickeá "Nuevo Movimiento".
+   - Cambiá entre "Compra" y "Venta" para ver cómo cambia la previsualización del asiento contable en el panel derecho del modal.
+   - Activá/Desactivá el switch "Generar asiento contable" para ver la lógica de vinculación.
+3. Cierre: En la tab "Cierre", probá cambiar el "Inventario Final (Físico)" para ver cómo calcula la diferencia y el asiento de ajuste automáticamente.
+4. Tono de voz: Observá los mensajes y tooltips ("Ojo con esto...", "Chequeá...").
+-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Inventario & Bienes de Cambio</title>
+
+    <!-- 1. TAILWIND CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2. TAILWIND CONFIG EXTENSION -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',   /* Azul Eléctrico */
+                            secondary: '#10B981', /* Verde Teal */
+                        },
+                        ui: {
+                            bg: '#F8FAFC',
+                            paper: '#FFFFFF',
+                            text: '#0F172A',
+                            secondary: '#64748B',
+                            tertiary: '#94A3B8',
+                            border: '#E2E8F0',
+                        },
+                        semantic: {
+                            success: '#10B981',
+                            warning: '#F59E0B',
+                            error: '#EF4444',
+                            info: '#3B82F6'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05)',
+                        'float': '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- 3. GOOGLE FONTS -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+
+    <!-- 4. PHOSPHOR ICONS -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- 5. CUSTOM STYLES (Brand Book Overrides) -->
+    <style>
+        :root {
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+        }
+        
+        body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; color: #0F172A; }
+        h1, h2, h3, h4 { font-family: 'Outfit', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Utility Classes */
+        .glass { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.5); }
+        .btn-primary { background: var(--brand-gradient); color: white; transition: all 0.2s; }
+        .btn-primary:hover { opacity: 0.95; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
+        .btn-secondary { background: white; border: 1px solid #E2E8F0; color: #0F172A; transition: all 0.2s; }
+        .btn-secondary:hover { border-color: #3B82F6; color: #3B82F6; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+        /* Animation */
+        @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .animate-slide-in { animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        
+        /* High Density Table Tweaks */
+        td, th { white-space: nowrap; }
+        .tab-active { color: #3B82F6; border-bottom: 2px solid #3B82F6; font-weight: 600; }
+        .tab-inactive { color: #64748B; border-bottom: 2px solid transparent; }
+        .tab-inactive:hover { color: #0F172A; border-bottom: 2px solid #E2E8F0; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden text-sm">
+
+    <!-- ================= SIDEBAR (Mock) ================= -->
+    <aside class="w-64 bg-white border-r border-ui-border flex flex-col hidden md:flex z-20 shadow-soft">
+        <div class="p-6 flex items-center gap-2">
+            <i class="ph-duotone ph-robot text-2xl text-brand-primary"></i>
+            <span class="font-display font-bold text-xl tracking-tight">ContaLivre</span>
+        </div>
+
+        <nav class="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
+            <div class="px-3 mb-2 text-xs font-bold text-ui-tertiary uppercase tracking-wider">Contabilidad</div>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 text-ui-secondary rounded-md hover:bg-ui-bg hover:text-ui-text transition-colors">
+                <i class="ph ph-squares-four text-lg"></i> Dashboard
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 text-ui-secondary rounded-md hover:bg-ui-bg hover:text-ui-text transition-colors">
+                <i class="ph ph-notebook text-lg"></i> Libro Diario
+            </a>
+            
+            <div class="px-3 mt-6 mb-2 text-xs font-bold text-ui-tertiary uppercase tracking-wider">Planillas</div>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 bg-blue-50 text-brand-primary font-medium rounded-md">
+                <i class="ph-fill ph-package text-lg"></i> Inventario
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 text-ui-secondary rounded-md hover:bg-ui-bg hover:text-ui-text transition-colors">
+                <i class="ph ph-users text-lg"></i> Sueldos
+            </a>
+        </nav>
+
+        <div class="p-4 border-t border-ui-border">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-brand-primary to-brand-secondary flex items-center justify-center text-white font-bold text-xs">SM</div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-ui-text truncate">Santiago M.</p>
+                    <p class="text-xs text-ui-secondary truncate">Admin</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ================= MAIN CONTENT ================= -->
+    <main class="flex-1 flex flex-col overflow-hidden bg-ui-bg relative">
+        
+        <!-- TOPBAR -->
+        <header class="h-16 bg-white border-b border-ui-border flex items-center justify-between px-6 shadow-sm z-10">
+            <div class="flex items-center gap-4">
+                <button class="md:hidden text-ui-secondary"><i class="ph ph-list text-2xl"></i></button>
+                <h2 class="text-lg font-display font-semibold text-ui-text">Bienes de Cambio (Mercaderías)</h2>
+                <div class="hidden sm:flex items-center px-2 py-1 bg-ui-bg rounded-md border border-ui-border text-xs font-mono text-ui-secondary">
+                    <span class="w-2 h-2 rounded-full bg-green-500 mr-2"></span> Periodo 2026
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <button class="p-2 text-ui-secondary hover:text-brand-primary transition-colors relative">
+                    <i class="ph ph-bell text-xl"></i>
+                    <span class="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
+                </button>
+                <button class="btn-secondary px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2">
+                    <i class="ph ph-question"></i> Ayuda
+                </button>
+            </div>
+        </header>
+
+        <!-- TABS HEADER -->
+        <div class="bg-white border-b border-ui-border px-6 pt-2">
+            <div class="flex space-x-6 overflow-x-auto" id="tabs-container">
+                <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-active pb-3 px-1 text-sm transition-all whitespace-nowrap">Dashboard</button>
+                <button onclick="switchTab('productos')" id="tab-productos" class="tab-inactive pb-3 px-1 text-sm transition-all whitespace-nowrap">Productos</button>
+                <button onclick="switchTab('movimientos')" id="tab-movimientos" class="tab-inactive pb-3 px-1 text-sm transition-all whitespace-nowrap">Movimientos</button>
+                <button onclick="switchTab('conciliacion')" id="tab-conciliacion" class="tab-inactive pb-3 px-1 text-sm transition-all whitespace-nowrap flex items-center gap-2">
+                    Conciliación <span class="bg-orange-100 text-orange-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full">2</span>
+                </button>
+                <button onclick="switchTab('cierre')" id="tab-cierre" class="tab-inactive pb-3 px-1 text-sm transition-all whitespace-nowrap">Cierre</button>
+            </div>
+        </div>
+
+        <!-- CONTENT AREA -->
+        <div class="flex-1 overflow-y-auto p-6 scroll-smooth">
+            
+            <!-- VIEW: DASHBOARD -->
+            <section id="view-dashboard" class="space-y-6 animate-slide-in">
+                <!-- KPIs -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="bg-white p-5 rounded-xl border border-ui-border shadow-soft">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-ui-secondary text-xs font-medium uppercase tracking-wider">Stock Valuado</span>
+                            <i class="ph-duotone ph-coins text-brand-primary text-xl"></i>
+                        </div>
+                        <div class="font-mono text-2xl font-medium text-ui-text">$ 1.250.400</div>
+                        <div class="text-xs text-green-600 font-medium mt-1 flex items-center gap-1">
+                            <i class="ph-bold ph-trend-up"></i> +12% vs mes anterior
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white p-5 rounded-xl border border-ui-border shadow-soft">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-ui-secondary text-xs font-medium uppercase tracking-wider">Unidades</span>
+                            <i class="ph-duotone ph-package text-brand-secondary text-xl"></i>
+                        </div>
+                        <div class="font-mono text-2xl font-medium text-ui-text">845 <span class="text-sm text-ui-secondary font-sans">u.</span></div>
+                        <div class="text-xs text-ui-secondary mt-1">32 productos activos</div>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl border border-ui-border shadow-soft">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-ui-secondary text-xs font-medium uppercase tracking-wider">Ventas (Período)</span>
+                            <i class="ph-duotone ph-chart-bar text-purple-500 text-xl"></i>
+                        </div>
+                        <div class="font-mono text-2xl font-medium text-ui-text">$ 3.400.200</div>
+                        <div class="h-1 w-full bg-gray-100 rounded-full mt-3 overflow-hidden">
+                            <div class="h-full bg-purple-500 w-3/4 rounded-full"></div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-xl border border-ui-border shadow-soft">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-ui-secondary text-xs font-medium uppercase tracking-wider">Margen Bruto</span>
+                            <i class="ph-duotone ph-percent text-orange-500 text-xl"></i>
+                        </div>
+                        <div class="font-mono text-2xl font-medium text-ui-text">42.5%</div>
+                        <div class="text-xs text-ui-secondary mt-1">Objetivo: 40%</div>
+                    </div>
+                </div>
+
+                <!-- ALERTS -->
+                <div class="bg-orange-50 border border-orange-100 rounded-lg p-4 flex items-start gap-3">
+                    <i class="ph-fill ph-warning-circle text-orange-500 text-xl mt-0.5"></i>
+                    <div>
+                        <h4 class="text-orange-900 font-semibold text-sm">Stock Bajo Detectado</h4>
+                        <p class="text-orange-800 text-xs mt-1">Tenés 3 productos por debajo del punto de reorden (Teclado Mecánico, Mouse Pad XL). Considerá reponer pronto.</p>
+                    </div>
+                </div>
+
+                <!-- QUICK ACTIONS -->
+                <div class="flex gap-3">
+                    <button onclick="openModal('modal-movimiento')" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-lg shadow-blue-500/20">
+                        <i class="ph-bold ph-plus"></i> Registrar Movimiento
+                    </button>
+                    <button onclick="switchTab('productos')" class="btn-secondary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">
+                        <i class="ph-bold ph-magnifying-glass"></i> Consultar Stock
+                    </button>
+                </div>
+            </section>
+
+            <!-- VIEW: PRODUCTOS -->
+            <section id="view-productos" class="hidden space-y-4 animate-slide-in">
+                <div class="flex justify-between items-center bg-white p-3 rounded-lg border border-ui-border">
+                    <div class="flex items-center gap-3 flex-1">
+                        <div class="relative w-full max-w-md">
+                            <i class="ph ph-magnifying-glass absolute left-3 top-2.5 text-ui-tertiary"></i>
+                            <input type="text" placeholder="Buscar por nombre, SKU..." class="w-full pl-9 pr-3 py-2 text-sm border border-ui-border rounded-md focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary">
+                        </div>
+                        <div class="hidden md:flex gap-2">
+                            <select class="text-sm border border-ui-border rounded-md px-3 py-2 bg-white text-ui-secondary">
+                                <option>Todas las categorías</option>
+                                <option>Hardware</option>
+                                <option>Accesorios</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn-secondary px-3 py-2 rounded-md text-sm font-medium ml-3 whitespace-nowrap">
+                        <i class="ph ph-plus"></i> Nuevo Producto
+                    </button>
+                </div>
+
+                <div class="bg-white rounded-lg border border-ui-border shadow-sm overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-slate-50 border-b border-ui-border">
+                                <tr>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider">SKU</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider">Producto</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider">Categoría</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider text-right">Stock</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider text-right">Costo Prom.</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider text-right">Precio Venta</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider text-center">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-ui-border text-sm">
+                                <tr class="hover:bg-slate-50 transition-colors group cursor-pointer">
+                                    <td class="py-3 px-4 font-mono text-ui-secondary">HARD-001</td>
+                                    <td class="py-3 px-4 font-medium text-ui-text">Monitor 24" IPS Dell</td>
+                                    <td class="py-3 px-4"><span class="bg-blue-50 text-brand-primary px-2 py-0.5 rounded text-xs font-medium">Hardware</span></td>
+                                    <td class="py-3 px-4 text-right font-mono font-medium">12 u.</td>
+                                    <td class="py-3 px-4 text-right font-mono text-ui-secondary">$ 120.000</td>
+                                    <td class="py-3 px-4 text-right font-mono text-ui-text">$ 180.000</td>
+                                    <td class="py-3 px-4 text-center">
+                                        <button class="text-ui-tertiary hover:text-brand-primary p-1"><i class="ph ph-pencil-simple"></i></button>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-slate-50 transition-colors group cursor-pointer bg-red-50/30">
+                                    <td class="py-3 px-4 font-mono text-ui-secondary">ACC-042</td>
+                                    <td class="py-3 px-4 font-medium text-ui-text">Mouse Pad XL</td>
+                                    <td class="py-3 px-4"><span class="bg-purple-50 text-purple-600 px-2 py-0.5 rounded text-xs font-medium">Accesorios</span></td>
+                                    <td class="py-3 px-4 text-right font-mono font-medium text-red-600">2 u.</td>
+                                    <td class="py-3 px-4 text-right font-mono text-ui-secondary">$ 12.000</td>
+                                    <td class="py-3 px-4 text-right font-mono text-ui-text">$ 25.000</td>
+                                    <td class="py-3 px-4 text-center">
+                                        <button class="text-ui-tertiary hover:text-brand-primary p-1"><i class="ph ph-pencil-simple"></i></button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW: MOVIMIENTOS -->
+            <section id="view-movimientos" class="hidden space-y-4 animate-slide-in">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-lg font-semibold text-ui-text">Kardex de Movimientos</h3>
+                    <div class="flex gap-2">
+                         <button class="btn-secondary px-3 py-2 rounded-md text-sm">
+                            <i class="ph ph-export"></i> Exportar
+                        </button>
+                        <button onclick="openModal('modal-movimiento')" class="btn-primary px-4 py-2 rounded-md text-sm font-semibold shadow-lg shadow-blue-500/20">
+                            <i class="ph-bold ph-plus"></i> Nuevo Movimiento
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg border border-ui-border shadow-sm overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-slate-50 border-b border-ui-border">
+                                <tr>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider">Fecha</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider">Tipo</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider">Producto</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider text-right">Cant.</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider text-right">Costo Unit.</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider text-right">Total</th>
+                                    <th class="py-3 px-4 text-xs font-semibold text-ui-secondary uppercase tracking-wider text-center">Asiento</th>
+                                </tr>
+                            </thead>
+                            <tbody id="movements-table-body" class="divide-y divide-ui-border text-sm">
+                                <!-- Preloaded Data -->
+                                <tr>
+                                    <td class="py-3 px-4 text-ui-secondary whitespace-nowrap">28 Ene 2026</td>
+                                    <td class="py-3 px-4"><span class="badge-compra bg-green-50 text-green-700 px-2 py-0.5 rounded text-xs font-bold uppercase">Compra</span></td>
+                                    <td class="py-3 px-4 font-medium text-ui-text">Monitor 24" IPS Dell</td>
+                                    <td class="py-3 px-4 text-right font-mono text-green-600">+10</td>
+                                    <td class="py-3 px-4 text-right font-mono text-ui-secondary">$ 120.000</td>
+                                    <td class="py-3 px-4 text-right font-mono font-medium">$ 1.200.000</td>
+                                    <td class="py-3 px-4 text-center">
+                                        <span class="inline-flex items-center gap-1 text-xs font-medium text-brand-primary bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 cursor-help" title="Asiento #2024-001 generado">
+                                            <i class="ph-fill ph-check-circle"></i> Gen.
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="py-3 px-4 text-ui-secondary whitespace-nowrap">27 Ene 2026</td>
+                                    <td class="py-3 px-4"><span class="badge-venta bg-blue-50 text-brand-primary px-2 py-0.5 rounded text-xs font-bold uppercase">Venta</span></td>
+                                    <td class="py-3 px-4 font-medium text-ui-text">Mouse Pad XL</td>
+                                    <td class="py-3 px-4 text-right font-mono text-ui-text">-5</td>
+                                    <td class="py-3 px-4 text-right font-mono text-ui-secondary">$ 12.000</td>
+                                    <td class="py-3 px-4 text-right font-mono font-medium">$ 60.000</td>
+                                    <td class="py-3 px-4 text-center">
+                                        <span class="inline-flex items-center gap-1 text-xs font-medium text-brand-primary bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                                            <i class="ph-fill ph-check-circle"></i> Gen.
+                                        </span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW: CONCILIACION -->
+            <section id="view-conciliacion" class="hidden space-y-4 animate-slide-in">
+                <div class="bg-blue-50 border border-blue-100 p-4 rounded-lg flex justify-between items-center">
+                    <div class="flex items-center gap-3">
+                        <div class="bg-white p-2 rounded-full shadow-sm">
+                            <i class="ph-duotone ph-scales text-2xl text-brand-primary"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-brand-primary font-bold text-sm">Conciliación Inventario vs. Contabilidad</h3>
+                            <p class="text-xs text-blue-800">Hay 2 inconsistencias detectadas entre el Libro Diario y el Kardex.</p>
+                        </div>
+                    </div>
+                    <button class="btn-primary px-3 py-1.5 text-xs rounded-md">Analizar Inconsistencias</button>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Panel Izq: Contabilidad sin Inventario -->
+                    <div class="bg-white rounded-lg border border-ui-border shadow-sm flex flex-col h-96">
+                        <div class="p-3 border-b border-ui-border bg-slate-50 flex justify-between items-center">
+                            <h4 class="text-xs font-bold text-ui-secondary uppercase">Asientos sin movimiento de stock</h4>
+                            <span class="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">1 Pendiente</span>
+                        </div>
+                        <div class="p-4 flex-1 overflow-y-auto">
+                            <!-- Item -->
+                            <div class="border border-ui-border rounded-lg p-3 hover:border-brand-primary transition-colors cursor-pointer group relative">
+                                <div class="flex justify-between mb-1">
+                                    <span class="font-mono text-xs text-ui-secondary">#AS-0492 • 25 Ene</span>
+                                    <span class="font-bold text-sm text-ui-text">$ 45.000</span>
+                                </div>
+                                <p class="text-sm text-ui-text font-medium">Factura Compra Prov. #991</p>
+                                <p class="text-xs text-ui-secondary mt-1">Cta: 1.1.04.01 Mercaderías</p>
+                                
+                                <div class="mt-3 flex gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
+                                    <button class="flex-1 bg-brand-primary text-white text-xs py-1.5 rounded hover:opacity-90">Crear Movimiento</button>
+                                    <button class="px-2 border border-ui-border rounded text-ui-secondary hover:text-red-500 text-xs">Ignorar</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Panel Der: Inventario sin Contabilidad -->
+                    <div class="bg-white rounded-lg border border-ui-border shadow-sm flex flex-col h-96">
+                        <div class="p-3 border-b border-ui-border bg-slate-50 flex justify-between items-center">
+                             <h4 class="text-xs font-bold text-ui-secondary uppercase">Movimientos sin asiento</h4>
+                             <span class="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">1 Pendiente</span>
+                        </div>
+                        <div class="p-4 flex-1 overflow-y-auto">
+                            <!-- Item -->
+                            <div class="border border-ui-border rounded-lg p-3 hover:border-brand-primary transition-colors cursor-pointer group relative">
+                                <div class="flex justify-between mb-1">
+                                    <span class="font-mono text-xs text-ui-secondary">#MOV-882 • 26 Ene</span>
+                                    <span class="font-bold text-sm text-red-600">- 2 u.</span>
+                                </div>
+                                <p class="text-sm text-ui-text font-medium">Ajuste Manual (Rotura)</p>
+                                <p class="text-xs text-ui-secondary mt-1">Producto: Monitor 24"</p>
+                                
+                                <div class="mt-3 flex gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
+                                    <button class="flex-1 bg-ui-text text-white text-xs py-1.5 rounded hover:opacity-90">Generar Asiento</button>
+                                    <button class="px-2 border border-ui-border rounded text-ui-secondary hover:text-red-500 text-xs">Ignorar</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+             <!-- VIEW: CIERRE -->
+             <section id="view-cierre" class="hidden space-y-6 animate-slide-in max-w-3xl mx-auto">
+                <div class="text-center mb-6">
+                    <h3 class="text-2xl font-bold text-ui-text">Cierre de Inventario (Periódico)</h3>
+                    <p class="text-ui-secondary">Calculá el costo de ventas por diferencia de inventario.</p>
+                </div>
+
+                <div class="bg-white rounded-xl border border-ui-border p-6 shadow-sm">
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center py-2 border-b border-ui-border">
+                            <span class="text-sm font-medium text-ui-secondary">Existencia Inicial (01 Ene)</span>
+                            <span class="font-mono text-lg font-medium text-ui-text">$ 850.000,00</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-ui-border">
+                            <span class="text-sm font-medium text-ui-secondary flex items-center gap-2">
+                                <i class="ph-bold ph-plus-circle text-green-500"></i> Compras del Período
+                            </span>
+                            <span class="font-mono text-lg font-medium text-green-600">$ 1.200.000,00</span>
+                        </div>
+                        <div class="flex justify-between items-center py-4 bg-slate-50 px-3 rounded-lg border border-ui-border">
+                            <div class="flex flex-col">
+                                <label class="text-sm font-bold text-ui-text mb-1">Inventario Final (Conteo Físico)</label>
+                                <span class="text-xs text-ui-secondary">Ingresá el valor real contado.</span>
+                            </div>
+                            <div class="relative">
+                                <span class="absolute left-3 top-2.5 text-ui-tertiary">$</span>
+                                <input type="number" id="input-final-stock" value="1250400" class="pl-8 pr-3 py-2 w-48 text-right font-mono font-bold border border-ui-border rounded-md focus:ring-2 focus:ring-brand-primary outline-none" oninput="calculateClosing()">
+                            </div>
+                        </div>
+
+                        <div class="flex justify-between items-center pt-4 mt-4 border-t-2 border-ui-border">
+                            <span class="text-lg font-bold text-ui-text">Costo Mercaderías Vendidas (CMV)</span>
+                            <span id="calc-cmv" class="font-mono text-2xl font-bold text-brand-primary">$ 799.600,00</span>
+                        </div>
+                    </div>
+
+                    <div class="mt-8 p-4 bg-slate-50 rounded-lg border border-dashed border-ui-border">
+                        <h4 class="text-xs font-bold text-ui-tertiary uppercase mb-3">Previsualización Asiento de Ajuste</h4>
+                        <div class="font-mono text-xs space-y-2">
+                            <div class="flex justify-between">
+                                <span>4.3.01 Costo Mercaderías Vendidas</span>
+                                <div class="flex gap-4">
+                                    <span class="w-24 text-right text-ui-text font-bold">$ 799.600</span>
+                                    <span class="w-24 text-right text-ui-tertiary">-</span>
+                                </div>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>1.1.04.01 Mercaderías</span>
+                                <div class="flex gap-4">
+                                    <span class="w-24 text-right text-ui-tertiary">-</span>
+                                    <span class="w-24 text-right text-ui-text font-bold">$ 799.600</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="w-full mt-6 btn-primary py-3 rounded-lg font-semibold shadow-lg shadow-blue-500/20">
+                        Confirmar y Generar Asiento
+                    </button>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- ================= MODAL: NUEVO MOVIMIENTO ================= -->
+    <div id="modal-movimiento" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onclick="closeModal('modal-movimiento')"></div>
+        <div class="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl transform transition-transform duration-300 translate-x-full flex flex-col" id="modal-panel">
+            
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-ui-border flex justify-between items-center bg-slate-50">
+                <h3 class="font-display font-semibold text-lg">Registrar Movimiento</h3>
+                <button onclick="closeModal('modal-movimiento')" class="text-ui-secondary hover:text-ui-text"><i class="ph ph-x text-xl"></i></button>
+            </div>
+
+            <!-- Modal Body -->
+            <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                
+                <!-- Tipo -->
+                <div class="grid grid-cols-3 gap-3 p-1 bg-slate-100 rounded-lg">
+                    <button type="button" onclick="setMoveType('compra')" id="btn-type-compra" class="py-2 text-sm font-medium rounded-md bg-white shadow-sm text-ui-text transition-all">Compra</button>
+                    <button type="button" onclick="setMoveType('venta')" id="btn-type-venta" class="py-2 text-sm font-medium rounded-md text-ui-secondary hover:text-ui-text transition-all">Venta</button>
+                    <button type="button" onclick="setMoveType('ajuste')" id="btn-type-ajuste" class="py-2 text-sm font-medium rounded-md text-ui-secondary hover:text-ui-text transition-all">Ajuste</button>
+                </div>
+
+                <!-- Form -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="col-span-2">
+                        <label class="block text-xs font-semibold text-ui-secondary mb-1">Producto</label>
+                        <select class="w-full border border-ui-border rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-brand-primary outline-none">
+                            <option>Monitor 24" IPS Dell (Stock: 12)</option>
+                            <option>Mouse Pad XL (Stock: 2)</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-xs font-semibold text-ui-secondary mb-1">Fecha</label>
+                        <input type="date" class="w-full border border-ui-border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-brand-primary outline-none" value="2026-01-28">
+                    </div>
+
+                    <div>
+                         <!-- UEPS Warning Placeholder -->
+                         <div id="ueps-warning" class="hidden absolute bg-orange-100 text-orange-800 text-xs p-2 rounded shadow-lg -mt-10 z-10 border border-orange-200 w-48">
+                            <i class="ph-bold ph-warning"></i> Ojo: UEPS no se permite bajo normas IFRS.
+                        </div>
+                        <label class="block text-xs font-semibold text-ui-secondary mb-1">Método de Costeo</label>
+                        <select onchange="checkUeps(this)" class="w-full border border-ui-border rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-brand-primary outline-none">
+                            <option value="PPP">Promedio Ponderado</option>
+                            <option value="FIFO">FIFO (PEPS)</option>
+                            <option value="UEPS">LIFO (UEPS) - No rec.</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-ui-secondary mb-1">Cantidad</label>
+                        <input type="number" id="input-qty" value="1" min="1" class="w-full border border-ui-border rounded-md px-3 py-2 text-sm font-mono text-right focus:ring-2 focus:ring-brand-primary outline-none" oninput="updatePreview()">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-ui-secondary mb-1" id="label-price">Costo Unitario</label>
+                        <div class="relative">
+                            <span class="absolute left-3 top-2 text-ui-tertiary">$</span>
+                            <input type="number" id="input-price" value="120000" class="w-full pl-6 border border-ui-border rounded-md px-3 py-2 text-sm font-mono text-right focus:ring-2 focus:ring-brand-primary outline-none" oninput="updatePreview()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contrapartida -->
+                <div>
+                    <label class="block text-xs font-semibold text-ui-secondary mb-1">Contrapartida (Pago/Cobro)</label>
+                    <select id="input-account" class="w-full border border-ui-border rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-brand-primary outline-none" onchange="updatePreview()">
+                        <option value="2.1.01.01">2.1.01.01 Proveedores</option>
+                        <option value="1.1.01.02">1.1.01.02 Banco Cuenta Corriente</option>
+                        <option value="1.1.01.01">1.1.01.01 Caja</option>
+                    </select>
+                </div>
+
+                <hr class="border-ui-border">
+
+                <!-- Asiento Toggle -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-sm font-medium text-ui-text">Generar asiento contable</span>
+                        <p class="text-xs text-ui-secondary">Crea automáticamente el registro en Libro Diario.</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" checked class="sr-only peer" id="toggle-asiento" onchange="toggleAsientoVis()">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-secondary"></div>
+                    </label>
+                </div>
+
+                <!-- Asiento Preview Box -->
+                <div id="asiento-preview-box" class="bg-slate-50 border border-dashed border-ui-border rounded-lg p-4 transition-all duration-300">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="text-xs font-bold text-ui-tertiary uppercase tracking-wider">Vista Previa Asiento</span>
+                        <span class="text-xs font-mono text-ui-secondary">28 Ene 2026</span>
+                    </div>
+                    
+                    <div class="font-mono text-xs space-y-2" id="asiento-lines">
+                        <!-- Dynamic Content via JS -->
+                    </div>
+                    
+                    <div class="mt-3 pt-2 border-t border-slate-200 flex justify-between font-mono text-xs font-bold text-ui-text">
+                        <span>Total</span>
+                        <span id="asiento-total">$ 145.200</span>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Footer -->
+            <div class="p-6 border-t border-ui-border bg-white flex justify-end gap-3">
+                <button onclick="closeModal('modal-movimiento')" class="btn-secondary px-4 py-2 rounded-md font-medium">Cancelar</button>
+                <button onclick="saveMovement()" class="btn-primary px-6 py-2 rounded-md font-medium shadow-lg shadow-blue-500/20">
+                    Confirmar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= TOAST NOTIFICATION ================= -->
+    <div id="toast" class="fixed bottom-6 right-6 transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+        <div class="bg-ui-text text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3">
+            <i class="ph-fill ph-check-circle text-brand-secondary text-xl"></i>
+            <div>
+                <p class="font-medium text-sm" id="toast-msg">Movimiento registrado</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= LOGIC SCRIPT ================= -->
+    <script>
+        // --- TABS LOGIC ---
+        function switchTab(tabId) {
+            // Hide all sections
+            document.querySelectorAll('section').forEach(el => el.classList.add('hidden'));
+            // Show target section
+            document.getElementById(`view-${tabId}`).classList.remove('hidden');
+            
+            // Update Tab Styles
+            const tabs = document.getElementById('tabs-container').children;
+            for(let tab of tabs) {
+                if(tab.id === `tab-${tabId}`) {
+                    tab.classList.remove('tab-inactive', 'text-ui-secondary', 'border-transparent');
+                    tab.classList.add('tab-active', 'text-brand-primary', 'border-brand-primary');
+                } else {
+                    tab.classList.remove('tab-active', 'text-brand-primary', 'border-brand-primary');
+                    tab.classList.add('tab-inactive', 'text-ui-secondary', 'border-transparent');
+                }
+            }
+        }
+
+        // --- MODAL LOGIC ---
+        function openModal(id) {
+            const modal = document.getElementById(id);
+            const panel = modal.querySelector('#modal-panel');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                panel.classList.remove('translate-x-full');
+            }, 10);
+            updatePreview(); // Init preview
+        }
+
+        function closeModal(id) {
+            const modal = document.getElementById(id);
+            const panel = modal.querySelector('#modal-panel');
+            panel.classList.add('translate-x-full');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+        }
+
+        // --- MOVEMENT LOGIC ---
+        let currentType = 'compra';
+
+        function setMoveType(type) {
+            currentType = type;
+            // Update UI Buttons
+            const btnCompra = document.getElementById('btn-type-compra');
+            const btnVenta = document.getElementById('btn-type-venta');
+            const btnAjuste = document.getElementById('btn-type-ajuste');
+            
+            // Reset all
+            [btnCompra, btnVenta, btnAjuste].forEach(btn => {
+                btn.className = "py-2 text-sm font-medium rounded-md text-ui-secondary hover:text-ui-text transition-all";
+            });
+
+            // Set Active
+            const activeClass = "py-2 text-sm font-medium rounded-md bg-white shadow-sm text-ui-text transition-all ring-1 ring-ui-border";
+            if (type === 'compra') btnCompra.className = activeClass;
+            if (type === 'venta') btnVenta.className = activeClass;
+            if (type === 'ajuste') btnAjuste.className = activeClass;
+
+            // Update Label
+            document.getElementById('label-price').innerText = type === 'compra' ? 'Costo Unitario' : (type === 'venta' ? 'Precio Venta' : 'Costo Unitario');
+            
+            updatePreview();
+        }
+
+        function checkUeps(select) {
+            const warning = document.getElementById('ueps-warning');
+            if(select.value === 'UEPS') {
+                warning.classList.remove('hidden');
+            } else {
+                warning.classList.add('hidden');
+            }
+        }
+
+        function toggleAsientoVis() {
+            const checkbox = document.getElementById('toggle-asiento');
+            const box = document.getElementById('asiento-preview-box');
+            if(checkbox.checked) {
+                box.classList.remove('opacity-50', 'grayscale');
+            } else {
+                box.classList.add('opacity-50', 'grayscale');
+            }
+        }
+
+        function formatMoney(amount) {
+            return '$ ' + amount.toLocaleString('es-AR', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        }
+
+        function updatePreview() {
+            const qty = parseFloat(document.getElementById('input-qty').value) || 0;
+            const price = parseFloat(document.getElementById('input-price').value) || 0;
+            const subtotal = qty * price;
+            const iva = subtotal * 0.21; // Mock 21%
+            const total = subtotal + iva;
+            
+            const contraAccount = document.getElementById('input-account');
+            const contraName = contraAccount.options[contraAccount.selectedIndex].text.split(' ').slice(1).join(' '); // Remove code
+            const contraCode = contraAccount.value;
+
+            const container = document.getElementById('asiento-lines');
+            document.getElementById('asiento-total').innerText = formatMoney(total);
+
+            let html = '';
+
+            if (currentType === 'compra') {
+                // Asiento Compra: Debe Mercadería + IVA / Haber Proveedores
+                html += `
+                <div class="flex justify-between items-center group">
+                    <span class="text-ui-text font-medium"><span class="text-ui-tertiary">1.1.04.01</span> Mercaderías</span>
+                    <div class="flex gap-4"><span class="w-20 text-right font-bold">${formatMoney(subtotal)}</span><span class="w-20 text-right text-ui-tertiary">-</span></div>
+                </div>
+                <div class="flex justify-between items-center group">
+                    <span class="text-ui-text font-medium"><span class="text-ui-tertiary">1.1.03.01</span> IVA Crédito Fiscal</span>
+                    <div class="flex gap-4"><span class="w-20 text-right font-bold">${formatMoney(iva)}</span><span class="w-20 text-right text-ui-tertiary">-</span></div>
+                </div>
+                <div class="flex justify-between items-center group">
+                    <span class="text-ui-text font-medium"><span class="text-ui-tertiary">${contraCode}</span> ${contraName}</span>
+                    <div class="flex gap-4"><span class="w-20 text-right text-ui-tertiary">-</span><span class="w-20 text-right font-bold">${formatMoney(total)}</span></div>
+                </div>
+                `;
+            } else if (currentType === 'venta') {
+                 // Asiento Venta: Debe Caja / Haber Ventas + IVA
+                 html += `
+                <div class="flex justify-between items-center group">
+                    <span class="text-ui-text font-medium"><span class="text-ui-tertiary">${contraCode}</span> ${contraName}</span>
+                    <div class="flex gap-4"><span class="w-20 text-right font-bold">${formatMoney(total)}</span><span class="w-20 text-right text-ui-tertiary">-</span></div>
+                </div>
+                <div class="flex justify-between items-center group">
+                    <span class="text-ui-text font-medium"><span class="text-ui-tertiary">4.1.01</span> Ventas</span>
+                    <div class="flex gap-4"><span class="w-20 text-right text-ui-tertiary">-</span><span class="w-20 text-right font-bold">${formatMoney(subtotal)}</span></div>
+                </div>
+                <div class="flex justify-between items-center group">
+                    <span class="text-ui-text font-medium"><span class="text-ui-tertiary">2.1.03.01</span> IVA Débito Fiscal</span>
+                    <div class="flex gap-4"><span class="w-20 text-right text-ui-tertiary">-</span><span class="w-20 text-right font-bold">${formatMoney(iva)}</span></div>
+                </div>
+                <div class="mt-2 text-xs text-ui-secondary italic border-t border-dashed pt-1">
+                    Nota: El asiento de CMV se generará autom. al guardar.
+                </div>
+                `;
+            } else {
+                // Ajuste
+                 html += `
+                <div class="flex justify-between items-center group">
+                    <span class="text-ui-text font-medium"><span class="text-ui-tertiary">4.3.02</span> Diferencia de Inventario</span>
+                    <div class="flex gap-4"><span class="w-20 text-right font-bold">${formatMoney(subtotal)}</span><span class="w-20 text-right text-ui-tertiary">-</span></div>
+                </div>
+                <div class="flex justify-between items-center group">
+                    <span class="text-ui-text font-medium"><span class="text-ui-tertiary">1.1.04.01</span> Mercaderías</span>
+                    <div class="flex gap-4"><span class="w-20 text-right text-ui-tertiary">-</span><span class="w-20 text-right font-bold">${formatMoney(subtotal)}</span></div>
+                </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function saveMovement() {
+            // Mock Save
+            closeModal('modal-movimiento');
+            showToast("Movimiento registrado con éxito");
+            
+            // Add row to table (Visual Feedback)
+            const tbody = document.getElementById('movements-table-body');
+            const qty = document.getElementById('input-qty').value;
+            const price = document.getElementById('input-price').value;
+            const total = qty * price;
+            
+            const row = document.createElement('tr');
+            row.className = "animate-slide-in";
+            
+            let typeBadge = '';
+            let qtyClass = '';
+            
+            if(currentType === 'compra') {
+                typeBadge = '<span class="bg-green-50 text-green-700 px-2 py-0.5 rounded text-xs font-bold uppercase">Compra</span>';
+                qtyClass = 'text-green-600';
+            } else if (currentType === 'venta') {
+                typeBadge = '<span class="bg-blue-50 text-brand-primary px-2 py-0.5 rounded text-xs font-bold uppercase">Venta</span>';
+                qtyClass = 'text-ui-text';
+            } else {
+                typeBadge = '<span class="bg-orange-50 text-orange-700 px-2 py-0.5 rounded text-xs font-bold uppercase">Ajuste</span>';
+                qtyClass = 'text-red-600';
+            }
+
+            row.innerHTML = `
+                <td class="py-3 px-4 text-ui-secondary whitespace-nowrap">Hoy</td>
+                <td class="py-3 px-4">${typeBadge}</td>
+                <td class="py-3 px-4 font-medium text-ui-text">Monitor 24" IPS Dell</td>
+                <td class="py-3 px-4 text-right font-mono ${qtyClass}">${currentType === 'venta' || currentType === 'ajuste' ? '-' : '+'}${qty}</td>
+                <td class="py-3 px-4 text-right font-mono text-ui-secondary">${formatMoney(parseFloat(price))}</td>
+                <td class="py-3 px-4 text-right font-mono font-medium">${formatMoney(total)}</td>
+                <td class="py-3 px-4 text-center">
+                    <span class="inline-flex items-center gap-1 text-xs font-medium text-brand-primary bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                        <i class="ph-fill ph-check-circle"></i> Gen.
+                    </span>
+                </td>
+            `;
+            
+            tbody.insertBefore(row, tbody.firstChild);
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        function calculateClosing() {
+            const initial = 850000;
+            const purchases = 1200000;
+            const final = parseFloat(document.getElementById('input-final-stock').value) || 0;
+            const cmv = initial + purchases - final;
+            
+            document.getElementById('calc-cmv').innerText = formatMoney(cmv);
+        }
+    </script>
+</body>
+</html>

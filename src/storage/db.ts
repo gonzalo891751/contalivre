@@ -1,6 +1,14 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { Account, JournalEntry } from '../core/models'
-import type { InventoryProduct, InventoryMovement, InventoryClosing, InventoryConfig } from '../core/inventario/types'
+import type {
+    InventoryProduct,
+    InventoryMovement,
+    InventoryClosing,
+    InventoryConfig,
+    BienesProduct,
+    BienesMovement,
+    BienesSettings,
+} from '../core/inventario/types'
 
 /**
  * Configuración de la aplicación
@@ -32,6 +40,10 @@ class ContableDatabase extends Dexie {
     // Cierre Valuación module
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cierreValuacionState!: EntityTable<any, 'id'>
+    // Bienes de Cambio module (new costing model)
+    bienesProducts!: EntityTable<BienesProduct, 'id'>
+    bienesMovements!: EntityTable<BienesMovement, 'id'>
+    bienesSettings!: EntityTable<BienesSettings, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -108,6 +120,22 @@ class ContableDatabase extends Dexie {
             inventoryClosings: 'id, periodEnd, status',
             inventoryConfig: 'id',
             cierreValuacionState: 'id',
+        })
+
+        // Version 6: Bienes de Cambio module (new costing model)
+        this.version(6).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
         })
     }
 }

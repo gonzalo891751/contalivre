@@ -25,6 +25,7 @@ export async function createEntry(
     const newEntry: JournalEntry = {
         ...entry,
         id: generateId(),
+        createdAt: entry.createdAt || new Date().toISOString(),
     }
 
     // Validar antes de guardar
