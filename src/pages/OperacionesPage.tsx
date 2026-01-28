@@ -404,19 +404,22 @@ export default function OperacionesPage() {
                     </div>
                 </div>
 
-                {/* Placeholder: Moneda Extranjera */}
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col opacity-90 hover:opacity-100 transition-opacity">
+                {/* Moneda Extranjera */}
+                <div
+                    className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col hover:shadow-md hover:border-blue-400 transition-all cursor-pointer group"
+                    onClick={() => navigate('/operaciones/moneda-extranjera')}
+                >
                     <div className="flex justify-between items-start mb-4">
-                        <div className="w-10 h-10 rounded-lg bg-slate-50 text-slate-500 flex items-center justify-center text-xl">
+                        <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl group-hover:bg-blue-100 transition-colors">
                             <CurrencyDollar weight="duotone" size={24} />
                         </div>
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500">Proximamente</span>
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-600 border border-emerald-100">Activo</span>
                     </div>
                     <h3 className="font-display font-semibold text-lg text-slate-900 mb-1">Moneda Extranjera</h3>
                     <p className="text-sm text-slate-500 mb-4">Gestion de cajas en USD/EUR y diferencias de cambio automaticas.</p>
                     <div className="mt-auto pt-4 border-t border-slate-50">
-                        <button className="text-sm font-medium text-slate-400 cursor-not-allowed flex items-center gap-2" disabled>
-                            Ver cotizaciones <LockKey size={14} />
+                        <button className="text-sm font-medium text-blue-600 flex items-center gap-2 group-hover:text-blue-700">
+                            Ver cotizaciones <CaretRight size={14} weight="bold" />
                         </button>
                     </div>
                 </div>
