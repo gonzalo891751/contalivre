@@ -10,10 +10,14 @@ import type { Account, JournalEntry, EntryLine } from '../core/models'
 import type {
     FxAccount,
     FxMovement,
+    FxDebt,
+    FxDebtInstallment,
     FxLiability,
     FxSettings,
     FxAccountMappingKey,
     FxJournalStatus,
+    PaymentFrequency,
+    LoanSystem,
 } from '../core/monedaExtranjera/types'
 import {
     createDefaultFxSettings,
@@ -79,6 +83,134 @@ const resolveMappedAccountId = (
         code: fallback?.code || DEFAULT_FX_ACCOUNT_CODES[key],
         names: fallback?.names,
     })
+}
+
+// ========================================
+// FX Debt Helpers
+// ========================================
+
+const frequencyToMonths: Record<PaymentFrequency, number> = {
+    MENSUAL: 1,
+    BIMESTRAL: 2,
+    TRIMESTRAL: 3,
+    SEMESTRAL: 6,
+    ANUAL: 12,
+    UNICO: 0,
+}
+
+const isValidDate = (value: string) => {
+    const time = Date.parse(value)
+    return !Number.isNaN(time)
+}
+
+const addMonths = (dateISO: string, months: number): string => {
+    const base = new Date(dateISO)
+    if (Number.isNaN(base.getTime())) {
+        return new Date().toISOString().split('T')[0]
+    }
+    const year = base.getFullYear()
+    const month = base.getMonth()
+    const day = base.getDate()
+    const next = new Date(year, month + months, day)
+    return next.toISOString().split('T')[0]
+}
+
+function generateFxDebtSchedule(params: {
+    principalME: number
+    interestRateAnnual: number
+    installments: number
+    frequency: PaymentFrequency
+    system: LoanSystem
+    firstDueDate: string
+}): FxDebtInstallment[] {
+    const { principalME, interestRateAnnual, installments, frequency, system, firstDueDate } = params
+
+    if (installments <= 0 || principalME <= 0) return []
+    if (!isValidDate(firstDueDate)) return []
+
+    const monthsPerPeriod = frequencyToMonths[frequency] ?? 1
+    const periodsPerYear = monthsPerPeriod > 0 ? Math.max(1, Math.round(12 / monthsPerPeriod)) : 1
+    const ratePerPeriod = interestRateAnnual / periodsPerYear
+
+    const schedule: FxDebtInstallment[] = []
+    let remaining = principalME
+
+    const round2 = (value: number) => Math.round(value * 100) / 100
+
+    if (system === 'BULLET' || frequency === 'UNICO') {
+        const interest = round2(remaining * ratePerPeriod)
+        const total = round2(remaining + interest)
+        schedule.push({
+            number: 1,
+            dueDate: firstDueDate,
+            capitalME: round2(remaining),
+            interestME: interest,
+            totalME: total,
+            paid: false,
+        })
+        return schedule
+    }
+
+    if (system === 'AMERICANO') {
+        const interestOnly = round2(remaining * ratePerPeriod)
+        for (let i = 1; i <= installments; i++) {
+            const isLast = i === installments
+            const capital = isLast ? round2(remaining) : 0
+            const interest = interestOnly
+            const total = round2(capital + interest)
+            schedule.push({
+                number: i,
+                dueDate: addMonths(firstDueDate, monthsPerPeriod * (i - 1)),
+                capitalME: capital,
+                interestME: interest,
+                totalME: total,
+                paid: false,
+            })
+        }
+        return schedule
+    }
+
+    if (system === 'ALEMAN') {
+        const capitalFixed = round2(principalME / installments)
+        for (let i = 1; i <= installments; i++) {
+            const interest = round2(remaining * ratePerPeriod)
+            const capital = i === installments ? round2(remaining) : capitalFixed
+            const total = round2(capital + interest)
+            schedule.push({
+                number: i,
+                dueDate: addMonths(firstDueDate, monthsPerPeriod * (i - 1)),
+                capitalME: capital,
+                interestME: interest,
+                totalME: total,
+                paid: false,
+            })
+            remaining = round2(remaining - capital)
+        }
+        return schedule
+    }
+
+    // FRANCES (cuota fija)
+    const rate = ratePerPeriod
+    const cuota = rate === 0
+        ? round2(principalME / installments)
+        : round2((principalME * rate) / (1 - Math.pow(1 + rate, -installments)))
+
+    for (let i = 1; i <= installments; i++) {
+        const interest = round2(remaining * rate)
+        const capital = round2(cuota - interest)
+        const total = round2(capital + interest)
+        schedule.push({
+            number: i,
+            dueDate: addMonths(firstDueDate, monthsPerPeriod * (i - 1)),
+            capitalME: capital,
+            interestME: interest,
+            totalME: total,
+            paid: false,
+        })
+        remaining = round2(remaining - capital)
+    }
+
+    return schedule
 }
 
 // ========================================
@@ -250,10 +382,21 @@ async function buildJournalEntriesForFxMovement(
     }
 
     // === RESOLVE ACCOUNTS ===
+    const isDebtDisbursement = movement.type === 'TOMA_DEUDA' || movement.type === 'DESEMBOLSO_DEUDA'
+    if (isDebtDisbursement && fxAccount.type !== 'LIABILITY') {
+        return {
+            entries: [],
+            lines: [],
+            totalDebit: 0,
+            totalCredit: 0,
+            isBalanced: true,
+            error: 'La cuenta origen de la deuda debe ser un pasivo ME.',
+        }
+    }
 
     // 1. ME Account: MUST be fxAccount.accountId (the linked ledger account)
     const meAccountId = fxAccount.accountId
-    if (!meAccountId) {
+    if (!meAccountId && !isDebtDisbursement) {
         return {
             entries: [],
             lines: [],
@@ -279,14 +422,32 @@ async function buildJournalEntriesForFxMovement(
     // 5. Intereses account
     const interesesId = resolveMappedAccountId(accounts, settings, 'interesesPerdidos')
 
+    // 6. Debt disbursement accounts (liability + asset target)
+    let debtLiabilityAccountId: string | null = null
+    let debtAssetAccountId: string | null = null
+    let debtAssetFxAccount: FxAccount | undefined
+
+    if (isDebtDisbursement) {
+        debtLiabilityAccountId = meAccountId || null
+        if (movement.targetAccountId) {
+            debtAssetFxAccount = await getFxAccountById(movement.targetAccountId)
+            debtAssetAccountId = debtAssetFxAccount?.accountId || null
+        }
+    }
+
     // Validate required accounts
     const missing: string[] = []
-    if (!meAccountId) missing.push('Cuenta ME')
-    if ((movement.type === 'COMPRA' || movement.type === 'VENTA' || movement.type === 'PAGO_DEUDA') && !contrapartidaId) {
-        missing.push('Contrapartida ARS')
-    }
-    if ((movement.comisionARS || 0) > 0 && !comisionId) {
-        missing.push('Cuenta de Comisiones')
+    if (isDebtDisbursement) {
+        if (!debtAssetAccountId) missing.push('Cuenta Activo ME')
+        if (!debtLiabilityAccountId) missing.push('Cuenta Pasivo ME')
+    } else {
+        if (!meAccountId) missing.push('Cuenta ME')
+        if ((movement.type === 'COMPRA' || movement.type === 'VENTA' || movement.type === 'PAGO_DEUDA') && !contrapartidaId) {
+            missing.push('Contrapartida ARS')
+        }
+        if ((movement.comisionARS || 0) > 0 && !comisionId) {
+            missing.push('Cuenta de Comisiones')
+        }
     }
 
     if (missing.length > 0) {
@@ -318,11 +479,21 @@ async function buildJournalEntriesForFxMovement(
         }
     }
 
+    // === TOMA/DESEMBOLSO DEUDA: Debit Activo ME, Credit Pasivo ME ===
+    if (isDebtDisbursement) {
+        const label = movement.type === 'TOMA_DEUDA' ? 'Toma deuda' : 'Desembolso deuda'
+        addLine(debtAssetAccountId!, arsAmount, 0, `${label} ${movement.amount} ${movement.currency}`)
+        addLine(debtLiabilityAccountId!, 0, arsAmount, `${label} ${movement.amount} ${movement.currency}`)
+
+        memo = `${label} ${movement.amount} ${movement.currency} - ${debtAssetFxAccount?.name || 'Activo ME'}`
+        journalRole = movement.type === 'TOMA_DEUDA' ? 'FX_DEBT_OPEN' : 'FX_DEBT_DISB'
+    }
+
     // === COMPRA: Debit ME, Debit Comision (if any), Credit Contrapartida ===
     if (movement.type === 'COMPRA') {
         const totalEgreso = arsAmount + comisionARS
 
-        addLine(meAccountId, arsAmount, 0, `Compra ${movement.amount} ${movement.currency} @ ${movement.rate}`)
+        addLine(meAccountId!, arsAmount, 0, `Compra ${movement.amount} ${movement.currency} @ ${movement.rate}`)
         if (comisionARS > 0 && comisionId) {
             addLine(comisionId, comisionARS, 0, 'Comisión operación')
         }
@@ -355,7 +526,7 @@ async function buildJournalEntriesForFxMovement(
         if (comisionARS > 0 && comisionId) {
             addLine(comisionId, comisionARS, 0, 'Comisión operación')
         }
-        addLine(meAccountId, 0, costoARS, `Venta ${movement.amount} ${movement.currency} (costo)`)
+        addLine(meAccountId!, 0, costoARS, `Venta ${movement.amount} ${movement.currency} (costo)`)
 
         if (resultadoARS !== 0 && difCambioId) {
             if (resultadoARS > 0) {
@@ -373,7 +544,7 @@ async function buildJournalEntriesForFxMovement(
 
     // === INGRESO: Debit ME, Credit Diferencia de cambio ===
     if (movement.type === 'INGRESO') {
-        addLine(meAccountId, arsAmount, 0, `Ingreso ${movement.amount} ${movement.currency}`)
+        addLine(meAccountId!, arsAmount, 0, `Ingreso ${movement.amount} ${movement.currency}`)
         if (difCambioId) {
             addLine(difCambioId, 0, arsAmount, 'Ajuste/Ingreso')
         }
@@ -386,7 +557,7 @@ async function buildJournalEntriesForFxMovement(
         if (difCambioId) {
             addLine(difCambioId, arsAmount, 0, 'Ajuste/Egreso')
         }
-        addLine(meAccountId, 0, arsAmount, `Egreso ${movement.amount} ${movement.currency}`)
+        addLine(meAccountId!, 0, arsAmount, `Egreso ${movement.amount} ${movement.currency}`)
         memo = `Egreso ${movement.currency} - ${fxAccount.name}`
         journalRole = 'FX_EXPENSE'
     }
@@ -398,7 +569,7 @@ async function buildJournalEntriesForFxMovement(
 
         if (targetMeId) {
             addLine(targetMeId, arsAmount, 0, `Ingreso ${movement.amount} ${movement.currency}`)
-            addLine(meAccountId, 0, arsAmount, `Egreso ${movement.amount} ${movement.currency}`)
+            addLine(meAccountId!, 0, arsAmount, `Egreso ${movement.amount} ${movement.currency}`)
             memo = `Transferencia ${movement.currency} - ${fxAccount.name} -> ${targetAccount?.name}`
             journalRole = 'FX_TRANSFER'
         } else {
@@ -420,7 +591,7 @@ async function buildJournalEntriesForFxMovement(
         const capitalARS = capitalME * movement.rate
         const totalARS = capitalARS + interestARS + comisionARS
 
-        addLine(meAccountId, capitalARS, 0, `Pago capital ${capitalME} ${movement.currency}`)
+        addLine(meAccountId!, capitalARS, 0, `Pago capital ${capitalME} ${movement.currency}`)
         if (interestARS > 0 && interesesId) {
             addLine(interesesId, interestARS, 0, 'Intereses')
         }
@@ -438,11 +609,11 @@ async function buildJournalEntriesForFxMovement(
         const isPositive = movement.amount > 0
         if (difCambioId) {
             if (isPositive) {
-                addLine(meAccountId, Math.abs(arsAmount), 0, `Ajuste +${movement.amount} ${movement.currency}`)
+                addLine(meAccountId!, Math.abs(arsAmount), 0, `Ajuste +${movement.amount} ${movement.currency}`)
                 addLine(difCambioId, 0, Math.abs(arsAmount), 'Diferencia de cambio')
             } else {
                 addLine(difCambioId, Math.abs(arsAmount), 0, 'Diferencia de cambio')
-                addLine(meAccountId, 0, Math.abs(arsAmount), `Ajuste ${movement.amount} ${movement.currency}`)
+                addLine(meAccountId!, 0, Math.abs(arsAmount), `Ajuste ${movement.amount} ${movement.currency}`)
             }
         }
         memo = `Ajuste ${movement.currency} - ${fxAccount.name}`
@@ -653,6 +824,23 @@ export async function createFxMovement(
     const now = new Date().toISOString()
     const movementId = generateFxId('fxm')
 
+    const isDebtDisbursement = movement.type === 'TOMA_DEUDA' || movement.type === 'DESEMBOLSO_DEUDA'
+    if (isDebtDisbursement) {
+        if (!movement.debtId) {
+            throw new Error('La deuda asociada es obligatoria.')
+        }
+        if (!movement.targetAccountId) {
+            throw new Error('Cuenta destino requerida para la deuda.')
+        }
+    }
+
+    if (movement.type === 'VENTA') {
+        const balance = await calculateFxAccountBalance(movement.accountId, movement.periodId, movement.date)
+        if (movement.amount > balance.balance) {
+            throw new Error(`Stock insuficiente. Disponible: ${balance.balance.toFixed(2)}`)
+        }
+    }
+
     // For sales, calculate FIFO cost if not provided
     let costoARS = movement.costoARS
     let resultadoARS = movement.resultadoARS
@@ -682,6 +870,9 @@ export async function createFxMovement(
     }
 
     const fxAccount = await getFxAccountById(movement.accountId)
+    if (isDebtDisbursement && fxAccount && fxAccount.type !== 'LIABILITY') {
+        throw new Error('La cuenta de deuda debe ser un pasivo ME.')
+    }
 
     if (!movement.autoJournal) {
         await db.fxMovements.add(newMovement)
@@ -733,6 +924,16 @@ export async function updateFxMovementWithJournal(
         ...existing,
         ...updates,
         updatedAt: now,
+    }
+
+    const isDebtDisbursement = baseMovement.type === 'TOMA_DEUDA' || baseMovement.type === 'DESEMBOLSO_DEUDA'
+    if (isDebtDisbursement) {
+        if (!baseMovement.debtId) {
+            throw new Error('La deuda asociada es obligatoria.')
+        }
+        if (!baseMovement.targetAccountId) {
+            throw new Error('Cuenta destino requerida para la deuda.')
+        }
     }
 
     const fxAccount = await getFxAccountById(baseMovement.accountId)
@@ -929,6 +1130,35 @@ export async function linkFxMovementToEntries(
         linkedJournalEntryIds: uniqueIds,
         journalStatus: 'linked',
         updatedAt: new Date().toISOString(),
+    }
+}
+
+/**
+ * Mark movement as non-accounting (no journal)
+ */
+export async function markFxMovementAsNonAccounting(movementId: string): Promise<FxMovement> {
+    const movement = await db.fxMovements.get(movementId)
+    if (!movement) {
+        throw new Error('Movimiento no encontrado')
+    }
+    if ((movement.linkedJournalEntryIds || []).length > 0) {
+        throw new Error('El movimiento ya tiene asientos vinculados.')
+    }
+
+    const now = new Date().toISOString()
+    await db.fxMovements.update(movementId, {
+        autoJournal: false,
+        journalStatus: 'none',
+        journalMissingReason: undefined,
+        updatedAt: now,
+    })
+
+    return {
+        ...movement,
+        autoJournal: false,
+        journalStatus: 'none',
+        journalMissingReason: undefined,
+        updatedAt: now,
     }
 }
 
@@ -1131,6 +1361,509 @@ export async function getReconciliationData(periodId?: string): Promise<FxReconc
 }
 
 // ========================================
+// FX Debts (Structured Liabilities)
+// ========================================
+
+const validateFxDebtPayload = (debt: Omit<FxDebt, 'id' | 'createdAt' | 'updatedAt' | 'journalStatus' | 'linkedJournalEntryIds'>) => {
+    const errors: string[] = []
+
+    if (!debt.name?.trim()) errors.push('El nombre de la deuda es obligatorio.')
+    if (!debt.accountId) errors.push('Cuenta de pasivo ME requerida.')
+    if (!debt.periodId) errors.push('Periodo requerido.')
+    if (debt.principalME <= 0) errors.push('El principal debe ser mayor a 0.')
+    if (debt.rateInicial <= 0) errors.push('El tipo de cambio inicial debe ser mayor a 0.')
+    if (!debt.currency) errors.push('Moneda requerida.')
+    if (debt.installments <= 0) errors.push('Las cuotas deben ser mayor a 0.')
+    if (!isValidDate(debt.originDate)) errors.push('Fecha de origen inválida.')
+    if (!isValidDate(debt.firstDueDate)) errors.push('Fecha de primer vencimiento inválida.')
+
+    if (errors.length > 0) {
+        throw new Error(errors.join(' '))
+    }
+}
+
+const buildFxDebtFromLiability = (liability: FxLiability): FxDebt => {
+    const now = new Date().toISOString()
+    const principalME = liability.originalAmount
+    const rateInicial = liability.rate
+    const installments = Math.max(1, liability.installments || 1)
+    const frequency = liability.frequency
+    const interestRateAnnual = liability.interestRate || 0
+    const schedule = generateFxDebtSchedule({
+        principalME,
+        interestRateAnnual,
+        installments,
+        frequency,
+        system: 'FRANCES',
+        firstDueDate: liability.startDate,
+    }).map((item, index) => ({
+        ...item,
+        paid: index < (liability.paidInstallments || 0),
+    }))
+
+    const remaining = liability.remainingAmount ?? principalME
+    const status: FxDebt['status'] = remaining <= 0 ? 'PAID' : 'ACTIVE'
+
+    return {
+        id: generateFxId('fxd'),
+        name: liability.reference || `Deuda ${liability.currency}`,
+        accountId: liability.accountId,
+        periodId: liability.periodId,
+        principalME,
+        currency: liability.currency,
+        rateInicial,
+        rateType: liability.rateType,
+        rateSide: 'venta',
+        principalARS: principalME * rateInicial,
+        originDate: liability.startDate,
+        interestRateAnnual,
+        installments,
+        frequency,
+        system: 'FRANCES',
+        firstDueDate: liability.startDate,
+        schedule,
+        saldoME: remaining,
+        paidInstallments: liability.paidInstallments || 0,
+        status,
+        creditor: liability.creditor,
+        reference: liability.reference,
+        notes: liability.notes,
+        autoJournal: liability.autoJournal,
+        linkedJournalEntryIds: liability.linkedJournalEntryIds || [],
+        journalStatus: liability.journalStatus,
+        legacyLiabilityId: liability.id,
+        createdAt: liability.createdAt || now,
+        updatedAt: liability.updatedAt || now,
+    }
+}
+
+async function migrateFxLiabilitiesToDebts(periodId?: string): Promise<number> {
+    const liabilities = await getAllFxLiabilities(periodId)
+    if (liabilities.length === 0) return 0
+
+    const existingDebts = await db.fxDebts.toArray()
+    const existingLegacyIds = new Set(existingDebts.map(d => d.legacyLiabilityId).filter(Boolean) as string[])
+
+    const toCreate = liabilities
+        .filter(l => !existingLegacyIds.has(l.id))
+        .map(buildFxDebtFromLiability)
+
+    if (toCreate.length === 0) return 0
+
+    await db.transaction('rw', db.fxDebts, async () => {
+        await db.fxDebts.bulkAdd(toCreate)
+    })
+
+    return toCreate.length
+}
+
+export async function getAllFxDebts(periodId?: string): Promise<FxDebt[]> {
+    await migrateFxLiabilitiesToDebts(periodId)
+    const debts = await db.fxDebts.toArray()
+    return debts.filter(d => matchesPeriod(d.periodId, periodId))
+}
+
+export async function getFxDebtById(id: string): Promise<FxDebt | undefined> {
+    return db.fxDebts.get(id)
+}
+
+export async function createFxDebt(
+    debt: Omit<FxDebt, 'id' | 'createdAt' | 'updatedAt' | 'journalStatus' | 'linkedJournalEntryIds'>,
+    options?: {
+        disbursementAccountId?: string
+        disbursementDate?: string
+        disbursementRate?: number
+        disbursementRateType?: FxDebt['rateType']
+        autoJournal?: boolean
+    }
+): Promise<FxDebt> {
+    validateFxDebtPayload(debt)
+
+    const now = new Date().toISOString()
+    const principalARS = debt.principalARS || debt.principalME * debt.rateInicial
+    const schedule = debt.schedule && debt.schedule.length > 0
+        ? debt.schedule
+        : generateFxDebtSchedule({
+            principalME: debt.principalME,
+            interestRateAnnual: debt.interestRateAnnual,
+            installments: debt.installments,
+            frequency: debt.frequency,
+            system: debt.system,
+            firstDueDate: debt.firstDueDate,
+        })
+
+    const newDebt: FxDebt = {
+        ...debt,
+        id: generateFxId('fxd'),
+        principalARS,
+        saldoME: debt.saldoME ?? debt.principalME,
+        schedule,
+        linkedJournalEntryIds: [],
+        journalStatus: 'none',
+        createdAt: now,
+        updatedAt: now,
+    }
+
+    const shouldCreateDisbursement = !!options?.disbursementAccountId
+    const autoJournal = options?.autoJournal ?? debt.autoJournal
+
+    if (!shouldCreateDisbursement) {
+        await db.fxDebts.add(newDebt)
+        return newDebt
+    }
+
+    const disbursementRate = options?.disbursementRate || debt.rateInicial
+    const movementId = generateFxId('fxm')
+    const movement: FxMovement = {
+        id: movementId,
+        date: options?.disbursementDate || debt.originDate,
+        type: 'TOMA_DEUDA',
+        accountId: debt.accountId,
+        targetAccountId: options!.disbursementAccountId,
+        periodId: debt.periodId,
+        amount: debt.principalME,
+        currency: debt.currency,
+        rate: disbursementRate,
+        rateType: options?.disbursementRateType || debt.rateType,
+        rateSide: debt.rateSide,
+        rateSource: 'Manual',
+        arsAmount: debt.principalME * disbursementRate,
+        autoJournal,
+        linkedJournalEntryIds: [],
+        journalStatus: autoJournal ? 'generated' : 'none',
+        debtId: newDebt.id,
+        counterparty: debt.creditor,
+        createdAt: now,
+        updatedAt: now,
+    }
+
+    const fxAccount = await getFxAccountById(movement.accountId)
+    let createdEntries: JournalEntry[] = []
+
+    // Include all stores that may be accessed during journal generation:
+    // - fxDebts: main debt record
+    // - fxMovements: disbursement movement
+    // - fxAccounts: lookup for target account
+    // - accounts: ledger accounts for journal building
+    // - entries: journal entries
+    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries], async () => {
+        await db.fxDebts.add(newDebt)
+
+        if (!autoJournal) {
+            await db.fxMovements.add(movement)
+            return
+        }
+
+        const { entries, error } = await buildJournalEntriesForFxMovement(movement, fxAccount)
+        if (error) {
+            throw new Error(error)
+        }
+
+        for (const entryData of entries) {
+            const created = await createEntry(entryData)
+            createdEntries.push(created)
+        }
+
+        await db.fxMovements.add({
+            ...movement,
+            linkedJournalEntryIds: createdEntries.map(e => e.id),
+            journalStatus: 'generated',
+        })
+
+        await db.fxDebts.update(newDebt.id, {
+            linkedJournalEntryIds: createdEntries.map(e => e.id),
+            journalStatus: 'generated',
+        })
+    })
+
+    return {
+        ...newDebt,
+        linkedJournalEntryIds: createdEntries.map(e => e.id),
+        journalStatus: createdEntries.length > 0 ? 'generated' : 'none',
+    }
+}
+
+export async function updateFxDebt(id: string, updates: Partial<FxDebt>): Promise<void> {
+    await db.fxDebts.update(id, {
+        ...updates,
+        updatedAt: new Date().toISOString(),
+    })
+}
+
+export async function deleteFxDebt(id: string): Promise<{ success: boolean; error?: string }> {
+    await db.fxDebts.delete(id)
+    return { success: true }
+}
+
+export async function addFxDebtDisbursement(params: {
+    debtId: string
+    amount: number
+    rate: number
+    date: string
+    targetAccountId: string
+    autoJournal?: boolean
+}): Promise<{ debt: FxDebt; movement: FxMovement; entries: JournalEntry[] }> {
+    const debt = await db.fxDebts.get(params.debtId)
+    if (!debt) {
+        throw new Error('Deuda no encontrada')
+    }
+    if (params.amount <= 0) {
+        throw new Error('El monto del desembolso debe ser mayor a 0.')
+    }
+    if (params.rate <= 0) {
+        throw new Error('El tipo de cambio debe ser mayor a 0.')
+    }
+    if (!isValidDate(params.date)) {
+        throw new Error('Fecha del desembolso inválida.')
+    }
+    if (!params.targetAccountId) {
+        throw new Error('Cuenta destino requerida.')
+    }
+
+    const autoJournal = params.autoJournal ?? debt.autoJournal
+    const now = new Date().toISOString()
+    const movementId = generateFxId('fxm')
+    const movement: FxMovement = {
+        id: movementId,
+        date: params.date,
+        type: 'DESEMBOLSO_DEUDA',
+        accountId: debt.accountId,
+        targetAccountId: params.targetAccountId,
+        periodId: debt.periodId,
+        amount: params.amount,
+        currency: debt.currency,
+        rate: params.rate,
+        rateType: debt.rateType,
+        rateSide: debt.rateSide,
+        rateSource: 'Manual',
+        arsAmount: params.amount * params.rate,
+        autoJournal,
+        linkedJournalEntryIds: [],
+        journalStatus: autoJournal ? 'generated' : 'none',
+        debtId: debt.id,
+        counterparty: debt.creditor,
+        createdAt: now,
+        updatedAt: now,
+    }
+
+    const nextPrincipalME = debt.principalME + params.amount
+    const nextSaldoME = debt.saldoME + params.amount
+    const nextPrincipalARS = (debt.principalARS || 0) + (params.amount * params.rate)
+
+    let nextSchedule = debt.schedule || []
+    if (debt.paidInstallments === 0) {
+        nextSchedule = generateFxDebtSchedule({
+            principalME: nextPrincipalME,
+            interestRateAnnual: debt.interestRateAnnual,
+            installments: debt.installments,
+            frequency: debt.frequency,
+            system: debt.system,
+            firstDueDate: debt.firstDueDate,
+        })
+    } else {
+        const lastDue = nextSchedule.length > 0
+            ? nextSchedule[nextSchedule.length - 1].dueDate
+            : debt.firstDueDate
+        nextSchedule = [
+            ...nextSchedule,
+            {
+                number: nextSchedule.length + 1,
+                dueDate: addMonths(lastDue, frequencyToMonths[debt.frequency] || 1),
+                capitalME: Math.round(params.amount * 100) / 100,
+                interestME: 0,
+                totalME: Math.round(params.amount * 100) / 100,
+                paid: false,
+            },
+        ]
+    }
+
+    const fxAccount = await getFxAccountById(movement.accountId)
+    const createdEntries: JournalEntry[] = []
+
+    // Include all stores for journal generation (accounts lookup + entries)
+    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries], async () => {
+        await db.fxDebts.update(debt.id, {
+            principalME: nextPrincipalME,
+            saldoME: nextSaldoME,
+            principalARS: nextPrincipalARS,
+            schedule: nextSchedule,
+            status: 'ACTIVE',
+            updatedAt: now,
+        })
+
+        if (!autoJournal) {
+            await db.fxMovements.add(movement)
+            return
+        }
+
+        const { entries, error } = await buildJournalEntriesForFxMovement(movement, fxAccount)
+        if (error) {
+            throw new Error(error)
+        }
+
+        for (const entryData of entries) {
+            const created = await createEntry(entryData)
+            createdEntries.push(created)
+        }
+
+        await db.fxMovements.add({
+            ...movement,
+            linkedJournalEntryIds: createdEntries.map(e => e.id),
+            journalStatus: 'generated',
+        })
+    })
+
+    return {
+        debt: {
+            ...debt,
+            principalME: nextPrincipalME,
+            saldoME: nextSaldoME,
+            principalARS: nextPrincipalARS,
+            schedule: nextSchedule,
+            status: 'ACTIVE',
+            updatedAt: now,
+        },
+        movement: {
+            ...movement,
+            linkedJournalEntryIds: createdEntries.map(e => e.id),
+            journalStatus: createdEntries.length > 0 ? 'generated' : movement.journalStatus,
+        },
+        entries: createdEntries,
+    }
+}
+
+export async function addFxDebtPayment(params: {
+    debtId: string
+    capitalME: number
+    interestARS?: number
+    rate: number
+    date: string
+    contrapartidaAccountId?: string
+    comisionARS?: number
+    comisionAccountId?: string
+    autoJournal?: boolean
+}): Promise<{ debt: FxDebt; movement: FxMovement; entries: JournalEntry[] }> {
+    const debt = await db.fxDebts.get(params.debtId)
+    if (!debt) {
+        throw new Error('Deuda no encontrada')
+    }
+    if (params.capitalME <= 0) {
+        throw new Error('El capital a pagar debe ser mayor a 0.')
+    }
+    if (params.capitalME > debt.saldoME) {
+        throw new Error('El pago excede el saldo de la deuda.')
+    }
+    if (params.rate <= 0) {
+        throw new Error('El tipo de cambio debe ser mayor a 0.')
+    }
+    if (!isValidDate(params.date)) {
+        throw new Error('Fecha de pago inválida.')
+    }
+
+    const autoJournal = params.autoJournal ?? debt.autoJournal
+    const now = new Date().toISOString()
+    const movementId = generateFxId('fxm')
+    const movement: FxMovement = {
+        id: movementId,
+        date: params.date,
+        type: 'PAGO_DEUDA',
+        accountId: debt.accountId,
+        periodId: debt.periodId,
+        amount: params.capitalME,
+        currency: debt.currency,
+        rate: params.rate,
+        rateType: debt.rateType,
+        rateSide: debt.rateSide,
+        rateSource: 'Manual',
+        arsAmount: params.capitalME * params.rate,
+        autoJournal,
+        linkedJournalEntryIds: [],
+        journalStatus: autoJournal ? 'generated' : 'none',
+        debtId: debt.id,
+        capitalAmount: params.capitalME,
+        interestARS: params.interestARS || 0,
+        contrapartidaAccountId: params.contrapartidaAccountId,
+        comisionARS: params.comisionARS,
+        comisionAccountId: params.comisionAccountId,
+        counterparty: debt.creditor,
+        createdAt: now,
+        updatedAt: now,
+    }
+
+    const nextSaldoME = Math.max(0, debt.saldoME - params.capitalME)
+    let nextPaidInstallments = debt.paidInstallments || 0
+    let nextSchedule = debt.schedule || []
+    const unpaidIndex = nextSchedule.findIndex(item => !item.paid)
+    if (unpaidIndex >= 0 && params.capitalME >= (nextSchedule[unpaidIndex].capitalME || 0)) {
+        nextSchedule = nextSchedule.map((item, index) => {
+            if (index !== unpaidIndex) return item
+            return {
+                ...item,
+                paid: true,
+                paidDate: params.date,
+                paidMovementId: movementId,
+                paidRate: params.rate,
+            }
+        })
+        nextPaidInstallments = Math.max(nextPaidInstallments, unpaidIndex + 1)
+    }
+
+    const nextStatus: FxDebt['status'] = nextSaldoME <= 0 ? 'PAID' : 'ACTIVE'
+
+    const fxAccount = await getFxAccountById(movement.accountId)
+    const createdEntries: JournalEntry[] = []
+
+    // Include all stores for journal generation (accounts lookup + entries)
+    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries], async () => {
+        await db.fxDebts.update(debt.id, {
+            saldoME: nextSaldoME,
+            paidInstallments: nextPaidInstallments,
+            schedule: nextSchedule,
+            status: nextStatus,
+            updatedAt: now,
+        })
+
+        if (!autoJournal) {
+            await db.fxMovements.add(movement)
+            return
+        }
+
+        const { entries, error } = await buildJournalEntriesForFxMovement(movement, fxAccount)
+        if (error) {
+            throw new Error(error)
+        }
+
+        for (const entryData of entries) {
+            const created = await createEntry(entryData)
+            createdEntries.push(created)
+        }
+
+        await db.fxMovements.add({
+            ...movement,
+            linkedJournalEntryIds: createdEntries.map(e => e.id),
+            journalStatus: 'generated',
+        })
+    })
+
+    return {
+        debt: {
+            ...debt,
+            saldoME: nextSaldoME,
+            paidInstallments: nextPaidInstallments,
+            schedule: nextSchedule,
+            status: nextStatus,
+            updatedAt: now,
+        },
+        movement: {
+            ...movement,
+            linkedJournalEntryIds: createdEntries.map(e => e.id),
+            journalStatus: createdEntries.length > 0 ? 'generated' : movement.journalStatus,
+        },
+        entries: createdEntries,
+    }
+}
+
+// ========================================
 // FX Liabilities
 // ========================================
 
@@ -1216,7 +1949,8 @@ export async function calculateFxAccountBalance(
     // Handle transfers where this account is the target
     const allMovements = await getAllFxMovements(periodId)
     const incomingTransfers = allMovements.filter(
-        m => m.type === 'TRANSFERENCIA' && m.targetAccountId === accountId
+        m => (m.type === 'TRANSFERENCIA' || m.type === 'TOMA_DEUDA' || m.type === 'DESEMBOLSO_DEUDA')
+            && m.targetAccountId === accountId
             && (!upToDate || m.date <= upToDate)
     )
 
@@ -1245,6 +1979,8 @@ function getMovementSign(type: FxMovement['type'], accountType: 'ASSET' | 'LIABI
             case 'TRANSFERENCIA':
                 return -1
             case 'PAGO_DEUDA':
+            case 'TOMA_DEUDA':
+            case 'DESEMBOLSO_DEUDA':
                 return 0 // Not applicable for assets
         }
     } else {
@@ -1253,6 +1989,8 @@ function getMovementSign(type: FxMovement['type'], accountType: 'ASSET' | 'LIABI
             case 'PAGO_DEUDA':
                 return -1 // Reduces liability
             case 'INGRESO':
+            case 'TOMA_DEUDA':
+            case 'DESEMBOLSO_DEUDA':
                 return 1 // Increases liability (new debt)
             default:
                 return 0
@@ -1274,6 +2012,7 @@ export async function clearFxPeriodData(
 ): Promise<{ deletedAccounts: number; deletedMovements: number; deletedEntries: number }> {
     const accounts = await getAllFxAccounts(periodId)
     const movements = await getAllFxMovements(periodId)
+    const debts = await getAllFxDebts(periodId)
     const liabilities = await getAllFxLiabilities(periodId)
 
     const movementIds = new Set(movements.map(m => m.id))
@@ -1283,7 +2022,7 @@ export async function clearFxPeriodData(
     const autoEntries = linkedEntries.filter(e => isAutoGeneratedEntryForMovement(e, e.sourceId || ''))
     const manualEntries = linkedEntries.filter(e => !isAutoGeneratedEntryForMovement(e, e.sourceId || ''))
 
-    await db.transaction('rw', db.fxAccounts, db.fxMovements, db.fxLiabilities, db.entries, async () => {
+    await db.transaction('rw', db.fxMovements, db.fxDebts, db.fxLiabilities, db.entries, async () => {
         if (options.deleteGeneratedEntries) {
             if (autoEntries.length > 0) {
                 await db.entries.bulkDelete(autoEntries.map(e => e.id))
@@ -1304,13 +2043,17 @@ export async function clearFxPeriodData(
         if (movements.length > 0) {
             await db.fxMovements.bulkDelete(movements.map(m => m.id))
         }
+        if (debts.length > 0) {
+            await db.fxDebts.bulkDelete(debts.map(d => d.id))
+        }
         if (liabilities.length > 0) {
             await db.fxLiabilities.bulkDelete(liabilities.map(l => l.id))
         }
-        if (accounts.length > 0) {
-            await db.fxAccounts.bulkDelete(accounts.map(a => a.id))
-        }
     })
+
+    if (accounts.length > 0) {
+        await db.fxAccounts.bulkDelete(accounts.map(a => a.id))
+    }
 
     return {
         deletedAccounts: accounts.length,
@@ -1326,6 +2069,7 @@ export async function clearAllFxData(): Promise<void> {
     await Promise.all([
         db.fxAccounts.clear(),
         db.fxMovements.clear(),
+        db.fxDebts.clear(),
         db.fxLiabilities.clear(),
         db.fxSettings.clear(),
         db.fxRatesCache.clear(),

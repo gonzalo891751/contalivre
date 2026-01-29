@@ -12,6 +12,7 @@ import type {
 import type {
     FxAccount,
     FxMovement,
+    FxDebt,
     FxLiability,
     FxSettings,
     ExchangeRatesCache,
@@ -54,6 +55,7 @@ class ContableDatabase extends Dexie {
     // Moneda Extranjera module
     fxAccounts!: EntityTable<FxAccount, 'id'>
     fxMovements!: EntityTable<FxMovement, 'id'>
+    fxDebts!: EntityTable<FxDebt, 'id'>
     fxLiabilities!: EntityTable<FxLiability, 'id'>
     fxSettings!: EntityTable<FxSettings, 'id'>
     fxRatesCache!: EntityTable<ExchangeRatesCache, 'id'>
@@ -167,6 +169,28 @@ class ContableDatabase extends Dexie {
             bienesSettings: 'id',
             fxAccounts: 'id, type, currency, periodId',
             fxMovements: 'id, date, accountId, type, periodId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
+        })
+
+        // Version 8: FX Debts (structured liabilities)
+        this.version(8).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxDebts: 'id, currency, creditor, createdAt, status, periodId, accountId',
             fxLiabilities: 'id, accountId, periodId',
             fxSettings: 'id',
             fxRatesCache: 'id',

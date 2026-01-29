@@ -116,6 +116,8 @@ export {
     // Settings
     loadFxSettings,
     saveFxSettings,
+    // Mapping
+    // (separado para smart mapping P0)
     // Accounts
     getAllFxAccounts,
     getFxAccountsByType,
@@ -130,6 +132,7 @@ export {
     updateFxMovementWithJournal,
     generateJournalForFxMovement,
     linkFxMovementToEntries,
+    markFxMovementAsNonAccounting,
     deleteFxMovementWithJournal,
     // Preview
     previewFxMovementJournal,
@@ -140,6 +143,13 @@ export {
     findOrphanFxEntries,
     getReconciliationData,
     // Liabilities
+    getAllFxDebts,
+    getFxDebtById,
+    createFxDebt,
+    updateFxDebt,
+    deleteFxDebt,
+    addFxDebtDisbursement,
+    addFxDebtPayment,
     getAllFxLiabilities,
     createFxLiability,
     updateFxLiability,
@@ -150,6 +160,13 @@ export {
     clearFxPeriodData,
     clearAllFxData,
 } from './fx'
+
+// FX Mapping helpers
+export {
+    suggestLedgerAccountForFxAsset,
+    suggestLedgerAccountForFxDebt,
+    ensureLedgerAccountExists,
+} from './fxMapping'
 
 // Export types from fx
 export type { FxJournalPreview, FxReconciliationData } from './fx'

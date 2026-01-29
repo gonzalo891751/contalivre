@@ -2,6 +2,167 @@
 
 ---
 
+## CHECKPOINT #ME-MODULO-FASE0-INSPECCION
+**Fecha:** 2026-01-28  
+**Estado:** EN PROGRESO - Fase 0 completada (inspecciÃ³n)  
+**Objetivo:** Inspeccionar estado real del mÃ³dulo Moneda Extranjera (ME) y definir plan de rediseÃ±o funcional segÃºn prototipo ME2 (mapping robusto, FxDebt, preview/asientos, conciliaciÃ³n).
+
+---
+
+### Archivos a tocar (lista corta)
+- `src/pages/Operaciones/MonedaExtranjeraPage.tsx`
+- `src/storage/fx.ts`
+- `src/core/monedaExtranjera/types.ts`
+- `src/storage/db.ts` (schema Dexie si se agrega FxDebt)
+- `src/storage/index.ts`
+- (posible) `src/storage/fxMapping.ts`
+
+---
+
+### Hallazgos clave
+1. **UI actual no sigue ME2:** `MonedaExtranjeraPage.tsx` tiene tabs: dashboard/activos/pasivos/movimientos/conciliaciÃ³n, modales Account/Movement/Settings. No existe modal de Alta Pasivo con plan, ni modal de Ver Plan, ni modal de Movimiento con 4 tabs, ni selector de vinculaciÃ³n avanzada.
+2. **Pasivos actuales = FxAccount LIABILTY:** No hay flujo de FxDebt en UI. `FxDebt` existe en tipos pero no en storage ni Dexie; la tabla vigente es `fxLiabilities`.
+3. **Mapping contable todavÃ­a dependiente de cÃ³digos:** `storage/fx.ts` resuelve cuentas con `settings.accountMappings` pero cae a `DEFAULT_FX_ACCOUNT_CODES` + `ACCOUNT_FALLBACKS` (por code/nombre). Si no hay cuentas, falla con error y no crea.
+4. **ConciliaciÃ³n UI limitada:** la UI calcula `entriesWithoutMovement` solo con `entries.sourceModule === 'fx'` y no usa `findOrphanFxEntries`/`getReconciliationData`, por lo que no detecta asientos manuales que toquen cuentas ME.
+5. **Atomicidad parcial ya existe:** `createFxMovement` (con autoJournal), `updateFxMovementWithJournal`, `generateJournalForFxMovement` y `linkFxMovementToEntries` usan `db.transaction`. Si `autoJournal=false` solo guarda el movimiento (sin entries). CRUD de `fxLiabilities` no genera asientos.
+6. **Identidad contable:** las cuentas contables se identifican por `id` string; la jerarquÃ­a se basa en `code` + `parentId`. `createAccount` exige `code` Ãºnico; `generateNextCode` usa prefijo por `parent.code`.
+
+---
+
+### Plan breve Fases 1â€“3
+1. **Fase 1 (P0) â€” Hardening modelo/integridad:**
+   - Agregar tabla `fxDebts` y compat layer/migraciÃ³n desde `fxLiabilities` (best-effort, sin borrar).
+   - Operar UI/lÃ³gica sobre `FxDebt` (alta, pagos, refinanciaciÃ³n).
+   - Encapsular commits de movimiento+asiento en transacciÃ³n Ãºnica cuando aplique.
+   - Validaciones P0: no saldo negativo en ventas/egresos, controles en pagos de deuda, `accountId` obligatorio si genera asiento.
+2. **Fase 2 (P0/P1) â€” Smart mapping + creaciÃ³n de cuentas:**
+   - Helper `ensureLedgerAccountForFx(...)` que resuelva por `accountId`/nombre y cree si falta.
+   - Persistir mappings por `accountId` (no por code); fallback por code solo para localizar cuenta inicial.
+3. **Fase 3 (P0/P1) â€” UI/UX ME2 + flujos:**
+   - Reestructurar UI segÃºn ME2: tablas Activos/Pasivos, modal Alta Pasivo, modal Ver Plan, modal Movimientos con 4 tabs, conciliaciÃ³n con paneles accionables + vinculaciÃ³n.
+
+---
+
+### ValidaciÃ³n planeada
+- `npm run build`
+- QA manual: crear activo ME con saldo inicial + asiento; alta pasivo con destino de fondos; pago deuda parcial; venta con FIFO sin saldo negativo; borrar asiento y verificar conciliaciÃ³n.
+
+---
+
+## CHECKPOINT #ME-FASE1-FXDEBT-SCHEMA-COMPAT
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Build PASS  
+**Objetivo:** Persistir FxDebt en Dexie con compat legacy (fxLiabilities), agregar CRUD y plan de amortizaciÃ³n persistido con validaciones P0.
+
+---
+
+### Archivos tocados
+- `src/storage/db.ts`
+- `src/storage/fx.ts`
+- `src/storage/index.ts`
+- `src/core/monedaExtranjera/types.ts`
+
+---
+
+### Cambios
+1. **Dexie v8:** nueva tabla `fxDebts` con Ã­ndices por currency/creditor/createdAt/status/periodId/accountId (se mantiene `fxLiabilities`).
+2. **Tipos FxDebt:** se agregÃ³ `schedule` (cronograma persistido) y `legacyLiabilityId` para compat.
+3. **CRUD FxDebt:** `getAllFxDebts`, `getFxDebtById`, `createFxDebt`, `updateFxDebt`, `deleteFxDebt` en `storage/fx.ts`.
+4. **MigraciÃ³n best-effort:** `fxLiabilities` se convierten a `fxDebts` al listar (no se borra legacy).
+5. **Validador P0:** principal>0, rate>0, cuotas>0, fechas vÃ¡lidas, moneda/periodo/cuenta requeridas.
+6. **Plan de amortizaciÃ³n:** generaciÃ³n bÃ¡sica (FRANCES/ALEMAN/AMERICANO/BULLET) y persistencia en `schedule`.
+7. **Bulk clear:** `clearFxPeriodData` y `clearAllFxData` incluyen `fxDebts`.
+
+---
+
+### Pendientes
+- Fase 2: nuevos tipos de movimiento de deuda, asientos y desembolsos automÃ¡ticos con transacciones.
+- Fase 3: UI ME2 mÃ­nima viable (pasivos con FxDebt, pagos, conciliaciÃ³n real).
+
+---
+
+### ValidaciÃ³n
+```bash
+npm run build  # PASS
+```
+
+---
+
+## CHECKPOINT #ME-FASE2-DEUDA-MOVIMIENTOS-ASIENTO
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Build PASS  
+**Objetivo:** Implementar movimientos de toma/desembolso de deuda con asiento ARS y actualizaciÃ³n de saldos/plan en transacciones atÃ³micas.
+
+---
+
+### Archivos tocados
+- `src/storage/fx.ts`
+- `src/storage/index.ts`
+- `src/core/monedaExtranjera/types.ts`
+
+---
+
+### Cambios
+1. **Nuevos tipos de movimiento:** `TOMA_DEUDA` y `DESEMBOLSO_DEUDA` agregados a `FxMovementType` + labels + rateSide por defecto.
+2. **Asiento contable deuda:** `buildJournalEntriesForFxMovement` soporta toma/desembolso (Debe Activo ME / Haber Pasivo ME) usando `targetAccountId` como cartera destino.
+3. **createFxDebt con desembolso:** ahora admite options de desembolso (cartera destino, fecha, TC, autoJournal) y crea movimiento + entry en transacciÃ³n (fxDebts + fxMovements + entries).
+4. **addFxDebtDisbursement:** agrega principal (refinanciaciÃ³n), actualiza saldo/principal/schedule y crea movimiento + asiento.
+5. **Validaciones P0:** disburso exige `debtId`, `targetAccountId`, rate/monto > 0 y cuenta de pasivo ME vÃ¡lida.
+6. **Saldos actualizados:** `calculateFxAccountBalance` y `getMovementSign` contemplan toma/desembolso (pasivos aumentan; activos reciben via `targetAccountId`).
+
+---
+
+### Pendientes
+- Fase 3: UI ME2 mÃ­nima viable (pasivos con FxDebt, alta/pago, conciliaciÃ³n real, tabs activos/pasivos en movimientos).
+
+---
+
+### ValidaciÃ³n
+```bash
+npm run build  # PASS
+```
+
+---
+
+## CHECKPOINT #ME-FASE3-UI-ME2-MINIMA
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Build PASS  
+**Objetivo:** UI ME2 mÃ­nima viable: pasivos con FxDebt, pagos/desembolsos, movimientos segmentados y conciliaciÃ³n real con acciones.
+
+---
+
+### Archivos tocados
+- `src/pages/Operaciones/MonedaExtranjeraPage.tsx`
+- `src/storage/fx.ts`
+- `src/storage/index.ts`
+
+---
+
+### Cambios
+1. **Pasivos ahora usan FxDebt:** tabla con acreedor, moneda, saldo, TC hist/actual, valuaciones y prÃ³x. vencimiento.
+2. **Modales nuevos:** Alta Deuda, Ver Plan (cronograma), Pago de Deuda y Desembolso (refinanciaciÃ³n).
+3. **Movimientos segmentados:** toggle Activos/Pasivos; Activos usan modal existente, Pasivos abren Pago/Desembolso con selector de deuda.
+4. **ConciliaciÃ³n real:** UI consume `getReconciliationData` (incluye asientos huÃ©rfanos) y permite:
+   - Generar asiento
+   - Vincular asiento manual
+   - Marcar como no contable (movimientos sin entries)
+5. **Storage extra:** `addFxDebtPayment` para registrar pagos y actualizar saldo/plan; `markFxMovementAsNonAccounting` para excluir de conciliaciÃ³n.
+
+---
+
+### Pendientes
+- UI mÃ¡s avanzada de vinculaciÃ³n (matching inteligente) y refinamientos ME2 completos (tabs internos detallados).
+- Ajustes finos de KPIs para sumar pasivos desde FxDebt (si se requiere).
+
+---
+
+### ValidaciÃ³n
+```bash
+npm run build  # PASS
+```
+
+---
+
 ## CHECKPOINT #PLAN-DE-CUENTAS-AJUSTE-ME
 **Fecha:** 2026-01-28
 **Estado:** COMPLETADO - Build PASS
@@ -2099,3 +2260,141 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 ### Pendientes
 - **Ready for Dev:** El plan P0 (Badge UI + Fix KPI) está listo para ser ejecutado.
 - **Riesgo Identificado:** La regeneración de partidas borra ediciones manuales (requiere merge inteligente).
+
+---
+
+## CHECKPOINT #ME2-FASE0-INSPECCION
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Fase 0 (inspecci�n)  
+**Objetivo:** Confirmar ruta, UI base y estructura del prototipo ME2 para reemplazo completo.
+
+---
+
+### Hallazgos clave
+1. **Ruta confirmada:** `/operaciones/moneda-extranjera` renderiza `src/pages/Operaciones/MonedaExtranjeraPage.tsx` (App.tsx).  
+2. **Prototipo ME2 inspeccionado:** `docs/prototypes/ME2.HTML` define ticker de cotizaciones, header con toggle Contable/Gesti�n, tabs con underline animado (Dashboard/Activos/Pasivos/Movimientos/Conciliaci�n), tablas con columnas alineadas, y modales ME2 (Nuevo Activo, Alta Pasivo, Registrar Operaci�n con tabs Compra/Venta/Pago/Refi, Ver Plan).  
+3. **Iconos disponibles:** Phosphor ya se usa en el proyecto (`@phosphor-icons/react` y clases `ph-*`).  
+4. **Componentes base:** No hay Button/Modal gen�ricos �nicos; se pueden crear componentes locales dentro del m�dulo ME sin contaminar global.
+
+---
+
+### Archivos previstos (Fases 1-3)
+- `src/pages/Operaciones/MonedaExtranjeraPage.tsx`
+- `src/storage/fx.ts`
+- `src/storage/index.ts`
+- (nuevo) `src/storage/fxMapping.ts`
+- (nuevo) `src/pages/Operaciones/MonedaExtranjera/*` (subcomponentes ME2)
+
+---
+
+### Pr�ximo paso
+- Iniciar Fase 1: reemplazo UI completo para calcar ME2.
+
+---
+
+---
+
+## CHECKPOINT #ME2-FASE1-UI
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - UI ME2 aplicada  
+**Objetivo:** Reemplazar UI del m�dulo ME para calcar ME2 (layout, tabs, tablas, header, ticker).
+
+---
+
+### Archivos tocados
+- `src/pages/Operaciones/MonedaExtranjeraPage.tsx`
+
+---
+
+### Cambios clave
+1. **Layout ME2:** ticker superior, header con breadcrumbs + toggle Contable/Gesti�n, tabs con underline animado.
+2. **Tablas ME2:** Activos/Pasivos/Movimientos con columnas, alineaci�n y badges estilo prototipo.
+3. **Dashboard ME2:** KPIs + acciones r�pidas + placeholder de gr�fico.
+4. **Conciliaci�n ME2:** paneles visuales con pendientes, hu�rfanos y desync/OK.
+
+---
+
+### Validaci�n
+- `npm run build`  ?
+
+---
+
+## CHECKPOINT #ME2-FASE2-MODALES
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Modales ME2  
+**Objetivo:** Implementar modales nuevos ME2 y reemplazar UI legacy.
+
+---
+
+### Archivos tocados
+- `src/pages/Operaciones/MonedaExtranjeraPage.tsx`
+
+---
+
+### Cambios clave
+1. **Modal Nuevo Activo:** smart mapping + creaci�n de cuenta contable + saldo inicial con preview de asiento.
+2. **Modal Alta Deuda (FxDebt):** identidad, plan financiero, destino de fondos, preview de asiento y creaci�n autom�tica.
+3. **Modal Operaci�n ME:** tabs Compra/Venta/Pago/Refinanciaci�n con preview de asiento + l�piz para edici�n manual.
+4. **Modal Plan Deuda:** cuadro de amortizaci�n + KPIs resumen.
+5. **Modal Vincular Asiento:** selecci�n de asiento hu�rfano para conciliaci�n.
+
+---
+
+### Validaci�n
+- `npm run build`  ?
+
+---
+
+## CHECKPOINT #ME2-FASE3-HARDENING
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Hardening P0  
+**Objetivo:** Smart mapping + validaciones + conciliaci�n real.
+
+---
+
+### Archivos tocados
+- `src/storage/fxMapping.ts`
+- `src/storage/fx.ts`
+- `src/storage/index.ts`
+- `src/pages/Operaciones/MonedaExtranjeraPage.tsx`
+
+---
+
+### Cambios clave
+1. **Smart mapping P0:** helpers `suggestLedgerAccountForFxAsset` / `suggestLedgerAccountForFxDebt` + `ensureLedgerAccountExists`.
+2. **Validaci�n stock:** `createFxMovement` bloquea ventas si stock ME insuficiente.
+3. **Conciliaci�n real:** UI consume `getReconciliationData`, acciones generar/vincular/no contable + panel desync.
+4. **Exports storage:** mapping helpers exportados desde `storage/index.ts`.
+
+---
+
+### Validaci�n
+- `npm run build`  ?
+
+---
+
+## CHECKPOINT #ME2-P0-FIX-UI-DB
+**Fecha:** 2026-01-28  
+**Estado:** COMPLETADO - Build PASS  
+**Objetivo:** Corregir problemas P0 de UI (botones invisibles/sin contraste) y IndexedDB (store no encontrado al crear deuda).
+
+---
+
+### Archivos tocados
+- `src/pages/Operaciones/MonedaExtranjeraPage.tsx`
+- `src/storage/fx.ts`
+
+---
+
+### Cambios clave
+1. **FxButton UI Fix:** Reemplazado `bg-brand-gradient` (que no funcionaba correctamente) por clases explícitas de Tailwind `bg-gradient-to-r from-blue-600 to-emerald-500`. Agregados estilos `disabled:` legibles (bg-slate-200 + text-slate-500) para todos los variants (primary/secondary/ghost).
+2. **IndexedDB Transaction Fix:** Las transacciones en `createFxDebt`, `addFxDebtDisbursement` y `addFxDebtPayment` ahora incluyen todos los stores necesarios para la generación de asientos: `[db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries]`. Esto corrige el error "The specified object store was not found" que ocurría porque `buildJournalEntriesForFxMovement` accede a `db.accounts.toArray()` internamente.
+3. **P1 Filtro destino fondos:** En el modal Alta Pasivo, el selector "Destino de fondos" ahora filtra FxAccounts ASSET por moneda == moneda de la deuda. Al cambiar moneda se resetea la selección si ya no es válida.
+
+---
+
+### Validación
+- `npm run build`  ✓
+- QA pendiente: verificar visualmente botones en Dashboard/Activos/Modales y crear deuda sin error IndexedDB.
+
+---

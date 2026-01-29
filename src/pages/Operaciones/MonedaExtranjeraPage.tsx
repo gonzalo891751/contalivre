@@ -1,79 +1,101 @@
+﻿
 /**
- * Moneda Extranjera Page
- *
- * Main foreign currency management page with dashboard, assets, liabilities,
- * movements, and reconciliation tabs.
- * Follows the prototype at docs/prototypes/ME.HTML
+ * Moneda Extranjera Page (ME2)
+ * UI/UX aligned with docs/prototypes/ME2.HTML
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useNavigate } from 'react-router-dom'
 import {
     ArrowLeft,
-    Gear,
-    Plus,
-    PencilSimple,
-    Trash,
+    ArrowsClockwise,
     ArrowsLeftRight,
-    TrendUp,
-    TrendDown,
-    Scales,
-    ChartLineUp,
-    Link as LinkIcon,
-    Warning,
-    X,
     CheckCircle,
-    MagnifyingGlass,
+    Eye,
     Funnel,
+    Info,
+    MagnifyingGlass,
+    MagicWand,
+    PencilSimple,
+    Plus,
+    TrendDown,
+    TrendUp,
+    X,
 } from '@phosphor-icons/react'
+
 import { usePeriodYear } from '../../hooks/usePeriodYear'
 import { db } from '../../storage/db'
 import {
-    loadFxSettings,
-    saveFxSettings,
-    getAllFxAccounts,
+    addFxDebtDisbursement,
+    addFxDebtPayment,
+    calculateFxAccountBalance,
+    createEntry,
     createFxAccount,
-    updateFxAccount,
-    deleteFxAccount,
-    getAllFxMovements,
+    createFxDebt,
     createFxMovement,
-    updateFxMovementWithJournal,
     generateJournalForFxMovement,
-    deleteFxMovementWithJournal,
-    reconcileFxJournalLinks,
+    getAllFxAccounts,
+    getAllFxDebts,
+    getAllFxMovements,
+    getReconciliationData,
+    linkFxMovementToEntries,
+    loadFxSettings,
+    markFxMovementAsNonAccounting,
     previewFxMovementJournal,
+    saveFxSettings,
+    type FxJournalPreview,
 } from '../../storage'
-import type { FxJournalPreview } from '../../storage'
 import {
-    getExchangeRates,
-    getQuote,
-    getRateValue,
-} from '../../services/exchangeRates'
+    ensureLedgerAccountExists,
+    suggestLedgerAccountForFxAsset,
+    suggestLedgerAccountForFxDebt,
+    type LedgerAccountSuggestion,
+} from '../../storage/fxMapping'
+import { getExchangeRates, getQuote, getRateValue } from '../../services/exchangeRates'
+import type { Account } from '../../core/models'
 import type {
-    FxSettings,
-    FxAccount,
-    FxMovement,
-    ExchangeRate,
-    QuoteType,
-    ValuationMode,
-    FxAccountMappingKey,
-    FxMovementType,
     CurrencyCode,
+    ExchangeRate,
+    FxAccount,
+    FxDebt,
+    FxDebtInstallment,
+    FxMovement,
+    FxMovementType,
+    FxSettings,
+    LoanSystem,
+    PaymentFrequency,
+    QuoteType,
+    RateSide,
+    ValuationMode,
     FxAssetSubtype,
     FxLiabilitySubtype,
-    RateSide,
 } from '../../core/monedaExtranjera/types'
 import {
-    QUOTE_TYPE_LABELS,
-    MOVEMENT_TYPE_LABELS,
-    CURRENCY_LABELS,
     ASSET_SUBTYPE_LABELS,
+    CURRENCY_LABELS,
+    FREQUENCY_LABELS,
+    getDefaultRateSide,
     LIABILITY_SUBTYPE_LABELS,
+    LOAN_SYSTEM_LABELS,
+    MOVEMENT_TYPE_LABELS,
+    QUOTE_TYPE_LABELS,
 } from '../../core/monedaExtranjera/types'
-import type { Account } from '../../core/models'
+
+// ========================================
+// Types & helpers
+// ========================================
 
 type TabId = 'dashboard' | 'activos' | 'pasivos' | 'movimientos' | 'conciliacion'
+
+type JournalMode = 'auto' | 'manual' | 'none'
+
+interface ManualEntryLine {
+    accountId: string
+    debit: number
+    credit: number
+    description?: string
+}
 
 const TABS: { id: TabId; label: string }[] = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -83,1075 +105,1961 @@ const TABS: { id: TabId; label: string }[] = [
     { id: 'conciliacion', label: 'Conciliación' },
 ]
 
-// ========================================
-// Helper Components
-// ========================================
+const formatCurrencyARS = (value: number) =>
+    new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value)
 
-function formatCurrency(value: number, currency: 'ARS' | 'USD' = 'ARS'): string {
-    if (currency === 'USD') {
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
-    }
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value)
+const formatCurrencyME = (value: number, currency: CurrencyCode) =>
+    new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) + ` ${currency}`
+
+const formatRate = (value: number) =>
+    new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+
+const formatDateShort = (value?: string) => {
+    if (!value) return '-'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: '2-digit' })
 }
 
-function formatRate(value: number): string {
-    return value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
+const formatDateInput = (value?: string) => value || new Date().toISOString().split('T')[0]
 
-function JournalStatusBadge({ status, onClick }: { status: FxMovement['journalStatus']; onClick?: () => void }) {
-    const config: Record<string, { label: string; className: string }> = {
-        generated: { label: 'Generado', className: 'bg-green-50 text-emerald-600 border-green-100' },
-        linked: { label: 'Vinculado', className: 'bg-blue-50 text-blue-600 border-blue-100' },
-        none: { label: 'Sin asiento', className: 'bg-slate-100 text-slate-500 border-slate-200' },
-        missing: { label: 'Falta asiento', className: 'bg-amber-50 text-amber-600 border-amber-100' },
-        desync: { label: 'Desync', className: 'bg-red-50 text-red-500 border-red-100' },
-        error: { label: 'Error', className: 'bg-red-50 text-red-500 border-red-100' },
+const cx = (...classes: (string | false | null | undefined)[]) => classes.filter(Boolean).join(' ')
+
+// ========================================
+// UI atoms
+// ========================================
+
+/**
+ * ME2 Primary Button: gradient background + white text + hover effects
+ * ME2 Secondary Button: white bg + border + dark text + hover
+ * Disabled state: legible (slate bg + slate text)
+ */
+function FxButton({
+    variant = 'primary',
+    size = 'md',
+    className,
+    disabled,
+    ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: 'primary' | 'secondary' | 'ghost'
+    size?: 'sm' | 'md'
+}) {
+    const base = 'inline-flex items-center justify-center gap-2 rounded-md font-semibold transition-all'
+    const variants = {
+        primary: disabled
+            ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+            : 'bg-gradient-to-r from-blue-600 to-emerald-500 text-white shadow-sm hover:shadow-soft hover:-translate-y-0.5 hover:from-blue-500 hover:to-emerald-400',
+        secondary: disabled
+            ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+            : 'bg-white border border-slate-200 text-slate-900 hover:bg-slate-50 hover:border-slate-300',
+        ghost: disabled
+            ? 'bg-transparent text-slate-300 cursor-not-allowed'
+            : 'bg-transparent text-slate-500 hover:text-slate-900 hover:bg-slate-100',
     }
-    const { label, className } = config[status] || config.none
-
+    const sizes = {
+        sm: 'px-3 py-1.5 text-xs',
+        md: 'px-4 py-2.5 text-sm',
+    }
     return (
-        <span
-            onClick={onClick}
-            className={`text-[10px] font-bold px-2 py-1 rounded border uppercase tracking-wide ${className} ${onClick ? 'cursor-pointer hover:opacity-80' : ''}`}
-        >
-            {label}
+        <button
+            className={cx(base, variants[variant], sizes[size], className)}
+            disabled={disabled}
+            {...props}
+        />
+    )
+}
+
+function FxBadge({
+    tone = 'neutral',
+    className,
+    children,
+}: {
+    tone?: 'success' | 'warning' | 'neutral' | 'info' | 'danger'
+    className?: string
+    children: React.ReactNode
+}) {
+    const tones = {
+        success: 'bg-emerald-50 text-emerald-700',
+        warning: 'bg-amber-50 text-amber-700',
+        neutral: 'bg-slate-100 text-slate-600',
+        info: 'bg-blue-50 text-blue-700',
+        danger: 'bg-rose-50 text-rose-700',
+    }
+    return (
+        <span className={cx('inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide', tones[tone], className)}>
+            {children}
         </span>
     )
 }
 
-// ========================================
-// Modals
-// ========================================
-
-interface AccountModalProps {
-    open: boolean
-    onClose: () => void
-    onSave: (account: Omit<FxAccount, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
-    editing?: FxAccount | null
-    type: 'ASSET' | 'LIABILITY'
-    periodId: string
-    rates: ExchangeRate[]
+function FxInput({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+    return (
+        <input
+            className={cx(
+                'w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100',
+                className
+            )}
+            {...props}
+        />
+    )
 }
 
-function AccountModal({ open, onClose, onSave, editing, type, periodId, rates }: AccountModalProps) {
-    const [name, setName] = useState('')
-    const [subtype, setSubtype] = useState<FxAssetSubtype | FxLiabilitySubtype>(type === 'ASSET' ? 'CAJA' : 'PROVEEDOR')
-    const [currency, setCurrency] = useState<CurrencyCode>('USD')
-    const [openingBalance, setOpeningBalance] = useState(0)
-    const [openingRate, setOpeningRate] = useState(0)
-    const [openingDate, setOpeningDate] = useState(new Date().toISOString().split('T')[0])
-    const [creditor, setCreditor] = useState('')
-    const [notes, setNotes] = useState('')
-    const [saving, setSaving] = useState(false)
+function FxSelect({ className, children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+    return (
+        <select
+            className={cx(
+                'w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100',
+                className
+            )}
+            {...props}
+        >
+            {children}
+        </select>
+    )
+}
+
+function FxModal({
+    open,
+    onClose,
+    title,
+    size = 'md',
+    children,
+    footer,
+}: {
+    open: boolean
+    onClose: () => void
+    title: string
+    size?: 'md' | 'lg'
+    children: React.ReactNode
+    footer?: React.ReactNode
+}) {
+    if (!open) return null
+
+    const sizeClass = size === 'lg' ? 'max-w-4xl' : 'max-w-2xl'
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm"
+            onMouseDown={e => {
+                if (e.target === e.currentTarget) onClose()
+            }}
+        >
+            <div
+                className={cx('flex max-h-[90vh] w-full flex-col overflow-hidden rounded-3xl bg-white shadow-2xl', sizeClass)}
+                onMouseDown={e => e.stopPropagation()}
+            >
+                <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+                    <h3 className="font-display text-lg font-bold text-slate-900">{title}</h3>
+                    <FxButton variant="secondary" size="sm" onClick={onClose}>
+                        <X size={14} weight="bold" />
+                    </FxButton>
+                </div>
+                <div className="max-h-[70vh] overflow-y-auto px-8 py-6">{children}</div>
+                {footer && (
+                    <div className="flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+                        {footer}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
+interface SelectOption {
+    value: string
+    label: string
+    meta?: string
+}
+
+function SearchableSelect({
+    value,
+    options,
+    placeholder,
+    onChange,
+    className,
+}: {
+    value?: string
+    options: SelectOption[]
+    placeholder?: string
+    onChange: (value: string) => void
+    className?: string
+}) {
+    const [query, setQuery] = useState('')
+    const [open, setOpen] = useState(false)
 
     useEffect(() => {
-        if (editing) {
-            setName(editing.name)
-            setSubtype(editing.subtype)
-            setCurrency(editing.currency)
-            setOpeningBalance(editing.openingBalance)
-            setOpeningRate(editing.openingRate)
-            setOpeningDate(editing.openingDate)
-            setCreditor(editing.creditor || '')
-            setNotes(editing.notes || '')
-        } else {
-            setName('')
-            setSubtype(type === 'ASSET' ? 'CAJA' : 'PROVEEDOR')
-            setCurrency('USD')
-            setOpeningBalance(0)
-            const oficialRate = getQuote(rates, 'Oficial')
-            setOpeningRate(oficialRate ? oficialRate.compra : 0)
-            setOpeningDate(new Date().toISOString().split('T')[0])
-            setCreditor('')
-            setNotes('')
-        }
-    }, [editing, type, rates])
+        const selected = options.find(option => option.value === value)
+        setQuery(selected?.label || '')
+    }, [options, value])
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
+    const filtered = useMemo(() => {
+        const normalized = query.toLowerCase()
+        if (!normalized) return options.slice(0, 50)
+        return options.filter(option => option.label.toLowerCase().includes(normalized)).slice(0, 50)
+    }, [options, query])
+
+    return (
+        <div className={cx('relative', className)}>
+            <FxInput
+                value={query}
+                placeholder={placeholder}
+                onChange={event => {
+                    setQuery(event.target.value)
+                    setOpen(true)
+                }}
+                onFocus={() => setOpen(true)}
+                onBlur={() => {
+                    setTimeout(() => setOpen(false), 150)
+                }}
+            />
+            {open && (
+                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                    {filtered.length === 0 && (
+                        <div className="px-3 py-2 text-xs text-slate-500">Sin resultados</div>
+                    )}
+                    {filtered.map(option => (
+                        <button
+                            key={option.value}
+                            type="button"
+                            className={cx(
+                                'flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50',
+                                option.value === value && 'bg-slate-100'
+                            )}
+                            onClick={() => {
+                                onChange(option.value)
+                                setQuery(option.label)
+                                setOpen(false)
+                            }}
+                        >
+                            <span>{option.label}</span>
+                            {option.meta && <span className="text-[11px] text-slate-400">{option.meta}</span>}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
+}
+
+function JournalStatusBadge({ status }: { status: FxMovement['journalStatus'] }) {
+    const config: Record<string, { label: string; tone: 'success' | 'warning' | 'neutral' | 'info' | 'danger' }> = {
+        generated: { label: 'Generado', tone: 'success' },
+        linked: { label: 'Vinculado', tone: 'info' },
+        none: { label: 'Sin asiento', tone: 'neutral' },
+        missing: { label: 'Falta asiento', tone: 'warning' },
+        desync: { label: 'Desync', tone: 'danger' },
+        error: { label: 'Error', tone: 'danger' },
+    }
+    const badge = config[status] || config.none
+    return <FxBadge tone={badge.tone}>{badge.label}</FxBadge>
+}
+
+function ManualEntryEditor({
+    lines,
+    accounts,
+    onChange,
+}: {
+    lines: ManualEntryLine[]
+    accounts: Account[]
+    onChange: (next: ManualEntryLine[]) => void
+}) {
+    const accountOptions = useMemo(() => accounts.map(acc => ({ value: acc.id, label: `${acc.code} - ${acc.name}` })), [accounts])
+
+    const updateLine = (index: number, patch: Partial<ManualEntryLine>) => {
+        const next = lines.map((line, idx) => (idx === index ? { ...line, ...patch } : line))
+        onChange(next)
+    }
+
+    return (
+        <div className="space-y-3">
+            {lines.map((line, index) => (
+                <div key={`${line.accountId}-${index}`} className="grid grid-cols-12 gap-3">
+                    <div className="col-span-6">
+                        <SearchableSelect
+                            value={line.accountId}
+                            options={accountOptions}
+                            placeholder="Cuenta contable"
+                            onChange={value => updateLine(index, { accountId: value })}
+                        />
+                    </div>
+                    <FxInput
+                        className="col-span-3 text-right font-mono"
+                        type="number"
+                        step="0.01"
+                        value={line.debit}
+                        onChange={event => updateLine(index, { debit: Number(event.target.value) || 0 })}
+                    />
+                    <FxInput
+                        className="col-span-3 text-right font-mono"
+                        type="number"
+                        step="0.01"
+                        value={line.credit}
+                        onChange={event => updateLine(index, { credit: Number(event.target.value) || 0 })}
+                    />
+                </div>
+            ))}
+        </div>
+    )
+}
+
+// ========================================
+// Modals (ME2)
+// ========================================
+
+function FxAssetAccountModalME2({
+    open,
+    onClose,
+    periodId,
+    rates,
+    ledgerAccounts,
+    onSuccess,
+}: {
+    open: boolean
+    onClose: () => void
+    periodId: string
+    rates: ExchangeRate[]
+    ledgerAccounts: Account[]
+    onSuccess: (message: string) => void
+}) {
+    const [name, setName] = useState('')
+    const [subtype, setSubtype] = useState<FxAssetSubtype>('CAJA')
+    const [currency, setCurrency] = useState<CurrencyCode>('USD')
+    const [ledgerAccountId, setLedgerAccountId] = useState<string>('')
+    const [openingBalance, setOpeningBalance] = useState(0)
+    const [openingRate, setOpeningRate] = useState(0)
+    const [openingDate, setOpeningDate] = useState(formatDateInput())
+    const [openingContraId, setOpeningContraId] = useState('')
+    const [openingAutoJournal, setOpeningAutoJournal] = useState(true)
+    const [suggestion, setSuggestion] = useState<LedgerAccountSuggestion | null>(null)
+    const [saving, setSaving] = useState(false)
+    const [manualSelection, setManualSelection] = useState(false)
+
+    const postableAccounts = useMemo(() => ledgerAccounts.filter(acc => !acc.isHeader), [ledgerAccounts])
+    const accountOptions = useMemo(
+        () => postableAccounts.map(acc => ({ value: acc.id, label: `${acc.code} - ${acc.name}` })),
+        [postableAccounts]
+    )
+
+    useEffect(() => {
+        if (!open) return
+        const oficial = getQuote(rates, 'Oficial')
+        setOpeningRate(oficial?.compra || 0)
+        setOpeningDate(formatDateInput())
+    }, [open, rates])
+
+    useEffect(() => {
+        if (!open) return
+        const run = async () => {
+            const next = await suggestLedgerAccountForFxAsset({
+                name,
+                subtype,
+                currency,
+                accounts: ledgerAccounts,
+            })
+            setSuggestion(next)
+            if (!manualSelection && next.account) {
+                setLedgerAccountId(next.account.id)
+            }
+        }
+        run()
+    }, [currency, ledgerAccounts, manualSelection, name, open, subtype])
+
+    useEffect(() => {
+        if (!open) return
+        setManualSelection(false)
+    }, [open])
+
+    const confidenceLabel = suggestion?.confidence === 'high'
+        ? 'Alta confianza'
+        : suggestion?.confidence === 'medium'
+            ? 'Confianza media'
+            : 'Baja confianza'
+
+    const previewAmount = openingBalance > 0 ? openingBalance * (openingRate || 0) : 0
+
+    const handleCreateAccount = async () => {
+        if (!suggestion) return
+        const created = await ensureLedgerAccountExists({
+            name: name || 'Cartera ME',
+            kind: 'ASSET',
+            accounts: ledgerAccounts,
+            parentId: suggestion.parentHint?.id || null,
+            group: suggestion.parentHint?.group || 'Caja y Bancos',
+            section: suggestion.parentHint?.section || 'CURRENT',
+            statementGroup: suggestion.parentHint?.statementGroup || 'CASH_AND_BANKS',
+        })
+        setLedgerAccountId(created.id)
+        setManualSelection(true)
+        onSuccess('Cuenta contable creada')
+    }
+
+    const handleSubmit = async () => {
+        if (!name.trim()) {
+            onSuccess('El nombre de la cartera es obligatorio')
+            return
+        }
+        if (!ledgerAccountId) {
+            onSuccess('Selecciona una cuenta contable para vincular')
+            return
+        }
+        if (openingBalance > 0 && openingAutoJournal) {
+            if (!openingContraId) {
+                onSuccess('Selecciona la contrapartida ARS del saldo inicial')
+                return
+            }
+            if (!openingRate || openingRate <= 0) {
+                onSuccess('Tipo de cambio historico requerido')
+                return
+            }
+        }
+
         setSaving(true)
         try {
-            await onSave({
+            const account = await createFxAccount({
                 name,
-                type,
+                type: 'ASSET',
                 subtype,
                 currency,
                 periodId,
+                accountId: ledgerAccountId,
                 openingBalance,
                 openingRate,
                 openingDate,
-                creditor: type === 'LIABILITY' ? creditor : undefined,
-                notes: notes || undefined,
             })
+
+            if (openingBalance > 0 && openingAutoJournal) {
+                await createEntry({
+                    date: openingDate,
+                    memo: `Apertura cartera ME - ${account.name}`,
+                    lines: [
+                        {
+                            accountId: ledgerAccountId,
+                            debit: previewAmount,
+                            credit: 0,
+                            description: `Apertura ${currency}`,
+                        },
+                        {
+                            accountId: openingContraId,
+                            debit: 0,
+                            credit: previewAmount,
+                            description: 'Contrapartida apertura',
+                        },
+                    ],
+                    sourceModule: 'fx',
+                    sourceId: account.id,
+                    sourceType: 'fx_opening',
+                    createdAt: new Date().toISOString(),
+                })
+            }
+
+            onSuccess('Cartera creada')
             onClose()
+            setName('')
+            setOpeningBalance(0)
+            setOpeningContraId('')
         } catch (error) {
-            console.error('Error saving account:', error)
+            console.error(error)
+            onSuccess(error instanceof Error ? error.message : 'Error al crear cartera')
         } finally {
             setSaving(false)
         }
     }
 
-    if (!open) return null
-
-    const subtypeOptions = type === 'ASSET' ? ASSET_SUBTYPE_LABELS : LIABILITY_SUBTYPE_LABELS
-
     return (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-                    <h3 className="text-lg font-bold font-display text-slate-900">
-                        {editing ? 'Editar' : 'Nuevo'} {type === 'ASSET' ? 'Activo' : 'Pasivo'} ME
-                    </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-red-500">
-                        <X size={20} weight="bold" />
-                    </button>
+        <FxModal
+            open={open}
+            onClose={onClose}
+            title="Nuevo Activo en Moneda Extranjera"
+            footer={
+                <>
+                    <FxButton variant="secondary" onClick={onClose}>Cancelar</FxButton>
+                    <FxButton onClick={handleSubmit} disabled={saving}>Crear Cartera</FxButton>
+                </>
+            }
+        >
+            <div className="space-y-6">
+                <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-500">Nombre de la Cartera / Lugar</label>
+                    <FxInput value={name} onChange={event => setName(event.target.value)} placeholder="Ej: Caja de Ahorro USD" />
+                    <div className="mt-3 rounded-xl border border-dashed border-blue-200 bg-blue-50 px-4 py-3">
+                        <div className="flex gap-3">
+                            <div className="text-blue-500">
+                                <MagicWand size={20} weight="fill" />
+                            </div>
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <h4 className="text-sm font-semibold text-slate-900">Sugerencia contable</h4>
+                                    <FxBadge tone="info">{confidenceLabel}</FxBadge>
+                                </div>
+                                <p className="text-xs text-slate-600">{suggestion?.reason || 'Asignaremos una cuenta sugerida segun el nombre y tipo.'}</p>
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                    <SearchableSelect
+                                        value={ledgerAccountId}
+                                        options={accountOptions}
+                                        placeholder="Selecciona cuenta contable"
+                                        onChange={value => {
+                                            setLedgerAccountId(value)
+                                            setManualSelection(true)
+                                        }}
+                                    />
+                                    {!suggestion?.account && (
+                                        <FxButton variant="secondary" size="sm" onClick={handleCreateAccount}>
+                                            <Plus size={14} /> Crear cuenta
+                                        </FxButton>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="col-span-2">
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Nombre / Cartera</label>
-                            <input
-                                type="text"
-                                value={name}
-                                onChange={e => setName(e.target.value)}
-                                required
-                                placeholder={type === 'ASSET' ? 'Ej: Caja Fuerte USD' : 'Ej: Deuda AWS'}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Tipo</label>
-                            <select
-                                value={subtype}
-                                onChange={e => setSubtype(e.target.value as any)}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            >
-                                {Object.entries(subtypeOptions).map(([key, label]) => (
-                                    <option key={key} value={key}>{label}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Moneda</label>
-                            <select
-                                value={currency}
-                                onChange={e => setCurrency(e.target.value as CurrencyCode)}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            >
-                                {Object.entries(CURRENCY_LABELS).map(([key, label]) => (
-                                    <option key={key} value={key}>{label}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-
-                    {type === 'LIABILITY' && (
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Acreedor</label>
-                            <input
-                                type="text"
-                                value={creditor}
-                                onChange={e => setCreditor(e.target.value)}
-                                placeholder="Nombre del acreedor"
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            />
-                        </div>
-                    )}
-
-                    <div className="grid grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Saldo Inicial</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                value={openingBalance}
-                                onChange={e => setOpeningBalance(parseFloat(e.target.value) || 0)}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none font-mono"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">TC Historico</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                value={openingRate}
-                                onChange={e => setOpeningRate(parseFloat(e.target.value) || 0)}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none font-mono"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
-                            <input
-                                type="date"
-                                value={openingDate}
-                                onChange={e => setOpeningDate(e.target.value)}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            />
-                        </div>
-                    </div>
-
+                <div className="grid gap-4 sm:grid-cols-2">
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 mb-1">Notas (opcional)</label>
-                        <textarea
-                            value={notes}
-                            onChange={e => setNotes(e.target.value)}
-                            rows={2}
-                            className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none resize-none"
+                        <label className="text-xs font-semibold text-slate-500">Tipo</label>
+                        <FxSelect value={subtype} onChange={event => setSubtype(event.target.value as FxAssetSubtype)}>
+                            {Object.entries(ASSET_SUBTYPE_LABELS).map(([key, label]) => (
+                                <option key={key} value={key}>{label}</option>
+                            ))}
+                        </FxSelect>
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-slate-500">Moneda</label>
+                        <FxSelect value={currency} onChange={event => setCurrency(event.target.value as CurrencyCode)}>
+                            {Object.entries(CURRENCY_LABELS).map(([key, label]) => (
+                                <option key={key} value={key}>{label}</option>
+                            ))}
+                        </FxSelect>
+                    </div>
+                </div>
+
+                <div className="border-t border-slate-200 pt-4">
+                    <label className="text-xs font-semibold text-slate-500">Saldo inicial (opcional)</label>
+                    <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                        <FxInput
+                            type="number"
+                            step="0.01"
+                            placeholder="0.00"
+                            value={openingBalance}
+                            onChange={event => setOpeningBalance(Number(event.target.value) || 0)}
+                        />
+                        <FxInput
+                            type="number"
+                            step="0.01"
+                            placeholder="TC historico"
+                            value={openingRate}
+                            onChange={event => setOpeningRate(Number(event.target.value) || 0)}
+                            disabled={openingBalance <= 0}
+                        />
+                        <FxInput
+                            type="date"
+                            value={openingDate}
+                            onChange={event => setOpeningDate(event.target.value)}
+                            disabled={openingBalance <= 0}
                         />
                     </div>
 
-                    <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-700"
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={saving || !name}
-                            className="px-6 py-2 text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-emerald-500 rounded-lg shadow disabled:opacity-50"
-                        >
-                            {saving ? 'Guardando...' : 'Guardar'}
-                        </button>
-                    </div>
-                </form>
+                    {openingBalance > 0 && (
+                        <div className="mt-4 space-y-3">
+                            <div className="flex items-center gap-3">
+                                <label className="text-xs font-semibold text-slate-500">Contrapartida ARS</label>
+                                <SearchableSelect
+                                    value={openingContraId}
+                                    options={accountOptions}
+                                    placeholder="Cuenta contrapartida"
+                                    onChange={setOpeningContraId}
+                                    className="flex-1"
+                                />
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                    <Eye size={14} /> Vista previa asiento (ARS)
+                                </div>
+                                <div className="mt-3 space-y-2 text-sm">
+                                    <div className="flex items-center justify-between border-b border-dashed border-slate-200 pb-2">
+                                        <span className="font-medium text-slate-800">{ledgerAccountId ? accountOptions.find(o => o.value === ledgerAccountId)?.label : 'Cuenta ME'}</span>
+                                        <span className="font-mono text-slate-500">{formatCurrencyARS(previewAmount)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-medium text-slate-800">{openingContraId ? accountOptions.find(o => o.value === openingContraId)?.label : 'Contrapartida'}</span>
+                                        <span className="font-mono text-slate-500">{formatCurrencyARS(previewAmount)}</span>
+                                    </div>
+                                </div>
+                                <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                                    <input
+                                        type="checkbox"
+                                        checked={openingAutoJournal}
+                                        onChange={event => setOpeningAutoJournal(event.target.checked)}
+                                    />
+                                    Generar asiento automaticamente
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
-        </div>
+        </FxModal>
     )
 }
 
-interface MovementModalProps {
+function FxDebtCreateModalME2({
+    open,
+    onClose,
+    periodId,
+    ledgerAccounts,
+    fxAssetAccounts,
+    onSuccess,
+    onOpenAssetModal,
+}: {
     open: boolean
     onClose: () => void
-    onSave: (movement: Omit<FxMovement, 'id' | 'createdAt' | 'updatedAt' | 'journalStatus' | 'linkedJournalEntryIds'>) => Promise<void>
-    editing?: FxMovement | null
-    accounts: FxAccount[]
-    ledgerAccounts: Account[] // All ledger accounts for contrapartida selection
     periodId: string
-    rates: ExchangeRate[]
-    settings: FxSettings
-}
-
-function MovementModal({ open, onClose, onSave, editing, accounts, ledgerAccounts, periodId, rates, settings: _settings }: MovementModalProps) {
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0])
-    const [type, setType] = useState<FxMovementType>('COMPRA')
-    const [accountId, setAccountId] = useState('')
-    const [targetAccountId, setTargetAccountId] = useState('')
-    const [amount, setAmount] = useState(0)
+    ledgerAccounts: Account[]
+    fxAssetAccounts: FxAccount[]
+    onSuccess: (message: string) => void
+    onOpenAssetModal: () => void
+}) {
+    const [name, setName] = useState('')
+    const [subtype, setSubtype] = useState<FxLiabilitySubtype>('PRESTAMO')
+    const [creditor, setCreditor] = useState('')
     const [currency, setCurrency] = useState<CurrencyCode>('USD')
+    const [principal, setPrincipal] = useState(0)
     const [rate, setRate] = useState(0)
-    const [rateType, setRateType] = useState<QuoteType | 'custom'>('Oficial')
-    const [counterparty, setCounterparty] = useState('')
-    const [reference, setReference] = useState('')
-    const [notes, setNotes] = useState('')
+    const [originDate, setOriginDate] = useState(formatDateInput())
+    const [firstDueDate, setFirstDueDate] = useState(formatDateInput())
+    const [installments, setInstallments] = useState(12)
+    const [frequency, setFrequency] = useState<PaymentFrequency>('MENSUAL')
+    const [system, setSystem] = useState<LoanSystem>('FRANCES')
+    const [tna, setTna] = useState(0)
+    const [targetAssetId, setTargetAssetId] = useState('')
+    const [ledgerAccountId, setLedgerAccountId] = useState('')
+    const [suggestion, setSuggestion] = useState<LedgerAccountSuggestion | null>(null)
+    const [manualSelection, setManualSelection] = useState(false)
     const [autoJournal, setAutoJournal] = useState(true)
-    const [capitalAmount, setCapitalAmount] = useState(0)
-    const [interestAmount, setInterestAmount] = useState(0)
-    // New fields for contrapartida and comision
-    const [contrapartidaAccountId, setContrapartidaAccountId] = useState('')
-    const [comisionARS, setComisionARS] = useState(0)
-    const [comisionAccountId, setComisionAccountId] = useState('')
     const [saving, setSaving] = useState(false)
-    // Preview state
-    const [preview, setPreview] = useState<FxJournalPreview | null>(null)
-    const [loadingPreview, setLoadingPreview] = useState(false)
 
-    const arsAmount = useMemo(() => amount * rate, [amount, rate])
-
-    // Determine rateSide based on movement type
-    const rateSide = useMemo((): RateSide => {
-        switch (type) {
-            case 'COMPRA':
-            case 'PAGO_DEUDA':
-                return 'venta' // You buy FC, they sell to you
-            case 'VENTA':
-                return 'compra' // You sell FC, they buy from you
-            default:
-                return 'compra'
-        }
-    }, [type])
-
-    // Filter ledger accounts for selectors
-    const arsAccounts = useMemo(() =>
-        ledgerAccounts.filter(a =>
-            a.kind === 'ASSET' && // Assets only for contrapartida
-            !a.name.toLowerCase().includes('me') &&
-            !a.name.toLowerCase().includes('usd') &&
-            !a.name.toLowerCase().includes('dolar') &&
-            !a.name.toLowerCase().includes('extranjera')
-        ),
-        [ledgerAccounts]
+    const postableAccounts = useMemo(() => ledgerAccounts.filter(acc => !acc.isHeader), [ledgerAccounts])
+    const accountOptions = useMemo(
+        () => postableAccounts.map(acc => ({ value: acc.id, label: `${acc.code} - ${acc.name}` })),
+        [postableAccounts]
     )
-    const expenseAccounts = useMemo(() =>
-        ledgerAccounts.filter(a => a.kind === 'EXPENSE'), // Gastos
-        [ledgerAccounts]
+    // Filter asset accounts by selected currency (P1: only show matching currency)
+    const assetOptions = useMemo(
+        () => fxAssetAccounts
+            .filter(acc => acc.currency === currency)
+            .map(acc => ({ value: acc.id, label: acc.name, meta: acc.currency })),
+        [fxAssetAccounts, currency]
     )
 
     useEffect(() => {
-        if (editing) {
-            setDate(editing.date)
-            setType(editing.type)
-            setAccountId(editing.accountId)
-            setTargetAccountId(editing.targetAccountId || '')
-            setAmount(editing.amount)
-            setCurrency(editing.currency)
-            setRate(editing.rate)
-            setRateType(editing.rateType)
-            setCounterparty(editing.counterparty || '')
-            setReference(editing.reference || '')
-            setNotes(editing.notes || '')
-            setAutoJournal(editing.autoJournal)
-            setCapitalAmount(editing.capitalAmount || 0)
-            setInterestAmount(editing.interestAmount || 0)
-            setContrapartidaAccountId(editing.contrapartidaAccountId || '')
-            setComisionARS(editing.comisionARS || 0)
-            setComisionAccountId(editing.comisionAccountId || '')
-        } else {
-            setDate(new Date().toISOString().split('T')[0])
-            setType('COMPRA')
-            setAccountId(accounts.find(a => a.type === 'ASSET')?.id || '')
-            setTargetAccountId('')
-            setAmount(0)
-            setCurrency('USD')
-            const oficialRate = getQuote(rates, 'Oficial')
-            setRate(oficialRate ? oficialRate.venta : 0) // Default to venta for COMPRA
-            setRateType('Oficial')
-            setCounterparty('')
-            setReference('')
-            setNotes('')
-            setAutoJournal(true)
-            setCapitalAmount(0)
-            setInterestAmount(0)
-            // Set default contrapartida (first Banco ARS or Caja ARS)
-            const defaultContra = arsAccounts.find(a => a.name.toLowerCase().includes('banco'))
-                || arsAccounts.find(a => a.name.toLowerCase().includes('caja'))
-                || arsAccounts[0]
-            setContrapartidaAccountId(defaultContra?.id || '')
-            setComisionARS(0)
-            // Set default comision account
-            const defaultComision = expenseAccounts.find(a => a.name.toLowerCase().includes('comision'))
-                || expenseAccounts.find(a => a.name.toLowerCase().includes('bancar'))
-                || expenseAccounts[0]
-            setComisionAccountId(defaultComision?.id || '')
-        }
-    }, [editing, accounts, rates, arsAccounts, expenseAccounts])
-
-    // Update rate when rateType or type changes
-    useEffect(() => {
-        if (rateType !== 'custom') {
-            const quote = getQuote(rates, rateType as QuoteType)
-            if (quote) {
-                const side = (type === 'COMPRA' || type === 'PAGO_DEUDA') ? 'venta' : 'compra'
-                setRate(getRateValue(quote, side))
+        if (!open) return
+        const run = async () => {
+            const next = await suggestLedgerAccountForFxDebt({
+                name,
+                creditor,
+                subtype,
+                currency,
+                accounts: ledgerAccounts,
+            })
+            setSuggestion(next)
+            if (!manualSelection && next.account) {
+                setLedgerAccountId(next.account.id)
             }
         }
-    }, [rateType, rates, type])
+        run()
+    }, [creditor, currency, ledgerAccounts, manualSelection, name, open, subtype])
 
-    // Load preview when autoJournal is ON and data changes
     useEffect(() => {
-        if (!autoJournal || !accountId || amount <= 0 || rate <= 0) {
-            setPreview(null)
+        if (!open) return
+        setManualSelection(false)
+    }, [open])
+
+    // Reset target asset when currency changes (P1: ensure valid selection)
+    useEffect(() => {
+        if (!open) return
+        // Check if current target is still valid for the new currency
+        const currentTargetValid = fxAssetAccounts.some(acc => acc.id === targetAssetId && acc.currency === currency)
+        if (!currentTargetValid) {
+            setTargetAssetId('')
+        }
+    }, [currency, fxAssetAccounts, open, targetAssetId])
+
+    const confidenceLabel = suggestion?.confidence === 'high'
+        ? 'Alta confianza'
+        : suggestion?.confidence === 'medium'
+            ? 'Confianza media'
+            : 'Baja confianza'
+
+    const previewAmount = principal > 0 ? principal * (rate || 0) : 0
+
+    const handleCreateAccount = async () => {
+        if (!suggestion) return
+        const created = await ensureLedgerAccountExists({
+            name: name || 'Pasivo ME',
+            kind: 'LIABILITY',
+            accounts: ledgerAccounts,
+            parentId: suggestion.parentHint?.id || null,
+            group: suggestion.parentHint?.group || 'Prestamos y deudas financieras',
+            section: suggestion.parentHint?.section || 'CURRENT',
+            statementGroup: suggestion.parentHint?.statementGroup || 'LOANS',
+        })
+        setLedgerAccountId(created.id)
+        setManualSelection(true)
+        onSuccess('Cuenta contable creada')
+    }
+
+    const handleSubmit = async () => {
+        if (!name.trim()) {
+            onSuccess('El nombre de la deuda es obligatorio')
             return
         }
-
-        const loadPreview = async () => {
-            setLoadingPreview(true)
-            try {
-                const fxAccount = accounts.find(a => a.id === accountId)
-                const result = await previewFxMovementJournal({
-                    date,
-                    type,
-                    accountId,
-                    targetAccountId: type === 'TRANSFERENCIA' ? targetAccountId : undefined,
-                    periodId,
-                    amount,
-                    currency,
-                    rate,
-                    rateType,
-                    rateSide,
-                    rateSource: rateType === 'custom' ? 'Manual' : 'DolarAPI',
-                    arsAmount,
-                    contrapartidaAccountId: contrapartidaAccountId || undefined,
-                    comisionARS: comisionARS > 0 ? comisionARS : undefined,
-                    comisionAccountId: comisionARS > 0 ? comisionAccountId : undefined,
-                    capitalAmount: type === 'PAGO_DEUDA' ? capitalAmount : undefined,
-                    interestAmount: type === 'PAGO_DEUDA' ? interestAmount : undefined,
-                    autoJournal: true,
-                }, fxAccount)
-                setPreview(result)
-            } catch (error) {
-                console.error('Error loading preview:', error)
-                setPreview(null)
-            } finally {
-                setLoadingPreview(false)
-            }
+        if (!ledgerAccountId) {
+            onSuccess('Selecciona la cuenta contable del pasivo')
+            return
         }
-
-        const timeout = setTimeout(loadPreview, 300) // Debounce
-        return () => clearTimeout(timeout)
-    }, [autoJournal, accountId, amount, rate, type, currency, arsAmount, contrapartidaAccountId, comisionARS, comisionAccountId, targetAccountId, periodId, rateType, rateSide, capitalAmount, interestAmount, accounts])
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
-
-        // Validate preview if autoJournal is ON
-        if (autoJournal && preview?.error) {
-            alert(`Error en el asiento: ${preview.error}`)
+        if (!principal || principal <= 0) {
+            onSuccess('Ingresa el monto principal')
+            return
+        }
+        if (!rate || rate <= 0) {
+            onSuccess('Ingresa el tipo de cambio historico')
+            return
+        }
+        if (!targetAssetId) {
+            onSuccess('Selecciona la cartera destino del desembolso')
             return
         }
 
         setSaving(true)
         try {
-            await onSave({
-                date,
-                type,
-                accountId,
-                targetAccountId: type === 'TRANSFERENCIA' ? targetAccountId : undefined,
-                periodId,
-                amount,
+            const liabilityAccount = await createFxAccount({
+                name,
+                type: 'LIABILITY',
+                subtype,
                 currency,
-                rate,
-                rateType,
-                rateSide,
-                rateSource: rateType === 'custom' ? 'Manual' : 'DolarAPI',
-                arsAmount,
-                contrapartidaAccountId: contrapartidaAccountId || undefined,
-                comisionARS: comisionARS > 0 ? comisionARS : undefined,
-                comisionAccountId: comisionARS > 0 ? comisionAccountId : undefined,
-                capitalAmount: type === 'PAGO_DEUDA' ? capitalAmount : undefined,
-                interestAmount: type === 'PAGO_DEUDA' ? interestAmount : undefined,
-                counterparty: counterparty || undefined,
-                reference: reference || undefined,
-                notes: notes || undefined,
-                autoJournal,
+                periodId,
+                accountId: ledgerAccountId,
+                creditor,
+                openingBalance: 0,
+                openingRate: rate,
+                openingDate: originDate,
             })
+
+            await createFxDebt(
+                {
+                    name,
+                    accountId: liabilityAccount.id,
+                    periodId,
+                    principalME: principal,
+                    currency,
+                    rateInicial: rate,
+                    rateType: 'custom',
+                    rateSide: 'venta',
+                    principalARS: principal * rate,
+                    originDate,
+                    interestRateAnnual: tna / 100,
+                    installments,
+                    frequency,
+                    system,
+                    firstDueDate,
+                    schedule: [],
+                    saldoME: principal,
+                    paidInstallments: 0,
+                    status: 'ACTIVE',
+                    creditor,
+                    autoJournal,
+                },
+                {
+                    disbursementAccountId: targetAssetId,
+                    disbursementDate: originDate,
+                    disbursementRate: rate,
+                    autoJournal,
+                }
+            )
+
+            onSuccess('Deuda creada y asentada')
             onClose()
+            setName('')
+            setPrincipal(0)
+            setLedgerAccountId('')
+            setTargetAssetId('')
         } catch (error) {
-            console.error('Error saving movement:', error)
-            alert(error instanceof Error ? error.message : 'Error al guardar')
+            console.error(error)
+            onSuccess(error instanceof Error ? error.message : 'Error al crear deuda')
         } finally {
             setSaving(false)
         }
     }
 
-    if (!open) return null
-
-    const assetAccounts = accounts.filter(a => a.type === 'ASSET')
-    const liabilityAccounts = accounts.filter(a => a.type === 'LIABILITY')
-    const showTargetAccount = type === 'TRANSFERENCIA'
-    const showDebtFields = type === 'PAGO_DEUDA'
-    const showContrapartida = type === 'COMPRA' || type === 'VENTA' || type === 'PAGO_DEUDA'
-
     return (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-                    <h3 className="text-lg font-bold font-display text-slate-900">
-                        {editing ? 'Editar Movimiento' : 'Registrar Movimiento'}
-                    </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-red-500">
-                        <X size={20} weight="bold" />
-                    </button>
-                </div>
-
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    {/* Type selector */}
-                    <div className="flex gap-2 p-1 bg-slate-100 rounded-lg">
-                        {(['COMPRA', 'VENTA', 'TRANSFERENCIA', 'AJUSTE'] as FxMovementType[]).map(t => (
-                            <button
-                                key={t}
-                                type="button"
-                                onClick={() => setType(t)}
-                                className={`flex-1 px-3 py-1.5 text-xs font-medium rounded ${type === t ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                {MOVEMENT_TYPE_LABELS[t]}
-                            </button>
-                        ))}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
+        <FxModal
+            open={open}
+            onClose={onClose}
+            title="Alta de Pasivo en Moneda Extranjera"
+            size="lg"
+            footer={
+                <>
+                    <FxButton variant="secondary" onClick={onClose}>Cancelar</FxButton>
+                    <FxButton onClick={handleSubmit} disabled={saving}>Crear Deuda y Asentar</FxButton>
+                </>
+            }
+        >
+            <div className="space-y-6">
+                <div>
+                    <div className="mb-3 border-b border-slate-200 pb-2 text-sm font-semibold text-slate-700">A. Identidad y Contabilidad</div>
+                    <div className="grid gap-4 sm:grid-cols-2">
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
-                            <input
-                                type="date"
-                                value={date}
-                                onChange={e => setDate(e.target.value)}
-                                required
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            />
+                            <label className="text-xs font-semibold text-slate-500">Nombre / Alias</label>
+                            <FxInput value={name} onChange={event => setName(event.target.value)} placeholder="Ej: Prestamo Socio A" />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Cuenta ME</label>
-                            <select
-                                value={accountId}
-                                onChange={e => setAccountId(e.target.value)}
-                                required
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            >
-                                <option value="">Seleccionar...</option>
-                                {assetAccounts.length > 0 && (
-                                    <optgroup label="Activos">
-                                        {assetAccounts.map(a => (
-                                            <option key={a.id} value={a.id}>{a.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                                {liabilityAccounts.length > 0 && (
-                                    <optgroup label="Pasivos">
-                                        {liabilityAccounts.map(a => (
-                                            <option key={a.id} value={a.id}>{a.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                            </select>
-                        </div>
-                    </div>
-
-                    {showTargetAccount && (
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Cuenta Destino</label>
-                            <select
-                                value={targetAccountId}
-                                onChange={e => setTargetAccountId(e.target.value)}
-                                required
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            >
-                                <option value="">Seleccionar...</option>
-                                {accounts.filter(a => a.id !== accountId).map(a => (
-                                    <option key={a.id} value={a.id}>{a.name}</option>
+                            <label className="text-xs font-semibold text-slate-500">Tipo</label>
+                            <FxSelect value={subtype} onChange={event => setSubtype(event.target.value as FxLiabilitySubtype)}>
+                                {Object.entries(LIABILITY_SUBTYPE_LABELS).map(([key, label]) => (
+                                    <option key={key} value={key}>{label}</option>
                                 ))}
-                            </select>
-                        </div>
-                    )}
-
-                    <div className="grid grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Monto ME</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                value={amount || ''}
-                                onChange={e => setAmount(parseFloat(e.target.value) || 0)}
-                                required
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none font-mono"
-                                placeholder="0.00"
-                            />
+                            </FxSelect>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Moneda</label>
-                            <select
-                                value={currency}
-                                onChange={e => setCurrency(e.target.value as CurrencyCode)}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            >
+                            <label className="text-xs font-semibold text-slate-500">Acreedor</label>
+                            <FxInput value={creditor} onChange={event => setCreditor(event.target.value)} placeholder="Nombre persona o entidad" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Moneda</label>
+                            <FxSelect value={currency} onChange={event => setCurrency(event.target.value as CurrencyCode)}>
                                 {Object.entries(CURRENCY_LABELS).map(([key, label]) => (
                                     <option key={key} value={key}>{label}</option>
                                 ))}
-                            </select>
+                            </FxSelect>
+                        </div>
+                    </div>
+
+                    <div className="mt-4 rounded-xl border border-dashed border-blue-200 bg-blue-50 px-4 py-3">
+                        <div className="flex gap-3">
+                            <div className="text-blue-500">
+                                <MagicWand size={20} weight="fill" />
+                            </div>
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <h4 className="text-sm font-semibold text-slate-900">Sugerencia contable</h4>
+                                    <FxBadge tone="info">{confidenceLabel}</FxBadge>
+                                </div>
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                    <SearchableSelect
+                                        value={ledgerAccountId}
+                                        options={accountOptions}
+                                        placeholder="Selecciona cuenta pasivo"
+                                        onChange={value => {
+                                            setLedgerAccountId(value)
+                                            setManualSelection(true)
+                                        }}
+                                    />
+                                    {!suggestion?.account && (
+                                        <FxButton variant="secondary" size="sm" onClick={handleCreateAccount}>
+                                            <Plus size={14} /> Crear cuenta
+                                        </FxButton>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div className="mb-3 border-b border-slate-200 pb-2 text-sm font-semibold text-slate-700">B. Alta Inicial (Desembolso)</div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Monto principal (ME)</label>
+                            <FxInput type="number" step="0.01" value={principal} onChange={event => setPrincipal(Number(event.target.value) || 0)} />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">
-                                Cotización <span className="text-[10px] text-slate-400">({rateSide === 'venta' ? 'VENTA' : 'COMPRA'})</span>
-                            </label>
-                            <select
-                                value={rateType}
-                                onChange={e => setRateType(e.target.value as QuoteType | 'custom')}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            >
-                                {Object.entries(QUOTE_TYPE_LABELS).map(([key, label]) => (
+                            <label className="text-xs font-semibold text-slate-500">TC historico (ARS/ME)</label>
+                            <FxInput type="number" step="0.01" value={rate} onChange={event => setRate(Number(event.target.value) || 0)} />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Fecha de alta</label>
+                            <FxInput type="date" value={originDate} onChange={event => setOriginDate(event.target.value)} />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Primer vencimiento</label>
+                            <FxInput type="date" value={firstDueDate} onChange={event => setFirstDueDate(event.target.value)} />
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div className="mb-3 border-b border-slate-200 pb-2 text-sm font-semibold text-slate-700">C. Condiciones Financieras (Plan)</div>
+                    <div className="grid gap-4 sm:grid-cols-3">
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Cuotas</label>
+                            <FxInput type="number" value={installments} onChange={event => setInstallments(Number(event.target.value) || 0)} />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Frecuencia</label>
+                            <FxSelect value={frequency} onChange={event => setFrequency(event.target.value as PaymentFrequency)}>
+                                {Object.entries(FREQUENCY_LABELS).map(([key, label]) => (
                                     <option key={key} value={key}>{label}</option>
                                 ))}
-                                <option value="custom">Manual</option>
-                            </select>
+                            </FxSelect>
                         </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">TC (ARS/{currency})</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                value={rate || ''}
-                                onChange={e => setRate(parseFloat(e.target.value) || 0)}
-                                disabled={rateType !== 'custom'}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none font-mono disabled:bg-slate-50"
-                            />
-                        </div>
-                        <div className="bg-blue-50 rounded-lg p-3 flex flex-col justify-center">
-                            <span className="text-[10px] uppercase font-bold text-blue-600 mb-0.5">Total Bruto ARS</span>
-                            <span className="font-mono font-bold text-blue-900">{formatCurrency(arsAmount)}</span>
-                        </div>
-                    </div>
-
-                    {/* Contrapartida selector for buy/sell operations */}
-                    {showContrapartida && (
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">
-                                Contrapartida ARS <span className="text-[10px] text-slate-400">(Banco/Caja origen/destino)</span>
-                            </label>
-                            <select
-                                value={contrapartidaAccountId}
-                                onChange={e => setContrapartidaAccountId(e.target.value)}
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            >
-                                <option value="">Sin especificar (usará default)</option>
-                                {arsAccounts.map(a => (
-                                    <option key={a.id} value={a.id}>{a.code} - {a.name}</option>
+                            <label className="text-xs font-semibold text-slate-500">Sistema</label>
+                            <FxSelect value={system} onChange={event => setSystem(event.target.value as LoanSystem)}>
+                                {Object.entries(LOAN_SYSTEM_LABELS).map(([key, label]) => (
+                                    <option key={key} value={key}>{label}</option>
                                 ))}
-                            </select>
-                        </div>
-                    )}
-
-                    {/* Comision fields */}
-                    {showContrapartida && (
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1">Comisión ARS</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    value={comisionARS || ''}
-                                    onChange={e => setComisionARS(parseFloat(e.target.value) || 0)}
-                                    className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none font-mono"
-                                    placeholder="0.00"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1">Cuenta Comisión</label>
-                                <select
-                                    value={comisionAccountId}
-                                    onChange={e => setComisionAccountId(e.target.value)}
-                                    disabled={comisionARS <= 0}
-                                    className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none disabled:bg-slate-50"
-                                >
-                                    <option value="">Gastos bancarios (default)</option>
-                                    {expenseAccounts.map(a => (
-                                        <option key={a.id} value={a.id}>{a.code} - {a.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
-                    )}
-
-                    {showDebtFields && (
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1">Capital ({currency})</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    value={capitalAmount || ''}
-                                    onChange={e => setCapitalAmount(parseFloat(e.target.value) || 0)}
-                                    className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none font-mono"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1">Intereses ARS</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    value={interestAmount || ''}
-                                    onChange={e => setInterestAmount(parseFloat(e.target.value) || 0)}
-                                    className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none font-mono"
-                                />
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Contraparte</label>
-                            <input
-                                type="text"
-                                value={counterparty}
-                                onChange={e => setCounterparty(e.target.value)}
-                                placeholder="Ej: Casa de cambio"
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            />
+                            </FxSelect>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">Referencia</label>
-                            <input
-                                type="text"
-                                value={reference}
-                                onChange={e => setReference(e.target.value)}
-                                placeholder="Ej: Ticket #123"
-                                className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:border-blue-500 outline-none"
-                            />
+                            <label className="text-xs font-semibold text-slate-500">TNA %</label>
+                            <FxInput type="number" step="0.01" value={tna} onChange={event => setTna(Number(event.target.value) || 0)} />
                         </div>
                     </div>
+                </div>
 
-                    {/* Auto journal toggle with preview */}
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                        <div className="flex items-center justify-between mb-3">
-                            <label className="flex items-center cursor-pointer">
-                                <div className="relative">
-                                    <input
-                                        type="checkbox"
-                                        checked={autoJournal}
-                                        onChange={e => setAutoJournal(e.target.checked)}
-                                        className="sr-only"
-                                    />
-                                    <div className={`w-10 h-6 rounded-full shadow-inner transition-colors ${autoJournal ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                                    <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full shadow transition-transform ${autoJournal ? 'translate-x-4' : ''}`} />
-                                </div>
-                                <span className="ml-3 text-sm font-medium text-slate-700">Generar asiento contable</span>
-                            </label>
-                            {autoJournal && (
-                                <span className="text-[10px] font-mono text-slate-400 bg-white px-2 py-1 rounded border border-slate-200">
-                                    PREVIEW
-                                </span>
-                            )}
+                <div>
+                    <div className="mb-3 border-b border-slate-200 pb-2 text-sm font-semibold text-slate-700">D. Destino de fondos (Activo ME)</div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <SearchableSelect
+                            value={targetAssetId}
+                            options={assetOptions}
+                            placeholder="Selecciona cartera destino"
+                            onChange={setTargetAssetId}
+                            className="flex-1"
+                        />
+                        <FxButton variant="secondary" size="sm" onClick={onOpenAssetModal}>
+                            <Plus size={14} /> Crear activo
+                        </FxButton>
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">Se acreditara en el activo seleccionado al TC historico.</div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        <Eye size={14} /> Vista previa asiento (ARS)
+                    </div>
+                    <div className="mt-3 space-y-2 text-sm">
+                        <div className="flex items-center justify-between border-b border-dashed border-slate-200 pb-2">
+                            <span className="font-medium text-slate-800">Activo ME</span>
+                            <span className="font-mono text-slate-500">{formatCurrencyARS(previewAmount)}</span>
                         </div>
-
-                        {/* Preview panel */}
-                        {autoJournal && (
-                            <div className="border-t border-slate-200 pt-3 mt-3">
-                                {loadingPreview ? (
-                                    <div className="text-xs text-slate-400 text-center py-2">Calculando...</div>
-                                ) : preview?.error ? (
-                                    <div className="text-xs text-red-600 bg-red-50 p-2 rounded border border-red-200">
-                                        <Warning size={14} className="inline mr-1" />
-                                        {preview.error}
-                                    </div>
-                                ) : preview?.lines && preview.lines.length > 0 ? (
-                                    <>
-                                        <table className="w-full text-xs">
-                                            <thead>
-                                                <tr className="text-slate-400">
-                                                    <th className="text-left font-normal pb-2">Cuenta</th>
-                                                    <th className="text-right font-normal pb-2">Debe</th>
-                                                    <th className="text-right font-normal pb-2">Haber</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="font-mono text-slate-600">
-                                                {preview.lines.map((line, i) => (
-                                                    <tr key={i} className="border-t border-slate-100">
-                                                        <td className="py-1">
-                                                            <span className="text-slate-400">{line.accountCode}</span>{' '}
-                                                            <span className="text-slate-700">{line.accountName}</span>
-                                                        </td>
-                                                        <td className="text-right py-1">
-                                                            {line.debit > 0 ? formatCurrency(line.debit) : '-'}
-                                                        </td>
-                                                        <td className="text-right py-1">
-                                                            {line.credit > 0 ? formatCurrency(line.credit) : '-'}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                            <tfoot className="border-t border-slate-300 font-bold">
-                                                <tr>
-                                                    <td className="pt-2">TOTALES</td>
-                                                    <td className="text-right pt-2">{formatCurrency(preview.totalDebit)}</td>
-                                                    <td className="text-right pt-2">{formatCurrency(preview.totalCredit)}</td>
-                                                </tr>
-                                            </tfoot>
-                                        </table>
-
-                                        {/* Show result for sales */}
-                                        {type === 'VENTA' && preview.resultadoARS !== undefined && (
-                                            <div className={`mt-2 p-2 rounded text-xs ${preview.resultadoARS >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                                                <span className="font-bold">
-                                                    {preview.resultadoARS >= 0 ? 'Ganancia' : 'Pérdida'} por diferencia de cambio:
-                                                </span>{' '}
-                                                {formatCurrency(Math.abs(preview.resultadoARS))}
-                                                <div className="text-[10px] mt-1 opacity-70">
-                                                    Costo FIFO: {formatCurrency(preview.costoARS || 0)} | Producido: {formatCurrency(arsAmount - comisionARS)}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {!preview.isBalanced && (
-                                            <div className="mt-2 text-xs text-red-600">
-                                                <Warning size={14} className="inline mr-1" />
-                                                El asiento no balancea
-                                            </div>
-                                        )}
-                                    </>
-                                ) : (
-                                    <div className="text-xs text-slate-400 text-center py-2">
-                                        Completa los campos para ver el asiento
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                        <div className="flex items-center justify-between">
+                            <span className="font-medium text-slate-800">{ledgerAccountId ? accountOptions.find(o => o.value === ledgerAccountId)?.label : 'Pasivo ME'}</span>
+                            <span className="font-mono text-slate-500">{formatCurrencyARS(previewAmount)}</span>
+                        </div>
                     </div>
-
-                    <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-700"
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={saving || !accountId || amount <= 0 || (autoJournal && !!preview?.error)}
-                            className="px-6 py-2 text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-emerald-500 rounded-lg shadow disabled:opacity-50"
-                        >
-                            {saving ? 'Guardando...' : 'Guardar'}
-                        </button>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                        <input
+                            type="checkbox"
+                            checked={autoJournal}
+                            onChange={event => setAutoJournal(event.target.checked)}
+                        />
+                        Generar asiento automaticamente
                     </div>
-                </form>
+                </div>
             </div>
-        </div>
+        </FxModal>
     )
 }
 
-interface SettingsModalProps {
+function FxDebtPlanModalME2({
+    open,
+    onClose,
+    debt,
+}: {
     open: boolean
     onClose: () => void
-    settings: FxSettings
-    onSave: (settings: FxSettings) => Promise<void>
-    accounts: Account[]
+    debt: FxDebt | null
+}) {
+    if (!debt) return null
+
+    const remainingInstallments = debt.schedule?.length ? debt.schedule.filter(item => !item.paid).length : 0
+
+    return (
+        <FxModal
+            open={open}
+            onClose={onClose}
+            title={debt.name}
+            size="lg"
+            footer={<FxButton onClick={onClose}>Cerrar</FxButton>}
+        >
+            <div className="space-y-6">
+                <div className="grid gap-3 sm:grid-cols-4">
+                    <div className="rounded-xl bg-slate-50 px-4 py-3">
+                        <div className="text-xs text-slate-500">Saldo capital</div>
+                        <div className="font-mono text-lg font-semibold">{formatCurrencyME(debt.saldoME, debt.currency)}</div>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-4 py-3">
+                        <div className="text-xs text-slate-500">TC historico</div>
+                        <div className="font-mono text-lg font-semibold">{formatRate(debt.rateInicial)}</div>
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                        <div className="text-xs text-amber-700">Prox. venc.</div>
+                        <div className="font-mono text-lg font-semibold text-amber-700">
+                            {formatDateShort(debt.schedule?.find(item => !item.paid)?.dueDate)}
+                        </div>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-4 py-3">
+                        <div className="text-xs text-slate-500">Cuotas rest.</div>
+                        <div className="font-mono text-lg font-semibold">{remainingInstallments} / {debt.installments}</div>
+                    </div>
+                </div>
+
+                <div>
+                    <div className="mb-2 text-sm font-semibold text-slate-700">Cuadro de amortización</div>
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                        <div className="max-h-72 overflow-auto">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                                    <tr>
+                                        <th className="px-3 py-2 text-left">#</th>
+                                        <th className="px-3 py-2 text-left">Vencimiento</th>
+                                        <th className="px-3 py-2 text-right">Capital</th>
+                                        <th className="px-3 py-2 text-right">Interes</th>
+                                        <th className="px-3 py-2 text-right">Total</th>
+                                        <th className="px-3 py-2 text-center">Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(debt.schedule || []).map((item: FxDebtInstallment) => (
+                                        <tr key={item.number} className="border-t border-slate-200">
+                                            <td className="px-3 py-2">{item.number}</td>
+                                            <td className="px-3 py-2">{formatDateShort(item.dueDate)}</td>
+                                            <td className="px-3 py-2 text-right font-mono">{item.capitalME.toFixed(2)}</td>
+                                            <td className="px-3 py-2 text-right font-mono">{item.interestME.toFixed(2)}</td>
+                                            <td className="px-3 py-2 text-right font-mono">{item.totalME.toFixed(2)}</td>
+                                            <td className="px-3 py-2 text-center">
+                                                {item.paid ? <FxBadge tone="success">Pagada</FxBadge> : <FxBadge tone="warning">Pendiente</FxBadge>}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </FxModal>
+    )
 }
 
-function SettingsModal({ open, onClose, settings, onSave, accounts }: SettingsModalProps) {
-    const [mappings, setMappings] = useState<Partial<Record<FxAccountMappingKey, string>>>({})
-    const [assetRule, setAssetRule] = useState<'compra' | 'venta'>('compra')
-    const [liabilityRule, setLiabilityRule] = useState<'compra' | 'venta'>('venta')
-    const [saving, setSaving] = useState(false)
+function FxOperationModalME2({
+    open,
+    onClose,
+    periodId,
+    settings,
+    rates,
+    fxAccounts,
+    fxDebts,
+    ledgerAccounts,
+    onSuccess,
+}: {
+    open: boolean
+    onClose: () => void
+    periodId: string
+    settings: FxSettings | null
+    rates: ExchangeRate[]
+    fxAccounts: FxAccount[]
+    fxDebts: FxDebt[]
+    ledgerAccounts: Account[]
+    onSuccess: (message: string) => void
+}) {
+    const [activeTab, setActiveTab] = useState<'compra' | 'venta' | 'pago' | 'refi'>('compra')
+    const [journalMode, setJournalMode] = useState<JournalMode>('auto')
+    const [manualLines, setManualLines] = useState<ManualEntryLine[]>([])
+    const [preview, setPreview] = useState<FxJournalPreview | null>(null)
+    const [previewError, setPreviewError] = useState<string | null>(null)
+
+    const assetAccounts = useMemo(() => fxAccounts.filter(acc => acc.type === 'ASSET'), [fxAccounts])
+    const assetOptions = useMemo(() => assetAccounts.map(acc => ({ value: acc.id, label: acc.name, meta: acc.currency })), [assetAccounts])
+    const debtOptions = useMemo(() => fxDebts.map(debt => ({ value: debt.id, label: debt.name, meta: debt.currency })), [fxDebts])
+
+    const postableAccounts = useMemo(() => ledgerAccounts.filter(acc => !acc.isHeader), [ledgerAccounts])
+    const ledgerOptions = useMemo(
+        () => postableAccounts.map(acc => ({ value: acc.id, label: `${acc.code} - ${acc.name}` })),
+        [postableAccounts]
+    )
+
+    const [compra, setCompra] = useState({
+        accountId: '',
+        date: formatDateInput(),
+        amount: 0,
+        rate: 0,
+        rateType: 'custom' as QuoteType | 'custom',
+        rateSide: getDefaultRateSide('COMPRA'),
+        contrapartidaAccountId: '',
+        comisionARS: 0,
+        comisionAccountId: '',
+        counterparty: '',
+        reference: '',
+    })
+
+    const [venta, setVenta] = useState({
+        accountId: '',
+        date: formatDateInput(),
+        amount: 0,
+        rate: 0,
+        rateType: 'custom' as QuoteType | 'custom',
+        rateSide: getDefaultRateSide('VENTA'),
+        contrapartidaAccountId: '',
+        comisionARS: 0,
+        comisionAccountId: '',
+        counterparty: '',
+        reference: '',
+    })
+
+    const [pago, setPago] = useState({
+        debtId: '',
+        date: formatDateInput(),
+        capitalME: 0,
+        rate: 0,
+        interestARS: 0,
+        contrapartidaAccountId: '',
+        comisionARS: 0,
+        comisionAccountId: '',
+        source: 'ARS' as 'ARS' | 'ME',
+        sourceFxAccountId: '',
+    })
+
+    const [refi, setRefi] = useState({
+        debtId: '',
+        date: formatDateInput(),
+        amount: 0,
+        rate: 0,
+        targetAccountId: '',
+    })
 
     useEffect(() => {
-        setMappings(settings.accountMappings || {})
-        setAssetRule(settings.assetRateRule)
-        setLiabilityRule(settings.liabilityRateRule)
-    }, [settings])
+        if (!open) return
+        const oficial = getQuote(rates, 'Oficial')
+        const defaultRate = oficial?.venta || 0
+        setCompra(prev => ({ ...prev, rate: defaultRate }))
+        setVenta(prev => ({ ...prev, rate: oficial?.compra || 0 }))
+        setPago(prev => ({ ...prev, rate: defaultRate }))
+        setRefi(prev => ({ ...prev, rate: defaultRate }))
+        setJournalMode('auto')
+        setManualLines([])
+    }, [open, rates])
 
-    const handleSave = async () => {
-        setSaving(true)
+    const buildPreviewMovement = (): Omit<FxMovement, 'id' | 'createdAt' | 'updatedAt' | 'journalStatus' | 'linkedJournalEntryIds'> | null => {
+        if (!settings) return null
+
+        if (activeTab === 'compra' && compra.accountId) {
+            return {
+                date: compra.date,
+                type: 'COMPRA',
+                accountId: compra.accountId,
+                periodId,
+                amount: compra.amount,
+                currency: assetAccounts.find(acc => acc.id === compra.accountId)?.currency || 'USD',
+                rate: compra.rate,
+                rateType: compra.rateType,
+                rateSide: compra.rateSide as RateSide,
+                rateSource: 'Manual',
+                arsAmount: compra.amount * compra.rate,
+                contrapartidaAccountId: compra.contrapartidaAccountId,
+                comisionARS: compra.comisionARS,
+                comisionAccountId: compra.comisionAccountId,
+                autoJournal: journalMode !== 'none',
+                counterparty: compra.counterparty,
+                reference: compra.reference,
+            }
+        }
+
+        if (activeTab === 'venta' && venta.accountId) {
+            return {
+                date: venta.date,
+                type: 'VENTA',
+                accountId: venta.accountId,
+                periodId,
+                amount: venta.amount,
+                currency: assetAccounts.find(acc => acc.id === venta.accountId)?.currency || 'USD',
+                rate: venta.rate,
+                rateType: venta.rateType,
+                rateSide: venta.rateSide as RateSide,
+                rateSource: 'Manual',
+                arsAmount: venta.amount * venta.rate,
+                contrapartidaAccountId: venta.contrapartidaAccountId,
+                comisionARS: venta.comisionARS,
+                comisionAccountId: venta.comisionAccountId,
+                autoJournal: journalMode !== 'none',
+                counterparty: venta.counterparty,
+                reference: venta.reference,
+            }
+        }
+
+        if (activeTab === 'pago' && pago.debtId) {
+            const debt = fxDebts.find(item => item.id === pago.debtId)
+            if (!debt) return null
+            return {
+                date: pago.date,
+                type: 'PAGO_DEUDA',
+                accountId: debt.accountId,
+                periodId,
+                amount: pago.capitalME,
+                currency: debt.currency,
+                rate: pago.rate,
+                rateType: debt.rateType || 'custom',
+                rateSide: debt.rateSide,
+                rateSource: 'Manual',
+                arsAmount: pago.capitalME * pago.rate,
+                autoJournal: journalMode !== 'none',
+                debtId: debt.id,
+                capitalAmount: pago.capitalME,
+                interestARS: pago.interestARS,
+                contrapartidaAccountId: pago.contrapartidaAccountId,
+                comisionARS: pago.comisionARS,
+                comisionAccountId: pago.comisionAccountId,
+            }
+        }
+
+        if (activeTab === 'refi' && refi.debtId) {
+            const debt = fxDebts.find(item => item.id === refi.debtId)
+            if (!debt) return null
+            return {
+                date: refi.date,
+                type: 'DESEMBOLSO_DEUDA',
+                accountId: debt.accountId,
+                targetAccountId: refi.targetAccountId,
+                periodId,
+                amount: refi.amount,
+                currency: debt.currency,
+                rate: refi.rate,
+                rateType: debt.rateType || 'custom',
+                rateSide: debt.rateSide,
+                rateSource: 'Manual',
+                arsAmount: refi.amount * refi.rate,
+                autoJournal: journalMode !== 'none',
+                debtId: debt.id,
+            }
+        }
+
+        return null
+    }
+
+    useEffect(() => {
+        if (!open) return
+        const run = async () => {
+            const movement = buildPreviewMovement()
+            if (!movement || journalMode === 'none') {
+                setPreview(null)
+                setPreviewError(null)
+                return
+            }
+            const result = await previewFxMovementJournal(movement)
+            setPreview(result)
+            setPreviewError(result.error || null)
+            if (journalMode === 'manual' && result.lines.length > 0) {
+                setManualLines(result.lines.map(line => ({
+                    accountId: line.accountId,
+                    debit: line.debit,
+                    credit: line.credit,
+                    description: line.description,
+                })))
+            }
+        }
+        run()
+    }, [activeTab, compra, fxDebts, journalMode, open, pago, refi, venta])
+
+    const manualTotals = useMemo(() => {
+        const debit = manualLines.reduce((sum, line) => sum + (line.debit || 0), 0)
+        const credit = manualLines.reduce((sum, line) => sum + (line.credit || 0), 0)
+        return { debit, credit, balanced: Math.abs(debit - credit) < 0.01 }
+    }, [manualLines])
+
+    const handleRegister = async () => {
         try {
-            await onSave({
-                ...settings,
-                accountMappings: mappings,
-                assetRateRule: assetRule,
-                liabilityRateRule: liabilityRule,
-            })
-            onClose()
-        } finally {
-            setSaving(false)
+            if (activeTab === 'compra') {
+                if (!compra.accountId || compra.amount <= 0 || compra.rate <= 0) {
+                    onSuccess('Completa cuenta, monto y TC')
+                    return
+                }
+                if (journalMode !== 'none' && !compra.contrapartidaAccountId) {
+                    onSuccess('Selecciona la contrapartida ARS')
+                    return
+                }
+
+                const movement = await createFxMovement({
+                    date: compra.date,
+                    type: 'COMPRA',
+                    accountId: compra.accountId,
+                    periodId,
+                    amount: compra.amount,
+                    currency: assetAccounts.find(acc => acc.id === compra.accountId)?.currency || 'USD',
+                    rate: compra.rate,
+                    rateType: compra.rateType,
+                    rateSide: compra.rateSide as RateSide,
+                    rateSource: 'Manual',
+                    arsAmount: compra.amount * compra.rate,
+                    contrapartidaAccountId: compra.contrapartidaAccountId,
+                    comisionARS: compra.comisionARS,
+                    comisionAccountId: compra.comisionAccountId,
+                    autoJournal: journalMode === 'auto',
+                })
+
+                if (journalMode === 'manual') {
+                    if (!manualTotals.balanced) {
+                        onSuccess('El asiento manual no balancea')
+                        return
+                    }
+                    const entry = await createEntry({
+                        date: compra.date,
+                        memo: `Compra ${compra.amount} ${movement.currency}`,
+                        lines: manualLines.map(line => ({
+                            accountId: line.accountId,
+                            debit: line.debit,
+                            credit: line.credit,
+                            description: line.description,
+                        })),
+                        createdAt: new Date().toISOString(),
+                    })
+                    await linkFxMovementToEntries(movement.id, [entry.id])
+                    await db.fxMovements.update(movement.id, { journalStatus: 'desync', autoJournal: true })
+                }
+
+                onSuccess('Operación registrada')
+                onClose()
+                return
+            }
+
+            if (activeTab === 'venta') {
+                if (!venta.accountId || venta.amount <= 0 || venta.rate <= 0) {
+                    onSuccess('Completa cuenta, monto y TC')
+                    return
+                }
+                if (journalMode !== 'none' && !venta.contrapartidaAccountId) {
+                    onSuccess('Selecciona la contrapartida ARS')
+                    return
+                }
+
+                const balanceCheck = await calculateFxAccountBalance(venta.accountId, periodId, venta.date)
+                if (venta.amount > balanceCheck.balance) {
+                    onSuccess(`Saldo insuficiente. Disponible: ${balanceCheck.balance.toFixed(2)}`)
+                    return
+                }
+
+                const movement = await createFxMovement({
+                    date: venta.date,
+                    type: 'VENTA',
+                    accountId: venta.accountId,
+                    periodId,
+                    amount: venta.amount,
+                    currency: assetAccounts.find(acc => acc.id === venta.accountId)?.currency || 'USD',
+                    rate: venta.rate,
+                    rateType: venta.rateType,
+                    rateSide: venta.rateSide as RateSide,
+                    rateSource: 'Manual',
+                    arsAmount: venta.amount * venta.rate,
+                    contrapartidaAccountId: venta.contrapartidaAccountId,
+                    comisionARS: venta.comisionARS,
+                    comisionAccountId: venta.comisionAccountId,
+                    autoJournal: journalMode === 'auto',
+                })
+
+                if (journalMode === 'manual') {
+                    if (!manualTotals.balanced) {
+                        onSuccess('El asiento manual no balancea')
+                        return
+                    }
+                    const entry = await createEntry({
+                        date: venta.date,
+                        memo: `Venta ${venta.amount} ${movement.currency}`,
+                        lines: manualLines.map(line => ({
+                            accountId: line.accountId,
+                            debit: line.debit,
+                            credit: line.credit,
+                            description: line.description,
+                        })),
+                        createdAt: new Date().toISOString(),
+                    })
+                    await linkFxMovementToEntries(movement.id, [entry.id])
+                    await db.fxMovements.update(movement.id, { journalStatus: 'desync', autoJournal: true })
+                }
+
+                onSuccess('Operación registrada')
+                onClose()
+                return
+            }
+
+            if (activeTab === 'pago') {
+                if (!pago.debtId || pago.capitalME <= 0 || pago.rate <= 0) {
+                    onSuccess('Completa deuda, monto y TC')
+                    return
+                }
+                if (journalMode !== 'none' && !pago.contrapartidaAccountId) {
+                    onSuccess('Selecciona contrapartida')
+                    return
+                }
+
+                const debt = fxDebts.find(item => item.id === pago.debtId)
+                if (!debt) {
+                    onSuccess('Deuda no encontrada')
+                    return
+                }
+
+                const result = await addFxDebtPayment({
+                    debtId: debt.id,
+                    capitalME: pago.capitalME,
+                    interestARS: pago.interestARS,
+                    rate: pago.rate,
+                    date: pago.date,
+                    contrapartidaAccountId: pago.contrapartidaAccountId,
+                    comisionARS: pago.comisionARS,
+                    comisionAccountId: pago.comisionAccountId,
+                    autoJournal: journalMode === 'auto',
+                })
+
+                if (pago.source === 'ME' && pago.sourceFxAccountId) {
+                    await createFxMovement({
+                        date: pago.date,
+                        type: 'EGRESO',
+                        accountId: pago.sourceFxAccountId,
+                        periodId,
+                        amount: pago.capitalME,
+                        currency: debt.currency,
+                        rate: pago.rate,
+                        rateType: debt.rateType || 'custom',
+                        rateSide: debt.rateSide,
+                        rateSource: 'Manual',
+                        arsAmount: pago.capitalME * pago.rate,
+                        autoJournal: false,
+                    })
+                }
+
+                if (journalMode === 'manual') {
+                    if (!manualTotals.balanced) {
+                        onSuccess('El asiento manual no balancea')
+                        return
+                    }
+                    const entry = await createEntry({
+                        date: pago.date,
+                        memo: `Pago deuda ${debt.name}`,
+                        lines: manualLines.map(line => ({
+                            accountId: line.accountId,
+                            debit: line.debit,
+                            credit: line.credit,
+                            description: line.description,
+                        })),
+                        createdAt: new Date().toISOString(),
+                    })
+                    await linkFxMovementToEntries(result.movement.id, [entry.id])
+                    await db.fxMovements.update(result.movement.id, { journalStatus: 'desync', autoJournal: true })
+                }
+
+                onSuccess('Pago registrado')
+                onClose()
+                return
+            }
+
+            if (activeTab === 'refi') {
+                if (!refi.debtId || refi.amount <= 0 || refi.rate <= 0 || !refi.targetAccountId) {
+                    onSuccess('Completa deuda, monto, TC y destino')
+                    return
+                }
+
+                const debt = fxDebts.find(item => item.id === refi.debtId)
+                if (!debt) {
+                    onSuccess('Deuda no encontrada')
+                    return
+                }
+
+                await addFxDebtDisbursement({
+                    debtId: debt.id,
+                    amount: refi.amount,
+                    rate: refi.rate,
+                    date: refi.date,
+                    targetAccountId: refi.targetAccountId,
+                    autoJournal: journalMode === 'auto',
+                })
+
+                if (journalMode === 'manual') {
+                    onSuccess('Refinanciación registrada. Ajusta el asiento en conciliación si es necesario.')
+                } else {
+                    onSuccess('Refinanciación registrada')
+                }
+
+                onClose()
+            }
+        } catch (error) {
+            console.error(error)
+            onSuccess(error instanceof Error ? error.message : 'Error al Registrar Operación')
         }
     }
 
-    if (!open) return null
-
-    const mappingFields: { key: FxAccountMappingKey; label: string }[] = [
-        { key: 'cajaME', label: 'Caja Moneda Extranjera (USD)' },
-        { key: 'bancoME', label: 'Banco Moneda Extranjera (USD)' },
-        { key: 'pasivoME', label: 'Pasivo ME (Dólares/USD)' },
-        { key: 'diferenciaCambio', label: 'Diferencias de Cambio' },
-        { key: 'interesesGanados', label: 'Intereses Ganados ME' },
-        { key: 'interesesPerdidos', label: 'Intereses Perdidos ME' },
-        { key: 'cajaARS', label: 'Contrapartida Caja ARS' },
-        { key: 'bancoARS', label: 'Contrapartida Banco ARS' },
-        { key: 'comisionesBancarias', label: 'Gastos y Comisiones' },
-    ]
+    const activePreview = journalMode === 'manual' ? null : preview
 
     return (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-                <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-                    <h3 className="text-lg font-bold font-display text-slate-900">Configuracion ME</h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-red-500">
-                        <X size={20} weight="bold" />
-                    </button>
+        <FxModal
+            open={open}
+            onClose={onClose}
+            title="Registrar Operación ME"
+            footer={
+                <>
+                    <FxButton variant="secondary" onClick={onClose}>Cancelar</FxButton>
+                    <FxButton variant="secondary" title="Editar asiento" onClick={() => setJournalMode(journalMode === 'manual' ? 'auto' : 'manual')}>
+                        <PencilSimple size={16} weight="bold" />
+                    </FxButton>
+                    <FxButton onClick={handleRegister}>Registrar Operación</FxButton>
+                </>
+            }
+        >
+            <div className="space-y-6">
+                <div className="flex gap-2 rounded-lg bg-slate-100 p-1">
+                    {[
+                        { id: 'compra', label: 'Compra (Activo)' },
+                        { id: 'venta', label: 'Venta (Activo)' },
+                        { id: 'pago', label: 'Pago Deuda' },
+                        { id: 'refi', label: 'Refinanciación' },
+                    ].map(tab => (
+                        <button
+                            key={tab.id}
+                            type="button"
+                            className={cx(
+                                'flex-1 rounded-md px-3 py-2 text-xs font-semibold transition',
+                                activeTab === tab.id
+                                    ? 'bg-white text-blue-600 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-800'
+                            )}
+                            onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
                 </div>
 
-                <div className="p-6 space-y-4">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Cuentas por Defecto</label>
-                        <div className="space-y-2">
-                            {mappingFields.map(field => (
-                                <select
-                                    key={field.key}
-                                    value={mappings[field.key] || ''}
-                                    onChange={e => setMappings(prev => ({ ...prev, [field.key]: e.target.value || undefined }))}
-                                    className="w-full text-sm border border-slate-200 rounded-lg p-2 bg-slate-50"
-                                >
-                                    <option value="">{field.label} (auto-detectar)</option>
-                                    {accounts.filter(a => !a.isHeader).map(a => (
-                                        <option key={a.id} value={a.id}>{a.code} {a.name}</option>
-                                    ))}
-                                </select>
+                {activeTab === 'compra' && (
+                    <div className="space-y-4">
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Cuenta destino (ME)</label>
+                                <SearchableSelect
+                                    value={compra.accountId}
+                                    options={assetOptions}
+                                    placeholder="Selecciona cartera"
+                                    onChange={value => setCompra(prev => ({ ...prev, accountId: value }))}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Fecha operación</label>
+                                <FxInput type="date" value={compra.date} onChange={event => setCompra(prev => ({ ...prev, date: event.target.value }))} />
+                            </div>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Monto compra</label>
+                                <FxInput type="number" step="0.01" value={compra.amount} onChange={event => setCompra(prev => ({ ...prev, amount: Number(event.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Cotizacion</label>
+                                <div className="flex gap-2">
+                                    <FxInput type="number" step="0.01" value={compra.rate} onChange={event => setCompra(prev => ({ ...prev, rate: Number(event.target.value) || 0 }))} />
+                                    <FxButton variant="secondary" size="sm" onClick={() => {
+                                        const quote = getQuote(rates, 'Oficial')
+                                        if (quote) setCompra(prev => ({ ...prev, rate: quote.venta || prev.rate }))
+                                    }}>
+                                        <ArrowsClockwise size={14} />
+                                    </FxButton>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Origen fondos (ARS)</label>
+                            <SearchableSelect
+                                value={compra.contrapartidaAccountId}
+                                options={ledgerOptions}
+                                placeholder="Cuenta ARS"
+                                onChange={value => setCompra(prev => ({ ...prev, contrapartidaAccountId: value }))}
+                            />
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Comisiones ARS</label>
+                                <FxInput type="number" step="0.01" value={compra.comisionARS} onChange={event => setCompra(prev => ({ ...prev, comisionARS: Number(event.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Cuenta comision</label>
+                                <SearchableSelect
+                                    value={compra.comisionAccountId}
+                                    options={ledgerOptions}
+                                    placeholder="Cuenta gasto"
+                                    onChange={value => setCompra(prev => ({ ...prev, comisionAccountId: value }))}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'venta' && (
+                    <div className="space-y-4">
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Cuenta origen (ME)</label>
+                                <SearchableSelect
+                                    value={venta.accountId}
+                                    options={assetOptions}
+                                    placeholder="Selecciona cartera"
+                                    onChange={value => setVenta(prev => ({ ...prev, accountId: value }))}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Destino ARS</label>
+                                <SearchableSelect
+                                    value={venta.contrapartidaAccountId}
+                                    options={ledgerOptions}
+                                    placeholder="Cuenta ARS"
+                                    onChange={value => setVenta(prev => ({ ...prev, contrapartidaAccountId: value }))}
+                                />
+                            </div>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Monto venta</label>
+                                <FxInput type="number" step="0.01" value={venta.amount} onChange={event => setVenta(prev => ({ ...prev, amount: Number(event.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Cotizacion</label>
+                                <FxInput type="number" step="0.01" value={venta.rate} onChange={event => setVenta(prev => ({ ...prev, rate: Number(event.target.value) || 0 }))} />
+                            </div>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Comisiones ARS</label>
+                                <FxInput type="number" step="0.01" value={venta.comisionARS} onChange={event => setVenta(prev => ({ ...prev, comisionARS: Number(event.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Cuenta comision</label>
+                                <SearchableSelect
+                                    value={venta.comisionAccountId}
+                                    options={ledgerOptions}
+                                    placeholder="Cuenta gasto"
+                                    onChange={value => setVenta(prev => ({ ...prev, comisionAccountId: value }))}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'pago' && (
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Pasivo a pagar</label>
+                            <SearchableSelect
+                                value={pago.debtId}
+                                options={debtOptions}
+                                placeholder="Selecciona deuda"
+                                onChange={value => setPago(prev => ({ ...prev, debtId: value }))}
+                            />
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Monto capital (ME)</label>
+                                <FxInput type="number" step="0.01" value={pago.capitalME} onChange={event => setPago(prev => ({ ...prev, capitalME: Number(event.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">TC pago</label>
+                                <FxInput type="number" step="0.01" value={pago.rate} onChange={event => setPago(prev => ({ ...prev, rate: Number(event.target.value) || 0 }))} />
+                            </div>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Interes ARS</label>
+                                <FxInput type="number" step="0.01" value={pago.interestARS} onChange={event => setPago(prev => ({ ...prev, interestARS: Number(event.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Fecha pago</label>
+                                <FxInput type="date" value={pago.date} onChange={event => setPago(prev => ({ ...prev, date: event.target.value }))} />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Origen del pago</label>
+                            <FxSelect value={pago.source} onChange={event => setPago(prev => ({ ...prev, source: event.target.value as 'ARS' | 'ME' }))}>
+                                <option value="ARS">Desde ARS</option>
+                                <option value="ME">Desde Activo ME</option>
+                            </FxSelect>
+                        </div>
+                        {pago.source === 'ME' ? (
+                            <SearchableSelect
+                                value={pago.sourceFxAccountId}
+                                options={assetOptions}
+                                placeholder="Selecciona cartera ME"
+                                onChange={value => setPago(prev => ({ ...prev, sourceFxAccountId: value, contrapartidaAccountId: fxAccounts.find(a => a.id === value)?.accountId || prev.contrapartidaAccountId }))}
+                            />
+                        ) : (
+                            <SearchableSelect
+                                value={pago.contrapartidaAccountId}
+                                options={ledgerOptions}
+                                placeholder="Cuenta ARS"
+                                onChange={value => setPago(prev => ({ ...prev, contrapartidaAccountId: value }))}
+                            />
+                        )}
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Comisiones ARS</label>
+                                <FxInput type="number" step="0.01" value={pago.comisionARS} onChange={event => setPago(prev => ({ ...prev, comisionARS: Number(event.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Cuenta comision</label>
+                                <SearchableSelect
+                                    value={pago.comisionAccountId}
+                                    options={ledgerOptions}
+                                    placeholder="Cuenta gasto"
+                                    onChange={value => setPago(prev => ({ ...prev, comisionAccountId: value }))}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'refi' && (
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500">Pasivo</label>
+                            <SearchableSelect
+                                value={refi.debtId}
+                                options={debtOptions}
+                                placeholder="Selecciona deuda"
+                                onChange={value => setRefi(prev => ({ ...prev, debtId: value }))}
+                            />
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Monto adicional (ME)</label>
+                                <FxInput type="number" step="0.01" value={refi.amount} onChange={event => setRefi(prev => ({ ...prev, amount: Number(event.target.value) || 0 }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">TC historico</label>
+                                <FxInput type="number" step="0.01" value={refi.rate} onChange={event => setRefi(prev => ({ ...prev, rate: Number(event.target.value) || 0 }))} />
+                            </div>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Fecha</label>
+                                <FxInput type="date" value={refi.date} onChange={event => setRefi(prev => ({ ...prev, date: event.target.value }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500">Destino fondos (Activo ME)</label>
+                                <SearchableSelect
+                                    value={refi.targetAccountId}
+                                    options={assetOptions}
+                                    placeholder="Selecciona cartera"
+                                    onChange={value => setRefi(prev => ({ ...prev, targetAccountId: value }))}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            <Eye size={14} /> Vista previa del asiento (ARS)
+                        </div>
+                        {previewError && <FxBadge tone="warning">{previewError}</FxBadge>}
+                    </div>
+
+                    {journalMode === 'manual' && (
+                        <div className="mt-3">
+                            <ManualEntryEditor lines={manualLines} accounts={postableAccounts} onChange={setManualLines} />
+                            <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                                <span>Debe: {formatCurrencyARS(manualTotals.debit)}</span>
+                                <span>Haber: {formatCurrencyARS(manualTotals.credit)}</span>
+                                <span className={manualTotals.balanced ? 'text-emerald-600' : 'text-rose-600'}>
+                                    {manualTotals.balanced ? 'Balanceado' : 'No balancea'}
+                                </span>
+                            </div>
+                        </div>
+                    )}
+
+                    {journalMode !== 'manual' && activePreview && (
+                        <div className="mt-3 space-y-2 text-sm">
+                            {activePreview.lines.map((line: FxJournalPreview['lines'][number], index: number) => (
+                                <div key={`${line.accountId}-${index}`} className="flex items-center justify-between border-b border-dashed border-slate-200 pb-2 last:border-b-0">
+                                    <span className="font-medium text-slate-800">
+                                        {line.accountCode ? `${line.accountCode} - ${line.accountName}` : line.accountName}
+                                    </span>
+                                    <span className="font-mono text-slate-500">
+                                        {line.debit > 0 ? formatCurrencyARS(line.debit) : '-'} / {line.credit > 0 ? formatCurrencyARS(line.credit) : '-'}
+                                    </span>
+                                </div>
                             ))}
                         </div>
-                    </div>
+                    )}
 
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Reglas de Valuacion</label>
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between text-sm text-slate-700 p-2 border border-slate-200 rounded-lg">
-                                <span>Activos usan TC</span>
-                                <div className="flex bg-slate-100 rounded p-0.5">
-                                    <button
-                                        type="button"
-                                        onClick={() => setAssetRule('compra')}
-                                        className={`px-2 py-0.5 text-xs font-bold rounded ${assetRule === 'compra' ? 'bg-white shadow' : 'text-slate-500'}`}
-                                    >
-                                        Compra
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setAssetRule('venta')}
-                                        className={`px-2 py-0.5 text-xs font-bold rounded ${assetRule === 'venta' ? 'bg-white shadow' : 'text-slate-500'}`}
-                                    >
-                                        Venta
-                                    </button>
-                                </div>
-                            </div>
-                            <div className="flex items-center justify-between text-sm text-slate-700 p-2 border border-slate-200 rounded-lg">
-                                <span>Pasivos usan TC</span>
-                                <div className="flex bg-slate-100 rounded p-0.5">
-                                    <button
-                                        type="button"
-                                        onClick={() => setLiabilityRule('compra')}
-                                        className={`px-2 py-0.5 text-xs font-bold rounded ${liabilityRule === 'compra' ? 'bg-white shadow' : 'text-slate-500'}`}
-                                    >
-                                        Compra
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setLiabilityRule('venta')}
-                                        className={`px-2 py-0.5 text-xs font-bold rounded ${liabilityRule === 'venta' ? 'bg-white shadow' : 'text-slate-500'}`}
-                                    >
-                                        Venta
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+                    <div className="mt-4 space-y-2 text-xs text-slate-500">
+                        <label className="flex items-center gap-2">
+                            <input
+                                type="radio"
+                                name="journalMode"
+                                checked={journalMode === 'auto'}
+                                onChange={() => setJournalMode('auto')}
+                            />
+                            Generar asiento automaticamente
+                        </label>
+                        <label className="flex items-center gap-2">
+                            <input
+                                type="radio"
+                                name="journalMode"
+                                checked={journalMode === 'none'}
+                                onChange={() => setJournalMode('none')}
+                            />
+                            No generar asiento (no contable)
+                        </label>
                     </div>
-                </div>
-
-                <div className="p-4 border-t border-slate-200 flex justify-end">
-                    <button
-                        onClick={handleSave}
-                        disabled={saving}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold disabled:opacity-50"
-                    >
-                        {saving ? 'Guardando...' : 'Guardar Cambios'}
-                    </button>
                 </div>
             </div>
-        </div>
+        </FxModal>
+    )
+}
+
+function LinkEntryModal({
+    open,
+    onClose,
+    movement,
+    entries,
+    onLink,
+}: {
+    open: boolean
+    onClose: () => void
+    movement: FxMovement | null
+    entries: { id: string; memo: string; date: string; total?: number }[]
+    onLink: (entryId: string) => void
+}) {
+    const [selected, setSelected] = useState('')
+
+    useEffect(() => {
+        if (!open) return
+        setSelected('')
+    }, [open])
+
+    if (!movement) return null
+
+    return (
+        <FxModal
+            open={open}
+            onClose={onClose}
+            title="Vincular asiento existente"
+            footer={
+                <>
+                    <FxButton variant="secondary" onClick={onClose}>Cancelar</FxButton>
+                    <FxButton onClick={() => selected && onLink(selected)} disabled={!selected}>Vincular</FxButton>
+                </>
+            }
+        >
+            <div className="space-y-3">
+                <div className="text-xs text-slate-500">Movimiento: {movement.type} - {movement.date}</div>
+                <div className="space-y-2">
+                    {entries.map(entry => (
+                        <button
+                            key={entry.id}
+                            type="button"
+                            className={cx(
+                                'w-full rounded-lg border px-3 py-2 text-left text-sm',
+                                selected === entry.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'
+                            )}
+                            onClick={() => setSelected(entry.id)}
+                        >
+                            <div className="font-medium text-slate-800">{entry.memo}</div>
+                            <div className="text-xs text-slate-500">{entry.date} · {entry.total ? formatCurrencyARS(entry.total) : ''}</div>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        </FxModal>
     )
 }
 
 // ========================================
-// Main Page Component
+// Main Page
 // ========================================
 
 export default function MonedaExtranjeraPage() {
     const navigate = useNavigate()
-    const { year: periodYear } = usePeriodYear()
-    const periodId = String(periodYear)
+    const { year } = usePeriodYear()
+    const periodId = String(year)
 
-    // State
     const [activeTab, setActiveTab] = useState<TabId>('dashboard')
     const [settings, setSettings] = useState<FxSettings | null>(null)
-    const [fxAccounts, setFxAccounts] = useState<FxAccount[]>([])
-    const [movements, setMovements] = useState<FxMovement[]>([])
+    const [valuationMode, setValuationMode] = useState<ValuationMode>('contable')
     const [rates, setRates] = useState<ExchangeRate[]>([])
     const [ratesError, setRatesError] = useState<string | null>(null)
     const [ratesLoading, setRatesLoading] = useState(false)
-    const [isLoading, setIsLoading] = useState(true)
-    const [valuationMode, setValuationMode] = useState<ValuationMode>('contable')
-    const [gestionQuoteType, setGestionQuoteType] = useState<QuoteType>('Blue')
 
-    // Modal state
-    const [accountModalOpen, setAccountModalOpen] = useState(false)
-    const [accountModalType, setAccountModalType] = useState<'ASSET' | 'LIABILITY'>('ASSET')
-    const [editingAccount, setEditingAccount] = useState<FxAccount | null>(null)
-    const [movementModalOpen, setMovementModalOpen] = useState(false)
-    const [editingMovement, setEditingMovement] = useState<FxMovement | null>(null)
-    const [settingsModalOpen, setSettingsModalOpen] = useState(false)
-
-    // Toast
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
-    const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray(), [])
-    const journalEntries = useLiveQuery(() => db.entries.orderBy('date').reverse().toArray(), [])
+    const [assetModalOpen, setAssetModalOpen] = useState(false)
+    const [debtModalOpen, setDebtModalOpen] = useState(false)
+    const [operationModalOpen, setOperationModalOpen] = useState(false)
+    const [planModalOpen, setPlanModalOpen] = useState(false)
+    const [selectedDebt, setSelectedDebt] = useState<FxDebt | null>(null)
 
-    const showToast = useCallback((message: string, type: 'success' | 'error') => {
+    const [linkModalOpen, setLinkModalOpen] = useState(false)
+    const [linkTargetMovement, setLinkTargetMovement] = useState<FxMovement | null>(null)
+
+    const [reconciliation, setReconciliation] = useState<{ movementsWithoutEntry: FxMovement[]; orphanEntries: any[] }>({
+        movementsWithoutEntry: [],
+        orphanEntries: [],
+    })
+
+    const fxAccounts = useLiveQuery(() => getAllFxAccounts(periodId), [periodId]) || []
+    const fxDebts = useLiveQuery(() => getAllFxDebts(periodId), [periodId]) || []
+    const movements = useLiveQuery(() => getAllFxMovements(periodId), [periodId]) || []
+    const ledgerAccounts = useLiveQuery(() => db.accounts.toArray(), []) || []
+
+    const assetAccounts = useMemo(() => fxAccounts.filter(acc => acc.type === 'ASSET'), [fxAccounts])
+
+    const accountMap = useMemo(() => new Map(fxAccounts.map(acc => [acc.id, acc])), [fxAccounts])
+    const ledgerMap = useMemo(() => new Map(ledgerAccounts.map(acc => [acc.id, acc])), [ledgerAccounts])
+
+    const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
         setToast({ message, type })
-        setTimeout(() => setToast(null), 3000)
-    }, [])
-
-    // Load data
-    const loadData = useCallback(async () => {
-        try {
-            setIsLoading(true)
-            await reconcileFxJournalLinks(periodId)
-            const [loadedSettings, loadedAccounts, loadedMovements] = await Promise.all([
-                loadFxSettings(),
-                getAllFxAccounts(periodId),
-                getAllFxMovements(periodId),
-            ])
-            setSettings(loadedSettings)
-            setFxAccounts(loadedAccounts)
-            setMovements(loadedMovements)
-            setValuationMode(loadedSettings.defaultValuationMode)
-            setGestionQuoteType(loadedSettings.gestionQuoteType)
-        } catch (error) {
-            console.error('Error loading FX data:', error)
-            showToast('Error al cargar datos', 'error')
-        } finally {
-            setIsLoading(false)
-        }
-    }, [periodId, showToast])
-
-    const loadRates = useCallback(async (forceRefresh = false) => {
-        setRatesLoading(true)
-        try {
-            const result = await getExchangeRates(forceRefresh)
-            setRates(result.rates)
-            setRatesError(result.error || null)
-        } catch (error) {
-            setRatesError('Error al cargar cotizaciones')
-        } finally {
-            setRatesLoading(false)
-        }
+        setTimeout(() => setToast(null), 3500)
     }, [])
 
     useEffect(() => {
-        loadData()
-        loadRates()
-    }, [loadData, loadRates])
+        loadFxSettings().then(value => {
+            setSettings(value)
+            setValuationMode(value.defaultValuationMode)
+        })
+    }, [])
 
-    // Computed values
-    const assetAccounts = useMemo(() => fxAccounts.filter(a => a.type === 'ASSET'), [fxAccounts])
-    const liabilityAccounts = useMemo(() => fxAccounts.filter(a => a.type === 'LIABILITY'), [fxAccounts])
+    const fetchRates = useCallback(async (force = false) => {
+        setRatesLoading(true)
+        const result = await getExchangeRates(force)
+        setRates(result.rates || [])
+        setRatesError(result.error || null)
+        setRatesLoading(false)
+    }, [])
 
-    const currentRate = useMemo(() => {
-        const quoteType = valuationMode === 'contable' ? 'Oficial' : gestionQuoteType
-        return getQuote(rates, quoteType)
-    }, [rates, valuationMode, gestionQuoteType])
+    useEffect(() => {
+        fetchRates(false)
+    }, [fetchRates])
 
-    // Calculate account balances and valuations
+    const currentQuoteType: QuoteType = useMemo(() => {
+        if (valuationMode === 'gestion') {
+            return settings?.gestionQuoteType || 'Blue'
+        }
+        return 'Oficial'
+    }, [settings?.gestionQuoteType, valuationMode])
+
+    const currentRate = useMemo(() => getQuote(rates, currentQuoteType), [rates, currentQuoteType])
+
     const accountValuations = useMemo(() => {
         if (!settings || !currentRate) return []
 
-        return fxAccounts.map(account => {
-            // Calculate balance from movements
+        return assetAccounts.map(account => {
             let balance = account.openingBalance
             let totalArsHistorical = account.openingBalance * account.openingRate
 
             const accountMovements = movements.filter(m => m.accountId === account.id)
             for (const m of accountMovements) {
-                const sign = account.type === 'ASSET'
-                    ? (['COMPRA', 'INGRESO'].includes(m.type) ? 1 : -1)
-                    : (m.type === 'PAGO_DEUDA' ? -1 : 1)
+                const sign = ['COMPRA', 'INGRESO', 'AJUSTE'].includes(m.type) ? 1 : -1
                 balance += sign * m.amount
                 totalArsHistorical += sign * m.arsAmount
             }
 
-            // Handle incoming transfers
-            const incomingTransfers = movements.filter(m => m.type === 'TRANSFERENCIA' && m.targetAccountId === account.id)
+            const incomingTransfers = movements.filter(m =>
+                (m.type === 'TRANSFERENCIA' || m.type === 'TOMA_DEUDA' || m.type === 'DESEMBOLSO_DEUDA') &&
+                m.targetAccountId === account.id
+            )
             for (const m of incomingTransfers) {
                 balance += m.amount
                 totalArsHistorical += m.arsAmount
@@ -1160,13 +2068,9 @@ export default function MonedaExtranjeraPage() {
             const rateHistorical = balance > 0 ? totalArsHistorical / balance : account.openingRate
             const arsHistorical = balance * rateHistorical
 
-            const rateRule = account.type === 'LIABILITY' ? settings.liabilityRateRule : settings.assetRateRule
+            const rateRule = settings.assetRateRule
             const rateCurrent = getRateValue(currentRate, rateRule)
             const arsCurrent = balance * rateCurrent
-
-            const differenceArs = account.type === 'ASSET'
-                ? arsCurrent - arsHistorical
-                : arsHistorical - arsCurrent // For liabilities, positive diff means debt increased
 
             return {
                 account,
@@ -1175,618 +2079,329 @@ export default function MonedaExtranjeraPage() {
                 arsHistorical,
                 rateCurrent,
                 arsCurrent,
-                differenceArs,
             }
         })
-    }, [fxAccounts, movements, settings, currentRate])
+    }, [assetAccounts, currentRate, movements, settings])
 
-    // KPIs
+    const debtSummaries = useMemo(() => {
+        if (!settings || !currentRate) return []
+        return fxDebts.map(debt => {
+            const rateHistorical = debt.rateInicial
+            const arsHistorical = debt.saldoME * rateHistorical
+            const rateCurrent = getRateValue(currentRate, settings.liabilityRateRule)
+            const arsCurrent = debt.saldoME * rateCurrent
+            const nextDue = debt.schedule?.find(item => !item.paid)?.dueDate
+            return {
+                debt,
+                rateHistorical,
+                arsHistorical,
+                rateCurrent,
+                arsCurrent,
+                nextDue,
+            }
+        })
+    }, [fxDebts, currentRate, settings])
+
     const kpis = useMemo(() => {
-        const assetValuations = accountValuations.filter(v => v.account.type === 'ASSET')
-        const liabilityValuations = accountValuations.filter(v => v.account.type === 'LIABILITY')
-
-        const oficialRate = getQuote(rates, 'Oficial')
-        const oficialCompra = oficialRate?.compra || 1
-        const oficialVenta = oficialRate?.venta || 1
-
-        const totalAssetsUSD = assetValuations.reduce((sum, v) => sum + v.balance, 0)
-        const totalLiabilitiesUSD = liabilityValuations.reduce((sum, v) => sum + v.balance, 0)
-
-        const totalAssetsArsOficial = totalAssetsUSD * oficialCompra
-        const totalLiabilitiesArsOficial = totalLiabilitiesUSD * oficialVenta
-
-        const totalAssetsArsHistorical = assetValuations.reduce((sum, v) => sum + v.arsHistorical, 0)
-        const totalAssetsArsCurrent = assetValuations.reduce((sum, v) => sum + v.arsCurrent, 0)
+        const totalAssetsUSD = accountValuations.reduce((sum, v) => sum + v.balance, 0)
+        const totalLiabilitiesUSD = debtSummaries.reduce((sum, v) => sum + v.debt.saldoME, 0)
+        const totalAssetsArs = accountValuations.reduce((sum, v) => sum + v.arsCurrent, 0)
+        const totalLiabilitiesArs = debtSummaries.reduce((sum, v) => sum + v.arsCurrent, 0)
+        const latentDifference = accountValuations.reduce((sum, v) => sum + (v.arsCurrent - v.arsHistorical), 0)
 
         return {
             totalAssetsUSD,
             totalLiabilitiesUSD,
             netPositionUSD: totalAssetsUSD - totalLiabilitiesUSD,
-            totalAssetsArsOficial,
-            totalLiabilitiesArsOficial,
-            netPositionArsOficial: totalAssetsArsOficial - totalLiabilitiesArsOficial,
-            latentDifferenceArs: totalAssetsArsCurrent - totalAssetsArsHistorical,
-            totalAssetsArsHistorical,
-            totalAssetsArsCurrent,
+            totalAssetsArs,
+            totalLiabilitiesArs,
+            netPositionArs: totalAssetsArs - totalLiabilitiesArs,
+            latentDifference,
         }
-    }, [accountValuations, rates])
+    }, [accountValuations, debtSummaries])
 
-    // Reconciliation data
-    const reconciliationData = useMemo(() => {
-        const movementsWithoutEntry = movements.filter(m => m.journalStatus === 'none' || m.journalStatus === 'missing')
-        const fxEntries = (journalEntries || []).filter(e => e.sourceModule === 'fx')
-        const linkedMovementIds = new Set(movements.flatMap(m => m.linkedJournalEntryIds || []))
-        const entriesWithoutMovement = fxEntries.filter(e => !linkedMovementIds.has(e.id))
+    const reconciliationStats = useMemo(() => {
+        const desync = movements.filter(m => m.journalStatus === 'desync')
+        const ok = movements.filter(m => ['generated', 'linked'].includes(m.journalStatus))
+        return { desync, ok }
+    }, [movements])
 
-        return {
-            movementsWithoutEntry,
-            entriesWithoutMovement,
-            totalPending: movementsWithoutEntry.length + entriesWithoutMovement.length,
+    const refreshReconciliation = useCallback(async () => {
+        const result = await getReconciliationData(periodId)
+        setReconciliation({
+            movementsWithoutEntry: result.movementsWithoutEntry,
+            orphanEntries: result.orphanEntries,
+        })
+    }, [periodId])
+
+    useEffect(() => {
+        if (activeTab === 'conciliacion') {
+            refreshReconciliation()
         }
-    }, [movements, journalEntries])
+    }, [activeTab, refreshReconciliation, movements])
 
-    // Handlers
-    const handleSaveAccount = async (accountData: Omit<FxAccount, 'id' | 'createdAt' | 'updatedAt'>) => {
-        if (editingAccount) {
-            await updateFxAccount(editingAccount.id, accountData)
-            showToast('Cuenta actualizada', 'success')
-        } else {
-            await createFxAccount(accountData)
-            showToast('Cuenta creada', 'success')
-        }
-        await loadData()
-        setEditingAccount(null)
-    }
-
-    const handleDeleteAccount = async (id: string) => {
-        if (!confirm('Eliminar esta cuenta?')) return
-        const result = await deleteFxAccount(id)
-        if (result.success) {
-            showToast('Cuenta eliminada', 'success')
-            await loadData()
-        } else {
-            showToast(result.error || 'Error al eliminar', 'error')
+    const handleToggleMode = async () => {
+        const next: ValuationMode = valuationMode === 'contable' ? 'gestion' : 'contable'
+        setValuationMode(next)
+        if (settings) {
+            const updated = { ...settings, defaultValuationMode: next }
+            setSettings(updated)
+            await saveFxSettings(updated)
         }
     }
 
-    const handleSaveMovement = async (movementData: Omit<FxMovement, 'id' | 'createdAt' | 'updatedAt' | 'journalStatus' | 'linkedJournalEntryIds'>) => {
-        if (editingMovement) {
-            await updateFxMovementWithJournal(editingMovement.id, movementData)
-            showToast('Movimiento actualizado', 'success')
-        } else {
-            await createFxMovement(movementData)
-            showToast(movementData.autoJournal ? 'Movimiento y asiento creados' : 'Movimiento registrado', 'success')
-        }
-        await loadData()
-        setEditingMovement(null)
-    }
+    const movementSearchOptions = useMemo(() => {
+        return movements.filter(m => !['TRANSFERENCIA'].includes(m.type))
+    }, [movements])
+
+    const [movementSearch, setMovementSearch] = useState('')
+
+    const filteredMovements = useMemo(() => {
+        const query = movementSearch.toLowerCase().trim()
+        if (!query) return movementSearchOptions
+        return movementSearchOptions.filter(movement => {
+            const accountName = accountMap.get(movement.accountId)?.name || ''
+            const debtName = movement.debtId ? fxDebts.find(debt => debt.id === movement.debtId)?.name || '' : ''
+            return (
+                accountName.toLowerCase().includes(query) ||
+                debtName.toLowerCase().includes(query) ||
+                (movement.reference || '').toLowerCase().includes(query) ||
+                (movement.counterparty || '').toLowerCase().includes(query)
+            )
+        })
+    }, [accountMap, fxDebts, movementSearch, movementSearchOptions])
+
+    const conciliationCount = reconciliation.movementsWithoutEntry.length + reconciliation.orphanEntries.length + reconciliationStats.desync.length
 
     const handleGenerateJournal = async (movementId: string) => {
         try {
             await generateJournalForFxMovement(movementId)
             showToast('Asiento generado', 'success')
-            await loadData()
+            refreshReconciliation()
         } catch (error) {
             showToast(error instanceof Error ? error.message : 'Error al generar asiento', 'error')
         }
     }
 
-    const handleDeleteMovement = async (id: string) => {
-        if (!confirm('Eliminar este movimiento?')) return
-        const result = await deleteFxMovementWithJournal(id, { keepManualEntries: true })
-        if (result.success) {
-            showToast('Movimiento eliminado', 'success')
-            await loadData()
-        } else {
-            showToast(result.error || 'Error al eliminar', 'error')
+    const handleLinkEntry = async (movement: FxMovement, entryId: string) => {
+        try {
+            await linkFxMovementToEntries(movement.id, [entryId])
+            showToast('Asiento vinculado', 'success')
+            setLinkModalOpen(false)
+            refreshReconciliation()
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Error al vincular', 'error')
         }
     }
 
-    const handleSaveSettings = async (newSettings: FxSettings) => {
-        await saveFxSettings(newSettings)
-        setSettings(newSettings)
-        showToast('Configuracion guardada', 'success')
-    }
-
-    const openAccountModal = (type: 'ASSET' | 'LIABILITY', account?: FxAccount) => {
-        setAccountModalType(type)
-        setEditingAccount(account || null)
-        setAccountModalOpen(true)
-    }
-
-    const openMovementModal = (movement?: FxMovement) => {
-        setEditingMovement(movement || null)
-        setMovementModalOpen(true)
-    }
-
-    if (isLoading || !settings) {
-        return (
-            <div className="flex-1 flex items-center justify-center">
-                <div className="text-slate-400">Cargando...</div>
-            </div>
-        )
+    const handleMarkNonAccounting = async (movementId: string) => {
+        try {
+            await markFxMovementAsNonAccounting(movementId)
+            showToast('Marcado como no contable', 'success')
+            refreshReconciliation()
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Error al actualizar', 'error')
+        }
     }
 
     return (
-        <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
+        <div className="space-y-6">
+            {/* Ticker */}
+            <div className="flex items-center gap-6 overflow-x-auto rounded-xl bg-slate-900 px-6 py-2 text-xs font-mono text-white">
+                {['Oficial', 'Blue', 'MEP', 'CCL', 'Cripto'].map(type => {
+                    const quote = getQuote(rates, type as QuoteType)
+                    return (
+                        <div key={type} className="flex items-center gap-2 whitespace-nowrap">
+                            <span className="text-slate-300">USD {type.toUpperCase()}:</span>
+                            <span className="text-emerald-300">C {quote ? formatRate(quote.compra) : '--'}</span>
+                            <span className="text-emerald-300">V {quote ? formatRate(quote.venta) : '--'}</span>
+                        </div>
+                    )
+                })}
+            </div>
+
             {/* Header */}
-            <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-6 flex-shrink-0">
-                <div className="flex items-center gap-4">
-                    <button
-                        onClick={() => navigate('/operaciones')}
-                        className="text-slate-400 hover:text-blue-600 transition-colors"
-                    >
-                        <ArrowLeft size={20} />
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-4">
+                <div className="flex items-center justify-between text-sm text-slate-500">
+                    <button type="button" className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-900" onClick={() => navigate('/operaciones')}>
+                        <ArrowLeft size={14} /> Operaciones
                     </button>
-                    <h1 className="text-xl font-display font-bold text-slate-900">Moneda Extranjera</h1>
-                </div>
-                <button
-                    onClick={() => setSettingsModalOpen(true)}
-                    className="text-slate-400 hover:text-blue-600 transition-colors p-2 rounded-full hover:bg-slate-50"
-                >
-                    <Gear size={24} />
-                </button>
-            </header>
-
-            {/* Ticker Bar */}
-            <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between gap-6 flex-shrink-0">
-                <div className="flex items-center gap-6 overflow-x-auto flex-1">
-                    {rates.map(rate => (
-                        <div key={rate.type} className="flex flex-col min-w-[100px] border-r border-slate-200 pr-6 last:border-0">
-                            <div className="flex items-center gap-2 mb-1">
-                                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">{rate.type}</span>
-                                <span className="text-[10px] text-slate-400 bg-slate-50 px-1 rounded">{rate.source}</span>
-                            </div>
-                            <div className="flex gap-3 font-mono text-xs">
-                                <div><span className="text-slate-400">C:</span> <span className="text-slate-600 font-medium">${formatRate(rate.compra)}</span></div>
-                                <div><span className="text-slate-400">V:</span> <span className="text-blue-600 font-bold">${formatRate(rate.venta)}</span></div>
-                            </div>
-                        </div>
-                    ))}
-                    {rates.length === 0 && !ratesLoading && (
-                        <div className="text-sm text-slate-400">{ratesError || 'Sin cotizaciones disponibles'}</div>
-                    )}
-                    {ratesLoading && (
-                        <div className="text-sm text-slate-400">Cargando cotizaciones...</div>
-                    )}
-                    {ratesError && rates.length > 0 && (
-                        <div className="text-xs text-amber-600 flex items-center gap-1">
-                            <Warning size={12} /> {ratesError}
-                        </div>
-                    )}
-                </div>
-
-                {/* Mode Switcher */}
-                <div className="flex items-center gap-4 border-l border-slate-200 pl-6 flex-shrink-0">
-                    <div className="flex flex-col items-end">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Modo de Valuacion</span>
-                        <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
+                    <div className="flex items-center gap-3">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Modo valuación</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500">Contable</span>
                             <button
-                                onClick={() => setValuationMode('contable')}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${valuationMode === 'contable' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                                type="button"
+                                className={cx(
+                                    'relative inline-flex h-6 w-11 items-center rounded-full transition',
+                                    valuationMode === 'gestion' ? 'bg-blue-500' : 'bg-slate-200'
+                                )}
+                                onClick={handleToggleMode}
                             >
-                                Contable
+                                <span
+                                    className={cx(
+                                        'inline-block h-4 w-4 transform rounded-full bg-white shadow transition',
+                                        valuationMode === 'gestion' ? 'translate-x-6' : 'translate-x-1'
+                                    )}
+                                />
                             </button>
-                            <button
-                                onClick={() => setValuationMode('gestion')}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${valuationMode === 'gestion' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                Gestion
-                            </button>
+                            <span className={cx('text-xs font-semibold', valuationMode === 'gestion' ? 'text-blue-600' : 'text-slate-400')}>Gestion</span>
                         </div>
                     </div>
-
-                    {valuationMode === 'gestion' && (
-                        <div className="flex flex-col items-start w-32">
-                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">Cotizacion Ref.</span>
-                            <select
-                                value={gestionQuoteType}
-                                onChange={e => setGestionQuoteType(e.target.value as QuoteType)}
-                                className="w-full text-xs font-medium bg-white border border-slate-200 rounded-md py-1 px-2 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer"
-                            >
-                                {Object.entries(QUOTE_TYPE_LABELS).filter(([k]) => k !== 'Oficial').map(([key, label]) => (
-                                    <option key={key} value={key}>{label}</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
+                </div>
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                        <h1 className="font-display text-2xl font-bold text-slate-900">Moneda Extranjera</h1>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                        {ratesLoading ? 'Actualizando cotizaciones...' : ratesError || `Cotizacion: ${QUOTE_TYPE_LABELS[currentQuoteType]}`}
+                        <FxButton variant="ghost" size="sm" onClick={() => fetchRates(true)}>
+                            <ArrowsClockwise size={14} />
+                        </FxButton>
+                    </div>
                 </div>
             </div>
 
-            {/* Tabs */}
-            <div className="bg-white border-b border-slate-200 px-6 pt-2 flex-shrink-0">
-                <nav className="flex gap-6">
+            {/* Tabs header */}
+            <div className="flex items-end justify-between border-b border-slate-200 pb-2">
+                <div className="flex gap-6">
                     {TABS.map(tab => (
                         <button
                             key={tab.id}
+                            type="button"
+                            className={cx(
+                                'relative pb-2 text-sm font-medium transition',
+                                activeTab === tab.id ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-900'
+                            )}
                             onClick={() => setActiveTab(tab.id)}
-                            className={`pb-3 border-b-2 font-medium transition-colors flex items-center gap-2 ${activeTab === tab.id
-                                ? 'border-blue-600 text-blue-600'
-                                : 'border-transparent text-slate-500 hover:text-slate-700'
-                                }`}
                         >
                             {tab.label}
-                            {tab.id === 'conciliacion' && reconciliationData.totalPending > 0 && (
-                                <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                                    {reconciliationData.totalPending}
-                                </span>
-                            )}
+                            <span
+                                className={cx(
+                                    'absolute left-0 -bottom-1 h-[2px] w-full origin-left transform bg-blue-500 transition-transform duration-300',
+                                    activeTab === tab.id ? 'scale-x-100' : 'scale-x-0'
+                                )}
+                            />
                         </button>
                     ))}
-                </nav>
+                </div>
+                {activeTab === 'conciliacion' && conciliationCount > 0 && (
+                    <FxBadge tone="warning">{conciliationCount} pendientes</FxBadge>
+                )}
             </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-6">
-                {/* Dashboard Tab */}
-                {activeTab === 'dashboard' && (
-                    <div className="space-y-6">
-                        {/* KPI Grid */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Activos ME</span>
-                                    <div className="p-1.5 bg-green-50 rounded-lg text-emerald-500"><TrendUp weight="fill" /></div>
-                                </div>
-                                <div className="text-2xl font-mono font-bold text-slate-900">
-                                    {formatCurrency(kpis.totalAssetsUSD, 'USD')}
-                                </div>
-                                <div className="text-xs text-slate-400 mt-1">
-                                    ARS oficial: {formatCurrency(kpis.totalAssetsArsOficial)}
-                                </div>
-                            </div>
+            {/* Tab content */}
 
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Pasivos ME</span>
-                                    <div className="p-1.5 bg-red-50 rounded-lg text-red-500"><TrendDown weight="fill" /></div>
-                                </div>
-                                <div className="text-2xl font-mono font-bold text-slate-900">
-                                    {formatCurrency(kpis.totalLiabilitiesUSD, 'USD')}
-                                </div>
-                                <div className="text-xs text-slate-400 mt-1">
-                                    ARS oficial: {formatCurrency(kpis.totalLiabilitiesArsOficial)}
-                                </div>
+            {activeTab === 'dashboard' && (
+                <div className="animate-in fade-in slide-in-from-top-2 duration-200 space-y-6">
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+                            <div className="flex items-center justify-between text-sm text-slate-500">
+                                Activos ME (Valuado) <TrendUp size={16} className="text-emerald-500" />
                             </div>
-
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm border-l-4 border-l-blue-500">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Posicion Neta</span>
-                                    <div className="p-1.5 bg-blue-50 rounded-lg text-blue-500"><Scales weight="fill" /></div>
-                                </div>
-                                <div className="text-2xl font-mono font-bold text-blue-600">
-                                    {formatCurrency(kpis.netPositionUSD, 'USD')}
-                                </div>
-                                <div className="text-xs text-slate-400 mt-1">
-                                    ARS oficial: {formatCurrency(kpis.netPositionArsOficial)}
-                                </div>
-                            </div>
-
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Diferencia Latente</span>
-                                    <div className="p-1.5 bg-slate-50 rounded-lg text-slate-400"><ChartLineUp weight="fill" /></div>
-                                </div>
-                                <div className={`text-2xl font-mono font-bold ${kpis.latentDifferenceArs >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                    {kpis.latentDifferenceArs >= 0 ? '+' : ''}{formatCurrency(kpis.latentDifferenceArs)}
-                                </div>
-                                <div className="text-xs text-slate-400 mt-1">Resultado por tenencia (ARS)</div>
-                            </div>
+                            <div className="font-display text-2xl font-bold text-slate-900">{formatCurrencyARS(kpis.totalAssetsArs)}</div>
+                            <div className="text-xs text-slate-400">Origen: {formatCurrencyME(kpis.totalAssetsUSD, 'USD')}</div>
                         </div>
-
-                        {/* Chart & Quick Actions */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                                <h3 className="text-lg font-bold text-slate-900 mb-6">Valuacion en Pesos (Historico vs Actual)</h3>
-                                <div className="space-y-4">
-                                    <div>
-                                        <div className="flex justify-between text-xs mb-1">
-                                            <span className="font-medium text-slate-600">Valor Historico (Al ingreso)</span>
-                                            <span className="font-mono">{formatCurrency(kpis.totalAssetsArsHistorical)}</span>
-                                        </div>
-                                        <div className="w-full bg-slate-100 rounded-full h-3">
-                                            <div
-                                                className="bg-slate-400 h-3 rounded-full transition-all"
-                                                style={{ width: `${Math.min(100, (kpis.totalAssetsArsHistorical / Math.max(kpis.totalAssetsArsCurrent, kpis.totalAssetsArsHistorical, 1)) * 100)}%` }}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div className="flex justify-between text-xs mb-1">
-                                            <span className="font-medium text-blue-600">Valor Actual (Mercado)</span>
-                                            <span className="font-mono text-blue-600">{formatCurrency(kpis.totalAssetsArsCurrent)}</span>
-                                        </div>
-                                        <div className="w-full bg-slate-100 rounded-full h-3">
-                                            <div
-                                                className="bg-gradient-to-r from-blue-500 to-emerald-500 h-3 rounded-full transition-all"
-                                                style={{ width: `${Math.min(100, (kpis.totalAssetsArsCurrent / Math.max(kpis.totalAssetsArsCurrent, kpis.totalAssetsArsHistorical, 1)) * 100)}%` }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
+                        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+                            <div className="flex items-center justify-between text-sm text-slate-500">
+                                Pasivos ME (Valuado) <TrendDown size={16} className="text-rose-500" />
                             </div>
-
-                            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center gap-3">
-                                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">Acciones Rapidas</h3>
-                                <button
-                                    onClick={() => openAccountModal('ASSET')}
-                                    className="w-full py-3 px-4 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 font-medium hover:border-blue-400 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
-                                >
-                                    <Plus weight="bold" /> Agregar Activo
-                                </button>
-                                <button
-                                    onClick={() => openAccountModal('LIABILITY')}
-                                    className="w-full py-3 px-4 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 font-medium hover:border-blue-400 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
-                                >
-                                    <Plus weight="bold" /> Agregar Pasivo
-                                </button>
-                                <button
-                                    onClick={() => openMovementModal()}
-                                    className="w-full py-3 px-4 rounded-lg bg-gradient-to-r from-blue-600 to-emerald-500 text-white font-medium shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all flex items-center justify-center gap-2"
-                                >
-                                    <ArrowsLeftRight weight="bold" /> Registrar Movimiento
-                                </button>
-                            </div>
+                            <div className="font-display text-2xl font-bold text-slate-600">{formatCurrencyARS(kpis.totalLiabilitiesArs)}</div>
+                            <div className="text-xs text-slate-400">Origen: {formatCurrencyME(kpis.totalLiabilitiesUSD, 'USD')}</div>
                         </div>
-
-                        {/* Empty state */}
-                        {fxAccounts.length === 0 && (
-                            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-                                <div className="text-slate-400 mb-4">
-                                    <Scales size={48} className="mx-auto" />
-                                </div>
-                                <h3 className="text-lg font-semibold text-slate-700 mb-2">Comenza a gestionar tus divisas</h3>
-                                <p className="text-sm text-slate-500 mb-4">Crea tu primera cuenta en moneda extranjera para empezar a trackear tus activos y pasivos.</p>
-                                <button
-                                    onClick={() => openAccountModal('ASSET')}
-                                    className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
-                                >
-                                    Crear Primera Cuenta
-                                </button>
-                            </div>
-                        )}
+                        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+                            <div className="text-sm text-slate-500">Posición Neta</div>
+                            <div className="font-display text-2xl font-bold text-blue-600">{formatCurrencyARS(kpis.netPositionArs)}</div>
+                            <div className="text-xs text-slate-400">{formatCurrencyME(kpis.netPositionUSD, 'USD')}</div>
+                        </div>
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 shadow-sm">
+                            <div className="text-sm text-emerald-700">Res. x Tenencia</div>
+                            <div className="font-display text-2xl font-bold text-emerald-600">{formatCurrencyARS(kpis.latentDifference)}</div>
+                            <div className="text-xs text-emerald-600">Impacto por valuación</div>
+                        </div>
                     </div>
-                )}
 
-                {/* Activos Tab */}
-                {activeTab === 'activos' && (
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-lg font-bold text-slate-900">Cartera de Activos</h2>
-                            <button
-                                onClick={() => openAccountModal('ASSET')}
-                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-emerald-500 text-white text-sm font-bold shadow"
-                            >
-                                <Plus weight="bold" /> Nuevo Activo
-                            </button>
+                    <div className="grid gap-4 lg:grid-cols-3">
+                        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm lg:col-span-2">
+                            <h3 className="font-display text-lg font-semibold text-slate-900">Evolución de cotización promedio</h3>
+                            <div className="mt-4 flex h-52 items-center justify-center rounded-lg bg-slate-100 text-sm text-slate-400">
+                                [Chart Placeholder]
+                            </div>
                         </div>
+                        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+                            <h3 className="font-display text-lg font-semibold text-slate-900">Acciones rapidas</h3>
+                            <div className="mt-4 flex flex-col gap-3">
+                                <FxButton onClick={() => setOperationModalOpen(true)}>
+                                    <ArrowsLeftRight size={16} /> Registrar Operación
+                                </FxButton>
+                                <FxButton variant="secondary" onClick={() => { setActiveTab('activos'); setAssetModalOpen(true) }}>
+                                    <Plus size={16} /> Nuevo activo ME
+                                </FxButton>
+                                <FxButton variant="secondary" onClick={() => { setActiveTab('pasivos'); setDebtModalOpen(true) }}>
+                                    <Plus size={16} /> Nueva deuda ME
+                                </FxButton>
+                                <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                                    <Info size={14} className="inline-block mr-2" /> Todo movimiento ME genera un asiento en ARS.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
-                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 uppercase tracking-wider">
-                                        <th className="p-4 font-semibold">Cartera</th>
-                                        <th className="p-4 font-semibold">Moneda</th>
-                                        <th className="p-4 font-semibold text-right">Saldo ME</th>
-                                        <th className="p-4 font-semibold text-right">TC Hist.</th>
-                                        <th className="p-4 font-semibold text-right">Valor Hist. (ARS)</th>
-                                        <th className="p-4 font-semibold text-right">TC Actual</th>
-                                        <th className="p-4 font-semibold text-right">Valor Actual (ARS)</th>
-                                        <th className="p-4 font-semibold text-right">Dif. ARS</th>
-                                        <th className="p-4 font-semibold text-center">Acciones</th>
+            {activeTab === 'activos' && (
+                <div className="animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="font-display text-xl font-semibold text-slate-900">Cartera de Activos</h2>
+                        <FxButton onClick={() => setAssetModalOpen(true)}>
+                            <Plus size={16} /> Agregar cartera
+                        </FxButton>
+                    </div>
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left">Tipo</th>
+                                        <th className="px-4 py-3 text-left">Cartera</th>
+                                        <th className="px-4 py-3 text-left">Nombre</th>
+                                        <th className="px-4 py-3 text-left">Moneda</th>
+                                        <th className="px-4 py-3 text-right">Saldo ME</th>
+                                        <th className="px-4 py-3 text-right">TC</th>
+                                        <th className="px-4 py-3 text-right">Valuacion ARS</th>
+                                        <th className="px-4 py-3 text-center">Estado</th>
+                                        <th className="px-4 py-3 text-right">Acciones</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {accountValuations.filter(v => v.account.type === 'ASSET').map(v => (
-                                        <tr key={v.account.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                                            <td className="p-4 font-medium text-slate-700">{v.account.name}</td>
-                                            <td className="p-4">
-                                                <span className="bg-blue-50 text-blue-600 text-xs font-bold px-2 py-1 rounded border border-blue-100">
-                                                    {v.account.currency}
-                                                </span>
-                                            </td>
-                                            <td className="p-4 text-right font-mono text-slate-900 font-bold">
-                                                {v.account.currency} {v.balance.toFixed(2)}
-                                            </td>
-                                            <td className="p-4 text-right font-mono text-slate-500 text-xs">{formatRate(v.rateHistorical)}</td>
-                                            <td className="p-4 text-right font-mono text-slate-500 text-xs font-medium bg-slate-50/50">
-                                                {formatCurrency(v.arsHistorical)}
-                                            </td>
-                                            <td className="p-4 text-right font-mono text-blue-600 font-medium text-xs">{formatRate(v.rateCurrent)}</td>
-                                            <td className="p-4 text-right font-mono text-slate-900">{formatCurrency(v.arsCurrent)}</td>
-                                            <td className={`p-4 text-right font-mono text-xs font-bold ${v.differenceArs >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                                {v.differenceArs >= 0 ? '+' : ''}{formatCurrency(v.differenceArs)}
-                                            </td>
-                                            <td className="p-4 text-center">
-                                                <button
-                                                    onClick={() => openAccountModal('ASSET', v.account)}
-                                                    className="text-slate-400 hover:text-blue-600 transition-colors mr-2"
-                                                >
-                                                    <PencilSimple weight="bold" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteAccount(v.account.id)}
-                                                    className="text-slate-400 hover:text-red-500 transition-colors"
-                                                >
-                                                    <Trash weight="bold" />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {assetAccounts.length === 0 && (
-                                        <tr>
-                                            <td colSpan={9} className="p-8 text-center text-slate-400">
-                                                No hay activos registrados. Crea uno para comenzar.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-
-                {/* Pasivos Tab */}
-                {activeTab === 'pasivos' && (
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-lg font-bold text-slate-900">Deudas en M.E.</h2>
-                            <button
-                                onClick={() => openAccountModal('LIABILITY')}
-                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-emerald-500 text-white text-sm font-bold shadow"
-                            >
-                                <Plus weight="bold" /> Nuevo Pasivo
-                            </button>
-                        </div>
-
-                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 uppercase tracking-wider">
-                                        <th className="p-4 font-semibold">Acreedor / Concepto</th>
-                                        <th className="p-4 font-semibold">Moneda</th>
-                                        <th className="p-4 font-semibold text-right">Saldo ME</th>
-                                        <th className="p-4 font-semibold text-right">TC Hist.</th>
-                                        <th className="p-4 font-semibold text-right">Valor Hist. (ARS)</th>
-                                        <th className="p-4 font-semibold text-right">TC Actual</th>
-                                        <th className="p-4 font-semibold text-right">Valor Actual (ARS)</th>
-                                        <th className="p-4 font-semibold text-right">Dif. ARS</th>
-                                        <th className="p-4 font-semibold text-center">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {accountValuations.filter(v => v.account.type === 'LIABILITY').map(v => (
-                                        <tr key={v.account.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                                            <td className="p-4 font-medium text-slate-700">{v.account.creditor || v.account.name}</td>
-                                            <td className="p-4">
-                                                <span className="bg-slate-100 text-slate-700 text-xs font-bold px-2 py-1 rounded">
-                                                    {v.account.currency}
-                                                </span>
-                                            </td>
-                                            <td className="p-4 text-right font-mono text-slate-900 font-bold">
-                                                {v.account.currency} {v.balance.toFixed(2)}
-                                            </td>
-                                            <td className="p-4 text-right font-mono text-slate-500 text-xs">{formatRate(v.rateHistorical)}</td>
-                                            <td className="p-4 text-right font-mono text-slate-500 text-xs font-medium bg-slate-50/50">
-                                                {formatCurrency(v.arsHistorical)}
-                                            </td>
-                                            <td className="p-4 text-right font-mono text-blue-600 font-medium text-xs">{formatRate(v.rateCurrent)}</td>
-                                            <td className="p-4 text-right font-mono text-slate-900">{formatCurrency(v.arsCurrent)}</td>
-                                            <td className={`p-4 text-right font-mono text-xs font-bold ${v.differenceArs <= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                                {/* For liabilities, positive difference = bad (debt increased), negative = good (debt decreased) */}
-                                                {v.differenceArs > 0 ? '+' : ''}{formatCurrency(v.differenceArs)}
-                                            </td>
-                                            <td className="p-4 text-center">
-                                                <button
-                                                    onClick={() => openAccountModal('LIABILITY', v.account)}
-                                                    className="text-slate-400 hover:text-blue-600 transition-colors mr-2"
-                                                >
-                                                    <PencilSimple weight="bold" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteAccount(v.account.id)}
-                                                    className="text-slate-400 hover:text-red-500 transition-colors"
-                                                >
-                                                    <Trash weight="bold" />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {liabilityAccounts.length === 0 && (
-                                        <tr>
-                                            <td colSpan={9} className="p-8 text-center text-slate-400">
-                                                No hay pasivos registrados.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-
-                {/* Movimientos Tab */}
-                {activeTab === 'movimientos' && (
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <div className="flex gap-2">
-                                <div className="relative">
-                                    <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                                    <input
-                                        type="text"
-                                        placeholder="Buscar movimiento..."
-                                        className="bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:border-blue-500 outline-none w-64"
-                                    />
-                                </div>
-                                <button className="bg-white border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50">
-                                    <Funnel size={16} />
-                                </button>
-                            </div>
-                            <button
-                                onClick={() => openMovementModal()}
-                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-emerald-500 text-white text-sm font-bold shadow"
-                            >
-                                <ArrowsLeftRight weight="bold" /> Registrar
-                            </button>
-                        </div>
-
-                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 uppercase tracking-wider">
-                                        <th className="p-4 font-semibold">Fecha</th>
-                                        <th className="p-4 font-semibold">Tipo</th>
-                                        <th className="p-4 font-semibold">Detalle</th>
-                                        <th className="p-4 font-semibold text-right">Monto ME</th>
-                                        <th className="p-4 font-semibold text-right">TC Op.</th>
-                                        <th className="p-4 font-semibold text-right">Total ARS</th>
-                                        <th className="p-4 font-semibold text-center">Estado Asiento</th>
-                                        <th className="p-4 font-semibold text-center"></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {movements.map(m => {
-                                        const account = fxAccounts.find(a => a.id === m.accountId)
+                                    {accountValuations.map(item => {
+                                        const ledgerName = item.account.accountId ? ledgerMap.get(item.account.accountId)?.name : 'Sin vinculo'
+                                        const hasIssues = movements.some(m => m.accountId === item.account.id && ['missing', 'desync'].includes(m.journalStatus))
                                         return (
-                                            <tr key={m.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                                                <td className="p-4 text-xs text-slate-500">
-                                                    {new Date(m.date).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}
+                                            <tr key={item.account.id} className="border-t border-slate-200">
+                                                <td className="px-4 py-3 font-medium">{ASSET_SUBTYPE_LABELS[item.account.subtype as FxAssetSubtype]}</td>
+                                                <td className="px-4 py-3">{item.account.name}</td>
+                                                <td className="px-4 py-3 text-slate-500">{ledgerName || 'Sin cuenta'}</td>
+                                                <td className="px-4 py-3">
+                                                    <FxBadge>{item.account.currency}</FxBadge>
                                                 </td>
-                                                <td className="p-4 text-sm font-medium text-slate-700">{MOVEMENT_TYPE_LABELS[m.type]}</td>
-                                                <td className="p-4 text-xs text-slate-500">{account?.name || m.accountId}</td>
-                                                <td className="p-4 text-right font-mono text-slate-900">{m.currency} {m.amount.toFixed(2)}</td>
-                                                <td className="p-4 text-right font-mono text-xs text-slate-500">{formatRate(m.rate)}</td>
-                                                <td className="p-4 text-right font-mono text-xs font-bold text-slate-900">{formatCurrency(m.arsAmount)}</td>
-                                                <td className="p-4 text-center">
-                                                    <JournalStatusBadge
-                                                        status={m.journalStatus}
-                                                        onClick={m.journalStatus === 'none' || m.journalStatus === 'missing'
-                                                            ? () => handleGenerateJournal(m.id)
-                                                            : undefined
-                                                        }
-                                                    />
+                                                <td className="px-4 py-3 text-right font-mono">{formatRate(item.balance)}</td>
+                                                <td className="px-4 py-3 text-right font-mono">{formatRate(item.rateHistorical)}</td>
+                                                <td className="px-4 py-3 text-right font-mono">{formatCurrencyARS(item.arsHistorical)}</td>
+                                                <td className="px-4 py-3 text-center">
+                                                    {hasIssues ? <FxBadge tone="warning">Pendiente</FxBadge> : <FxBadge tone="success">Conciliado</FxBadge>}
                                                 </td>
-                                                <td className="p-4 text-center">
-                                                    <button
-                                                        onClick={() => openMovementModal(m)}
-                                                        className="text-slate-400 hover:text-blue-600 transition-colors mr-2"
-                                                    >
-                                                        <PencilSimple weight="bold" />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteMovement(m.id)}
-                                                        className="text-slate-400 hover:text-red-500 transition-colors"
-                                                    >
-                                                        <Trash weight="bold" />
-                                                    </button>
+                                                <td className="px-4 py-3 text-right">
+                                                    <FxButton variant="ghost" size="sm"><PencilSimple size={14} /></FxButton>
+                                                    <FxButton variant="ghost" size="sm"><Eye size={14} /></FxButton>
                                                 </td>
                                             </tr>
                                         )
                                     })}
-                                    {movements.length === 0 && (
+                                    {accountValuations.length === 0 && (
                                         <tr>
-                                            <td colSpan={8} className="p-8 text-center text-slate-400">
-                                                No hay movimientos registrados.
+                                            <td colSpan={9} className="px-4 py-6 text-center text-sm text-slate-500">
+                                                No hay activos ME registrados.
                                             </td>
                                         </tr>
                                     )}
@@ -1794,162 +2409,297 @@ export default function MonedaExtranjeraPage() {
                             </table>
                         </div>
                     </div>
-                )}
+                </div>
+            )}
 
-                {/* Conciliacion Tab */}
-                {activeTab === 'conciliacion' && (
-                    <div className="space-y-6 h-full flex flex-col">
-                        {reconciliationData.totalPending > 0 && (
-                            <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-lg flex items-start gap-3">
-                                <Warning weight="fill" className="text-amber-500 text-xl mt-0.5" />
-                                <div>
-                                    <h4 className="font-bold text-amber-600 text-sm">Conciliacion Pendiente</h4>
-                                    <p className="text-xs text-slate-600 mt-1">
-                                        Tenes {reconciliationData.movementsWithoutEntry.length} movimiento(s) sin asiento
-                                        {reconciliationData.entriesWithoutMovement.length > 0 && ` y ${reconciliationData.entriesWithoutMovement.length} asiento(s) sin vincular`}.
-                                    </p>
-                                </div>
-                            </div>
-                        )}
+            {activeTab === 'pasivos' && (
+                <div className="animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="font-display text-xl font-semibold text-slate-900">Pasivos en M.E.</h2>
+                        <FxButton onClick={() => setDebtModalOpen(true)}>
+                            <Plus size={16} /> Nueva deuda
+                        </FxButton>
+                    </div>
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left">Tipo</th>
+                                        <th className="px-4 py-3 text-left">Acreedor</th>
+                                        <th className="px-4 py-3 text-left">Deuda / Nombre</th>
+                                        <th className="px-4 py-3 text-left">Moneda</th>
+                                        <th className="px-4 py-3 text-right">Saldo ME</th>
+                                        <th className="px-4 py-3 text-right">TC Hist.</th>
+                                        <th className="px-4 py-3 text-right">Val. ARS Hist.</th>
+                                        <th className="px-4 py-3 text-right">TC Actual</th>
+                                        <th className="px-4 py-3 text-right">Val. ARS Actual</th>
+                                        <th className="px-4 py-3 text-right">Prox. Venc.</th>
+                                        <th className="px-4 py-3 text-right">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {debtSummaries.map(item => (
+                                        <tr key={item.debt.id} className="border-t border-slate-200">
+                                            <td className="px-4 py-3">{LIABILITY_SUBTYPE_LABELS[item.debt.accountId ? (accountMap.get(item.debt.accountId)?.subtype as FxLiabilitySubtype) : 'PRESTAMO']}</td>
+                                            <td className="px-4 py-3">{item.debt.creditor}</td>
+                                            <td className="px-4 py-3 text-slate-500">{item.debt.name}</td>
+                                            <td className="px-4 py-3"><FxBadge>{item.debt.currency}</FxBadge></td>
+                                            <td className="px-4 py-3 text-right font-mono">{formatRate(item.debt.saldoME)}</td>
+                                            <td className="px-4 py-3 text-right font-mono">{formatRate(item.rateHistorical)}</td>
+                                            <td className="px-4 py-3 text-right font-mono text-slate-400">{formatCurrencyARS(item.arsHistorical)}</td>
+                                            <td className="px-4 py-3 text-right font-mono">{formatRate(item.rateCurrent)}</td>
+                                            <td className="px-4 py-3 text-right font-mono font-semibold">{formatCurrencyARS(item.arsCurrent)}</td>
+                                            <td className="px-4 py-3 text-right">{formatDateShort(item.nextDue)}</td>
+                                            <td className="px-4 py-3 text-right">
+                                                <FxButton
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        setSelectedDebt(item.debt)
+                                                        setPlanModalOpen(true)
+                                                    }}
+                                                >
+                                                    Ver plan
+                                                </FxButton>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {debtSummaries.length === 0 && (
+                                        <tr>
+                                            <td colSpan={11} className="px-4 py-6 text-center text-sm text-slate-500">
+                                                No hay deudas ME registradas.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
 
-                        <div className="flex gap-6 flex-1 min-h-[400px]">
-                            {/* Panel A - Movimientos */}
-                            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col">
-                                <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
-                                    <h3 className="font-bold text-sm text-slate-700">Movimientos (Operativos)</h3>
-                                    <span className="bg-slate-200 text-slate-700 text-xs font-bold px-2 py-0.5 rounded-full">
-                                        {reconciliationData.movementsWithoutEntry.length}
-                                    </span>
-                                </div>
-                                <div className="p-4 space-y-3 overflow-y-auto flex-1">
-                                    {reconciliationData.movementsWithoutEntry.map(m => {
-                                        const account = fxAccounts.find(a => a.id === m.accountId)
+            {activeTab === 'movimientos' && (
+                <div className="animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="font-display text-xl font-semibold text-slate-900">Libro de Movimientos</h2>
+                        <FxButton onClick={() => setOperationModalOpen(true)}>
+                            <ArrowsLeftRight size={16} /> Registrar Operación
+                        </FxButton>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex w-full max-w-md items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <MagnifyingGlass size={16} className="text-slate-400" />
+                            <input
+                                className="w-full border-none text-sm focus:outline-none"
+                                placeholder="Buscar por detalle..."
+                                value={movementSearch}
+                                onChange={event => setMovementSearch(event.target.value)}
+                            />
+                        </div>
+                        <FxButton variant="ghost" size="sm"><Funnel size={14} /> Todo el periodo</FxButton>
+                    </div>
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left">Fecha</th>
+                                        <th className="px-4 py-3 text-left">Tipo</th>
+                                        <th className="px-4 py-3 text-left">Cuenta ME</th>
+                                        <th className="px-4 py-3 text-left">Detalle</th>
+                                        <th className="px-4 py-3 text-right">Monto ME</th>
+                                        <th className="px-4 py-3 text-right">TC Op.</th>
+                                        <th className="px-4 py-3 text-right">Total ARS</th>
+                                        <th className="px-4 py-3 text-right">Asiento</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredMovements.map(movement => {
+                                        const account = accountMap.get(movement.accountId)
+                                        const debt = movement.debtId ? fxDebts.find(d => d.id === movement.debtId) : null
+                                        const sign = ['COMPRA', 'INGRESO', 'TOMA_DEUDA', 'DESEMBOLSO_DEUDA'].includes(movement.type) ? '+' : '-'
+                                        const amountColor = sign === '+' ? 'text-emerald-600' : 'text-rose-600'
                                         return (
-                                            <div key={m.id} className="border border-slate-200 rounded-lg p-3 hover:border-blue-400 transition-colors cursor-pointer group relative overflow-hidden">
-                                                {m.journalStatus === 'none' && (
-                                                    <div className="absolute top-0 right-0 bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-bl-lg">
-                                                        SUGERIDO
-                                                    </div>
-                                                )}
-                                                <div className="flex justify-between mb-1">
-                                                    <span className="text-xs font-bold text-slate-700">{MOVEMENT_TYPE_LABELS[m.type]} ({account?.name})</span>
-                                                    <span className="text-xs font-mono text-blue-600">{m.currency} {m.amount.toFixed(2)}</span>
-                                                </div>
-                                                <div className="text-[10px] text-slate-500 mb-3">
-                                                    {new Date(m.date).toLocaleDateString('es-AR')} • {formatCurrency(m.arsAmount)}
-                                                </div>
-                                                <div className="flex gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                                                    <button
-                                                        onClick={() => handleGenerateJournal(m.id)}
-                                                        className="flex-1 bg-blue-600 text-white text-xs font-bold py-1.5 rounded hover:bg-blue-700"
-                                                    >
-                                                        Generar Asiento
-                                                    </button>
-                                                    <button className="px-2 border border-slate-200 rounded text-xs hover:bg-slate-50 text-slate-500">
-                                                        Vincular
-                                                    </button>
-                                                </div>
-                                            </div>
+                                            <tr key={movement.id} className="border-t border-slate-200">
+                                                <td className="px-4 py-3">{formatDateShort(movement.date)}</td>
+                                                <td className="px-4 py-3">
+                                                    <FxBadge tone={movement.type === 'COMPRA' ? 'success' : movement.type === 'PAGO_DEUDA' ? 'warning' : 'neutral'}>
+                                                        {MOVEMENT_TYPE_LABELS[movement.type as FxMovementType] || movement.type}
+                                                    </FxBadge>
+                                                </td>
+                                                <td className="px-4 py-3">{debt?.name || account?.name || 'N/A'}</td>
+                                                <td className="px-4 py-3 text-slate-500">{movement.reference || movement.counterparty || '-'}</td>
+                                                <td className={cx('px-4 py-3 text-right font-mono', amountColor)}>
+                                                    {sign} {formatRate(movement.amount)}
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-mono">{formatRate(movement.rate)}</td>
+                                                <td className="px-4 py-3 text-right font-mono">{formatCurrencyARS(movement.arsAmount)}</td>
+                                                <td className="px-4 py-3 text-right"><JournalStatusBadge status={movement.journalStatus} /></td>
+                                            </tr>
                                         )
                                     })}
-                                    {reconciliationData.movementsWithoutEntry.length === 0 && (
-                                        <div className="text-center text-slate-400 py-8">
-                                            <CheckCircle size={32} className="mx-auto mb-2 text-emerald-500" />
-                                            <p className="text-sm">Todos los movimientos tienen asiento</p>
-                                        </div>
+                                    {filteredMovements.length === 0 && (
+                                        <tr>
+                                            <td colSpan={8} className="px-4 py-6 text-center text-sm text-slate-500">
+                                                No hay movimientos en el periodo.
+                                            </td>
+                                        </tr>
                                     )}
-                                </div>
-                            </div>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
 
-                            {/* Link Icon */}
-                            <div className="flex items-center justify-center text-slate-300">
-                                <LinkIcon size={24} weight="duotone" />
+            {activeTab === 'conciliacion' && (
+                <div className="animate-in fade-in slide-in-from-top-2 duration-200 space-y-6">
+                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-4">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <h2 className="font-display text-xl font-semibold text-slate-900">Centro de Conciliación</h2>
+                                <p className="text-sm text-slate-500">Asegura que operaciones ME coincidan con el Libro Diario.</p>
                             </div>
-
-                            {/* Panel B - Asientos */}
-                            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col">
-                                <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
-                                    <h3 className="font-bold text-sm text-slate-700">Libro Diario (Contable)</h3>
-                                    <span className="bg-slate-200 text-slate-700 text-xs font-bold px-2 py-0.5 rounded-full">
-                                        {reconciliationData.entriesWithoutMovement.length}
-                                    </span>
-                                </div>
-                                <div className="p-4 space-y-3 overflow-y-auto flex-1">
-                                    {reconciliationData.entriesWithoutMovement.map(e => (
-                                        <div key={e.id} className="border border-slate-200 rounded-lg p-3 hover:border-blue-400 transition-colors cursor-pointer group">
-                                            <div className="flex justify-between mb-1">
-                                                <span className="text-xs font-bold text-slate-700">Asiento #{e.id.slice(-4)}</span>
-                                                <span className="text-xs font-mono text-slate-700">
-                                                    {formatCurrency(e.lines.reduce((sum, l) => sum + l.debit, 0))}
-                                                </span>
-                                            </div>
-                                            <div className="text-[10px] text-slate-500 mb-3">
-                                                {new Date(e.date).toLocaleDateString('es-AR')} • {e.memo}
-                                            </div>
-                                            <div className="flex gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                                                <button className="flex-1 border border-blue-600 text-blue-600 text-xs font-bold py-1.5 rounded hover:bg-blue-50">
-                                                    Vincular Seleccion
-                                                </button>
+                            <FxButton variant="secondary" onClick={refreshReconciliation}>
+                                <MagicWand size={16} /> Conciliar automaticamente
+                            </FxButton>
+                        </div>
+                    </div>
+                    <div className="grid gap-4 lg:grid-cols-3">
+                        <div className="rounded-2xl border-t-4 border-amber-400 bg-white px-5 py-4 shadow-sm">
+                            <div className="flex items-center justify-between">
+                                <h4 className="font-semibold">Movimientos sin asiento</h4>
+                                <FxBadge tone="warning">{reconciliation.movementsWithoutEntry.length} pendientes</FxBadge>
+                            </div>
+                            <p className="mt-2 text-xs text-slate-500">Operaciones ME sin impacto en Diario.</p>
+                            <div className="mt-3 space-y-2">
+                                {reconciliation.movementsWithoutEntry.map(item => (
+                                    <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                        <div className="text-xs font-semibold">{MOVEMENT_TYPE_LABELS[item.type as FxMovementType]} · {formatRate(item.amount)} {item.currency}</div>
+                                        <div className="mt-2 flex items-center justify-between text-xs">
+                                            <span className="font-mono text-slate-500">{formatDateShort(item.date)}</span>
+                                            <div className="flex gap-2">
+                                                <FxButton variant="secondary" size="sm" onClick={() => handleGenerateJournal(item.id)}>Generar</FxButton>
+                                                <FxButton variant="ghost" size="sm" onClick={() => { setLinkTargetMovement(item); setLinkModalOpen(true) }}>Vincular</FxButton>
+                                                <FxButton variant="ghost" size="sm" onClick={() => handleMarkNonAccounting(item.id)}>No contable</FxButton>
                                             </div>
                                         </div>
-                                    ))}
-                                    {reconciliationData.entriesWithoutMovement.length === 0 && (
-                                        <div className="text-center text-slate-400 py-8">
-                                            <CheckCircle size={32} className="mx-auto mb-2 text-emerald-500" />
-                                            <p className="text-sm">No hay asientos huerfanos</p>
+                                    </div>
+                                ))}
+                                {reconciliation.movementsWithoutEntry.length === 0 && (
+                                    <div className="text-xs text-slate-400">Sin pendientes.</div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl border-t-4 border-blue-400 bg-white px-5 py-4 shadow-sm">
+                            <div className="flex items-center justify-between">
+                                <h4 className="font-semibold">Asientos huerfanos</h4>
+                                <FxBadge tone="info">{reconciliation.orphanEntries.length} detectados</FxBadge>
+                            </div>
+                            <p className="mt-2 text-xs text-slate-500">Asientos en Diario que usan cuentas ME sin vinculo.</p>
+                            <div className="mt-3 space-y-2">
+                                {reconciliation.orphanEntries.map(entry => (
+                                    <div key={entry.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                        <div className="text-xs font-semibold">{entry.memo}</div>
+                                        <div className="mt-2 flex items-center justify-between text-xs">
+                                            <span className="font-mono text-slate-500">{formatDateShort(entry.date)}</span>
+                                            <FxButton variant="secondary" size="sm" onClick={() => showToast('Selecciona un movimiento para vincular', 'error')}>Vincular</FxButton>
                                         </div>
-                                    )}
-                                </div>
+                                    </div>
+                                ))}
+                                {reconciliation.orphanEntries.length === 0 && (
+                                    <div className="text-xs text-slate-400">No se detectan asientos huerfanos.</div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl border-t-4 border-emerald-400 bg-white px-5 py-4 shadow-sm">
+                            <div className="flex items-center justify-between">
+                                <h4 className="font-semibold">Desync / OK</h4>
+                                <FxBadge tone={reconciliationStats.desync.length > 0 ? 'warning' : 'success'}>
+                                    {reconciliationStats.desync.length > 0 ? `${reconciliationStats.desync.length} desync` : `${reconciliationStats.ok.length} OK`}
+                                </FxBadge>
+                            </div>
+                            <p className="mt-2 text-xs text-slate-500">Movimientos con asiento editado o conciliados.</p>
+                            <div className="mt-3 space-y-2">
+                                {reconciliationStats.desync.length > 0 ? (
+                                    reconciliationStats.desync.map(item => (
+                                        <div key={item.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
+                                            {MOVEMENT_TYPE_LABELS[item.type as FxMovementType]} · {formatDateShort(item.date)}
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center gap-2 py-4 text-emerald-600">
+                                        <CheckCircle size={32} weight="fill" />
+                                        <span className="text-sm font-semibold">Todo en orden</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
 
             {/* Modals */}
-            <AccountModal
-                open={accountModalOpen}
-                onClose={() => {
-                    setAccountModalOpen(false)
-                    setEditingAccount(null)
-                }}
-                onSave={handleSaveAccount}
-                editing={editingAccount}
-                type={accountModalType}
+            <FxAssetAccountModalME2
+                open={assetModalOpen}
+                onClose={() => setAssetModalOpen(false)}
                 periodId={periodId}
                 rates={rates}
+                ledgerAccounts={ledgerAccounts}
+                onSuccess={message => showToast(message, 'success')}
             />
-
-            <MovementModal
-                open={movementModalOpen}
-                onClose={() => {
-                    setMovementModalOpen(false)
-                    setEditingMovement(null)
-                }}
-                onSave={handleSaveMovement}
-                editing={editingMovement}
-                accounts={fxAccounts}
-                ledgerAccounts={accounts || []}
+            <FxDebtCreateModalME2
+                open={debtModalOpen}
+                onClose={() => setDebtModalOpen(false)}
                 periodId={periodId}
+                ledgerAccounts={ledgerAccounts}
+                fxAssetAccounts={assetAccounts}
+                onSuccess={message => showToast(message, 'success')}
+                onOpenAssetModal={() => setAssetModalOpen(true)}
+            />
+            <FxOperationModalME2
+                open={operationModalOpen}
+                onClose={() => setOperationModalOpen(false)}
+                periodId={periodId}
+                settings={settings}
                 rates={rates}
-                settings={settings}
+                fxAccounts={fxAccounts}
+                fxDebts={fxDebts}
+                ledgerAccounts={ledgerAccounts}
+                onSuccess={message => showToast(message, 'success')}
+            />
+            <FxDebtPlanModalME2
+                open={planModalOpen}
+                onClose={() => setPlanModalOpen(false)}
+                debt={selectedDebt}
+            />
+            <LinkEntryModal
+                open={linkModalOpen}
+                onClose={() => setLinkModalOpen(false)}
+                movement={linkTargetMovement}
+                entries={reconciliation.orphanEntries.map((entry: any) => ({
+                    id: entry.id,
+                    memo: entry.memo,
+                    date: entry.date,
+                    total: entry.lines?.reduce((sum: number, line: any) => sum + line.debit + line.credit, 0) / 2,
+                }))}
+                onLink={entryId => linkTargetMovement && handleLinkEntry(linkTargetMovement, entryId)}
             />
 
-            <SettingsModal
-                open={settingsModalOpen}
-                onClose={() => setSettingsModalOpen(false)}
-                settings={settings}
-                onSave={handleSaveSettings}
-                accounts={accounts || []}
-            />
-
-            {/* Toast */}
             {toast && (
-                <div className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'
-                    }`}>
+                <div className={cx(
+                    'fixed bottom-4 right-4 z-50 rounded-lg px-4 py-3 text-sm font-semibold text-white shadow-lg',
+                    toast.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'
+                )}>
                     {toast.message}
                 </div>
             )}
         </div>
     )
 }
+
+
+

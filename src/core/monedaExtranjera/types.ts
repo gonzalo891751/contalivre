@@ -98,6 +98,8 @@ export type FxMovementType =
     | 'TRANSFERENCIA' // Transfer between FC accounts
     | 'AJUSTE' // Adjustment
     | 'PAGO_DEUDA' // Debt payment (for liabilities)
+    | 'TOMA_DEUDA' // Debt origination (disbursement)
+    | 'DESEMBOLSO_DEUDA' // Additional disbursement / refinancing
 
 /**
  * Journal integration status (same as inventory for consistency)
@@ -227,6 +229,7 @@ export interface FxDebt {
     frequency: PaymentFrequency
     system: LoanSystem // Amortization system
     firstDueDate: string // First installment due date
+    schedule: FxDebtInstallment[] // Persisted amortization schedule
     // Contrapartida for opening
     contrapartidaAccountId?: string // Where the money went (Banco/Caja)
     // Current status
@@ -237,6 +240,7 @@ export interface FxDebt {
     creditor: string
     reference?: string
     notes?: string
+    legacyLiabilityId?: string // Backwards-compat link to FxLiability
     // Journal integration (for opening entry)
     autoJournal: boolean
     linkedJournalEntryIds: string[]
@@ -469,10 +473,6 @@ export function createEmptyFxMovement(
     type: FxMovementType = 'COMPRA'
 ): Omit<FxMovement, 'id' | 'createdAt' | 'updatedAt' | 'journalStatus' | 'linkedJournalEntryIds'> {
     const now = new Date().toISOString().split('T')[0]
-    // Default rateSide based on movement type:
-    // COMPRA: use 'venta' (you buy FC, they sell to you)
-    // VENTA: use 'compra' (you sell FC, they buy from you)
-    const defaultRateSide: RateSide = type === 'COMPRA' ? 'venta' : 'compra'
     return {
         date: now,
         type,
@@ -482,7 +482,7 @@ export function createEmptyFxMovement(
         currency: 'USD',
         rate: 0,
         rateType: 'Oficial',
-        rateSide: defaultRateSide,
+        rateSide: getDefaultRateSide(type),
         rateSource: 'DolarAPI',
         arsAmount: 0,
         autoJournal: true,
@@ -513,6 +513,7 @@ export function createEmptyFxDebt(
         frequency: 'MENSUAL',
         system: 'FRANCES',
         firstDueDate: now,
+        schedule: [],
         saldoME: 0,
         paidInstallments: 0,
         status: 'ACTIVE',
@@ -584,6 +585,8 @@ export const MOVEMENT_TYPE_LABELS: Record<FxMovementType, string> = {
     TRANSFERENCIA: 'Transferencia',
     AJUSTE: 'Ajuste',
     PAGO_DEUDA: 'Pago Deuda',
+    TOMA_DEUDA: 'Toma de Deuda',
+    DESEMBOLSO_DEUDA: 'Desembolso Deuda',
 }
 
 /**
@@ -658,6 +661,9 @@ export function getDefaultRateSide(type: FxMovementType): RateSide {
             return 'compra' // You sell FC, they buy from you
         case 'PAGO_DEUDA':
             return 'venta' // You need FC to pay, you buy at venta
+        case 'TOMA_DEUDA':
+        case 'DESEMBOLSO_DEUDA':
+            return 'venta' // ValuaciÃ³n histÃ³rica de ingreso
         default:
             return 'compra' // Default for other types
     }
