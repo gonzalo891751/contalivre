@@ -84,6 +84,16 @@ export function buildCostLayers(
                 unitCost: mov.unitCost,
                 movementId: mov.id,
             })
+        } else if (mov.type === 'VALUE_ADJUSTMENT') {
+            // Value-only adjustment (RT6 inflation): distribute across existing layers
+            const delta = mov.valueDelta ?? mov.subtotal ?? 0
+            const totalLayerQty = layers.reduce((s, l) => s + l.quantity, 0)
+            if (totalLayerQty > 0 && delta !== 0) {
+                for (const layer of layers) {
+                    const share = layer.quantity / totalLayerQty
+                    layer.unitCost += (delta * share) / layer.quantity
+                }
+            }
         }
     }
 
@@ -219,6 +229,9 @@ export function calculateWeightedAverageCost(
                 totalQty -= Math.abs(mov.quantity)
                 totalValue -= Math.abs(mov.quantity) * avgCost
             }
+        } else if (mov.type === 'VALUE_ADJUSTMENT') {
+            // Value-only adjustment (e.g., RT6 inflation): changes value, not quantity
+            totalValue += (mov.valueDelta ?? mov.subtotal ?? 0)
         }
     }
 
@@ -249,6 +262,8 @@ export function calculateProductValuation(
             currentStock -= mov.quantity
         } else if (mov.type === 'ADJUSTMENT') {
             currentStock += mov.quantity // Can be negative
+        } else if (mov.type === 'VALUE_ADJUSTMENT') {
+            // No quantity change — value-only adjustment (RT6 inflation)
         } else if (mov.type === 'COUNT') {
             // Count sets the stock to the counted value
             // This is handled in closing, not here

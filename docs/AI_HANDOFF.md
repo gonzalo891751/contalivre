@@ -2,6 +2,92 @@
 
 ---
 
+## CHECKPOINT #FIX-RT6-RT17-SIGNS-V2
+**Fecha:** 2026-01-30
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Fix definitivo de signos RT6/RT17 en asientos. Cuentas regulares (totalBase unsigned) y cuentas movimiento (totalBase signed) ahora se manejan correctamente. RT17 también usa lógica normalSide-aware.
+
+### Archivos tocados
+- `src/core/cierre-valuacion/asientos.ts` — Refactor completo de sign helpers (RT6 + RT17)
+- `src/pages/Planillas/CierreValuacionPage.tsx` — UI totales con tabular-nums y minWidth
+
+### Cambios clave
+
+#### A. RT6 Sign Fix v2 (asientos.ts)
+1. **`resolveNormalSide()`**: Resuelve normalSide con fallback robusto: explicit > accountKind > code prefix (1./5. → DEBIT, resto → CREDIT)
+2. **`toNormalSideAmounts()`**: Distingue signed vs unsigned totalBase:
+   - Regular accounts (`inventoryRole` undefined): totalBase/totalHomog ya son positivos en lado normal → se usan directo
+   - Movement accounts (`inventoryRole === 'periodic_movement'`): totalBase es signed (debit-credit) → se convierte via `ns==='DEBIT' ? val : -val`
+3. **`computeDeltaNormal()`**: Helper compartido que calcula deltaNormal unificando la lógica
+4. **`getAdjustmentSide()` y `computeRT6LineAmounts()`**: Usan `computeDeltaNormal()` internamente
+
+#### B. RT17 Sign Fix (asientos.ts)
+1. **`getRT17AdjustmentSide()`**: Nuevo — bucketing normalSide-aware para RT17
+   - `deltaNormal = ns==='DEBIT' ? resTenencia : -resTenencia`
+   - deltaNormal > 0 → lado normal, < 0 → lado opuesto
+2. **`computeRT17LineAmounts()`**: Nuevo — calcula debe/haber para líneas RT17
+3. **Bucketing en `generateCierreDrafts()`**: RT17 ahora usa `getRT17AdjustmentSide()` en vez de `resTenencia > 0`
+4. **`buildVoucher()`**: RT17 branch usa `computeRT17LineAmounts()` en vez de sign-based logic
+
+#### C. UI Totals (CierreValuacionPage.tsx)
+- Footer totals: añadido `tabular-nums` y `minWidth: 120` para legibilidad
+
+### Resultado esperado por tipo de cuenta (inflación positiva)
+| Cuenta | normalSide | Lado asiento |
+|--------|-----------|-------------|
+| Mercaderías (1.1.04.01) | DEBIT | DEBE |
+| Compras (5.1.03) | DEBIT | DEBE |
+| Gastos s/compras (5.1.04) | DEBIT | DEBE |
+| Descuentos otorgados (4.2.01) | DEBIT | DEBE |
+| Bonif/Devol s/ventas | DEBIT | DEBE |
+| Ajuste de Capital (3.1.02) | CREDIT | HABER |
+| Ventas (4.1.01) | CREDIT | HABER |
+| Descuentos obtenidos (4.6.09) | CREDIT | HABER |
+| Bonif/Devol s/compras | CREDIT | HABER |
+
+### QA
+```bash
+npm run build  # PASS
+```
+- Todas las cuentas ajustan en el lado correcto según normalSide
+- RECPAM/RxT: 1 línea por asiento, no se mezclan ganancia/pérdida
+- No hay montos negativos en columnas Debe/Haber
+- Totales D=H en cada asiento
+
+### Deshacer
+```bash
+git checkout HEAD -- src/core/cierre-valuacion/asientos.ts src/pages/Planillas/CierreValuacionPage.tsx
+```
+
+---
+
+## CHECKPOINT #FIX-RT6-SIGNS-INV-RECONCILIATION
+**Fecha:** 2026-01-30
+**Estado:** SUPERADO por #FIX-RT6-RT17-SIGNS-V2
+**Objetivo:** Corregir signos en asientos RT6 (Bonif/Devol s/compras iban en DEBE en vez de HABER) y agregar flujo de conciliacion RT6 en Inventario con movimientos VALUE_ADJUSTMENT.
+
+### Archivos tocados
+- `src/core/cierre-valuacion/asientos.ts` — Fix signo RT6 con formula normalSide-aware
+- `src/core/inventario/types.ts` — Nuevo tipo VALUE_ADJUSTMENT + campos valueDelta/rt6Period/rt6SourceEntryId
+- `src/core/inventario/costing.ts` — VALUE_ADJUSTMENT en PPP, FIFO/LIFO y stock calc
+- `src/storage/bienes.ts` — VALUE_ADJUSTMENT en createBienesMovement y buildJournalEntries
+- `src/pages/Planillas/InventarioBienesPage.tsx` — Deteccion RT6 en conciliacion, boton "Aplicar ajuste RT6", display VALUE_ADJUSTMENT
+
+### Cambios clave (parciales, ver V2 arriba para fix completo)
+
+#### B. Inventario - VALUE_ADJUSTMENT (estos cambios siguen vigentes)
+1. **Nuevo tipo `VALUE_ADJUSTMENT`**: quantity=0, solo cambia valuacion via `valueDelta`.
+2. **Storage**: createBienesMovement shortcircuits para VALUE_ADJUSTMENT (no cost calc, no journal). buildJournalEntries retorna vacio.
+3. **Costing**: PPP suma valueDelta al pool de valor. FIFO/LIFO distribuye proporcionalmente en layers existentes.
+4. **Conciliacion UI**: Entries RT6 se detectan por memo "Ajuste por inflacion" → muestran boton "Aplicar ajuste RT6" → crea VALUE_ADJUSTMENT(s) prorrateados por compras del periodo → entry sale de "sin movimiento".
+
+### Deshacer
+```bash
+git checkout HEAD -- src/core/cierre-valuacion/asientos.ts src/core/inventario/types.ts src/core/inventario/costing.ts src/storage/bienes.ts src/pages/Planillas/InventarioBienesPage.tsx
+```
+
+---
+
 ## CHECKPOINT #FIX-INV-ER-RT6
 **Fecha:** 2026-01-30  
 **Estado:** COMPLETADO - Build PASS  

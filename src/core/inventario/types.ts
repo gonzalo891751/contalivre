@@ -300,7 +300,7 @@ export type CostingMethod = 'FIFO' | 'LIFO' | 'PPP'
 /**
  * Movement type for bienes de cambio (extended)
  */
-export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT'
+export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT' | 'VALUE_ADJUSTMENT'
 
 /**
  * Journal integration status for inventory movements
@@ -383,6 +383,10 @@ export interface BienesMovement {
     descuentoFinancieroAmount?: number // $ calculated descuento
     gastosCompra?: number          // $ purchase expenses (freight, insurance, etc.)
     isDevolucion?: boolean         // True if this is a return (purchase return / sale return)
+    // RT6 inflation adjustment (VALUE_ADJUSTMENT only)
+    valueDelta?: number            // $ change in valuation (positive = increase, negative = decrease)
+    rt6Period?: string             // YYYY-MM period of the RT6 adjustment
+    rt6SourceEntryId?: string      // Journal entry ID of the RT6 asiento that originated this
     // Additional info
     counterparty?: string          // Supplier name (PURCHASE) or Customer (SALE)
     paymentMethod?: string         // Efectivo, Cuenta Corriente, etc.

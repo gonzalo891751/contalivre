@@ -1126,8 +1126,8 @@ export default function CierreValuacionPage() {
                                             <tfoot>
                                                 <tr className="font-bold bg-slate-50">
                                                     <td>TOTALES</td>
-                                                    <td className="text-right font-mono">{formatNumber(voucher.totalDebe)}</td>
-                                                    <td className="text-right font-mono">{formatNumber(voucher.totalHaber)}</td>
+                                                    <td className="text-right font-mono tabular-nums" style={{ minWidth: 120 }}>{formatNumber(voucher.totalDebe)}</td>
+                                                    <td className="text-right font-mono tabular-nums" style={{ minWidth: 120 }}>{formatNumber(voucher.totalHaber)}</td>
                                                 </tr>
                                             </tfoot>
                                         </table>

@@ -152,6 +152,11 @@ const buildJournalEntriesForMovement = async (
         return { entries: [], error: 'El conteo fisico no genera asiento directo.' }
     }
 
+    // VALUE_ADJUSTMENT: no journal entry (the RT6 asiento already exists)
+    if (movement.type === 'VALUE_ADJUSTMENT') {
+        return { entries: [] }
+    }
+
     const accounts = await db.accounts.toArray()
     const settings = await loadBienesSettings()
     const isPeriodic = settings.inventoryMode === 'PERIODIC'
@@ -667,6 +672,24 @@ export async function createBienesMovement(
     let costUnitAssigned = 0
     let costTotalAssigned = 0
     let product: BienesProduct | undefined
+
+    if (movement.type === 'VALUE_ADJUSTMENT') {
+        // VALUE_ADJUSTMENT: no cost calculation, no stock change, no journal generation.
+        // It only adjusts valuation. journalStatus is 'linked' if we have a linked entry.
+        const vaMovement: BienesMovement = {
+            ...movement,
+            id: generateInventoryId('bmov'),
+            costMethod: settings.costMethod,
+            costUnitAssigned: 0,
+            costTotalAssigned: 0,
+            linkedJournalEntryIds: movement.linkedJournalEntryIds || [],
+            journalStatus: (movement.linkedJournalEntryIds || []).length > 0 ? 'linked' : 'none',
+            createdAt: now,
+            updatedAt: now,
+        }
+        await db.bienesMovements.add(vaMovement)
+        return vaMovement
+    }
 
     if (movement.type === 'SALE' || (movement.type === 'ADJUSTMENT' && movement.quantity < 0)) {
         product = await getBienesProductById(movement.productId)

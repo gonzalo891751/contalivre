@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre - Conciliación Inventario & RT6</title>
+    
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Configuración Brand Book (Tokens) -->
+    <style>
+        :root {
+            /* BRAND CORE */
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            
+            /* NEUTRALS */
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            --border-light: #E2E8F0;
+
+            /* SEMANTIC */
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+
+            /* TYPOGRAPHY */
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            
+            /* UI UTILS */
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --radius-md: 12px;
+            --radius-lg: 24px;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background-color: var(--bg-app);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Typography Utility Classes */
+        .font-display { font-family: var(--font-display); }
+        .font-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+        /* Componentes Específicos */
+        .btn-primary {
+            background: var(--brand-gradient);
+            color: white;
+            transition: all 0.2s;
+        }
+        .btn-primary:hover {
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .card-interaction:hover {
+            border-color: var(--brand-primary);
+            box-shadow: var(--shadow-md);
+        }
+
+        /* Modal Transitions */
+        .modal-overlay {
+            transition: opacity 0.3s ease-out;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .modal-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .modal-content {
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+            transform: scale(0.95) translateY(10px);
+            opacity: 0;
+        }
+        .modal-overlay.open .modal-content {
+            transform: scale(1) translateY(0);
+            opacity: 1;
+        }
+
+        /* Drawer Transitions */
+        .drawer-overlay {
+            transition: opacity 0.3s ease;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+        .drawer-panel {
+            transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+            transform: translateX(100%);
+        }
+        .drawer-overlay.open .drawer-panel { transform: translateX(0); }
+
+        /* Badge Styles */
+        .badge-rt6 { background: #EFF6FF; color: #3B82F6; border: 1px solid #DBEAFE; }
+        .badge-warning { background: #FFF7ED; color: #C2410C; border: 1px solid #FFEDD5; }
+        .badge-error { background: #FEF2F2; color: #EF4444; border: 1px solid #FEE2E2; }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden">
+
+    <!-- 1. SIDEBAR (MOCK) -->
+    <aside class="w-20 lg:w-64 bg-white border-r border-slate-200 flex flex-col hidden md:flex shrink-0 z-20">
+        <div class="h-16 flex items-center justify-center lg:justify-start lg:px-6 border-b border-slate-100">
+            <div class="text-2xl font-display font-extrabold text-blue-600 flex items-center gap-2">
+                <i class="ph-duotone ph-robot"></i>
+                <span class="hidden lg:block text-slate-900 tracking-tight">ContaLivre</span>
+            </div>
+        </div>
+        
+        <nav class="flex-1 overflow-y-auto py-4 flex flex-col gap-1 px-3">
+            <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <i class="ph ph-squares-four text-xl"></i>
+                <span class="hidden lg:block text-sm font-medium">Dashboard</span>
+            </a>
+            <div class="px-3 mt-4 mb-2 hidden lg:block text-xs font-bold text-slate-400 uppercase tracking-wider">Operaciones</div>
+            <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <i class="ph ph-receipt text-xl"></i>
+                <span class="hidden lg:block text-sm font-medium">Compras</span>
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <i class="ph ph-shopping-cart text-xl"></i>
+                <span class="hidden lg:block text-sm font-medium">Ventas</span>
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-blue-50 text-blue-600 font-semibold transition-colors">
+                <i class="ph-fill ph-package text-xl"></i>
+                <span class="hidden lg:block text-sm">Inventario</span>
+            </a>
+        </nav>
+        
+        <div class="p-4 border-t border-slate-100">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold">GM</div>
+                <div class="hidden lg:block">
+                    <div class="text-sm font-medium text-slate-900">Gonzalo M.</div>
+                    <div class="text-xs text-slate-500">Plan Pro</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 2. MAIN CONTENT -->
+    <main class="flex-1 flex flex-col h-screen overflow-hidden relative">
+        
+        <!-- Topbar -->
+        <header class="h-16 bg-slate-900 text-white flex items-center justify-between px-6 shrink-0 shadow-lg z-10">
+            <div class="flex items-center gap-4">
+                <button class="md:hidden text-slate-300 hover:text-white"><i class="ph ph-list text-2xl"></i></button>
+                <div class="flex flex-col">
+                    <div class="flex items-center gap-2 text-xs text-slate-400">
+                        <span>Operaciones</span>
+                        <i class="ph ph-caret-right"></i>
+                        <span>Inventario</span>
+                    </div>
+                    <h1 class="font-display font-semibold text-lg leading-tight">Conciliación Inventario</h1>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-4">
+                <div class="hidden md:flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700">
+                    <button class="p-1.5 hover:bg-slate-700 rounded-md text-slate-400"><i class="ph ph-caret-left"></i></button>
+                    <span class="px-3 text-sm font-mono text-slate-200">01/01/2025 - 31/12/2025</span>
+                    <button class="p-1.5 hover:bg-slate-700 rounded-md text-slate-400"><i class="ph ph-caret-right"></i></button>
+                </div>
+                <button class="relative p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-full transition-colors">
+                    <i class="ph ph-bell text-xl"></i>
+                    <span class="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-slate-900"></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Workspace Scrollable -->
+        <div class="flex-1 overflow-y-auto p-4 md:p-6 pb-24">
+            
+            <!-- KPIs & Filters -->
+            <div class="max-w-7xl mx-auto mb-8">
+                <div class="flex flex-wrap gap-4 items-center justify-between mb-6">
+                    <div class="flex gap-4">
+                        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                            <div class="p-2 rounded-lg bg-orange-50 text-orange-600"><i class="ph ph-warning-circle text-xl"></i></div>
+                            <div>
+                                <div class="text-xs text-slate-500 uppercase font-bold tracking-wide">Sin Asiento</div>
+                                <div class="font-display font-bold text-xl text-slate-900">5</div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                            <div class="p-2 rounded-lg bg-blue-50 text-blue-600"><i class="ph ph-arrows-left-right text-xl"></i></div>
+                            <div>
+                                <div class="text-xs text-slate-500 uppercase font-bold tracking-wide">Sin Movimiento</div>
+                                <div class="font-display font-bold text-xl text-slate-900">2</div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 ring-2 ring-blue-500/10">
+                            <div class="p-2 rounded-lg bg-indigo-50 text-indigo-600"><i class="ph ph-trend-up text-xl"></i></div>
+                            <div>
+                                <div class="text-xs text-indigo-600 uppercase font-bold tracking-wide">RT6 Pendientes</div>
+                                <div class="font-display font-bold text-xl text-slate-900">2</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <button onclick="openModal()" class="btn-primary px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-lg shadow-blue-500/20">
+                            <i class="ph-bold ph-plus"></i> Nuevo Movimiento
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filtros Rápidos -->
+                <div class="flex items-center gap-2 overflow-x-auto pb-2 mb-4 text-sm">
+                    <span class="text-slate-500 font-medium px-2">Filtrar:</span>
+                    <button class="px-3 py-1.5 bg-slate-200 text-slate-800 rounded-full font-medium transition-colors">Todos</button>
+                    <button class="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600 rounded-full transition-colors">Compras</button>
+                    <button class="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600 rounded-full transition-colors">Ventas</button>
+                    <button class="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600 rounded-full transition-colors">RT6 (Ajustes)</button>
+                    <div class="ml-auto flex items-center gap-2">
+                        <input type="text" placeholder="Buscar producto o importe..." class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm w-48 focus:outline-none focus:border-blue-500 transition-colors">
+                    </div>
+                </div>
+            </div>
+
+            <!-- SPLIT VIEW CONTAINER -->
+            <div class="max-w-7xl mx-auto grid md:grid-cols-2 gap-6 items-start h-full">
+                
+                <!-- COLUMN LEFT: INVENTARIO (FALTA EN CONTABILIDAD) -->
+                <section class="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full min-h-[500px]">
+                    <header class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
+                        <div class="flex items-center gap-2">
+                            <i class="ph-fill ph-package text-slate-400"></i>
+                            <h3 class="font-display font-bold text-slate-800">En Inventario</h3>
+                        </div>
+                        <span class="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-md">Falta asiento</span>
+                    </header>
+                    
+                    <div class="p-4 flex flex-col gap-3">
+                        
+                        <!-- Item 1 -->
+                        <div class="card-interaction bg-white border border-slate-200 rounded-xl p-3 cursor-pointer group relative overflow-hidden transition-all duration-200" onclick="openDrawer('inv-001')">
+                            <div class="absolute left-0 top-0 bottom-0 w-1 bg-orange-400"></div>
+                            <div class="flex justify-between items-start mb-2 pl-2">
+                                <div>
+                                    <div class="text-xs font-bold text-slate-500 mb-0.5">COMPRA • 30 AGO 2025</div>
+                                    <div class="font-semibold text-slate-900">Gin Heráclito & Macedonio</div>
+                                    <div class="text-xs text-slate-500">Stock: +15 u.</div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="font-mono font-medium text-slate-900">$ 368.000</div>
+                                    <div class="badge-warning inline-block text-[10px] font-bold px-1.5 py-0.5 rounded mt-1">SIN ASIENTO</div>
+                                </div>
+                            </div>
+                            <div class="pl-2 flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-medium hover:bg-blue-100">Generar Asiento</button>
+                                <button class="text-xs bg-slate-50 text-slate-600 px-2 py-1 rounded font-medium hover:bg-slate-100">Vincular</button>
+                            </div>
+                        </div>
+
+                        <!-- Item 2 -->
+                        <div class="card-interaction bg-white border border-slate-200 rounded-xl p-3 cursor-pointer group relative overflow-hidden transition-all duration-200" onclick="openDrawer('inv-002')">
+                            <div class="absolute left-0 top-0 bottom-0 w-1 bg-orange-400"></div>
+                            <div class="flex justify-between items-start mb-2 pl-2">
+                                <div>
+                                    <div class="text-xs font-bold text-slate-500 mb-0.5">VENTA • 01 OCT 2025</div>
+                                    <div class="font-semibold text-slate-900">Gin Heráclito & Macedonio</div>
+                                    <div class="text-xs text-slate-500">Stock: -5 u.</div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="font-mono font-medium text-slate-900">$ 242.000</div>
+                                    <div class="badge-warning inline-block text-[10px] font-bold px-1.5 py-0.5 rounded mt-1">SIN ASIENTO</div>
+                                </div>
+                            </div>
+                            <div class="pl-2 flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-medium hover:bg-blue-100">Generar Asiento</button>
+                                <button class="text-xs bg-slate-50 text-slate-600 px-2 py-1 rounded font-medium hover:bg-slate-100">Vincular</button>
+                            </div>
+                        </div>
+
+                    </div>
+                    
+                    <!-- Empty State Helper -->
+                    <div class="mt-auto p-6 text-center">
+                        <p class="text-sm text-slate-400 italic">"Chequeá estos movimientos, parecen estar colgados sin su contraparte contable." — Boti</p>
+                    </div>
+                </section>
+
+                <!-- COLUMN RIGHT: CONTABILIDAD (FALTA EN INVENTARIO) -->
+                <section class="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full min-h-[500px]">
+                    <header class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
+                        <div class="flex items-center gap-2">
+                            <i class="ph-fill ph-notebook text-slate-400"></i>
+                            <h3 class="font-display font-bold text-slate-800">En Diario</h3>
+                        </div>
+                        <span class="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-md">Falta mov. stock</span>
+                    </header>
+
+                    <div class="p-4 flex flex-col gap-4">
+                        
+                        <!-- CARD RT6 PRINCIPAL -->
+                        <div class="bg-white border border-blue-200 rounded-xl p-0 shadow-sm relative overflow-hidden group hover:border-blue-400 transition-all">
+                            <div class="bg-blue-50 px-4 py-2 border-b border-blue-100 flex justify-between items-center">
+                                <div class="flex items-center gap-2">
+                                    <span class="badge-rt6 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">RT6 (INFLACIÓN)</span>
+                                    <span class="text-xs text-blue-800 font-medium">Asiento Manual #4029</span>
+                                </div>
+                                <span class="text-xs text-slate-500">31 DIC 2025</span>
+                            </div>
+                            
+                            <div class="p-4">
+                                <div class="flex justify-between items-start">
+                                    <div class="pr-4">
+                                        <h4 class="font-semibold text-slate-900 text-sm">Ajuste por Inflación (RECPAM)</h4>
+                                        <p class="text-xs text-slate-500 mt-1 leading-relaxed">Este asiento refleja la pérdida/ganancia de poder adquisitivo, pero no se aplicó al valor del stock.</p>
+                                    </div>
+                                    <div class="text-right shrink-0">
+                                        <div class="font-mono font-bold text-lg text-slate-900">$ 7.211.403</div>
+                                        <div class="text-[10px] text-slate-400 mt-1 uppercase">Pérdida neta</div>
+                                    </div>
+                                </div>
+
+                                <!-- Actions -->
+                                <div class="mt-4 flex flex-wrap gap-2">
+                                    <button class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 px-3 rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5" onclick="alert('Abre modal confirmación aplicar RT6')">
+                                        <i class="ph-bold ph-magic-wand"></i> Aplicar a Inventario
+                                    </button>
+                                    <button class="px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-50 text-slate-600">
+                                        Ver Asiento
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- AI Suggestions -->
+                            <div class="bg-slate-50 p-3 border-t border-slate-100">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <i class="ph-duotone ph-sparkle text-purple-500"></i>
+                                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Sugerencias de impacto</span>
+                                </div>
+                                <div class="flex gap-2 overflow-x-auto">
+                                    <span class="text-xs bg-white border border-slate-200 px-2 py-1 rounded text-slate-600 whitespace-nowrap">Mercaderías (Global)</span>
+                                    <span class="text-xs bg-white border border-slate-200 px-2 py-1 rounded text-slate-600 whitespace-nowrap">Compras</span>
+                                    <span class="text-xs bg-white border border-slate-200 px-2 py-1 rounded text-slate-600 whitespace-nowrap opacity-60 dashed">Gastos Grales</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card Standard -->
+                        <div class="card-interaction bg-white border border-slate-200 rounded-xl p-3 cursor-pointer group relative overflow-hidden transition-all duration-200 opacity-60 hover:opacity-100">
+                             <div class="absolute left-0 top-0 bottom-0 w-1 bg-slate-300"></div>
+                             <div class="flex justify-between items-center pl-2">
+                                <div>
+                                    <div class="text-xs font-bold text-slate-500">ASIENTO #3991</div>
+                                    <div class="font-semibold text-slate-700 text-sm">Ajuste Manual Stock</div>
+                                </div>
+                                <div class="font-mono text-sm text-slate-600">$ 50.000</div>
+                             </div>
+                        </div>
+
+                    </div>
+                </section>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- 3. DRAWER (DETALLE/EDICIÓN) -->
+    <div id="drawerOverlay" class="drawer-overlay fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40" onclick="closeDrawer()">
+        <div id="drawerPanel" class="drawer-panel absolute top-2 bottom-2 right-2 w-full max-w-md bg-white shadow-2xl rounded-2xl flex flex-col border border-slate-100" onclick="event.stopPropagation()">
+            
+            <header class="p-5 border-b border-slate-100 flex justify-between items-start">
+                <div>
+                    <div class="text-xs font-bold text-blue-600 mb-1">DETALLE DE MOVIMIENTO</div>
+                    <h2 class="font-display font-bold text-xl text-slate-900 leading-tight">Compra #00921</h2>
+                    <p class="text-sm text-slate-500">Gin Heráclito & Macedonio</p>
+                </div>
+                <button onclick="closeDrawer()" class="p-2 rounded-full hover:bg-slate-100 text-slate-400 transition-colors"><i class="ph-bold ph-x"></i></button>
+            </header>
+
+            <div class="flex-1 overflow-y-auto p-5">
+                <!-- Formulario Mock -->
+                <div class="space-y-5">
+                    
+                    <div class="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                        <label class="block text-xs font-semibold text-blue-800 mb-2">SUGERENCIA INTELIGENTE</label>
+                        <p class="text-sm text-slate-700 mb-3">Encontramos un asiento contable del 30/08 por el mismo importe ($368.000) en la cuenta "Proveedores Varios".</p>
+                        <button class="w-full bg-white border border-blue-200 text-blue-600 text-sm font-semibold py-2 rounded-lg hover:bg-blue-50 transition-colors">Vincular con Asiento #2021</button>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Fecha</label>
+                        <input type="date" value="2025-08-30" class="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1.5">Cantidad</label>
+                            <input type="number" value="15" class="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 font-mono text-right focus:border-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1.5">Costo Total</label>
+                            <input type="text" value="$ 368.000" class="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 font-mono text-right focus:border-blue-500 outline-none">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Categoría / Rubro</label>
+                        <select class="w-full p-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 bg-white focus:border-blue-500 outline-none">
+                            <option>Bienes de Cambio (Mercaderías)</option>
+                            <option>Insumos</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="p-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-end gap-3">
+                <button onclick="closeDrawer()" class="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900">Cancelar</button>
+                <button onclick="closeDrawer()" class="btn-primary px-6 py-2 rounded-lg text-sm font-semibold shadow-md">Guardar Cambios</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- 4. MODAL "REGISTRAR MOVIMIENTO" (RT6) -->
+    <div id="modalOverlay" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onclick="closeModal()"></div>
+        
+        <div class="modal-content relative bg-white w-full max-w-5xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            
+            <!-- Modal Header -->
+            <header class="bg-white border-b border-slate-100 p-4 flex justify-between items-center shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="bg-blue-50 p-2 rounded-lg text-blue-600"><i class="ph-bold ph-package text-xl"></i></div>
+                    <h2 class="font-display font-bold text-lg text-slate-900">Registrar Movimiento</h2>
+                </div>
+                
+                <!-- TABS -->
+                <div class="flex bg-slate-100 p-1 rounded-lg">
+                    <button class="px-4 py-1.5 rounded-md text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors" onclick="switchTab('tab-compra')">Compra</button>
+                    <button class="px-4 py-1.5 rounded-md text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors" onclick="switchTab('tab-venta')">Venta</button>
+                    <button class="px-4 py-1.5 rounded-md text-sm font-bold bg-white text-blue-600 shadow-sm transition-colors" onclick="switchTab('tab-ajuste')" id="btnTabAjuste">Ajuste</button>
+                </div>
+                
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-900 p-2 rounded-full transition-colors"><i class="ph-bold ph-x text-lg"></i></button>
+            </header>
+
+            <!-- Modal Body (Split) -->
+            <div class="flex-1 flex overflow-hidden">
+                
+                <!-- LEFT COL: FORMULARIO -->
+                <div class="w-full lg:w-7/12 p-6 overflow-y-auto border-r border-slate-100 bg-white">
+                    
+                    <!-- Subtabs Ajuste -->
+                    <div class="mb-6 flex gap-6 border-b border-slate-100 pb-1">
+                        <button class="text-sm font-medium text-slate-400 pb-2 hover:text-slate-600">Ajuste de Stock</button>
+                        <button class="text-sm font-bold text-blue-600 border-b-2 border-blue-600 pb-2">Ajuste por Inflación (RT6)</button>
+                        <button class="text-sm font-medium text-slate-400 pb-2 hover:text-slate-600">Diferencia Inventario</button>
+                    </div>
+
+                    <div class="space-y-6">
+                        <!-- Step 1: Qué ajustar -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">Concepto</label>
+                                <select class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:bg-white focus:border-blue-500 outline-none transition-colors">
+                                    <option>Compra</option>
+                                    <option>Gastos s/Compras</option>
+                                    <option>Venta</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">Fecha Ajuste</label>
+                                <input type="date" value="2025-12-31" class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:bg-white outline-none">
+                            </div>
+                        </div>
+
+                        <!-- Step 2: Origen -->
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">Origen a Ajustar</label>
+                            <div class="relative">
+                                <i class="ph ph-magnifying-glass absolute left-3 top-3 text-slate-400"></i>
+                                <select class="w-full pl-9 p-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 appearance-none bg-white focus:border-blue-500 outline-none">
+                                    <option>Seleccioná un movimiento...</option>
+                                    <option selected>Compra 01/02/2025 • Lote A2 • $ 1.000.000 (Origen)</option>
+                                    <option>Compra 15/03/2025 • Lote B9 • $ 550.000 (Origen)</option>
+                                </select>
+                                <i class="ph ph-caret-down absolute right-3 top-3 text-slate-400 pointer-events-none"></i>
+                            </div>
+                        </div>
+
+                        <!-- Step 3: Calculation Panel -->
+                        <div class="bg-blue-50/30 rounded-xl p-4 border border-blue-100">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="text-sm font-bold text-blue-800">Cálculo Sugerido</h4>
+                                <span class="text-xs font-mono text-blue-600 bg-blue-100 px-2 py-0.5 rounded">Coef: 2,4143</span>
+                            </div>
+                            
+                            <div class="grid grid-cols-3 gap-4 text-center">
+                                <div>
+                                    <div class="text-xs text-slate-500 mb-1">Valor Origen</div>
+                                    <div class="font-mono font-medium text-slate-900">$ 1.000.000</div>
+                                </div>
+                                <div class="flex items-center justify-center text-slate-300 pt-4"><i class="ph-bold ph-arrow-right"></i></div>
+                                <div>
+                                    <div class="text-xs text-slate-500 mb-1">Valor Homogéneo</div>
+                                    <div class="font-mono font-bold text-slate-900">$ 2.414.300</div>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 pt-3 border-t border-blue-100 flex justify-between items-center">
+                                <div class="text-sm text-blue-800 font-medium">Delta (RECPAM) a registrar</div>
+                                <div class="font-mono font-bold text-lg text-green-600">+ $ 1.414.300</div>
+                            </div>
+                        </div>
+
+                        <!-- Step 4: Manual Override -->
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" class="sr-only peer" id="toggleManual">
+                                <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                <span class="ms-3 text-sm font-medium text-slate-700">Editar delta manualmente</span>
+                            </label>
+                        </div>
+
+                        <div id="manualInput" class="hidden pl-4 border-l-2 border-slate-200">
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">Delta Manual</label>
+                            <input type="text" placeholder="$ 0,00" class="w-full p-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:border-blue-500 outline-none">
+                            <p class="text-xs text-slate-400 mt-1">Ingresá la diferencia exacta si el cálculo automático no te cierra.</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-8 flex gap-2">
+                        <button class="text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors">
+                            <i class="ph-bold ph-plus-circle"></i> Agregar otro ajuste a la lista
+                        </button>
+                    </div>
+                </div>
+
+                <!-- RIGHT COL: PREVIEW -->
+                <div class="hidden lg:flex w-5/12 bg-slate-50 p-6 border-l border-slate-100 flex-col">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Vista Previa</h3>
+                    
+                    <div class="sticky top-6">
+                        <!-- Preview Card -->
+                        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
+                            <div class="flex items-center gap-2 mb-3">
+                                <div class="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600">
+                                    <i class="ph-fill ph-check"></i>
+                                </div>
+                                <div>
+                                    <div class="text-sm font-bold text-slate-900">Resultado del ajuste</div>
+                                    <div class="text-xs text-slate-500">Impacto en contabilidad e inventario</div>
+                                </div>
+                            </div>
+                            
+                            <div class="space-y-3">
+                                <div class="flex justify-between text-sm py-2 border-b border-dashed border-slate-200">
+                                    <span class="text-slate-600">Stock físico</span>
+                                    <span class="font-medium text-slate-900">Sin cambios</span>
+                                </div>
+                                <div class="flex justify-between text-sm py-2 border-b border-dashed border-slate-200">
+                                    <span class="text-slate-600">Valor Inventario</span>
+                                    <span class="font-mono font-bold text-green-600">+ $ 1.4M</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Asiento Preview -->
+                        <div class="bg-slate-900 rounded-xl p-4 text-slate-300 font-mono text-xs leading-relaxed shadow-lg">
+                            <div class="text-slate-500 mb-2 font-sans font-bold text-[10px] uppercase">Previsualización del Asiento</div>
+                            <div class="flex justify-between mb-1">
+                                <span>Mercaderías (Revalúo)</span>
+                                <span class="text-white">1.414.300,00</span>
+                            </div>
+                            <div class="flex justify-between pl-4 text-slate-400">
+                                <span>a RECPAM</span>
+                                <span>1.414.300,00</span>
+                            </div>
+                            <div class="mt-3 pt-2 border-t border-slate-700 text-[10px] italic text-slate-500">
+                                // Ajuste automático RT6 ref: Compra Lote A2
+                            </div>
+                        </div>
+
+                        <div class="mt-6 bg-blue-50 p-3 rounded-lg flex gap-3 items-start">
+                            <i class="ph-fill ph-info text-blue-500 mt-0.5"></i>
+                            <p class="text-xs text-blue-800 leading-snug">
+                                <strong>Recordá:</strong> Esto ajusta la valuación contable. Si necesitás corregir cantidades físicas, usá la pestaña "Ajuste de Stock".
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Modal Footer -->
+            <footer class="bg-white border-t border-slate-100 p-4 flex justify-end gap-3 shrink-0">
+                <button onclick="closeModal()" class="px-5 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors">Cancelar</button>
+                <button onclick="closeModal()" class="btn-primary px-6 py-2.5 rounded-lg text-sm font-semibold shadow-lg shadow-blue-500/20 flex items-center gap-2">
+                    <i class="ph-bold ph-check"></i> Confirmar Ajuste
+                </button>
+            </footer>
+
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC (PROTOTYPE) -->
+    <script>
+        // Drawer Logic
+        function openDrawer(id) {
+            const overlay = document.getElementById('drawerOverlay');
+            overlay.classList.remove('hidden');
+            // Small timeout to allow transition
+            setTimeout(() => {
+                overlay.classList.add('open');
+            }, 10);
+        }
+
+        function closeDrawer() {
+            const overlay = document.getElementById('drawerOverlay');
+            overlay.classList.remove('open');
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+            }, 300);
+        }
+
+        // Modal Logic
+        function openModal() {
+            const overlay = document.getElementById('modalOverlay');
+            overlay.classList.remove('hidden');
+            setTimeout(() => {
+                overlay.classList.add('open');
+            }, 10);
+        }
+
+        function closeModal() {
+            const overlay = document.getElementById('modalOverlay');
+            overlay.classList.remove('open');
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+            }, 300);
+        }
+
+        // Manual Input Toggle Logic
+        document.getElementById('toggleManual').addEventListener('change', function() {
+            const manualInput = document.getElementById('manualInput');
+            if(this.checked) {
+                manualInput.classList.remove('hidden');
+            } else {
+                manualInput.classList.add('hidden');
+            }
+        });
+
+        // Tabs Logic (Visual Only for Prototype)
+        function switchTab(tabName) {
+            // Reset styles mock
+            const buttons = document.querySelectorAll('[onclick^="switchTab"]');
+            buttons.forEach(btn => {
+                btn.className = "px-4 py-1.5 rounded-md text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors";
+            });
+            
+            // Set active (Mocking 'Ajuste' as active for this demo)
+            if(tabName === 'tab-ajuste') {
+                const btn = document.getElementById('btnTabAjuste');
+                btn.className = "px-4 py-1.5 rounded-md text-sm font-bold bg-white text-blue-600 shadow-sm transition-colors";
+            }
+        }
+
+        // Init: Hide overlays initially to prevent FOUC but allow transitions
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('drawerOverlay').classList.add('hidden');
+            document.getElementById('modalOverlay').classList.add('hidden');
+        });
+    </script>
+    
+    <!-- 
+    NOTAS PARA IMPLEMENTACIÓN
+    =========================
+    1. Datos Dinámicos:
+       - Los KPIs del dashboard deben calcularse via backend (count de items sin foreign_key).
+       - El dropdown "Origen a ajustar" debe filtrar movimientos que no hayan sido ajustados totalmente aún.
+    
+    2. Lógica RT6:
+       - El coeficiente se debe traer de una tabla `indices_inflacion` basada en la fecha de origen.
+       - El cálculo: (ValorOrigen * Coeficiente) - ValorOrigen = RECPAM.
+    
+    3. UX/States:
+       - Agregar spinner de carga al cambiar el select de "Origen".
+       - Validar que Fecha Ajuste >= Fecha Origen.
+    
+    4. Mapping Contable:
+       - El asiento preview debe usar la configuración del Plan de Cuentas del usuario.
+    -->
+
+</body>
+</html>

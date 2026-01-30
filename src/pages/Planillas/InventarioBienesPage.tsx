@@ -83,7 +83,7 @@ const TABS: { id: TabId; label: string; badge?: number }[] = [
     { id: 'cierre', label: 'Cierre' },
 ]
 
-type InventoryAccountCategory = 'mercaderias' | 'compras' | 'cmv' | 'ventas'
+type InventoryAccountCategory = 'mercaderias' | 'compras' | 'cmv' | 'ventas' | 'rt6_adjustment'
 
 type InventoryAccountRule = {
     key: AccountMappingKey
@@ -991,6 +991,130 @@ export default function InventarioBienesPage() {
         setMovementModalOpen(true)
     }
 
+    const handleApplyRT6Adjustment = async (entry: JournalEntry) => {
+        if (products.length === 0) {
+            showToast('Crea al menos un producto antes de aplicar ajustes RT6', 'error')
+            return
+        }
+
+        // Find inventory-relevant lines in the RT6 entry (compras, bonif, devol, mercaderias accounts)
+        const inventoryLines = entry.lines.filter(line => {
+            const match = inventoryAccountResolution.byId.get(line.accountId)
+            return match && (match.category === 'mercaderias' || match.category === 'compras')
+        })
+
+        if (inventoryLines.length === 0) {
+            showToast('No se encontraron lineas de inventario en el asiento RT6', 'error')
+            return
+        }
+
+        // Calculate the net adjustment amount from all inventory lines
+        const adjustmentAmount = inventoryLines.reduce((sum, line) => sum + (line.debit || 0) - (line.credit || 0), 0)
+
+        if (Math.abs(adjustmentAmount) < 0.01) {
+            showToast('El ajuste neto es cero, no hay nada que aplicar', 'error')
+            return
+        }
+
+        // Get the entry period (YYYY-MM)
+        const entryPeriod = entry.date.substring(0, 7)
+
+        // Find purchases in the same period to prorate
+        const periodPurchases = movements.filter(m =>
+            m.type === 'PURCHASE'
+            && !m.isDevolucion
+            && m.date.substring(0, 7) === entryPeriod
+        )
+
+        if (periodPurchases.length === 0 && products.length === 1) {
+            // Fallback: single product, assign 100% to it
+            const product = products[0]
+            if (!confirm(`No hay compras en ${entryPeriod}. Asignar ajuste de ${formatCurrency(adjustmentAmount)} al producto "${product.name}"?`)) {
+                return
+            }
+            try {
+                await createBienesMovement({
+                    date: entry.date,
+                    type: 'VALUE_ADJUSTMENT',
+                    productId: product.id,
+                    quantity: 0,
+                    periodId,
+                    ivaRate: 0,
+                    ivaAmount: 0,
+                    subtotal: Math.abs(adjustmentAmount),
+                    total: Math.abs(adjustmentAmount),
+                    costMethod: settings?.costMethod || 'PPP',
+                    valueDelta: adjustmentAmount,
+                    rt6Period: entryPeriod,
+                    rt6SourceEntryId: entry.id,
+                    notes: `Ajuste RT6 inflacion - ${entryPeriod}`,
+                    reference: entry.id.slice(0, 8),
+                    autoJournal: false,
+                    linkedJournalEntryIds: [entry.id],
+                })
+                showToast('Ajuste RT6 aplicado: 1 movimiento creado', 'success')
+                await loadData()
+                return
+            } catch (error) {
+                showToast(error instanceof Error ? error.message : 'Error al aplicar ajuste RT6', 'error')
+                return
+            }
+        }
+
+        if (periodPurchases.length === 0) {
+            showToast(`No hay compras en ${entryPeriod} para prorratear. Vincule manualmente.`, 'error')
+            return
+        }
+
+        // Prorate by purchase subtotal
+        const totalPurchases = periodPurchases.reduce((sum, m) => sum + m.subtotal, 0)
+        if (totalPurchases <= 0) {
+            showToast('Total de compras en el periodo es cero, no se puede prorratear', 'error')
+            return
+        }
+
+        const confirmMsg = periodPurchases.length === 1
+            ? `Aplicar ajuste RT6 de ${formatCurrency(adjustmentAmount)} a compra de "${products.find(p => p.id === periodPurchases[0].productId)?.name || 'producto'}"?`
+            : `Prorratear ajuste RT6 de ${formatCurrency(adjustmentAmount)} entre ${periodPurchases.length} compras del periodo ${entryPeriod}?`
+        if (!confirm(confirmMsg)) return
+
+        try {
+            let remaining = adjustmentAmount
+            for (let i = 0; i < periodPurchases.length; i++) {
+                const purchase = periodPurchases[i]
+                const isLast = i === periodPurchases.length - 1
+                const share = isLast
+                    ? remaining
+                    : Math.round(((purchase.subtotal / totalPurchases) * adjustmentAmount) * 100) / 100
+                remaining = Math.round((remaining - share) * 100) / 100
+
+                await createBienesMovement({
+                    date: entry.date,
+                    type: 'VALUE_ADJUSTMENT',
+                    productId: purchase.productId,
+                    quantity: 0,
+                    periodId,
+                    ivaRate: 0,
+                    ivaAmount: 0,
+                    subtotal: Math.abs(share),
+                    total: Math.abs(share),
+                    costMethod: settings?.costMethod || 'PPP',
+                    valueDelta: share,
+                    rt6Period: entryPeriod,
+                    rt6SourceEntryId: entry.id,
+                    notes: `Ajuste RT6 inflacion - ${entryPeriod} (prorrateo ${i + 1}/${periodPurchases.length})`,
+                    reference: entry.id.slice(0, 8),
+                    autoJournal: false,
+                    linkedJournalEntryIds: [entry.id],
+                })
+            }
+            showToast(`Ajuste RT6 aplicado: ${periodPurchases.length} movimiento(s) creados`, 'success')
+            await loadData()
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Error al aplicar ajuste RT6', 'error')
+        }
+    }
+
     const handleConfirmLinkMovement = async () => {
         if (!linkMovementTarget || !selectedLinkEntryId) {
             showToast('Selecciona un asiento para vincular', 'error')
@@ -1320,20 +1444,29 @@ export default function InventarioBienesPage() {
             else if (entry.sourceType === 'adjustment') primaryCategory = 'mercaderias'
             else primaryCategory = 'mercaderias'
         }
+        // Detect RT6 inflation adjustment entries
+        const isRT6Entry = entry.memo?.toLowerCase().includes('ajuste por inflaci')
+            || (entry.sourceModule === 'cierre-valuacion' && entry.metadata?.tipo === 'RT6')
+        if (isRT6Entry && hasMatches) {
+            primaryCategory = 'rt6_adjustment'
+        }
+
         const triggerAccountId = primaryCategory
             ? entry.lines.find(line => matches.get(line.accountId)?.category === primaryCategory)?.accountId
             : undefined
 
         return {
-            hasMatch: entry.sourceModule === 'inventory' || hasMatches,
+            hasMatch: entry.sourceModule === 'inventory' || isRT6Entry || hasMatches,
             category: primaryCategory,
             triggerAccountId,
             matchedKeys,
+            isRT6: isRT6Entry,
         }
     }, [inventoryAccountResolution])
 
     const getEntryTypeLabel = useCallback((category: InventoryAccountCategory | null) => {
         if (!category) return 'Inventario'
+        if (category === 'rt6_adjustment') return 'Ajuste RT6 (Inflacion)'
         if (category === 'mercaderias') return 'Existencia/Refundicion'
         if (category === 'compras') return 'Compra/Dev/Bonif'
         if (category === 'cmv') return 'CMV'
@@ -2072,6 +2205,7 @@ export default function InventarioBienesPage() {
                                                     SALE: { label: 'Venta', color: 'bg-blue-50 text-blue-600' },
                                                     ADJUSTMENT: { label: 'Ajuste', color: 'bg-orange-50 text-orange-700' },
                                                     COUNT: { label: 'Conteo', color: 'bg-purple-50 text-purple-600' },
+                                                    VALUE_ADJUSTMENT: { label: 'Ajuste Valuacion', color: 'bg-violet-50 text-violet-700' },
                                                 }
                                                 const typeInfo = typeLabels[mov.type] || { label: mov.type, color: 'bg-slate-50 text-slate-600' }
                                                 const isEntry = mov.type === 'PURCHASE' || (mov.type === 'ADJUSTMENT' && mov.quantity > 0)
@@ -2364,12 +2498,21 @@ export default function InventarioBienesPage() {
                                                     </div>
 
                                                     <div className="mt-3 flex flex-wrap gap-2">
-                                                        <button
-                                                            onClick={() => handleCreateMovementFromEntry(entry)}
-                                                            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100"
-                                                        >
-                                                            Crear movimiento
-                                                        </button>
+                                                        {entryMatch.category === 'rt6_adjustment' ? (
+                                                            <button
+                                                                onClick={() => handleApplyRT6Adjustment(entry)}
+                                                                className="px-2.5 py-1 text-xs font-semibold rounded-md bg-violet-50 text-violet-700 border border-violet-100"
+                                                            >
+                                                                Aplicar ajuste RT6
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => handleCreateMovementFromEntry(entry)}
+                                                                className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                                            >
+                                                                Crear movimiento
+                                                            </button>
+                                                        )}
                                                         <button
                                                             onClick={() => handleStartLinkEntry(entry)}
                                                             className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white text-slate-600 border border-slate-200"
