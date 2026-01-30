@@ -18,8 +18,16 @@ const formatAmount = (n: number): string => {
     return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+const parseISODateLocal = (dateStr: string): Date | null => {
+    const [y, m, d] = dateStr.split('-').map(Number)
+    if (!y || !m || !d) return null
+    return new Date(y, m - 1, d)
+}
+
 const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('es-AR', {
+    const parsed = parseISODateLocal(dateStr)
+    if (!parsed) return dateStr
+    return parsed.toLocaleDateString('es-AR', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
