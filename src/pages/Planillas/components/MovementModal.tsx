@@ -282,11 +282,10 @@ export default function MovementModal({
                                 key={opt.value}
                                 type="button"
                                 onClick={() => handleChange('type', opt.value)}
-                                className={`py-2 text-sm font-medium rounded-md transition-all ${
-                                    formData.type === opt.value
+                                className={`py-2 text-sm font-medium rounded-md transition-all ${formData.type === opt.value
                                         ? 'bg-white shadow-sm text-slate-900 ring-1 ring-slate-200'
                                         : 'text-slate-500 hover:text-slate-700'
-                                }`}
+                                    }`}
                             >
                                 {opt.label}
                             </button>
@@ -302,22 +301,20 @@ export default function MovementModal({
                                 <button
                                     type="button"
                                     onClick={() => handleChange('adjustmentDirection', 'IN')}
-                                    className={`py-2 text-xs font-semibold rounded-md border transition-all ${
-                                        formData.adjustmentDirection === 'IN'
+                                    className={`py-2 text-xs font-semibold rounded-md border transition-all ${formData.adjustmentDirection === 'IN'
                                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                             : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                                    }`}
+                                        }`}
                                 >
                                     Entrada (aumenta stock)
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => handleChange('adjustmentDirection', 'OUT')}
-                                    className={`py-2 text-xs font-semibold rounded-md border transition-all ${
-                                        formData.adjustmentDirection === 'OUT'
+                                    className={`py-2 text-xs font-semibold rounded-md border transition-all ${formData.adjustmentDirection === 'OUT'
                                             ? 'bg-amber-50 text-amber-700 border-amber-200'
                                             : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                                    }`}
+                                        }`}
                                 >
                                     Salida (baja stock)
                                 </button>
