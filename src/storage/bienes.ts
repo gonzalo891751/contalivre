@@ -33,6 +33,13 @@ const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
     compras: { code: '5.1.03', names: ['Compras'] },
     diferenciaInventario: { code: '4.3.02', names: ['Diferencia de inventario'] },
     aperturaInventario: { code: '3.2.01', names: ['Apertura inventario', 'Resultados acumulados'] },
+    gastosCompras: { code: '4.8.02', names: ['Gastos sobre compras'] },
+    bonifCompras: { code: '4.8.03', names: ['Bonificaciones sobre compras'] },
+    devolCompras: { code: '4.8.04', names: ['Devoluciones sobre compras'] },
+    bonifVentas: { code: '4.8.05', names: ['Bonificaciones sobre ventas'] },
+    devolVentas: { code: '4.8.06', names: ['Devoluciones sobre ventas'] },
+    descuentosObtenidos: { code: '4.6.09', names: ['Descuentos obtenidos'] },
+    descuentosOtorgados: { code: '4.2.01', names: ['Descuentos otorgados'] },
     caja: { code: '1.1.01.01', names: ['Caja'] },
     banco: { code: '1.1.01.02', names: ['Bancos cuenta corriente', 'Banco cuenta corriente', 'Bancos'] },
     proveedores: { code: '2.1.01.01', names: ['Proveedores'] },
@@ -210,38 +217,103 @@ const buildJournalEntriesForMovement = async (
     const ivaAmount = movement.ivaAmount
     const total = movement.total
 
+    // Resolve optional sub-accounts for bonif/gastos/descuento
+    const gastosComprasId = resolveMappedAccountId(accounts, settings, 'gastosCompras', 'gastosCompras')
+    const bonifComprasId = resolveMappedAccountId(accounts, settings, 'bonifCompras', 'bonifCompras')
+    const devolComprasId = resolveMappedAccountId(accounts, settings, 'devolCompras', 'devolCompras')
+    const bonifVentasId = resolveMappedAccountId(accounts, settings, 'bonifVentas', 'bonifVentas')
+    const devolVentasId = resolveMappedAccountId(accounts, settings, 'devolVentas', 'devolVentas')
+    const descuentosObtenidosId = resolveMappedAccountId(accounts, settings, 'descuentosObtenidos', 'descuentosObtenidos')
+    const descuentosOtorgadosId = resolveMappedAccountId(accounts, settings, 'descuentosOtorgados', 'descuentosOtorgados')
+
+    const bonifAmt = movement.bonificacionAmount || 0
+    const descuentoAmt = movement.descuentoFinancieroAmount || 0
+    const gastosAmt = movement.gastosCompra || 0
+
     if (movement.type === 'PURCHASE') {
-        // PERIODIC: Debe Compras / PERMANENT: Debe Mercaderias
-        const purchaseDesc = isPeriodic ? 'Compra (cuenta Compras)' : 'Compra de mercaderias'
-        const lines: EntryLine[] = [
-            { accountId: purchaseDebitAccountId!, debit: subtotal, credit: 0, description: purchaseDesc },
-        ]
-        if (ivaAmount > 0 && ivaCFId) {
-            lines.push({ accountId: ivaCFId, debit: ivaAmount, credit: 0, description: 'IVA credito fiscal' })
+        if (movement.isDevolucion) {
+            // DEVOLUCIÓN DE COMPRA: reverse entry
+            // Debe: Proveedores/Anticipos (total c/IVA)
+            // Haber: Devoluciones s/compras (neto)
+            // Haber: IVA CF (reverso)
+            const lines: EntryLine[] = [
+                { accountId: contraId!, debit: total, credit: 0, description: 'Proveedores - devolucion' },
+            ]
+            if (devolComprasId) {
+                lines.push({ accountId: devolComprasId, debit: 0, credit: subtotal, description: 'Devolucion s/compras' })
+            } else {
+                lines.push({ accountId: purchaseDebitAccountId!, debit: 0, credit: subtotal, description: 'Devolucion compra' })
+            }
+            if (ivaAmount > 0 && ivaCFId) {
+                lines.push({ accountId: ivaCFId, debit: 0, credit: ivaAmount, description: 'IVA CF reverso' })
+            }
+            pushEntry(`Devolucion compra - ${product?.name || movement.productId}`, lines, { journalRole: 'purchase_return' })
+        } else {
+            // COMPRA NORMAL with bonif/gastos/descuento
+            const purchaseDesc = isPeriodic ? 'Compra (cuenta Compras)' : 'Compra de mercaderias'
+            const lines: EntryLine[] = [
+                { accountId: purchaseDebitAccountId!, debit: subtotal, credit: 0, description: purchaseDesc },
+            ]
+            if (gastosAmt > 0 && gastosComprasId) {
+                lines.push({ accountId: gastosComprasId, debit: gastosAmt, credit: 0, description: 'Gastos s/compras' })
+            }
+            if (ivaAmount > 0 && ivaCFId) {
+                lines.push({ accountId: ivaCFId, debit: ivaAmount, credit: 0, description: 'IVA credito fiscal' })
+            }
+            if (bonifAmt > 0 && bonifComprasId) {
+                lines.push({ accountId: bonifComprasId, debit: 0, credit: bonifAmt, description: 'Bonificacion s/compras' })
+            }
+            if (descuentoAmt > 0 && descuentosObtenidosId) {
+                lines.push({ accountId: descuentosObtenidosId, debit: 0, credit: descuentoAmt, description: 'Descuento financiero obtenido' })
+            }
+            lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Pago / Proveedores' })
+            pushEntry(`Compra mercaderias - ${product?.name || movement.productId}`, lines, { journalRole: 'purchase' })
         }
-        lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Pago / Proveedores' })
-        pushEntry(`Compra mercaderias - ${product?.name || movement.productId}`, lines, { journalRole: 'purchase' })
     }
 
     if (movement.type === 'SALE') {
-        // Asiento de venta (siempre)
-        const saleLines: EntryLine[] = [
-            { accountId: contraId!, debit: total, credit: 0, description: 'Cobro / Deudores' },
-            { accountId: ventasId!, debit: 0, credit: subtotal, description: 'Ventas' },
-        ]
-        if (ivaAmount > 0 && ivaDFId) {
-            saleLines.push({ accountId: ivaDFId, debit: 0, credit: ivaAmount, description: 'IVA debito fiscal' })
-        }
-        pushEntry(`Venta mercaderias - ${product?.name || movement.productId}`, saleLines, { journalRole: 'sale' })
-
-        // Asiento de CMV (solo en modo PERMANENT)
-        if (!isPeriodic && cmvId && mercaderiasId) {
-            const cmvAmount = movement.costTotalAssigned
-            const cmvLines: EntryLine[] = [
-                { accountId: cmvId, debit: cmvAmount, credit: 0, description: 'CMV' },
-                { accountId: mercaderiasId, debit: 0, credit: cmvAmount, description: 'Salida de mercaderias' },
+        if (movement.isDevolucion) {
+            // DEVOLUCIÓN DE VENTA
+            // Debe: Devol s/ventas (neto)
+            // Debe: IVA DF (reverso)
+            // Haber: Deudores/Caja (total devuelto)
+            const lines: EntryLine[] = []
+            if (devolVentasId) {
+                lines.push({ accountId: devolVentasId, debit: subtotal, credit: 0, description: 'Devolucion s/ventas' })
+            } else {
+                lines.push({ accountId: ventasId!, debit: subtotal, credit: 0, description: 'Devolucion venta' })
+            }
+            if (ivaAmount > 0 && ivaDFId) {
+                lines.push({ accountId: ivaDFId, debit: ivaAmount, credit: 0, description: 'IVA DF reverso' })
+            }
+            lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Devolucion a cliente' })
+            pushEntry(`Devolucion venta - ${product?.name || movement.productId}`, lines, { journalRole: 'sale_return' })
+        } else {
+            // VENTA NORMAL with bonif/descuento
+            const saleLines: EntryLine[] = [
+                { accountId: contraId!, debit: total, credit: 0, description: 'Cobro / Deudores' },
             ]
-            pushEntry(`CMV venta - ${product?.name || movement.productId}`, cmvLines, { journalRole: 'cogs' })
+            if (bonifAmt > 0 && bonifVentasId) {
+                saleLines.push({ accountId: bonifVentasId, debit: bonifAmt, credit: 0, description: 'Bonificacion s/ventas' })
+            }
+            if (descuentoAmt > 0 && descuentosOtorgadosId) {
+                saleLines.push({ accountId: descuentosOtorgadosId, debit: descuentoAmt, credit: 0, description: 'Descuento financiero otorgado' })
+            }
+            saleLines.push({ accountId: ventasId!, debit: 0, credit: subtotal, description: 'Ventas' })
+            if (ivaAmount > 0 && ivaDFId) {
+                saleLines.push({ accountId: ivaDFId, debit: 0, credit: ivaAmount, description: 'IVA debito fiscal' })
+            }
+            pushEntry(`Venta mercaderias - ${product?.name || movement.productId}`, saleLines, { journalRole: 'sale' })
+
+            // Asiento de CMV (solo en modo PERMANENT)
+            if (!isPeriodic && cmvId && mercaderiasId) {
+                const cmvAmount = movement.costTotalAssigned
+                const cmvLines: EntryLine[] = [
+                    { accountId: cmvId, debit: cmvAmount, credit: 0, description: 'CMV' },
+                    { accountId: mercaderiasId, debit: 0, credit: cmvAmount, description: 'Salida de mercaderias' },
+                ]
+                pushEntry(`CMV venta - ${product?.name || movement.productId}`, cmvLines, { journalRole: 'cogs' })
+            }
         }
     }
 
@@ -1330,7 +1402,7 @@ export async function hasPeriodicClosingEntries(periodId: string): Promise<boole
 }
 
 /**
- * Generate and persist periodic closing entries (3-entry standard)
+ * Generate and persist periodic closing entries (refundición + CMV + ventas netas)
  * Idempotent: won't duplicate if already generated for this period.
  *
  * @returns Created entry IDs or error
@@ -1338,8 +1410,14 @@ export async function hasPeriodicClosingEntries(periodId: string): Promise<boole
 export async function generatePeriodicClosingJournalEntries(
     data: {
         existenciaInicial: number
-        comprasNetas: number
+        compras: number
+        gastosCompras: number
+        bonifCompras: number
+        devolCompras: number
         existenciaFinal: number
+        ventas: number
+        bonifVentas: number
+        devolVentas: number
         closingDate: string
         periodId: string
         periodLabel: string
@@ -1358,6 +1436,7 @@ export async function generatePeriodicClosingJournalEntries(
 
     const allAccounts = await db.accounts.toArray()
 
+    // Required accounts
     const mercaderiasId = resolveMappedAccountId(allAccounts, settings, 'mercaderias', 'mercaderias')
     const comprasId = resolveMappedAccountId(allAccounts, settings, 'compras', 'compras')
     const cmvId = resolveMappedAccountId(allAccounts, settings, 'cmv', 'cmv')
@@ -1367,21 +1446,41 @@ export async function generatePeriodicClosingJournalEntries(
     if (!comprasId) missing.push('Compras')
     if (!cmvId) missing.push('CMV')
     if (missing.length > 0) {
-        return { entryIds: [], cmv: 0, error: `Faltan cuentas: ${missing.join(', ')}` }
+        return { entryIds: [], cmv: 0, error: `Faltan cuentas: ${missing.join(', ')}. Configura las cuentas primero.` }
     }
+
+    // Optional sub-accounts (for refundición)
+    const gastosComprasId = resolveMappedAccountId(allAccounts, settings, 'gastosCompras', 'gastosCompras')
+    const bonifComprasId = resolveMappedAccountId(allAccounts, settings, 'bonifCompras', 'bonifCompras')
+    const devolComprasId = resolveMappedAccountId(allAccounts, settings, 'devolCompras', 'devolCompras')
+    const ventasId = resolveMappedAccountId(allAccounts, settings, 'ventas', 'ventas')
+    const bonifVentasId = resolveMappedAccountId(allAccounts, settings, 'bonifVentas', 'bonifVentas')
+    const devolVentasId = resolveMappedAccountId(allAccounts, settings, 'devolVentas', 'devolVentas')
 
     const { generatePeriodicClosingEntries } = await import('../core/inventario/closing')
 
     const { entries: closingEntries, cmv } = generatePeriodicClosingEntries(
         {
             existenciaInicial: data.existenciaInicial,
-            comprasNetas: data.comprasNetas,
+            compras: data.compras,
+            gastosCompras: data.gastosCompras,
+            bonifCompras: data.bonifCompras,
+            devolCompras: data.devolCompras,
             existenciaFinal: data.existenciaFinal,
+            ventas: data.ventas,
+            bonifVentas: data.bonifVentas,
+            devolVentas: data.devolVentas,
         },
         {
             mercaderiasId: mercaderiasId!,
             comprasId: comprasId!,
             cmvId: cmvId!,
+            gastosComprasId: gastosComprasId || undefined,
+            bonifComprasId: bonifComprasId || undefined,
+            devolComprasId: devolComprasId || undefined,
+            ventasId: ventasId || undefined,
+            bonifVentasId: bonifVentasId || undefined,
+            devolVentasId: devolVentasId || undefined,
         },
         data.periodLabel
     )

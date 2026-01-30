@@ -53,6 +53,7 @@ import {
     reconcileMovementJournalLinks,
     clearBienesPeriodData,
     generatePeriodicClosingJournalEntries,
+    getAccountBalanceByCode,
 } from '../../storage'
 import { db } from '../../storage/db'
 import {
@@ -162,6 +163,22 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         nameAll: ['devol', 'venta'],
         optional: true,
     },
+    {
+        key: 'descuentosObtenidos',
+        label: 'Descuentos obtenidos',
+        category: 'compras',
+        codes: [DEFAULT_ACCOUNT_CODES.descuentosObtenidos, '4.6.09'],
+        nameAny: ['descuento obtenido', 'descuentos obtenidos'],
+        optional: true,
+    },
+    {
+        key: 'descuentosOtorgados',
+        label: 'Descuentos otorgados',
+        category: 'ventas',
+        codes: [DEFAULT_ACCOUNT_CODES.descuentosOtorgados, '4.2.01'],
+        nameAny: ['descuento otorgado', 'descuentos otorgados'],
+        optional: true,
+    },
 ]
 
 const REQUIRED_BIENES_RULES = BIENES_ACCOUNT_RULES.filter(rule => !rule.optional)
@@ -214,8 +231,14 @@ export default function InventarioBienesPage() {
     }, [])
 
     // Cierre
-    const [closingPhysicalValue, setClosingPhysicalValue] = useState(0)
+    const [closingPhysicalValue, setClosingPhysicalValue] = useState<number | null>(null)
     const [closingIsSaving, setClosingIsSaving] = useState(false)
+    const [existenciaInicialLedger, setExistenciaInicialLedger] = useState<number | null>(null)
+    // Sub-account balances for cierre (loaded from ledger for the period)
+    const [cierreBalances, setCierreBalances] = useState<{
+        gastosCompras: number; bonifCompras: number; devolCompras: number
+        ventas: number; bonifVentas: number; devolVentas: number
+    }>({ gastosCompras: 0, bonifCompras: 0, devolCompras: 0, ventas: 0, bonifVentas: 0, devolVentas: 0 })
 
     // Configuracion de cuentas Bienes de Cambio (conciliacion)
     const [accountMappingsDraft, setAccountMappingsDraft] = useState<Partial<Record<AccountMappingKey, string>>>({})
@@ -308,19 +331,87 @@ export default function InventarioBienesPage() {
         return calculateBienesKPIs(products, movements, settings.costMethod, monthRange.start, monthRange.end)
     }, [products, movements, settings, monthRange])
 
-    const existenciaInicial = useMemo(() => {
+    // EI: saldo contable de Mercaderías al día anterior al inicio del ejercicio
+    // Fallback: sum of product openingQty * openingUnitCost (legacy)
+    const existenciaInicialFallback = useMemo(() => {
         return products.reduce((sum, p) => sum + p.openingQty * p.openingUnitCost, 0)
     }, [products])
 
-    const comprasPeriodo = useMemo(() => {
+    useEffect(() => {
+        // Resolve account code from mapping (could be an ID or a code)
+        const resolveCode = (mappedValue: string | undefined, defaultCode: string): string => {
+            if (mappedValue) {
+                if (mappedValue.includes('.')) return mappedValue
+                const acc = accounts?.find(a => a.id === mappedValue)
+                return acc?.code || defaultCode
+            }
+            return defaultCode
+        }
+
+        const loadCierreBalances = async () => {
+            const mappings = settings?.accountMappings || {}
+            const mercCode = resolveCode(mappings.mercaderias, DEFAULT_ACCOUNT_CODES.mercaderias)
+
+            // EI: balance of Mercaderías up to day before period start
+            const dayBefore = new Date(periodYear, 0, 0) // Dec 31 of previous year
+            const eiEndDate = dayBefore.toISOString().split('T')[0]
+            const eiBalance = await getAccountBalanceByCode(mercCode, undefined, eiEndDate)
+            setExistenciaInicialLedger(eiBalance)
+
+            // Sub-account balances for the period (yearRange)
+            const start = `${periodYear}-01-01`
+            const end = `${periodYear}-12-31`
+
+            const codes = {
+                gastosCompras: resolveCode(mappings.gastosCompras, DEFAULT_ACCOUNT_CODES.gastosCompras),
+                bonifCompras: resolveCode(mappings.bonifCompras, DEFAULT_ACCOUNT_CODES.bonifCompras),
+                devolCompras: resolveCode(mappings.devolCompras, DEFAULT_ACCOUNT_CODES.devolCompras),
+                ventas: resolveCode(mappings.ventas, DEFAULT_ACCOUNT_CODES.ventas),
+                bonifVentas: resolveCode(mappings.bonifVentas, DEFAULT_ACCOUNT_CODES.bonifVentas),
+                devolVentas: resolveCode(mappings.devolVentas, DEFAULT_ACCOUNT_CODES.devolVentas),
+            }
+
+            const [gastosCompras, bonifCompras, devolCompras, ventas, bonifVentas, devolVentas] = await Promise.all([
+                getAccountBalanceByCode(codes.gastosCompras, start, end),
+                getAccountBalanceByCode(codes.bonifCompras, start, end),
+                getAccountBalanceByCode(codes.devolCompras, start, end),
+                getAccountBalanceByCode(codes.ventas, start, end),
+                getAccountBalanceByCode(codes.bonifVentas, start, end),
+                getAccountBalanceByCode(codes.devolVentas, start, end),
+            ])
+
+            setCierreBalances({
+                gastosCompras: Math.abs(gastosCompras),   // Debit balance (expense)
+                bonifCompras: Math.abs(bonifCompras),     // Credit balance (contra-expense)
+                devolCompras: Math.abs(devolCompras),      // Credit balance (contra-expense)
+                ventas: Math.abs(ventas),                  // Credit balance (income)
+                bonifVentas: Math.abs(bonifVentas),        // Debit balance (contra-income)
+                devolVentas: Math.abs(devolVentas),         // Debit balance (contra-income)
+            })
+        }
+
+        loadCierreBalances()
+    }, [periodYear, settings?.accountMappings, accounts])
+
+    const existenciaInicial = existenciaInicialLedger !== null ? existenciaInicialLedger : existenciaInicialFallback
+
+    // Compras brutas del período (from movements)
+    const comprasBrutas = useMemo(() => {
         return movements
             .filter(m => m.type === 'PURCHASE')
             .reduce((sum, m) => sum + m.subtotal, 0)
     }, [movements])
 
+    // Full CMV formula: CMV = EI + (Compras + Gastos - Bonif - Devol) - EF
+    const comprasNetas = comprasBrutas + cierreBalances.gastosCompras - cierreBalances.bonifCompras - cierreBalances.devolCompras
+    const ventasNetas = cierreBalances.ventas - cierreBalances.bonifVentas - cierreBalances.devolVentas
+
     const inventarioTeorico = kpis.stockValue
-    const diferenciaCierre = closingPhysicalValue - inventarioTeorico
-    const cmvPorDiferencia = existenciaInicial + comprasPeriodo - (closingPhysicalValue || 0)
+    // EF efectivo: si el usuario cargó un valor físico, usar ese; si no, usar teórico
+    const efEfectivo = closingPhysicalValue !== null ? closingPhysicalValue : inventarioTeorico
+    const esFisicoDefinido = closingPhysicalValue !== null
+    const diferenciaCierre = esFisicoDefinido ? closingPhysicalValue - inventarioTeorico : 0
+    const cmvPorDiferencia = existenciaInicial + comprasNetas - efEfectivo
     const cierreAjusteMonto = Math.abs(diferenciaCierre)
     const cierreAjusteEntrada = diferenciaCierre > 0
 
@@ -785,19 +876,25 @@ export default function InventarioBienesPage() {
 
         if (isPeriodic) {
             // PERIODIC mode: generate 3 standard closing entries
-            if (closingPhysicalValue <= 0) {
+            if (closingPhysicalValue === null || closingPhysicalValue < 0) {
                 showToast('Ingresa el inventario final fisico para generar los asientos', 'error')
                 return
             }
-            if (!confirm('Se generaran los asientos de cierre periodico (EI a CMV, Compras a CMV, EF a Mercaderias). Continuar?')) {
+            if (!confirm(`Se generaran los asientos de cierre periodico.\nEI: ${formatCurrency(existenciaInicial)}\nCompras Netas: ${formatCurrency(comprasNetas)}\nEF: ${formatCurrency(closingPhysicalValue)}\nCMV: ${formatCurrency(existenciaInicial + comprasNetas - closingPhysicalValue)}\n\nContinuar?`)) {
                 return
             }
             setClosingIsSaving(true)
             try {
                 const result = await generatePeriodicClosingJournalEntries({
                     existenciaInicial,
-                    comprasNetas: comprasPeriodo,
+                    compras: comprasBrutas,
+                    gastosCompras: cierreBalances.gastosCompras,
+                    bonifCompras: cierreBalances.bonifCompras,
+                    devolCompras: cierreBalances.devolCompras,
                     existenciaFinal: closingPhysicalValue,
+                    ventas: cierreBalances.ventas,
+                    bonifVentas: cierreBalances.bonifVentas,
+                    devolVentas: cierreBalances.devolVentas,
                     closingDate: new Date().toISOString().split('T')[0],
                     periodId,
                     periodLabel: `${periodId}`,
@@ -820,7 +917,7 @@ export default function InventarioBienesPage() {
             showToast('Faltan cuentas Mercaderias o Diferencia de inventario', 'error')
             return
         }
-        if (closingPhysicalValue <= 0) {
+        if (closingPhysicalValue === null || closingPhysicalValue < 0) {
             showToast('Ingresa el inventario final fisico para generar el asiento', 'error')
             return
         }
@@ -864,7 +961,7 @@ export default function InventarioBienesPage() {
                 },
             ]
 
-        const memo = `Cierre inventario por diferencias - EI ${formatCurrency(existenciaInicial)} / Compras ${formatCurrency(comprasPeriodo)} / EF Fisico ${formatCurrency(closingPhysicalValue)}`
+        const memo = `Cierre inventario por diferencias - EI ${formatCurrency(existenciaInicial)} / Compras ${formatCurrency(comprasBrutas)} / EF Fisico ${formatCurrency(closingPhysicalValue)}`
 
         setClosingIsSaving(true)
         try {
@@ -884,7 +981,7 @@ export default function InventarioBienesPage() {
                     inventarioFisico: closingPhysicalValue,
                     diferencia,
                     existenciaInicial,
-                    comprasPeriodo,
+                    comprasBrutas,
                 },
             })
             showToast('Asiento de cierre generado', 'success')
@@ -2096,9 +2193,12 @@ export default function InventarioBienesPage() {
                             <h3 className="text-2xl font-bold text-slate-900">Cierre de Inventario</h3>
                             <p className="text-slate-500">
                                 {settings?.inventoryMode === 'PERIODIC'
-                                    ? 'Modo Diferencias: CMV = EI + Compras Netas - EF. Genera 3 asientos de refundicion.'
+                                    ? 'Modo Diferencias: CMV = EI + Compras Netas - EF. Genera asientos de refundicion y determinacion CMV.'
                                     : `Modo Permanente: ajuste de inventario fisico vs teorico (${settings?.costMethod}).`
                                 }
+                            </p>
+                            <p className="text-xs text-slate-400 mt-1">
+                                Ejercicio: {yearRange.start.split('-').reverse().join('/')} – {yearRange.end.split('-').reverse().join('/')}
                             </p>
                         </div>
 
@@ -2148,20 +2248,64 @@ export default function InventarioBienesPage() {
                         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center py-2 border-b border-slate-200">
-                                    <span className="text-sm font-medium text-slate-500">Existencia Inicial</span>
+                                    <div>
+                                        <span className="text-sm font-medium text-slate-500">Existencia Inicial</span>
+                                        <p className="text-xs text-slate-400">
+                                            {existenciaInicialLedger !== null
+                                                ? `Saldo Mercaderias al 31/12/${periodYear - 1}`
+                                                : 'Desde inventario inicial de productos'
+                                            }
+                                        </p>
+                                    </div>
                                     <span className="font-mono text-lg font-medium text-slate-900">
                                         {formatCurrency(existenciaInicial)}
                                     </span>
                                 </div>
 
-                                <div className="flex justify-between items-center py-2 border-b border-slate-200">
-                                    <span className="text-sm font-medium text-slate-500 flex items-center gap-2">
-                                        <Plus className="text-green-500" size={16} weight="bold" /> Compras del Periodo
-                                    </span>
-                                    <span className="font-mono text-lg font-medium text-green-600">
-                                        {formatCurrency(comprasPeriodo)}
-                                    </span>
-                                </div>
+                                {settings?.inventoryMode === 'PERIODIC' ? (<>
+                                    {/* Full CMV formula breakdown for PERIODIC */}
+                                    <div className="flex justify-between items-center py-1.5 border-b border-slate-100">
+                                        <span className="text-sm font-medium text-slate-500 flex items-center gap-2">
+                                            <Plus className="text-green-500" size={14} weight="bold" /> Compras (brutas)
+                                        </span>
+                                        <span className="font-mono text-sm font-medium text-green-600">
+                                            {formatCurrency(comprasBrutas)}
+                                        </span>
+                                    </div>
+                                    {cierreBalances.gastosCompras > 0 && (
+                                        <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
+                                            <span className="text-xs text-slate-400">+ Gastos sobre compras</span>
+                                            <span className="font-mono text-xs text-slate-500">{formatCurrency(cierreBalances.gastosCompras)}</span>
+                                        </div>
+                                    )}
+                                    {cierreBalances.bonifCompras > 0 && (
+                                        <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
+                                            <span className="text-xs text-slate-400">− Bonificaciones s/compras</span>
+                                            <span className="font-mono text-xs text-red-400">({formatCurrency(cierreBalances.bonifCompras)})</span>
+                                        </div>
+                                    )}
+                                    {cierreBalances.devolCompras > 0 && (
+                                        <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
+                                            <span className="text-xs text-slate-400">− Devoluciones s/compras</span>
+                                            <span className="font-mono text-xs text-red-400">({formatCurrency(cierreBalances.devolCompras)})</span>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between items-center py-2 border-b border-slate-200 bg-slate-50 px-2 rounded">
+                                        <span className="text-sm font-semibold text-slate-700">= Compras Netas</span>
+                                        <span className="font-mono text-base font-bold text-green-700">
+                                            {formatCurrency(comprasNetas)}
+                                        </span>
+                                    </div>
+                                </>) : (
+                                    <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                                        <span className="text-sm font-medium text-slate-500 flex items-center gap-2">
+                                            <Plus className="text-green-500" size={16} weight="bold" /> Compras del Periodo
+                                        </span>
+                                        <span className="font-mono text-lg font-medium text-green-600">
+                                            {formatCurrency(comprasBrutas)}
+                                        </span>
+                                    </div>
+                                )}
 
                                 <div className="flex justify-between items-center py-4 bg-slate-50 px-3 rounded-lg border border-slate-200">
                                     <div className="flex flex-col">
@@ -2176,28 +2320,40 @@ export default function InventarioBienesPage() {
                                 <div className="flex justify-between items-center py-3 border-b border-slate-200">
                                     <div>
                                         <span className="text-sm font-medium text-slate-600">Inventario Final (Fisico)</span>
-                                        <p className="text-xs text-slate-400">Ingresar valor contado</p>
+                                        <p className="text-xs text-slate-400">
+                                            {esFisicoDefinido ? 'Valor ingresado por conteo fisico' : 'Sin definir — se usa teorico como estimacion'}
+                                        </p>
                                     </div>
                                     <input
                                         type="number"
                                         min="0"
-                                        value={closingPhysicalValue || ''}
-                                        onChange={(e) => setClosingPhysicalValue(Number(e.target.value))}
+                                        value={closingPhysicalValue !== null ? closingPhysicalValue : ''}
+                                        onChange={(e) => {
+                                            const val = e.target.value
+                                            setClosingPhysicalValue(val === '' ? null : Number(val))
+                                        }}
                                         className="w-40 border border-slate-200 rounded-md px-3 py-1.5 text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                        placeholder="0"
+                                        placeholder="Sin definir"
                                     />
                                 </div>
 
                                 <div className="flex justify-between items-center py-3">
                                     <span className="text-sm font-medium text-slate-500">Diferencia vs teorico</span>
-                                    <span className={`font-mono text-lg font-semibold ${Math.abs(diferenciaCierre) < 0.01 ? 'text-slate-500' : diferenciaCierre > 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                        {formatCurrency(diferenciaCierre)}
+                                    <span className={`font-mono text-lg font-semibold ${!esFisicoDefinido ? 'text-slate-400' : Math.abs(diferenciaCierre) < 0.01 ? 'text-slate-500' : diferenciaCierre > 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                        {esFisicoDefinido ? formatCurrency(diferenciaCierre) : '—'}
                                     </span>
                                 </div>
 
                                 <div className="flex justify-between items-center pt-4 mt-4 border-t-2 border-slate-200">
-                                    <span className="text-lg font-bold text-slate-900">CMV por diferencias</span>
-                                    <span className="font-mono text-2xl font-bold text-blue-600">
+                                    <div>
+                                        <span className="text-lg font-bold text-slate-900">
+                                            {esFisicoDefinido ? 'CMV por diferencias' : 'CMV estimado'}
+                                        </span>
+                                        {!esFisicoDefinido && (
+                                            <p className="text-xs text-amber-500">Usando EF teorico. Ingresa el inventario fisico para valor definitivo.</p>
+                                        )}
+                                    </div>
+                                    <span className={`font-mono text-2xl font-bold ${esFisicoDefinido ? 'text-blue-600' : 'text-slate-400'}`}>
                                         {formatCurrency(cmvPorDiferencia)}
                                     </span>
                                 </div>
@@ -2206,37 +2362,246 @@ export default function InventarioBienesPage() {
                             {/* Preview */}
                             <div className="mt-8 p-4 bg-slate-50 rounded-lg border border-dashed border-slate-200">
                                 <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">
-                                    Previsualizacion Asiento de Cierre
+                                    Previsualizacion {settings?.inventoryMode === 'PERIODIC' ? 'Asientos de Cierre Periodico' : 'Asiento de Cierre'}
                                 </h4>
-                                <div className="font-mono text-xs space-y-2">
-                                    {cierreAjusteMonto < 0.01 ? (
-                                        <div className="text-slate-500">Sin diferencias para ajustar.</div>
-                                    ) : (
-                                        <>
-                                            <div className="flex justify-between">
-                                                <span>{cierreAjusteEntrada ? '1.1.04.01 Mercaderias' : '4.3.02 Diferencia de inventario'}</span>
-                                                <div className="flex gap-4">
-                                                    <span className="w-24 text-right font-bold">{formatCurrency(cierreAjusteMonto)}</span>
-                                                    <span className="w-24 text-right text-slate-400">-</span>
-                                                </div>
+
+                                {settings?.inventoryMode === 'PERIODIC' ? (
+                                    <div className="font-mono text-xs space-y-4">
+                                        {/* Helper for preview lines */}
+                                        {/* 1. Refundición de subcuentas */}
+                                        {(cierreBalances.gastosCompras > 0.01 || cierreBalances.bonifCompras > 0.01 || cierreBalances.devolCompras > 0.01) && (
+                                            <div className="space-y-1">
+                                                <div className="text-slate-400 text-[10px] uppercase font-bold">1. Refundicion subcuentas de compras</div>
+                                                {cierreBalances.gastosCompras > 0.01 && (<>
+                                                    <div className="flex justify-between">
+                                                        <span>Compras</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.gastosCompras)}</span>
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>&nbsp;&nbsp;a Gastos s/compras</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.gastosCompras)}</span>
+                                                        </div>
+                                                    </div>
+                                                </>)}
+                                                {cierreBalances.bonifCompras > 0.01 && (<>
+                                                    <div className="flex justify-between">
+                                                        <span>Bonif s/compras</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.bonifCompras)}</span>
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>&nbsp;&nbsp;a Compras</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.bonifCompras)}</span>
+                                                        </div>
+                                                    </div>
+                                                </>)}
+                                                {cierreBalances.devolCompras > 0.01 && (<>
+                                                    <div className="flex justify-between">
+                                                        <span>Devol s/compras</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.devolCompras)}</span>
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>&nbsp;&nbsp;a Compras</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.devolCompras)}</span>
+                                                        </div>
+                                                    </div>
+                                                </>)}
                                             </div>
-                                            <div className="flex justify-between">
-                                                <span>{cierreAjusteEntrada ? '4.3.02 Diferencia de inventario' : '1.1.04.01 Mercaderias'}</span>
-                                                <div className="flex gap-4">
-                                                    <span className="w-24 text-right text-slate-400">-</span>
-                                                    <span className="w-24 text-right font-bold">{formatCurrency(cierreAjusteMonto)}</span>
+                                        )}
+
+                                        {/* 2. Compras Netas a Mercaderías */}
+                                        {Math.abs(comprasNetas) > 0.01 && (
+                                            <div className="space-y-1">
+                                                <div className="text-slate-400 text-[10px] uppercase font-bold">
+                                                    {(cierreBalances.gastosCompras > 0.01 || cierreBalances.bonifCompras > 0.01 || cierreBalances.devolCompras > 0.01) ? '2' : '1'}. Compras Netas a Mercaderias
                                                 </div>
+                                                {comprasNetas > 0 ? (<>
+                                                    <div className="flex justify-between">
+                                                        <span>Mercaderias</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(comprasNetas)}</span>
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>&nbsp;&nbsp;a Compras</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(comprasNetas)}</span>
+                                                        </div>
+                                                    </div>
+                                                </>) : (<>
+                                                    <div className="flex justify-between">
+                                                        <span>Compras</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(Math.abs(comprasNetas))}</span>
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>&nbsp;&nbsp;a Mercaderias</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(Math.abs(comprasNetas))}</span>
+                                                        </div>
+                                                    </div>
+                                                </>)}
                                             </div>
-                                        </>
-                                    )}
-                                </div>
+                                        )}
+
+                                        {/* 3. Determinación CMV */}
+                                        {Math.abs(cmvPorDiferencia) > 0.01 && (
+                                            <div className="space-y-1">
+                                                <div className="text-slate-400 text-[10px] uppercase font-bold">
+                                                    {(() => {
+                                                        let n = 1
+                                                        if (cierreBalances.gastosCompras > 0.01 || cierreBalances.bonifCompras > 0.01 || cierreBalances.devolCompras > 0.01) n++
+                                                        if (Math.abs(comprasNetas) > 0.01) n++
+                                                        return n
+                                                    })()}. Determinacion CMV
+                                                </div>
+                                                {cmvPorDiferencia > 0 ? (<>
+                                                    <div className="flex justify-between">
+                                                        <span>CMV</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cmvPorDiferencia)}</span>
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>&nbsp;&nbsp;a Mercaderias</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cmvPorDiferencia)}</span>
+                                                        </div>
+                                                    </div>
+                                                </>) : (<>
+                                                    <div className="flex justify-between">
+                                                        <span>Mercaderias</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(Math.abs(cmvPorDiferencia))}</span>
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>&nbsp;&nbsp;a CMV</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(Math.abs(cmvPorDiferencia))}</span>
+                                                        </div>
+                                                    </div>
+                                                </>)}
+                                            </div>
+                                        )}
+
+                                        {/* 4. Neteo Ventas Netas (optional) */}
+                                        {(cierreBalances.bonifVentas > 0.01 || cierreBalances.devolVentas > 0.01) && (
+                                            <div className="space-y-1">
+                                                <div className="text-slate-400 text-[10px] uppercase font-bold">Neteo Ventas Netas</div>
+                                                {cierreBalances.bonifVentas > 0.01 && (<>
+                                                    <div className="flex justify-between">
+                                                        <span>Ventas</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.bonifVentas)}</span>
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>&nbsp;&nbsp;a Bonif s/ventas</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.bonifVentas)}</span>
+                                                        </div>
+                                                    </div>
+                                                </>)}
+                                                {cierreBalances.devolVentas > 0.01 && (<>
+                                                    <div className="flex justify-between">
+                                                        <span>Ventas</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.devolVentas)}</span>
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>&nbsp;&nbsp;a Devol s/ventas</span>
+                                                        <div className="flex gap-4">
+                                                            <span className="w-24 text-right text-slate-400">-</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.devolVentas)}</span>
+                                                        </div>
+                                                    </div>
+                                                </>)}
+                                            </div>
+                                        )}
+
+                                        <div className="border-t border-slate-300 pt-2 mt-2">
+                                            <div className="flex justify-between font-bold">
+                                                <span>Resultado: CMV = {formatCurrency(cmvPorDiferencia)}</span>
+                                                <span className="text-xs text-slate-400">
+                                                    Mercaderias queda en EF = {formatCurrency(efEfectivo)}
+                                                </span>
+                                            </div>
+                                            {ventasNetas > 0.01 && (
+                                                <div className="flex justify-between text-slate-500 mt-1">
+                                                    <span>Ventas Netas = {formatCurrency(ventasNetas)}</span>
+                                                    <span className="text-xs">Resultado Bruto = {formatCurrency(ventasNetas - cmvPorDiferencia)}</span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {!esFisicoDefinido && (
+                                            <div className="text-amber-500 text-[10px] mt-1">
+                                                * Preview con EF teorico. Ingresa inventario fisico para valores definitivos.
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="font-mono text-xs space-y-2">
+                                        {/* PERMANENT mode: single adjustment entry */}
+                                        {!esFisicoDefinido || cierreAjusteMonto < 0.01 ? (
+                                            <div className="text-slate-500">
+                                                {!esFisicoDefinido ? 'Ingresa el inventario fisico para ver la previsualizacion.' : 'Sin diferencias para ajustar.'}
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div className="flex justify-between">
+                                                    <span>{cierreAjusteEntrada ? 'Mercaderias' : 'Diferencia de inventario'}</span>
+                                                    <div className="flex gap-4">
+                                                        <span className="w-24 text-right font-bold">{formatCurrency(cierreAjusteMonto)}</span>
+                                                        <span className="w-24 text-right text-slate-400">-</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span>&nbsp;&nbsp;a {cierreAjusteEntrada ? 'Diferencia de inventario' : 'Mercaderias'}</span>
+                                                    <div className="flex gap-4">
+                                                        <span className="w-24 text-right text-slate-400">-</span>
+                                                        <span className="w-24 text-right font-bold">{formatCurrency(cierreAjusteMonto)}</span>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             <button
                                 onClick={handleGenerateClosingEntry}
-                                disabled={closingIsSaving || closingPhysicalValue <= 0}
+                                disabled={closingIsSaving || closingPhysicalValue === null || closingPhysicalValue < 0}
                                 className="w-full mt-6 py-3 rounded-lg font-semibold bg-gradient-to-r from-blue-600 to-emerald-500 text-white shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title={closingPhysicalValue <= 0 ? 'Ingresa el inventario final fisico' : undefined}
+                                title={closingPhysicalValue === null ? 'Ingresa el inventario final fisico' : undefined}
                             >
                                 {closingIsSaving ? 'Generando...' : settings?.inventoryMode === 'PERIODIC' ? 'Generar Asientos de Cierre Periodico' : 'Generar Asiento de Cierre'}
                             </button>

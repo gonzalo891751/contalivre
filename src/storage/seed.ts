@@ -278,6 +278,7 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '4.6.06', name: 'Resultado por tenencia', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6', allowOppositeBalance: true },
     { code: '4.6.07', name: 'Diferencias de cambio (Ganancia)', kind: 'INCOME', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_INCOME', parentCode: '4.6' },
     { code: '4.6.08', name: 'Diferencias de cambio (Pérdida)', kind: 'EXPENSE', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_EXPENSES', parentCode: '4.6' },
+    { code: '4.6.09', name: 'Descuentos obtenidos', kind: 'INCOME', section: 'FINANCIAL', group: 'Resultados financieros', statementGroup: 'FINANCIAL_INCOME', parentCode: '4.6' },
 
     // 4.7 - Otros ingresos y egresos
     { code: '4.7', name: 'Otros ingresos y egresos', kind: 'EXPENSE', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_EXPENSES', parentCode: '4', isHeader: true },

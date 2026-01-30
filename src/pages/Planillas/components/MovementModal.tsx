@@ -56,6 +56,11 @@ export default function MovementModal({
         reference: '',
         autoJournal: false,
         adjustmentDirection: 'IN' as 'IN' | 'OUT',
+        // New: bonif/descuento/gastos/devolución
+        bonificacionPct: 0,
+        descuentoFinancieroPct: 0,
+        gastosCompra: 0,
+        isDevolucion: false,
     })
 
     const [isSaving, setIsSaving] = useState(false)
@@ -118,17 +123,33 @@ export default function MovementModal({
         const estimatedCost = selectedValuation?.averageCost || 0
         const isAdjustmentOut = formData.type === 'ADJUSTMENT' && formData.adjustmentDirection === 'OUT'
         const adjustedBase = isAdjustmentOut ? estimatedCost : baseAmount
-        const subtotal = formData.quantity * adjustedBase
+        const bruto = formData.quantity * adjustedBase
+
+        // Bonificación (reduces base imponible)
+        const bonificacionAmt = bruto * (formData.bonificacionPct / 100)
+        const netoAfterBonif = bruto - bonificacionAmt
+
+        // IVA: calculated on neto after bonificación
         const ivaAmount = formData.type === 'PURCHASE' || formData.type === 'SALE'
-            ? subtotal * (formData.ivaRate / 100)
+            ? netoAfterBonif * (formData.ivaRate / 100)
             : 0
-        const total = subtotal + ivaAmount
+
+        // Descuento financiero (does NOT alter IVA base)
+        const descuentoAmt = bruto * (formData.descuentoFinancieroPct / 100)
+
+        // Gastos sobre compra (added to total payable)
+        const gastos = formData.type === 'PURCHASE' ? formData.gastosCompra : 0
+
+        // subtotal = bruto (for ledger purposes)
+        const subtotal = bruto
+        // total payable = neto after bonif + IVA + gastos - descuento
+        const total = netoAfterBonif + ivaAmount + gastos - descuentoAmt
 
         const estimatedCMV = formData.type === 'SALE'
             ? formData.quantity * estimatedCost
             : 0
 
-        return { subtotal, ivaAmount, total, estimatedCost, estimatedCMV }
+        return { subtotal, bruto, bonificacionAmt, netoAfterBonif, ivaAmount, descuentoAmt, gastos, total, estimatedCost, estimatedCMV }
     }, [formData, selectedValuation])
 
     // Stock check for sales/adjustment out
@@ -202,6 +223,13 @@ export default function MovementModal({
                 notes: formData.notes || undefined,
                 reference: formData.reference || undefined,
                 autoJournal: formData.autoJournal,
+                // Bonif/descuento/gastos/devolución
+                bonificacionPct: formData.bonificacionPct || undefined,
+                bonificacionAmount: calculations.bonificacionAmt || undefined,
+                descuentoFinancieroPct: formData.descuentoFinancieroPct || undefined,
+                descuentoFinancieroAmount: calculations.descuentoAmt || undefined,
+                gastosCompra: calculations.gastos || undefined,
+                isDevolucion: formData.isDevolucion || undefined,
             })
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Error al guardar')
@@ -397,6 +425,83 @@ export default function MovementModal({
                         </div>
                     </div>
 
+                    {/* Bonificación / Descuento / Gastos / Devolución */}
+                    {(formData.type === 'PURCHASE' || formData.type === 'SALE') && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                    {formData.type === 'PURCHASE' ? 'Condiciones de compra' : 'Condiciones de venta'}
+                                </span>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.isDevolucion}
+                                        onChange={(e) => handleChange('isDevolucion', e.target.checked)}
+                                        className="accent-amber-600 rounded"
+                                    />
+                                    <span className="text-xs font-semibold text-amber-700">
+                                        {formData.type === 'PURCHASE' ? 'Devolucion de compra' : 'Devolucion de venta'}
+                                    </span>
+                                </label>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                    <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                        Bonificacion (%)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.5"
+                                        value={formData.bonificacionPct || ''}
+                                        onChange={(e) => handleChange('bonificacionPct', Number(e.target.value))}
+                                        className="w-full border border-slate-200 rounded-md px-2 py-1.5 text-xs font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="0"
+                                    />
+                                    {calculations.bonificacionAmt > 0 && (
+                                        <p className="text-[10px] text-slate-400 mt-0.5">= {formatCurrency(calculations.bonificacionAmt)}</p>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                        Dto. financiero (%)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.5"
+                                        value={formData.descuentoFinancieroPct || ''}
+                                        onChange={(e) => handleChange('descuentoFinancieroPct', Number(e.target.value))}
+                                        className="w-full border border-slate-200 rounded-md px-2 py-1.5 text-xs font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="0"
+                                    />
+                                    {calculations.descuentoAmt > 0 && (
+                                        <p className="text-[10px] text-slate-400 mt-0.5">= {formatCurrency(calculations.descuentoAmt)}</p>
+                                    )}
+                                </div>
+                                {formData.type === 'PURCHASE' && (
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                            Gastos s/compra ($)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            value={formData.gastosCompra || ''}
+                                            onChange={(e) => handleChange('gastosCompra', Number(e.target.value))}
+                                            className="w-full border border-slate-200 rounded-md px-2 py-1.5 text-xs font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                                            placeholder="0"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Counterparty & Payment */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -486,21 +591,44 @@ export default function MovementModal({
 
                         <div className="space-y-2 text-sm">
                             <div className="flex justify-between">
-                                <span className="text-slate-600">Subtotal</span>
+                                <span className="text-slate-600">
+                                    {formData.isDevolucion ? 'Importe devolucion' : 'Subtotal (bruto)'}
+                                </span>
                                 <span className="font-mono font-medium">
-                                    {formatCurrency(calculations.subtotal)}
+                                    {formatCurrency(calculations.bruto)}
                                 </span>
                             </div>
+                            {calculations.bonificacionAmt > 0 && (
+                                <div className="flex justify-between text-red-500">
+                                    <span>− Bonificacion ({formData.bonificacionPct}%)</span>
+                                    <span className="font-mono">({formatCurrency(calculations.bonificacionAmt)})</span>
+                                </div>
+                            )}
                             {formData.type !== 'ADJUSTMENT' && (
                                 <div className="flex justify-between">
-                                    <span className="text-slate-600">IVA ({formData.ivaRate}%)</span>
+                                    <span className="text-slate-600">
+                                        IVA ({formData.ivaRate}%)
+                                        {calculations.bonificacionAmt > 0 ? ` s/${formatCurrency(calculations.netoAfterBonif)}` : ''}
+                                    </span>
                                     <span className="font-mono font-medium">
                                         {formatCurrency(calculations.ivaAmount)}
                                     </span>
                                 </div>
                             )}
+                            {calculations.gastos > 0 && (
+                                <div className="flex justify-between text-slate-600">
+                                    <span>+ Gastos s/compra</span>
+                                    <span className="font-mono">{formatCurrency(calculations.gastos)}</span>
+                                </div>
+                            )}
+                            {calculations.descuentoAmt > 0 && (
+                                <div className="flex justify-between text-emerald-600">
+                                    <span>− Dto. financiero ({formData.descuentoFinancieroPct}%)</span>
+                                    <span className="font-mono">({formatCurrency(calculations.descuentoAmt)})</span>
+                                </div>
+                            )}
                             <div className="flex justify-between pt-2 border-t border-slate-200">
-                                <span className="font-semibold text-slate-900">Total</span>
+                                <span className="font-semibold text-slate-900">Total a pagar</span>
                                 <span className="font-mono font-bold text-lg">
                                     {formatCurrency(calculations.total)}
                                 </span>

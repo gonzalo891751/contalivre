@@ -187,6 +187,14 @@ export interface PeriodicClosingAccounts {
     mercaderiasId: string
     comprasId: string
     cmvId: string
+    // Optional sub-accounts for refundición
+    gastosComprasId?: string
+    bonifComprasId?: string
+    devolComprasId?: string
+    // Ventas netas
+    ventasId?: string
+    bonifVentasId?: string
+    devolVentasId?: string
 }
 
 /**
@@ -194,75 +202,168 @@ export interface PeriodicClosingAccounts {
  */
 export interface PeriodicClosingData {
     existenciaInicial: number   // $ value of opening inventory
-    comprasNetas: number        // Net purchases in the period
+    compras: number             // Gross purchases
+    gastosCompras: number       // Purchase expenses (freight, insurance)
+    bonifCompras: number        // Purchase discounts/bonifications
+    devolCompras: number        // Purchase returns
     existenciaFinal: number     // $ value of closing inventory (physical count)
+    // Ventas netas (optional)
+    ventas: number
+    bonifVentas: number
+    devolVentas: number
 }
 
 /**
- * Generate the 3 standard periodic closing entries:
- * 1) Transfer EI to CMV:      Debe CMV / Haber Mercaderias (EI)
- * 2) Transfer Compras to CMV:  Debe CMV / Haber Compras (ComprasNetas)
- * 3) Recognize EF:             Debe Mercaderias / Haber CMV (EF)
+ * Compute ComprasNetas from PeriodicClosingData
+ */
+export function computeComprasNetas(data: PeriodicClosingData): number {
+    return data.compras + data.gastosCompras - data.bonifCompras - data.devolCompras
+}
+
+/**
+ * Generate full periodic closing entries:
  *
- * Result: Mercaderias = EF, Compras = 0, CMV = EI + CN - EF
+ * 1) Refundición de subcuentas a Compras (Gastos/Bonif/Devol → Compras)
+ *    Result: Gastos/Bonif/Devol quedan en 0, Compras = ComprasNetas
+ *
+ * 2) Transferencia Compras Netas a Mercaderías
+ *    Debe Mercaderías / Haber Compras
+ *    Result: Compras = 0, Mercaderías = EI + ComprasNetas
+ *
+ * 3) Determinación CMV
+ *    Debe CMV / Haber Mercaderías (por CMV = EI + CN - EF)
+ *    Result: Mercaderías = EF, CMV = resultado
+ *
+ * 4) Neteo Ventas Netas (optional, if ventas sub-accounts have balances)
+ *    Debe Ventas / Haber DevolVentas + BonifVentas
+ *    Result: Devol/Bonif ventas = 0, Ventas = VentasNetas
  */
 export function generatePeriodicClosingEntries(
     data: PeriodicClosingData,
     accounts: PeriodicClosingAccounts,
     periodLabel: string
-): { entries: { memo: string; lines: EntryLine[] }[]; cmv: number } {
-    const { existenciaInicial, comprasNetas, existenciaFinal } = data
+): { entries: { memo: string; lines: EntryLine[] }[]; cmv: number; comprasNetas: number; ventasNetas: number } {
+    const { existenciaInicial, gastosCompras, bonifCompras, devolCompras, existenciaFinal } = data
     const { mercaderiasId, comprasId, cmvId } = accounts
+    const comprasNetas = computeComprasNetas(data)
     const cmv = existenciaInicial + comprasNetas - existenciaFinal
+    const ventasNetas = data.ventas - data.bonifVentas - data.devolVentas
 
     const entries: { memo: string; lines: EntryLine[] }[] = []
 
-    // 1) Transfer EI to CMV
-    if (existenciaInicial > 0.01) {
+    // ──────────────────────────────────────────
+    // 1) Refundición de subcuentas de compras
+    // ──────────────────────────────────────────
+    const refundicionLines: EntryLine[] = []
+
+    // Gastos sobre compras → Compras (Debe Compras / Haber Gastos)
+    if (gastosCompras > 0.01 && accounts.gastosComprasId) {
+        refundicionLines.push(
+            { accountId: comprasId, debit: gastosCompras, credit: 0, description: 'Compras - absorbe Gastos s/compras' },
+            { accountId: accounts.gastosComprasId, debit: 0, credit: gastosCompras, description: 'Gastos s/compras - refundicion' },
+        )
+    }
+
+    // Bonificaciones sobre compras → Compras (Debe Bonif / Haber Compras)
+    // Bonif tiene saldo acreedor (contra-cuenta), se cierra debitándola
+    if (bonifCompras > 0.01 && accounts.bonifComprasId) {
+        refundicionLines.push(
+            { accountId: accounts.bonifComprasId, debit: bonifCompras, credit: 0, description: 'Bonif s/compras - refundicion' },
+            { accountId: comprasId, debit: 0, credit: bonifCompras, description: 'Compras - absorbe Bonif s/compras' },
+        )
+    }
+
+    // Devoluciones sobre compras → Compras (Debe Devol / Haber Compras)
+    if (devolCompras > 0.01 && accounts.devolComprasId) {
+        refundicionLines.push(
+            { accountId: accounts.devolComprasId, debit: devolCompras, credit: 0, description: 'Devol s/compras - refundicion' },
+            { accountId: comprasId, debit: 0, credit: devolCompras, description: 'Compras - absorbe Devol s/compras' },
+        )
+    }
+
+    if (refundicionLines.length > 0) {
         entries.push({
-            memo: `Cierre periodico ${periodLabel} - Transferencia EI a CMV`,
-            lines: [
-                { accountId: cmvId, debit: existenciaInicial, credit: 0, description: 'CMV - Existencia Inicial' },
-                { accountId: mercaderiasId, debit: 0, credit: existenciaInicial, description: 'Mercaderias - Transferencia EI' },
-            ],
+            memo: `Cierre periodico ${periodLabel} - Refundicion subcuentas de compras`,
+            lines: refundicionLines,
         })
     }
 
-    // 2) Transfer Compras Netas to CMV
+    // ──────────────────────────────────────────
+    // 2) Transferencia Compras Netas a Mercaderías
+    // ──────────────────────────────────────────
     if (Math.abs(comprasNetas) > 0.01) {
         if (comprasNetas > 0) {
             entries.push({
-                memo: `Cierre periodico ${periodLabel} - Transferencia Compras a CMV`,
+                memo: `Cierre periodico ${periodLabel} - Compras Netas a Mercaderias`,
                 lines: [
-                    { accountId: cmvId, debit: comprasNetas, credit: 0, description: 'CMV - Compras Netas' },
-                    { accountId: comprasId, debit: 0, credit: comprasNetas, description: 'Compras - Refundicion al cierre' },
+                    { accountId: mercaderiasId, debit: comprasNetas, credit: 0, description: 'Mercaderias - incorpora Compras Netas' },
+                    { accountId: comprasId, debit: 0, credit: comprasNetas, description: 'Compras - refundicion al cierre' },
                 ],
             })
         } else {
-            // Negative net purchases (more returns/discounts than purchases)
-            const absAmount = Math.abs(comprasNetas)
+            const abs = Math.abs(comprasNetas)
             entries.push({
-                memo: `Cierre periodico ${periodLabel} - Transferencia Compras a CMV`,
+                memo: `Cierre periodico ${periodLabel} - Compras Netas a Mercaderias (negativo)`,
                 lines: [
-                    { accountId: comprasId, debit: absAmount, credit: 0, description: 'Compras - Refundicion al cierre' },
-                    { accountId: cmvId, debit: 0, credit: absAmount, description: 'CMV - Compras Netas (negativo)' },
+                    { accountId: comprasId, debit: abs, credit: 0, description: 'Compras - refundicion al cierre' },
+                    { accountId: mercaderiasId, debit: 0, credit: abs, description: 'Mercaderias - reduce por Compras Netas negativas' },
                 ],
             })
         }
     }
 
-    // 3) Recognize EF
-    if (existenciaFinal > 0.01) {
+    // ──────────────────────────────────────────
+    // 3) Determinación CMV
+    //    Debe CMV / Haber Mercaderías (por monto CMV)
+    //    Post: Mercaderías = EI + CN - CMV = EF
+    // ──────────────────────────────────────────
+    if (Math.abs(cmv) > 0.01) {
+        if (cmv > 0) {
+            entries.push({
+                memo: `Cierre periodico ${periodLabel} - Determinacion CMV`,
+                lines: [
+                    { accountId: cmvId, debit: cmv, credit: 0, description: 'CMV - Costo Mercaderias Vendidas' },
+                    { accountId: mercaderiasId, debit: 0, credit: cmv, description: 'Mercaderias - baja por CMV' },
+                ],
+            })
+        } else {
+            // Negative CMV (unusual but possible: EF > EI + CN)
+            const abs = Math.abs(cmv)
+            entries.push({
+                memo: `Cierre periodico ${periodLabel} - Determinacion CMV (negativo)`,
+                lines: [
+                    { accountId: mercaderiasId, debit: abs, credit: 0, description: 'Mercaderias - ajuste CMV negativo' },
+                    { accountId: cmvId, debit: 0, credit: abs, description: 'CMV - ajuste negativo' },
+                ],
+            })
+        }
+    }
+
+    // ──────────────────────────────────────────
+    // 4) Neteo Ventas Netas (optional)
+    //    Debe Ventas / Haber BonifVentas + DevolVentas
+    // ──────────────────────────────────────────
+    const ventasNeteoLines: EntryLine[] = []
+    if (data.bonifVentas > 0.01 && accounts.ventasId && accounts.bonifVentasId) {
+        ventasNeteoLines.push(
+            { accountId: accounts.ventasId, debit: data.bonifVentas, credit: 0, description: 'Ventas - absorbe Bonif s/ventas' },
+            { accountId: accounts.bonifVentasId, debit: 0, credit: data.bonifVentas, description: 'Bonif s/ventas - neteo' },
+        )
+    }
+    if (data.devolVentas > 0.01 && accounts.ventasId && accounts.devolVentasId) {
+        ventasNeteoLines.push(
+            { accountId: accounts.ventasId, debit: data.devolVentas, credit: 0, description: 'Ventas - absorbe Devol s/ventas' },
+            { accountId: accounts.devolVentasId, debit: 0, credit: data.devolVentas, description: 'Devol s/ventas - neteo' },
+        )
+    }
+    if (ventasNeteoLines.length > 0) {
         entries.push({
-            memo: `Cierre periodico ${periodLabel} - Reconocimiento EF`,
-            lines: [
-                { accountId: mercaderiasId, debit: existenciaFinal, credit: 0, description: 'Mercaderias - Existencia Final' },
-                { accountId: cmvId, debit: 0, credit: existenciaFinal, description: 'CMV - Existencia Final' },
-            ],
+            memo: `Cierre periodico ${periodLabel} - Neteo Ventas Netas`,
+            lines: ventasNeteoLines,
         })
     }
 
-    return { entries, cmv }
+    return { entries, cmv, comprasNetas, ventasNetas }
 }
 
 /**

@@ -2551,3 +2551,208 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 - [ ] Reversal de cierre periódico: función `generateReversalEntryLines` existe pero no hay UI para usarla
 
 ---
+
+## CHECKPOINT #INV-PERIODICO-CIERRE-FASE0
+**Fecha:** 2026-01-29
+**Estado:** FASE 0 completada — Inspección y diagnóstico
+
+---
+
+### Diagnóstico de bugs encontrados
+
+#### BUG A: Existencia Inicial (EI) = $0
+
+**Causa raíz:** `InventarioBienesPage.tsx:311-313`
+```ts
+const existenciaInicial = useMemo(() => {
+    return products.reduce((sum, p) => sum + p.openingQty * p.openingUnitCost, 0)
+}, [products])
+```
+Cuando se crea un producto con `generateOpeningJournal: true`, la función `createBienesProduct()` en `bienes.ts` setea `openingQty: 0` y `openingUnitCost: 0` para evitar doble conteo en cost layers. Resultado: EI siempre es $0 para productos que generaron asiento de apertura.
+
+**Fix requerido:** EI debe calcularse desde el saldo contable de la cuenta Mercaderías al inicio del período (usando `getAccountBalanceByCode(mercaderiasCode, undefined, dayBeforeStart)`), NO desde `product.openingQty`.
+
+#### BUG B: EF físico default = 0
+
+**Causa raíz:** `InventarioBienesPage.tsx:217`
+```ts
+const [closingPhysicalValue, setClosingPhysicalValue] = useState(0)
+```
+El input `value={closingPhysicalValue || ''}` (línea 2184) muestra vacío cuando es 0, pero `Number(e.target.value)` parsea vacío como 0. El cálculo `cmvPorDiferencia = EI + compras - (closingPhysicalValue || 0)` trata 0 como valor explícito, generando CMV incorrecto.
+
+**Fix requerido:** Usar `null` como estado inicial. Mientras sea null, usar `inventarioTeorico` como EF en los cálculos y mostrar "CMV estimado". Solo usar valor explícito cuando el usuario lo ingresa.
+
+#### BUG C: Preview de cierre NO refleja asientos reales
+
+**Causa raíz:** `InventarioBienesPage.tsx:2207-2233`
+La previsualización muestra un solo asiento de ajuste (Mercaderías ↔ Diferencia de inventario) incluso en modo PERIODIC. No refleja los 3 asientos reales (EI→CMV, Compras→CMV, EF→Mercaderías) ni la refundición de subcuentas.
+
+**Fix requerido:** La preview debe ser mode-aware y mostrar:
+- PERIODIC: 3-4 asientos (refundición + determinación CMV)
+- PERMANENT: 1 asiento de ajuste por diferencia
+
+#### BUG D: Fórmula CMV incompleta
+
+**Causa raíz:** `InventarioBienesPage.tsx:315-319,323`
+```ts
+const comprasPeriodo = movements.filter(m => m.type === 'PURCHASE').reduce((sum, m) => sum + m.subtotal, 0)
+const cmvPorDiferencia = existenciaInicial + comprasPeriodo - (closingPhysicalValue || 0)
+```
+Solo suma subtotal de compras. Falta: gastos sobre compras, bonificaciones, devoluciones. La fórmula completa es: `CMV = EI + Compras + Gastos - Bonif - Devol - EF`.
+
+#### BUG E: MovementModal sin campos de bonif/descuento/gastos
+
+El modal solo tiene: type, product, date, qty, unitCost/Price, ivaRate, counterparty, paymentMethod, notes, reference, autoJournal. Faltan: bonificación (%), descuento financiero (%), gastos sobre compra ($), tipo devolución, contrapartida alternativa.
+
+### Infraestructura existente (lo que funciona)
+
+1. **Seed accounts existentes en `seed.ts`:**
+   - `4.8.01` Compras ✓
+   - `4.8.02` Gastos sobre compras ✓
+   - `4.8.03` Bonificaciones sobre compras (contra) ✓
+   - `4.8.04` Devoluciones sobre compras (contra) ✓
+   - `4.8.05` Bonificaciones sobre ventas (contra) ✓
+   - `4.8.06` Devoluciones sobre ventas (contra) ✓
+   - `4.2.01` Descuentos otorgados (contra) ✓
+   - `1.1.04.02` Anticipos a proveedores ✓
+   - **FALTA:** Descuentos obtenidos (resultado financiero positivo)
+
+2. **`getAccountBalanceByCode(code, startDate?, endDate?)`** en `inventario.ts:279-311`: Funciona, retorna debit-credit. Puede usarse para calcular EI robusto.
+
+3. **`generatePeriodicClosingEntries()`** en `closing.ts:209-266`: Genera los 3 asientos estándar (EI→CMV, Compras→CMV, EF→Mercaderías). Pero NO incluye refundición de subcuentas (gastos/bonif/devol).
+
+4. **AccountMappingKey** en `types.ts` ya incluye: mercaderias, compras, cmv, gastosCompras, bonifCompras, devolCompras, ventas, bonifVentas, devolVentas, ivaCF, ivaDF, diferenciaInventario, aperturaInventario.
+
+### Plan de implementación (FASES 1-4)
+
+**FASE 1 — Fix EI + Fix EF físico**
+- Calcular EI desde saldo Mercaderías al inicio del período via `getAccountBalanceByCode`
+- Cambiar `closingPhysicalValue` de `number` a `number | null`
+- Ajustar UI: mostrar "CMV estimado" cuando físico es null, usar teórico como fallback
+- Mostrar período explícito en UI ("Ejercicio: 01/01/YYYY – 31/12/YYYY")
+
+**FASE 2 — Asientos de cierre correctos**
+- Extender `generatePeriodicClosingEntries` para incluir refundición de subcuentas
+- Asiento 1: Refundición → Gastos/Bonif/Devol a Compras (ComprasNetas)
+- Asiento 2: Compras Netas a Mercaderías
+- Asiento 3: CMV desde Mercaderías
+- Asiento 4 (opcional): Neteo ventas (Ventas - BonifVentas - DevolVentas)
+- Preview fiel con todos los asientos, cuentas y montos
+- Idempotencia: check `hasPeriodicClosingEntries`
+
+**FASE 3 — MovementModal: bonif/descuento/gastos/devoluciones**
+- Extender BienesMovement type con campos opcionales
+- UI condicional en MovementModal según tipo
+- Preview de asiento completo en modal
+- Asientos correctos según modo y campos
+
+**FASE 4 — Plan de cuentas + configuración**
+- Agregar "Descuentos obtenidos" al seed
+- Extender AccountMappingKey con descuentosObtenidos, descuentosOtorgados, anticiposProveedores
+- Configurar cuentas drawer con nuevos campos
+
+---
+
+## CHECKPOINT #INV-PERIODICO-CIERRE-FASE1
+**Fecha:** 2026-01-29
+**Estado:** FASE 1 completada — Fix EI + Fix EF físico
+
+### Cambios realizados
+
+**`src/pages/Planillas/InventarioBienesPage.tsx`:**
+1. **EI robusto**: Reemplazado `products.reduce(openingQty * openingUnitCost)` por `getAccountBalanceByCode(mercaderias, undefined, "31/12/YYYY-1")`. Fallback a suma de productos si el ledger devuelve null.
+2. **EF null por default**: `closingPhysicalValue` de `useState(0)` a `useState<number | null>(null)`. Mientras sea null, se usa `inventarioTeorico` como EF y se muestra "CMV estimado".
+3. **UI mejorada**: Período explícito, fuente de EI visible, placeholder "Sin definir", labels dinámicos.
+4. **Preview mode-aware**: PERIODIC muestra 3 asientos. PERMANENT muestra asiento único de ajuste.
+5. **Validación corregida**: Botón deshabilitado cuando `closingPhysicalValue === null`.
+
+**Build:** PASS
+
+---
+
+## CHECKPOINT #INV-PERIODICO-CIERRE-FASE3
+**Fecha:** 2026-01-30
+**Estado:** FASE 3 completada — MovementModal: bonif/descuento/gastos/devoluciones + preview
+
+### Cambios realizados
+
+**`src/core/inventario/types.ts`:**
+- Campos ya existentes en `BienesMovement`: `bonificacionPct`, `bonificacionAmount`, `descuentoFinancieroPct`, `descuentoFinancieroAmount`, `gastosCompra`, `isDevolucion`
+
+**`src/pages/Planillas/components/MovementModal.tsx`:**
+- Nuevos campos de formulario: bonificacionPct, descuentoFinancieroPct, gastosCompra, isDevolucion
+- Cálculos: bruto → bonificación → netoAfterBonif → IVA (sobre neto) → gastos → descuento financiero → total
+- Sección UI "Condiciones de compra/venta": checkbox devolución, inputs bonif%, descuento%, gastos$
+- Preview con breakdown completo (bruto, bonif, IVA, gastos, descuento, total)
+- handleSubmit pasa todos los campos nuevos al movement
+
+**`src/storage/bienes.ts` (`buildJournalEntriesForMovement`):**
+- Resuelve sub-cuentas opcionales: gastosComprasId, bonifComprasId, devolComprasId, bonifVentasId, devolVentasId
+- PURCHASE normal: líneas Gastos s/compras, Bonif s/compras, Descuento obtenido
+- PURCHASE devolución: asiento inverso (Debe Proveedores / Haber DevolCompras + IVA CF reverso)
+- SALE normal: líneas Bonif s/ventas, Descuento otorgado
+- SALE devolución: asiento inverso (Debe DevolVentas + IVA DF reverso / Haber Contrapartida)
+
+**Build:** PASS
+
+---
+
+## CHECKPOINT #INV-PERIODICO-CIERRE-FASE4
+**Fecha:** 2026-01-30
+**Estado:** FASE 4 completada — Plan de cuentas genérico + configuración
+
+### Cambios realizados
+
+**`src/storage/seed.ts`:**
+- Agregada cuenta `{ code: '4.6.09', name: 'Descuentos obtenidos' }` (financial income)
+- Ya existía `{ code: '4.2.01', name: 'Descuentos otorgados' }` (sales deduction)
+
+**`src/core/inventario/types.ts`:**
+- `AccountMappingKey`: agregados `'descuentosObtenidos' | 'descuentosOtorgados'`
+- `DEFAULT_ACCOUNT_CODES`: agregados `descuentosObtenidos: '4.6.09'`, `descuentosOtorgados: '4.2.01'`
+
+**`src/storage/bienes.ts`:**
+- `ACCOUNT_FALLBACKS`: agregados `descuentosObtenidos` y `descuentosOtorgados`
+- `buildJournalEntriesForMovement`: resuelve `descuentosObtenidosId` y `descuentosOtorgadosId`
+- PURCHASE usa `descuentosObtenidosId` para descuentos financieros
+- SALE usa `descuentosOtorgadosId` para descuentos financieros
+
+**`src/pages/Planillas/InventarioBienesPage.tsx`:**
+- `BIENES_ACCOUNT_RULES`: agregadas 2 reglas opcionales para descuentosObtenidos (categoría compras) y descuentosOtorgados (categoría ventas)
+- Aparecen en el drawer "Configurar cuentas" como cuentas opcionales
+
+**Build:** PASS
+
+---
+
+## CHECKPOINT #INV-PERIODICO-CIERRE-FASE2
+**Fecha:** 2026-01-30
+**Estado:** FASE 2 completada — Asientos de cierre correctos
+
+### Cambios realizados
+
+**`src/core/inventario/closing.ts`:**
+- Expandido `PeriodicClosingAccounts` con sub-accounts opcionales (gastosComprasId, bonifComprasId, devolComprasId, ventasId, bonifVentasId, devolVentasId)
+- Expandido `PeriodicClosingData` con campos desagregados (compras, gastosCompras, bonifCompras, devolCompras, ventas, bonifVentas, devolVentas)
+- Función `computeComprasNetas(data)` exportada
+- `generatePeriodicClosingEntries` ahora genera 4 asientos:
+  1. **Refundición subcuentas** → Gastos/Bonif/Devol a Compras (deja Compras = ComprasNetas)
+  2. **Compras Netas → Mercaderías** (Debe Mercaderías / Haber Compras)
+  3. **Determinación CMV** (Debe CMV / Haber Mercaderías por CMV = EI + CN - EF)
+  4. **Neteo Ventas Netas** (Debe Ventas / Haber BonifVentas + DevolVentas)
+- Retorna `{ entries, cmv, comprasNetas, ventasNetas }`
+
+**`src/storage/bienes.ts`:**
+- Agregados fallbacks: gastosCompras, bonifCompras, devolCompras, bonifVentas, devolVentas
+- `generatePeriodicClosingJournalEntries` expandida: resuelve 9 cuentas (3 required + 6 optional), pasa datos completos
+
+**`src/pages/Planillas/InventarioBienesPage.tsx`:**
+- Carga balances de sub-cuentas desde ledger (gastosCompras, bonifCompras, devolCompras, ventas, bonifVentas, devolVentas) via `getAccountBalanceByCode`
+- Fórmula CMV completa: `CMV = EI + (Compras + Gastos - Bonif - Devol) - EF`
+- UI muestra breakdown completo de ComprasNetas y VentasNetas
+- Preview muestra los 4 asientos de cierre con todas las líneas
+- Resultado bruto calculado (VentasNetas - CMV)
+
+**Build:** PASS
+
+---

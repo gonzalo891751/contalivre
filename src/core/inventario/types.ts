@@ -157,6 +157,8 @@ export type AccountMappingKey =
     | 'ivaDF'
     | 'diferenciaInventario'
     | 'aperturaInventario'
+    | 'descuentosObtenidos'
+    | 'descuentosOtorgados'
 
 /**
  * Module configuration
@@ -282,6 +284,8 @@ export const DEFAULT_ACCOUNT_CODES: Record<AccountMappingKey, string> = {
     ivaDF: '2.1.03.01',
     diferenciaInventario: '4.3.02',
     aperturaInventario: '3.2.01',
+    descuentosObtenidos: '4.6.09',
+    descuentosOtorgados: '4.2.01',
 }
 
 // ========================================
@@ -372,6 +376,13 @@ export interface BienesMovement {
     costMethod: CostingMethod      // Snapshot of method at transaction time
     costUnitAssigned: number       // Assigned cost per unit (for SALE/ADJUSTMENT)
     costTotalAssigned: number      // Total cost assigned (for CMV calculation)
+    // Bonificaciones, descuentos, gastos (optional)
+    bonificacionPct?: number       // % commercial discount (reduces base price)
+    bonificacionAmount?: number    // $ calculated bonificación
+    descuentoFinancieroPct?: number // % financial discount (goes to financial result)
+    descuentoFinancieroAmount?: number // $ calculated descuento
+    gastosCompra?: number          // $ purchase expenses (freight, insurance, etc.)
+    isDevolucion?: boolean         // True if this is a return (purchase return / sale return)
     // Additional info
     counterparty?: string          // Supplier name (PURCHASE) or Customer (SALE)
     paymentMethod?: string         // Efectivo, Cuenta Corriente, etc.
