@@ -130,18 +130,24 @@ function finalizeSection(section: StatementSectionResult) {
 /**
  * Check if account name matches a pattern (case-insensitive, accent-normalized)
  */
-function nameMatches(name: string, patterns: string[]): boolean {
-    const normalized = name.toLowerCase()
+function normalizeName(name: string): string {
+    return name.toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+function nameMatches(name: string, patterns: string[]): boolean {
+    const normalized = normalizeName(name)
     return patterns.some(p => normalized.includes(p))
 }
 
 function isDescuentosObtenidos(name: string): boolean {
-    return nameMatches(name, ['descuento obtenido', 'descuentos obtenidos'])
+    const normalized = normalizeName(name)
+    return normalized.includes('descuent') && normalized.includes('obtenid')
 }
 
 function isDescuentoOtorgado(name: string): boolean {
-    return nameMatches(name, ['descuento otorgado', 'descuentos otorgados'])
+    const normalized = normalizeName(name)
+    return normalized.includes('descuent') && normalized.includes('otorgad')
 }
 
 function isDevolucionVentas(name: string): boolean {
@@ -310,7 +316,8 @@ function processTrialBalance(
         const group = row.account.statementGroup
         const name = row.account.name
         const isSalesDeduction = isDevolucionVentas(name) || isBonificacionVentas(name)
-        const isSalesDiscount = isDescuentoOtorgado(name)
+        const isFinancialByCode = code.startsWith('4.6')
+        const isDiscountByName = isDescuentosObtenidos(name) || isDescuentoOtorgado(name)
 
         // Check for tax account
         if (nameMatches(name, ['impuesto a las ganancias', 'impuesto ganancias', 'imp ganancias'])) {
@@ -318,8 +325,8 @@ function processTrialBalance(
             continue
         }
 
-        // Override: descuentos (obtenidos u otorgados) always go to financial results
-        if (isDescuentosObtenidos(name) || isSalesDiscount) {
+        // Override: financial accounts and descuentos always go to financial results
+        if (isFinancialByCode || isDiscountByName) {
             addToSection(resultadosFinancieros, row, signedAmount)
             continue
         }

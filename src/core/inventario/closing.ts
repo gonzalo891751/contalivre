@@ -436,15 +436,17 @@ export function parseArgentineNumber(input: string): number | null {
  * Format date for display (DD/MM/YYYY)
  */
 export function formatDateDisplay(dateStr: string): string {
-    if (!dateStr) return '—'
-    const d = new Date(dateStr)
-    if (isNaN(d.getTime())) return '—'
+    if (!dateStr) return '-'
+    const [y, m, d] = dateStr.split('-').map(Number)
+    if (!y || !m || !d) return '-'
+    const date = new Date(y, m - 1, d)
+    if (isNaN(date.getTime())) return '-'
 
     return new Intl.DateTimeFormat('es-AR', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
-    }).format(d)
+    }).format(date)
 }
 
 /**

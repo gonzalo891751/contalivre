@@ -24,7 +24,7 @@ import {
     generateFxId,
     DEFAULT_FX_ACCOUNT_CODES,
 } from '../core/monedaExtranjera/types'
-import { createEntry } from './entries'
+import { createEntry, getLocalDateISO } from './entries'
 
 // ========================================
 // Account Resolution Helpers
@@ -103,16 +103,22 @@ const isValidDate = (value: string) => {
     return !Number.isNaN(time)
 }
 
+const parseISODateLocal = (value: string): Date | null => {
+    const [y, m, d] = value.split('-').map(Number)
+    if (!y || !m || !d) return null
+    return new Date(y, m - 1, d)
+}
+
 const addMonths = (dateISO: string, months: number): string => {
-    const base = new Date(dateISO)
-    if (Number.isNaN(base.getTime())) {
-        return new Date().toISOString().split('T')[0]
+    const base = parseISODateLocal(dateISO)
+    if (!base) {
+        return getLocalDateISO()
     }
     const year = base.getFullYear()
     const month = base.getMonth()
     const day = base.getDate()
     const next = new Date(year, month + months, day)
-    return next.toISOString().split('T')[0]
+    return getLocalDateISO(next)
 }
 
 function generateFxDebtSchedule(params: {

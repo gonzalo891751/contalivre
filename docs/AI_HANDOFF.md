@@ -2,6 +2,52 @@
 
 ---
 
+## CHECKPOINT #FIX-INV-ER-RT6
+**Fecha:** 2026-01-30  
+**Estado:** COMPLETADO - Build PASS  
+**Objetivo:** Fixes contables: fecha local sin UTC, ER ventas netas con descuentos a financieros, y RT6 bienes de cambio con lotes por actividad.
+
+---
+
+## CHECKPOINT #FIX-RT6-MOV-BC-MAYOR
+**Fecha:** 2026-01-30  
+**Estado:** COMPLETADO - Build PASS  
+**Objetivo:** RT6 Bienes de cambio incluye cuentas de movimiento por mes (compras/gastos/bonif/devol) y Mayor muestra etiqueta "Movimiento Bienes de cambio".
+
+### Archivos tocados
+- `src/core/cierre-valuacion/auto-partidas-rt6.ts`
+- `src/pages/Mayor.tsx`
+
+### Cambios clave
+1. Deteccion de cuentas movimiento bienes de cambio por codigo/nombre, evitando ventas.
+2. RT6 genera lotes mensuales por cuenta (neto debito-credito) y las muestra bajo rubro "Bienes de cambio".
+3. Mayor reemplaza la pill "Resultado" por "Movimiento Bienes de cambio" en esas cuentas.
+
+### QA
+```bash
+npm run build  # PASS
+```
+
+
+### Archivos tocados
+- `src/storage/entries.ts`
+- `src/storage/fx.ts`
+- `src/core/inventario/closing.ts`
+- `src/domain/reports/estadoResultados.ts`
+- `src/core/cierre-valuacion/auto-partidas-rt6.ts`
+
+### Cambios clave
+1. Fecha local contable (sin UTC): helper `getLocalDateISO()` usado para hoy y addMonths; formateo de fechas de inventario con parse local.
+2. Estado de Resultados: override por codigo 4.6 y por nombre para descuentos; descuentos van a financieros y no a ventas netas.
+3. RT6 Bienes de cambio: mercaderias suma lotes mensuales de compras/gastos/bonif/devol (neto debito-credito), aun con saldo 0.
+
+### QA
+```bash
+npm run build  # PASS
+```
+
+---
+
 ## CHECKPOINT #ME-MODULO-FASE0-INSPECCION
 **Fecha:** 2026-01-28  
 **Estado:** EN PROGRESO - Fase 0 completada (inspecciÃ³n)  

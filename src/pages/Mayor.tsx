@@ -2,7 +2,8 @@ import { useState, useMemo, useCallback, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useLedger } from '../hooks/useLedger'
 import { formatCurrencyARS } from '../core/amortizaciones/calc'
-import type { AccountKind, AccountType } from '../core/models'
+import type { Account } from '../core/models'
+import { isMovimientoBienesDeCambio } from '../core/cierre-valuacion/auto-partidas-rt6'
 import {
     LedgerHero,
     LedgerToolbar,
@@ -37,7 +38,15 @@ function inferRubroFromCode(code: string): string {
     return 'Movimiento'
 }
 
-function getRubroLabel(kind?: AccountKind, type?: AccountType, code?: string): string {
+function getRubroLabel(account?: Account): string {
+    if (account && isMovimientoBienesDeCambio(account)) {
+        return 'Movimiento Bienes de cambio'
+    }
+
+    const kind = account?.kind
+    const type = account?.type
+    const code = account?.code
+
     if (kind) {
         if (kind === 'ASSET') return 'Activo'
         if (kind === 'LIABILITY') return 'Pasivo'
@@ -76,11 +85,7 @@ export default function Mayor() {
             if (la.account.isHeader) return
 
             const status = getAccountStatus(la.balance)
-            const rubroLabel = getRubroLabel(
-                la.account.kind,
-                la.account.type,
-                la.account.code
-            )
+            const rubroLabel = getRubroLabel(la.account)
 
             rows.push({
                 id: la.account.id,
@@ -141,11 +146,7 @@ export default function Mayor() {
             name: la.account.name,
             kind: la.account.kind,
             group: la.account.group,
-            rubroLabel: getRubroLabel(
-                la.account.kind,
-                la.account.type,
-                la.account.code
-            ),
+            rubroLabel: getRubroLabel(la.account),
             totalDebit: la.totalDebit,
             totalCredit: la.totalCredit,
             balance: la.balance,
