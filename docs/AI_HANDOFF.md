@@ -2697,6 +2697,33 @@ El modal solo tiene: type, product, date, qty, unitCost/Price, ivaRate, counterp
 
 ---
 
+## CHECKPOINT #INV-CLOSING-DATE-SOURCE-OF-TRUTH
+**Fecha:** 2026-01-30
+**Estado:** Completado — Fix closingMonthKey desalineado con período global
+
+### Bug
+En Inventario, card "Existencia Final (FIFO)" mostraba "Valuación al cierre (2026-12)" y "Faltan índices para: 2026-12" aunque el header decía "Periodo 2025".
+
+### Root cause
+`usePeriodYear()` usaba `useState` independiente por componente. Cuando PeriodPicker (header) cambiaba el año, InventarioBienesPage no se enteraba porque su `useState` ya se había inicializado y no se re-sincronizaba.
+
+### Fix
+**`src/hooks/usePeriodYear.ts`:**
+- Reescrito para usar `useSyncExternalStore` (React 18) con store externo compartido
+- Módulo-level `currentYear` + `listeners` Set
+- `setYear()` actualiza valor, localStorage Y notifica a TODOS los suscriptores
+- Todos los consumidores (`PeriodPicker`, `InventarioBienesPage`, `MonedaExtranjeraPage`, etc.) comparten el mismo valor reactivo
+
+### QA
+1. Con selector global "Periodo 2025" → card dice "Valuación al cierre (2025-12)"
+2. Cambiar a "Periodo 2026" → card dice "Valuación al cierre (2026-12)" inmediatamente
+3. El banner "Faltan índices para:" refleja el mes correcto
+4. Todos los consumidores de `usePeriodYear()` se actualizan al unísono
+
+**Build:** PASS
+
+---
+
 ## CHECKPOINT #INV-PERIODICO-CIERRE-FASE4
 **Fecha:** 2026-01-30
 **Estado:** FASE 4 completada — Plan de cuentas genérico + configuración
@@ -2720,6 +2747,65 @@ El modal solo tiene: type, product, date, qty, unitCost/Price, ivaRate, counterp
 **`src/pages/Planillas/InventarioBienesPage.tsx`:**
 - `BIENES_ACCOUNT_RULES`: agregadas 2 reglas opcionales para descuentosObtenidos (categoría compras) y descuentosOtorgados (categoría ventas)
 - Aparecen en el drawer "Configurar cuentas" como cuentas opcionales
+
+**Build:** PASS
+
+---
+
+## CHECKPOINT #INV-EXISTENCIA-FINAL-HOMOG
+**Fecha:** 2026-01-30
+**Estado:** Completado — EF a valores de origen y homogéneos (FIFO/PEPS)
+
+### Objetivo
+Calcular y mostrar Existencia Final (EF) por método de costeo (FIFO/PEPS, LIFO, PPP):
+1. A valores de ORIGEN (ARS históricos)
+2. REEXPRESADA a moneda de cierre (valores homogéneos) usando índices FACPCE
+3. Ajuste = EF_homog - EF_origen (informativo)
+
+### Cambios realizados
+
+**`src/core/inventario/costing.ts`:**
+- Nueva función `computeInventariableUnitCost(mov)`: calcula costo inventariable = precio neto de bonificaciones + gastos sobre compras (sin IVA, sin descuento financiero)
+- `buildCostLayers()` ahora usa `computeInventariableUnitCost()` para capas de compra
+- `calculateWeightedAverageCost()` actualizado para usar costo inventariable en PPP
+
+**`src/core/inventario/valuation-homogenea.ts` (NUEVO):**
+- `HomogeneousLayer`: tipo con datos de reexpresión (originPeriod, closingPeriod, indexOrigen, indexCierre, coef, unitCostHomog, totalHomog)
+- `ProductEndingValuation`: valuación por producto con endingValueOrigen, endingValueHomog, ajuste, ajustePct, layers[]
+- `EndingInventoryValuation`: agregado total con hasIndices, missingPeriods
+- `reexpressLayer()`: reexpresa una capa individual usando coef = indexCierre/indexOrigen
+- `computeProductEndingValuation()`: valuación por producto (FIFO/LIFO: por capa; PPP: coef blended)
+- `computeEndingInventoryValuation()`: valuación completa para todos los productos
+- Reutiliza `getPeriodFromDate`, `getIndexForPeriod`, `calculateCoef` de `core/cierre-valuacion/calc.ts`
+
+**`src/pages/Planillas/InventarioBienesPage.tsx`:**
+- Importa `computeEndingInventoryValuation`, `EndingInventoryValuation`, `ProductEndingValuation`
+- Importa `IndexRow`, `getPeriodFromDate` de cierre-valuacion + `loadCierreValuacionState` de storage
+- Estado nuevo: `facpceIndices` (IndexRow[]), `layersDrawerProduct` (ProductEndingValuation | null)
+- useEffect: carga índices FACPCE desde CierreValuacionState
+- useMemo `efHomogenea`: computa valuación homogénea al closingPeriod (YYYY-12)
+- **Dashboard**: card "Existencia Final (método)" con V.Origen, V.Homogéneo, Ajuste ($ y %); tabla expandible por producto con click → drawer de capas
+- **Cierre tab**: sección informativa "EF Homogénea" entre EF Teórico y EF Físico, mostrando valor homogéneo y ajuste
+- **Drawer de capas**: detalle por capa con fecha origen, qty, $/u origen, total origen, coef, $/u homog, total homog; footer con totales; info de índices FACPCE
+
+### Reglas contables implementadas
+- Costo inventariable = precio neto de bonificaciones + gastos s/compras
+- NO incluye IVA (ya excluido)
+- NO incluye descuento financiero (va a resultados financieros, cuenta Descuentos obtenidos)
+- FIFO: cada capa reexpresada individualmente con coef = index(cierre)/index(origen)
+- PPP: coef blended ponderado por valor de cada capa subyacente
+
+### QA Steps
+1. Crear producto con inventario inicial (ej: 10u a $100, fecha 2025-01-15)
+2. Registrar compra 5u a $200 en julio con bonificación 10% y gastos $50
+   - Costo inventariable = (200*5 - 100 + 50) / 5 = $190/u
+3. Registrar venta 8u en octubre
+4. Verificar EF FIFO: 2u del lote enero + 5u del lote julio
+5. EF origen = 2*100 + 5*190 = $1.150
+6. Si hay índices cargados en cierre-valuación: verificar que EF homog aplica coef por capa
+7. Dashboard: card muestra V.Origen, V.Homog, Ajuste
+8. Click en producto → drawer muestra capas con coeficientes
+9. Cierre tab: sección "EF Homogénea" visible cuando hay índices
 
 **Build:** PASS
 

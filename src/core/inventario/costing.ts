@@ -15,6 +15,24 @@ import type {
 } from './types'
 
 // ========================================
+// Inventariable Cost
+// ========================================
+
+/**
+ * Compute inventariable unit cost for a purchase movement.
+ * Includes: precio neto de bonificaciones + gastos sobre compras.
+ * Excludes: IVA, descuento financiero (goes to financial results).
+ */
+export function computeInventariableUnitCost(mov: BienesMovement): number {
+    if (mov.unitCost === undefined || mov.quantity <= 0) return 0
+    const bruto = mov.unitCost * mov.quantity
+    const bonif = mov.bonificacionAmount ?? (mov.bonificacionPct ? bruto * mov.bonificacionPct / 100 : 0)
+    const netoAfterBonif = bruto - bonif
+    const gastos = mov.gastosCompra ?? 0
+    return (netoAfterBonif + gastos) / mov.quantity
+}
+
+// ========================================
 // Cost Layer Management
 // ========================================
 
@@ -46,11 +64,12 @@ export function buildCostLayers(
     // Process each movement
     for (const mov of sorted) {
         if (mov.type === 'PURCHASE' && mov.unitCost !== undefined && mov.quantity > 0) {
-            // Add new layer for purchase
+            // Inventariable cost = neto de bonificaciones + gastos s/compras (sin IVA, sin desc financiero)
+            const inventariableUnitCost = computeInventariableUnitCost(mov)
             layers.push({
                 date: mov.date,
                 quantity: mov.quantity,
-                unitCost: mov.unitCost,
+                unitCost: inventariableUnitCost,
                 movementId: mov.id,
             })
         } else if (mov.type === 'SALE' || (mov.type === 'ADJUSTMENT' && mov.quantity < 0)) {
@@ -182,9 +201,10 @@ export function calculateWeightedAverageCost(
 
     for (const mov of sorted) {
         if (mov.type === 'PURCHASE' && mov.unitCost !== undefined) {
-            // Add to inventory
+            // Add to inventory at inventariable cost (neto bonif + gastos)
+            const invUnitCost = computeInventariableUnitCost(mov)
             totalQty += mov.quantity
-            totalValue += mov.quantity * mov.unitCost
+            totalValue += mov.quantity * invUnitCost
         } else if (mov.type === 'SALE') {
             // Remove at current average cost
             const avgCost = totalQty > 0 ? totalValue / totalQty : 0

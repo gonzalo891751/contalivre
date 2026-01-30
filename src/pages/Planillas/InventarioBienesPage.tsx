@@ -61,6 +61,14 @@ import {
     calculateBienesKPIs,
     canChangeCostingMethod,
 } from '../../core/inventario/costing'
+import {
+    computeEndingInventoryValuation,
+    type EndingInventoryValuation,
+    type ProductEndingValuation,
+} from '../../core/inventario/valuation-homogenea'
+import type { IndexRow } from '../../core/cierre-valuacion/types'
+import { getPeriodFromDate } from '../../core/cierre-valuacion/calc'
+import { loadCierreValuacionState } from '../../storage'
 import ProductModal from './components/ProductModal'
 import MovementModal from './components/MovementModal'
 import { AccountAutocomplete } from './components/AccountAutocomplete'
@@ -240,6 +248,11 @@ export default function InventarioBienesPage() {
         ventas: number; bonifVentas: number; devolVentas: number
     }>({ gastosCompras: 0, bonifCompras: 0, devolCompras: 0, ventas: 0, bonifVentas: 0, devolVentas: 0 })
 
+    // Indices FACPCE (from cierre-valuacion module)
+    const [facpceIndices, setFacpceIndices] = useState<IndexRow[]>([])
+    // Layers drawer
+    const [layersDrawerProduct, setLayersDrawerProduct] = useState<ProductEndingValuation | null>(null)
+
     // Configuracion de cuentas Bienes de Cambio (conciliacion)
     const [accountMappingsDraft, setAccountMappingsDraft] = useState<Partial<Record<AccountMappingKey, string>>>({})
     const [accountMappingsSaving, setAccountMappingsSaving] = useState(false)
@@ -275,6 +288,13 @@ export default function InventarioBienesPage() {
     useEffect(() => {
         loadData()
     }, [loadData])
+
+    // Load FACPCE indices from cierre-valuacion module
+    useEffect(() => {
+        loadCierreValuacionState().then(state => {
+            setFacpceIndices(state.indices || [])
+        })
+    }, [])
 
     useEffect(() => {
         if (settings) {
@@ -330,6 +350,20 @@ export default function InventarioBienesPage() {
         }
         return calculateBienesKPIs(products, movements, settings.costMethod, monthRange.start, monthRange.end)
     }, [products, movements, settings, monthRange])
+
+    // Homogeneous ending inventory valuation (FIFO layers reexpressed to closing month)
+    const efHomogenea = useMemo<EndingInventoryValuation | null>(() => {
+        if (!settings || products.length === 0) return null
+        const closingDate = `${periodYear}-12-31`
+        const closingPeriod = getPeriodFromDate(closingDate)
+        return computeEndingInventoryValuation({
+            products,
+            movements,
+            method: settings.costMethod,
+            closingPeriod,
+            indices: facpceIndices,
+        })
+    }, [products, movements, settings, periodYear, facpceIndices])
 
     // EI: saldo contable de Mercaderías al día anterior al inicio del ejercicio
     // Fallback: sum of product openingQty * openingUnitCost (legacy)
@@ -1619,6 +1653,96 @@ export default function InventarioBienesPage() {
                             </div>
                         </div>
 
+                        {/* EF Homogénea Card */}
+                        {efHomogenea && efHomogenea.totalEndingQty > 0 && (
+                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                                <div className="flex justify-between items-start mb-3">
+                                    <div>
+                                        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                                            Existencia Final ({settings?.costMethod})
+                                        </h3>
+                                        <p className="text-[10px] text-slate-400 mt-0.5">
+                                            Valuacion al cierre ({periodYear}-12)
+                                        </p>
+                                    </div>
+                                    <Scales className="text-indigo-500" size={20} weight="duotone" />
+                                </div>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <span className="text-[10px] uppercase text-slate-400 font-medium">V. Origen</span>
+                                        <div className="font-mono text-lg font-medium text-slate-900">
+                                            {formatCurrency(efHomogenea.totalEndingValueOrigen)}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] uppercase text-slate-400 font-medium">V. Homogeneo</span>
+                                        <div className="font-mono text-lg font-medium text-indigo-700">
+                                            {efHomogenea.hasIndices
+                                                ? formatCurrency(efHomogenea.totalEndingValueHomog)
+                                                : <span className="text-amber-500 text-sm">Sin indices</span>
+                                            }
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] uppercase text-slate-400 font-medium">Ajuste</span>
+                                        <div className={`font-mono text-lg font-medium ${efHomogenea.totalAjuste >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            {efHomogenea.hasIndices
+                                                ? <>{formatCurrency(efHomogenea.totalAjuste)} <span className="text-xs">({efHomogenea.totalAjustePct.toFixed(1)}%)</span></>
+                                                : '—'
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                                {efHomogenea.missingPeriods.length > 0 && (
+                                    <div className="mt-3 text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded">
+                                        Faltan indices para: {efHomogenea.missingPeriods.join(', ')}
+                                    </div>
+                                )}
+                                {efHomogenea.products.length > 0 && (
+                                    <details className="mt-3">
+                                        <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-700">
+                                            Ver detalle por producto ({efHomogenea.products.length})
+                                        </summary>
+                                        <div className="mt-2 max-h-60 overflow-y-auto">
+                                            <table className="w-full text-xs">
+                                                <thead>
+                                                    <tr className="text-slate-400 border-b border-slate-100">
+                                                        <th className="text-left py-1 pr-2">Producto</th>
+                                                        <th className="text-right py-1 px-1">Qty</th>
+                                                        <th className="text-right py-1 px-1">V.Origen</th>
+                                                        <th className="text-right py-1 px-1">V.Homog</th>
+                                                        <th className="text-right py-1 pl-1">Ajuste</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {efHomogenea.products.map(pv => (
+                                                        <tr
+                                                            key={pv.product.id}
+                                                            className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer"
+                                                            onClick={() => setLayersDrawerProduct(pv)}
+                                                        >
+                                                            <td className="py-1.5 pr-2 font-medium text-slate-700">
+                                                                {pv.product.name}
+                                                                <span className="text-slate-400 ml-1">({pv.product.sku})</span>
+                                                            </td>
+                                                            <td className="text-right py-1.5 px-1 font-mono">{pv.endingQty}</td>
+                                                            <td className="text-right py-1.5 px-1 font-mono">{formatCurrency(pv.endingValueOrigen)}</td>
+                                                            <td className="text-right py-1.5 px-1 font-mono text-indigo-700">
+                                                                {efHomogenea.hasIndices ? formatCurrency(pv.endingValueHomog) : '—'}
+                                                            </td>
+                                                            <td className={`text-right py-1.5 pl-1 font-mono ${pv.ajuste >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                                {efHomogenea.hasIndices ? formatCurrency(pv.ajuste) : '—'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </details>
+                                )}
+                            </div>
+                        )}
+
                         {/* Low Stock Alert */}
                         {lowStockCount > 0 && (
                             <div className="bg-orange-50 border border-orange-100 rounded-lg p-4 flex items-start gap-3">
@@ -2316,6 +2440,31 @@ export default function InventarioBienesPage() {
                                         {formatCurrency(inventarioTeorico)}
                                     </span>
                                 </div>
+
+                                {/* EF Homogénea (informativo) */}
+                                {efHomogenea && efHomogenea.totalEndingQty > 0 && facpceIndices.length > 0 && (
+                                    <div className="flex justify-between items-center py-3 border-b border-slate-100 bg-indigo-50/50 px-3 rounded">
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium text-indigo-700">EF Homogenea ({settings?.costMethod})</span>
+                                            <span className="text-[10px] text-indigo-500">
+                                                Reexpresada a moneda de cierre ({periodYear}-12)
+                                                {efHomogenea.missingPeriods.length > 0 && (
+                                                    <> · Faltan indices: {efHomogenea.missingPeriods.join(', ')}</>
+                                                )}
+                                            </span>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="font-mono text-lg font-bold text-indigo-700">
+                                                {efHomogenea.hasIndices ? formatCurrency(efHomogenea.totalEndingValueHomog) : '—'}
+                                            </span>
+                                            {efHomogenea.hasIndices && (
+                                                <div className="text-[10px] text-indigo-500 font-mono">
+                                                    Ajuste: {formatCurrency(efHomogenea.totalAjuste)} ({efHomogenea.totalAjustePct.toFixed(1)}%)
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="flex justify-between items-center py-3 border-b border-slate-200">
                                     <div>
@@ -3267,6 +3416,112 @@ export default function InventarioBienesPage() {
                         <Warning className="text-white" size={20} weight="fill" />
                     )}
                     <span className="font-medium text-sm">{toast.message}</span>
+                </div>
+            )}
+
+            {/* Layers Drawer (EF Homogénea detail per product) */}
+            {layersDrawerProduct && (
+                <div className="fixed inset-0 z-50 flex justify-end">
+                    <div className="absolute inset-0 bg-black/30" onClick={() => setLayersDrawerProduct(null)} />
+                    <div className="relative w-full max-w-lg bg-white shadow-xl animate-slide-in-right overflow-y-auto">
+                        <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center z-10">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-900">
+                                    Capas de Costo — {layersDrawerProduct.product.name}
+                                </h3>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    SKU: {layersDrawerProduct.product.sku} · Metodo: {layersDrawerProduct.method}
+                                </p>
+                            </div>
+                            <button onClick={() => setLayersDrawerProduct(null)} className="p-1 hover:bg-slate-100 rounded">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-6">
+                            <div className="grid grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg">
+                                <div>
+                                    <span className="text-[10px] uppercase text-slate-400">Qty Final</span>
+                                    <div className="font-mono text-lg font-bold">{layersDrawerProduct.endingQty} {layersDrawerProduct.product.unit}</div>
+                                </div>
+                                <div>
+                                    <span className="text-[10px] uppercase text-slate-400">V. Origen</span>
+                                    <div className="font-mono text-lg font-bold">{formatCurrency(layersDrawerProduct.endingValueOrigen)}</div>
+                                </div>
+                                <div>
+                                    <span className="text-[10px] uppercase text-slate-400">V. Homogeneo</span>
+                                    <div className="font-mono text-lg font-bold text-indigo-700">{formatCurrency(layersDrawerProduct.endingValueHomog)}</div>
+                                </div>
+                            </div>
+                            <div className="text-sm text-slate-600">
+                                Ajuste: <span className={`font-mono font-bold ${layersDrawerProduct.ajuste >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                    {formatCurrency(layersDrawerProduct.ajuste)}
+                                </span>
+                                <span className="text-slate-400 ml-1">({layersDrawerProduct.ajustePct.toFixed(2)}%)</span>
+                            </div>
+
+                            <div>
+                                <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Detalle de Capas</h4>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="text-slate-400 border-b border-slate-200">
+                                                <th className="text-left py-2 pr-2">Fecha Origen</th>
+                                                <th className="text-right py-2 px-1">Qty</th>
+                                                <th className="text-right py-2 px-1">$/u Origen</th>
+                                                <th className="text-right py-2 px-1">Total Origen</th>
+                                                <th className="text-right py-2 px-1">Coef</th>
+                                                <th className="text-right py-2 px-1">$/u Homog</th>
+                                                <th className="text-right py-2 pl-1">Total Homog</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {layersDrawerProduct.layers.map((layer, idx) => (
+                                                <tr key={idx} className="border-b border-slate-50">
+                                                    <td className="py-2 pr-2 font-mono">
+                                                        {layer.date === 'PPP' ? 'PPP (prom.)' : layer.date}
+                                                        {layer.indexOrigen === null && layer.date !== 'PPP' && (
+                                                            <span className="text-amber-500 ml-1" title="Sin indice para este periodo">⚠</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="text-right py-2 px-1 font-mono">{layer.quantity}</td>
+                                                    <td className="text-right py-2 px-1 font-mono">{layer.unitCostOrigen.toFixed(2)}</td>
+                                                    <td className="text-right py-2 px-1 font-mono">{formatCurrency(layer.totalOrigen)}</td>
+                                                    <td className="text-right py-2 px-1 font-mono text-indigo-600">{layer.coef.toFixed(4)}</td>
+                                                    <td className="text-right py-2 px-1 font-mono text-indigo-700">{layer.unitCostHomog.toFixed(2)}</td>
+                                                    <td className="text-right py-2 pl-1 font-mono text-indigo-700 font-bold">{formatCurrency(layer.totalHomog)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot>
+                                            <tr className="border-t-2 border-slate-200 font-bold">
+                                                <td className="py-2 pr-2">Total</td>
+                                                <td className="text-right py-2 px-1 font-mono">
+                                                    {layersDrawerProduct.layers.reduce((s, l) => s + l.quantity, 0)}
+                                                </td>
+                                                <td className="text-right py-2 px-1"></td>
+                                                <td className="text-right py-2 px-1 font-mono">{formatCurrency(layersDrawerProduct.endingValueOrigen)}</td>
+                                                <td className="text-right py-2 px-1"></td>
+                                                <td className="text-right py-2 px-1"></td>
+                                                <td className="text-right py-2 pl-1 font-mono text-indigo-700">{formatCurrency(layersDrawerProduct.endingValueHomog)}</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+
+                            {layersDrawerProduct.layers.some(l => l.indexOrigen !== null) && (
+                                <div className="text-[10px] text-slate-400 bg-slate-50 p-3 rounded">
+                                    Indices FACPCE: {layersDrawerProduct.layers
+                                        .filter(l => l.indexOrigen !== null)
+                                        .map(l => `${l.originPeriod}: ${l.indexOrigen}`)
+                                        .join(' | ')}
+                                    {layersDrawerProduct.layers[0]?.indexCierre !== null && (
+                                        <> | Cierre ({layersDrawerProduct.layers[0].closingPeriod}): {layersDrawerProduct.layers[0].indexCierre}</>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             )}
 
