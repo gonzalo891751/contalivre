@@ -21,9 +21,11 @@ export type TipoMovimiento = 'ENTRADA' | 'SALIDA' | 'AJUSTE'
 export type ClosingStatus = 'DRAFT' | 'POSTED' | 'REVERSED'
 
 /**
- * Inventory mode (only PERIODIC in MVP)
+ * Inventory mode
+ * PERIODIC = Diferencias de inventario (CMV al cierre)
+ * PERMANENT = Inventario permanente (CMV en cada venta)
  */
-export type InventoryMode = 'PERIODIC'
+export type InventoryMode = 'PERIODIC' | 'PERMANENT'
 
 // ========================================
 // Product & Movement Types (Tab A)
@@ -154,6 +156,7 @@ export type AccountMappingKey =
     | 'ivaCF'
     | 'ivaDF'
     | 'diferenciaInventario'
+    | 'aperturaInventario'
 
 /**
  * Module configuration
@@ -278,6 +281,7 @@ export const DEFAULT_ACCOUNT_CODES: Record<AccountMappingKey, string> = {
     ivaCF: '1.1.03.01',
     ivaDF: '2.1.03.01',
     diferenciaInventario: '4.3.02',
+    aperturaInventario: '3.2.01',
 }
 
 // ========================================
@@ -392,6 +396,10 @@ export interface BienesSettings {
     costMethodLocked: boolean      // True if there are exits (sales/adjustments)
     allowNegativeStock: boolean
     defaultIVARate: IVARate
+    // Inventory mode: PERMANENT (CMV on each sale) vs PERIODIC (CMV at close)
+    inventoryMode: InventoryMode
+    // Auto-generate journal entries for movements (default true)
+    autoJournalEntries: boolean
     // Account mappings (for Etapa 2)
     accountMappings: Partial<Record<AccountMappingKey, string>>
     periodGoals?: Record<string, { salesTarget?: number; marginTarget?: number }>
@@ -488,6 +496,8 @@ export function createDefaultBienesSettings(): BienesSettings {
         costMethodLocked: false,
         allowNegativeStock: false,
         defaultIVARate: 21,
+        inventoryMode: 'PERMANENT',
+        autoJournalEntries: true,
         accountMappings: {},
         periodGoals: {},
         lastUpdated: new Date().toISOString(),

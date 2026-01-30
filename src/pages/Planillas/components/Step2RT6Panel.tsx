@@ -267,6 +267,8 @@ export function Step2RT6Panel({
         for (const partida of computedRT6) {
             const grupo = partida.grupo || getGroupFromCode(partida.cuentaCodigo || '') || 'ACTIVO';
             if (grupo !== 'RESULTADOS') continue;
+            // Exclude periodic movement accounts (compras in PERIODIC mode)
+            if (partida.inventoryRole === 'periodic_movement') continue;
 
             const rubro = partida.rubroLabel || 'Sin rubro';
             if (!groups[rubro]) groups[rubro] = [];
@@ -279,9 +281,18 @@ export function Step2RT6Panel({
     // ============================================
     // Resultados summary (neto, con signo por naturaleza)
     // ============================================
-    const resultadosPartidas = useMemo(
+    // Separate periodic movement partidas from regular resultados
+    const allResultadosPartidas = useMemo(
         () => computedRT6.filter(p => p.grupo === 'RESULTADOS'),
         [computedRT6]
+    );
+    const periodicMovementPartidas = useMemo(
+        () => allResultadosPartidas.filter(p => p.inventoryRole === 'periodic_movement'),
+        [allResultadosPartidas]
+    );
+    const resultadosPartidas = useMemo(
+        () => allResultadosPartidas.filter(p => p.inventoryRole !== 'periodic_movement'),
+        [allResultadosPartidas]
     );
 
     const resultadosSummary = useMemo(() => {
@@ -308,8 +319,9 @@ export function Step2RT6Panel({
             baseNet,
             homogNet,
             ajusteNet,
+            hasPeriodicMovements: periodicMovementPartidas.length > 0,
         };
-    }, [resultadosPartidas]);
+    }, [resultadosPartidas, periodicMovementPartidas]);
 
     // ============================================
     // Counts
@@ -919,6 +931,16 @@ export function Step2RT6Panel({
                                 {closingEntriesCount > 0 && (
                                     <span className="rt6-resultados-banner-count">{closingEntriesCount}</span>
                                 )}
+                            </div>
+                        )}
+
+                        {resultadosSummary.hasPeriodicMovements && (
+                            <div className="rt6-resultados-banner" style={{ background: '#eff6ff', borderColor: '#bfdbfe' }}>
+                                <i className="ph-fill ph-info" style={{ color: '#3b82f6' }} />
+                                <span style={{ color: '#1d4ed8' }}>
+                                    Modo Diferencias: {periodicMovementPartidas.length} cuenta(s) de Compras excluida(s) de resultados.
+                                    Se refunden al cierre en CMV.
+                                </span>
                             </div>
                         )}
 

@@ -91,6 +91,8 @@ export interface PartidaRT6 {
     normalSide?: NormalSide;
     /** Account kind (ASSET/LIABILITY/EQUITY/INCOME/EXPENSE) */
     accountKind?: AccountKind;
+    /** Inventory role for periodic mode (compras/bonif/devol are 'periodic_movement') */
+    inventoryRole?: 'periodic_movement';
 }
 
 /** Computed lot with calculated values */

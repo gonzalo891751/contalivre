@@ -2265,16 +2265,16 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 
 ## CHECKPOINT #ME2-FASE0-INSPECCION
 **Fecha:** 2026-01-28  
-**Estado:** COMPLETADO - Fase 0 (inspecci�n)  
+**Estado:** COMPLETADO - Fase 0 (inspecci�n)  
 **Objetivo:** Confirmar ruta, UI base y estructura del prototipo ME2 para reemplazo completo.
 
 ---
 
 ### Hallazgos clave
 1. **Ruta confirmada:** `/operaciones/moneda-extranjera` renderiza `src/pages/Operaciones/MonedaExtranjeraPage.tsx` (App.tsx).  
-2. **Prototipo ME2 inspeccionado:** `docs/prototypes/ME2.HTML` define ticker de cotizaciones, header con toggle Contable/Gesti�n, tabs con underline animado (Dashboard/Activos/Pasivos/Movimientos/Conciliaci�n), tablas con columnas alineadas, y modales ME2 (Nuevo Activo, Alta Pasivo, Registrar Operaci�n con tabs Compra/Venta/Pago/Refi, Ver Plan).  
+2. **Prototipo ME2 inspeccionado:** `docs/prototypes/ME2.HTML` define ticker de cotizaciones, header con toggle Contable/Gesti�n, tabs con underline animado (Dashboard/Activos/Pasivos/Movimientos/Conciliaci�n), tablas con columnas alineadas, y modales ME2 (Nuevo Activo, Alta Pasivo, Registrar Operaci�n con tabs Compra/Venta/Pago/Refi, Ver Plan).  
 3. **Iconos disponibles:** Phosphor ya se usa en el proyecto (`@phosphor-icons/react` y clases `ph-*`).  
-4. **Componentes base:** No hay Button/Modal gen�ricos �nicos; se pueden crear componentes locales dentro del m�dulo ME sin contaminar global.
+4. **Componentes base:** No hay Button/Modal gen�ricos �nicos; se pueden crear componentes locales dentro del m�dulo ME sin contaminar global.
 
 ---
 
@@ -2287,7 +2287,7 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 
 ---
 
-### Pr�ximo paso
+### Pr�ximo paso
 - Iniciar Fase 1: reemplazo UI completo para calcar ME2.
 
 ---
@@ -2297,7 +2297,7 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 ## CHECKPOINT #ME2-FASE1-UI
 **Fecha:** 2026-01-28  
 **Estado:** COMPLETADO - UI ME2 aplicada  
-**Objetivo:** Reemplazar UI del m�dulo ME para calcar ME2 (layout, tabs, tablas, header, ticker).
+**Objetivo:** Reemplazar UI del m�dulo ME para calcar ME2 (layout, tabs, tablas, header, ticker).
 
 ---
 
@@ -2307,14 +2307,14 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 ---
 
 ### Cambios clave
-1. **Layout ME2:** ticker superior, header con breadcrumbs + toggle Contable/Gesti�n, tabs con underline animado.
-2. **Tablas ME2:** Activos/Pasivos/Movimientos con columnas, alineaci�n y badges estilo prototipo.
-3. **Dashboard ME2:** KPIs + acciones r�pidas + placeholder de gr�fico.
-4. **Conciliaci�n ME2:** paneles visuales con pendientes, hu�rfanos y desync/OK.
+1. **Layout ME2:** ticker superior, header con breadcrumbs + toggle Contable/Gesti�n, tabs con underline animado.
+2. **Tablas ME2:** Activos/Pasivos/Movimientos con columnas, alineaci�n y badges estilo prototipo.
+3. **Dashboard ME2:** KPIs + acciones r�pidas + placeholder de gr�fico.
+4. **Conciliaci�n ME2:** paneles visuales con pendientes, hu�rfanos y desync/OK.
 
 ---
 
-### Validaci�n
+### Validaci�n
 - `npm run build`  ?
 
 ---
@@ -2332,15 +2332,15 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 ---
 
 ### Cambios clave
-1. **Modal Nuevo Activo:** smart mapping + creaci�n de cuenta contable + saldo inicial con preview de asiento.
-2. **Modal Alta Deuda (FxDebt):** identidad, plan financiero, destino de fondos, preview de asiento y creaci�n autom�tica.
-3. **Modal Operaci�n ME:** tabs Compra/Venta/Pago/Refinanciaci�n con preview de asiento + l�piz para edici�n manual.
-4. **Modal Plan Deuda:** cuadro de amortizaci�n + KPIs resumen.
-5. **Modal Vincular Asiento:** selecci�n de asiento hu�rfano para conciliaci�n.
+1. **Modal Nuevo Activo:** smart mapping + creaci�n de cuenta contable + saldo inicial con preview de asiento.
+2. **Modal Alta Deuda (FxDebt):** identidad, plan financiero, destino de fondos, preview de asiento y creaci�n autom�tica.
+3. **Modal Operaci�n ME:** tabs Compra/Venta/Pago/Refinanciaci�n con preview de asiento + l�piz para edici�n manual.
+4. **Modal Plan Deuda:** cuadro de amortizaci�n + KPIs resumen.
+5. **Modal Vincular Asiento:** selecci�n de asiento hu�rfano para conciliaci�n.
 
 ---
 
-### Validaci�n
+### Validaci�n
 - `npm run build`  ?
 
 ---
@@ -2348,7 +2348,7 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 ## CHECKPOINT #ME2-FASE3-HARDENING
 **Fecha:** 2026-01-28  
 **Estado:** COMPLETADO - Hardening P0  
-**Objetivo:** Smart mapping + validaciones + conciliaci�n real.
+**Objetivo:** Smart mapping + validaciones + conciliaci�n real.
 
 ---
 
@@ -2362,13 +2362,13 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 
 ### Cambios clave
 1. **Smart mapping P0:** helpers `suggestLedgerAccountForFxAsset` / `suggestLedgerAccountForFxDebt` + `ensureLedgerAccountExists`.
-2. **Validaci�n stock:** `createFxMovement` bloquea ventas si stock ME insuficiente.
-3. **Conciliaci�n real:** UI consume `getReconciliationData`, acciones generar/vincular/no contable + panel desync.
+2. **Validaci�n stock:** `createFxMovement` bloquea ventas si stock ME insuficiente.
+3. **Conciliaci�n real:** UI consume `getReconciliationData`, acciones generar/vincular/no contable + panel desync.
 4. **Exports storage:** mapping helpers exportados desde `storage/index.ts`.
 
 ---
 
-### Validaci�n
+### Validaci�n
 - `npm run build`  ?
 
 ---
@@ -2396,5 +2396,158 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 ### Validación
 - `npm run build`  ✓
 - QA pendiente: verificar visualmente botones en Dashboard/Activos/Modales y crear deuda sin error IndexedDB.
+
+---
+
+## CHECKPOINT #INV-PERMANENTE-FASE0
+**Fecha:** 2026-01-29
+**Estado:** FASE 0 COMPLETADA — Plan aprobado para implementación
+**Objetivo:** Implementar soporte real para Inventario Permanente vs Diferencias (Periódico) con asientos automáticos, cierre, y corrección RT6.
+
+---
+
+### Hallazgos de Inspección
+
+#### Estado actual del módulo
+
+1. **BienesSettings** (`types.ts:389-399`): Tiene `costMethod`, `costMethodLocked`, `allowNegativeStock`, `defaultIVARate`, `accountMappings`. **NO tiene** `mode` (PERMANENT/PERIODIC) ni `autoJournalEntries`.
+
+2. **createBienesProduct** (`bienes.ts:370-389`): Solo crea el producto en DB. **NO genera movimiento inicial ni asiento** por inventario inicial (openingQty/openingUnitCost).
+
+3. **buildJournalEntriesForMovement** (`bienes.ts:138-263`):
+   - PURCHASE: Siempre debita Mercaderías (no distingue modo).
+   - SALE: Siempre genera 2 asientos (Venta + CMV). No hay modo periódico.
+   - ADJUSTMENT: Genera asiento con Diferencia de Inventario.
+   - COUNT: No genera asiento.
+
+4. **costing.ts** (`buildCostLayers` línea 37-44): Usa `openingQty`/`openingUnitCost` como capa virtual si >0. Si se crea un movimiento inicial, se duplicaría el conteo.
+
+5. **closing.ts**: Tiene fórmulas puras (calculateCMV = EI + CN - EF) pero `generateClosingEntryLines` solo genera 1 asiento con Variación de Existencias (no los 3 asientos estándar del periódico: transferir EI, transferir Compras, reconocer EF).
+
+6. **Tab "Cierre"** (InventarioBienesPage líneas 2006-2154): Existe con cálculos y botón "Generar Asiento de Cierre". Ya tiene drawer de configuración de cuentas.
+
+7. **monetary-classification.ts**: No tiene awareness del modo inventario. Clasifica "compra" como NON_MONETARY por keyword (línea 320), lo cual es correcto para reexpresión pero no hay role especial para excluirla de resultados cuando es cuenta de movimiento periódico.
+
+8. **Step2RT6Panel.tsx**: Tab "resultados" filtra por `grupo === 'RESULTADOS'` (línea 283). No hay tratamiento especial para compras/CMV. Las cuentas de Compras aparecerían como resultado final sin distinción.
+
+9. **ProductModal.tsx**: Campos openingQty/openingUnitCost solo visibles al crear (línea 271). **NO hay toggle de asiento automático**.
+
+10. **AccountMappingKey** (`types.ts:143-156`): Ya incluye `compras`, `cmv`, `mercaderias`, `variacionExistencias`, `gastosCompras`, `bonifCompras`, `devolCompras`. **Falta** `aperturaInventario`.
+
+---
+
+### Plan de Implementación (archivos a tocar)
+
+| Fase | Archivos | Cambios |
+|------|----------|---------|
+| **F1: Settings** | `types.ts`, `bienes.ts`, `InventarioBienesPage.tsx` | Agregar `mode`, `autoJournalEntries` a BienesSettings. Agregar `aperturaInventario` a AccountMappingKey. UI: engranaje + drawer con selector modo/auto/cuentas. |
+| **F2: Stock inicial** | `ProductModal.tsx`, `bienes.ts`, `costing.ts` | Toggle asiento en modal. createBienesProduct genera movimiento inicial + asiento. Evitar doble conteo en costing. |
+| **F3: Compras/Ventas** | `bienes.ts` | buildJournalEntriesForMovement: PURCHASE usa Compras si PERIODIC. SALE omite CMV si PERIODIC. |
+| **F4: Cierre** | `closing.ts`, `bienes.ts`, `InventarioBienesPage.tsx` | Builder de 3 asientos de cierre periódico. UI en tab cierre con card EI/CN/EF/CMV + botón. Idempotencia. |
+| **F5: RT6** | `monetary-classification.ts`, `auto-partidas-rt6.ts`, `Step2RT6Panel.tsx` | Role `inventory_periodic_movement` para compras. Excluir de resultados estándar. Mostrar CMV por diferencia. |
+
+---
+
+### Decisiones contables clave
+
+1. **Modo PERMANENT** (Inventario Permanente): Compra debita Mercaderías. Venta genera CMV automático. El Kardex refleja costo real por FIFO/LIFO/PPP.
+
+2. **Modo PERIODIC** (Diferencias): Compra debita Compras (no Mercaderías). Venta NO genera CMV. Al cierre se refunde: CMV = EI + Compras Netas - EF con 3 asientos estándar.
+
+3. **Stock inicial**: El movimiento INITIAL_STOCK (o ADJUSTMENT subtipo) permite vincular el asiento. Si se materializa, openingQty se pone en 0 para evitar doble capa en costing. Productos viejos sin movimiento inicial mantienen compatibilidad.
+
+4. **RT6**: Compras en modo periódico son cuentas de movimiento que se absorben en CMV al cierre. No deben aparecer como resultado final aislado. Se etiquetan con role especial.
+
+---
+
+### Pendientes / TODOs
+- Bonificaciones y devoluciones (compras/ventas): estructura preparada pero implementación UI diferida.
+- Breakdown de compras por mes como orígenes RT6: diferido si es complejo.
+- Validación manual post-implementación de los 3 escenarios (PERMANENT, PERIODIC, RT6).
+
+---
+
+## CHECKPOINT #INV-PERMANENTE-IMPLEMENTACION-FINAL
+**Fecha:** 2026-01-29
+**Estado:** IMPLEMENTACION COMPLETADA — Build PASS
+**Objetivo:** Soporte real para Inventario Permanente vs Diferencias (Periódico).
+
+---
+
+### Archivos tocados
+
+| Archivo | Cambios |
+|---------|---------|
+| `src/core/inventario/types.ts` | +`InventoryMode: 'PERMANENT' \| 'PERIODIC'`, +`inventoryMode`/`autoJournalEntries` en BienesSettings, +`aperturaInventario` en AccountMappingKey y DEFAULT_ACCOUNT_CODES |
+| `src/storage/bienes.ts` | Backward compat en `loadBienesSettings`, `createBienesProduct` con movimiento/asiento inicial, `buildJournalEntriesForMovement` mode-aware (PERIODIC vs PERMANENT), +`hasPeriodicClosingEntries`, +`generatePeriodicClosingJournalEntries`, +fallback compras/apertura |
+| `src/storage/index.ts` | +exports: `hasPeriodicClosingEntries`, `generatePeriodicClosingJournalEntries` |
+| `src/core/inventario/closing.ts` | +`generatePeriodicClosingEntries` (3 asientos estándar: EI→CMV, Compras→CMV, EF→Merc) |
+| `src/core/cierre-valuacion/types.ts` | +`inventoryRole?: 'periodic_movement'` en PartidaRT6 |
+| `src/core/cierre-valuacion/auto-partidas-rt6.ts` | +`periodicMovementAccountIds` en options, tagging de partidas periódicas |
+| `src/core/cierre-valuacion/monetary-classification.ts` | Sin cambios (keywords ya cubren compras como NON_MONETARY) |
+| `src/pages/Planillas/InventarioBienesPage.tsx` | +GearSix, badge modo, +`handleChangeInventoryMode`/`handleChangeAutoJournal`, drawer con radio modo + toggle auto-asientos + cuenta apertura, cierre handler mode-aware, import `generatePeriodicClosingJournalEntries`, +`defaultAutoJournal` en ProductModal |
+| `src/pages/Planillas/components/ProductModal.tsx` | +toggle "Generar asiento por inventario inicial", +`generateOpeningJournal` option, +`defaultAutoJournal` prop |
+| `src/pages/Planillas/components/Step2RT6Panel.tsx` | Filtro de `inventoryRole=periodic_movement` en resultados, banner informativo, counts ajustados |
+| `src/pages/Planillas/CierreValuacionPage.tsx` | +`loadBienesSettings`, pasa `periodicMovementAccountIds` a autoGeneratePartidasRT6, callback async |
+| `docs/AI_HANDOFF.md` | +2 CHECKPOINTs |
+
+---
+
+### Resumen por fase
+
+**FASE 1 — Settings + UI Config**
+- BienesSettings extendido con `inventoryMode` (default PERMANENT) y `autoJournalEntries` (default true).
+- Backward compatibility: settings viejos se rellenan al cargar.
+- UI: badge de modo en header, botón engranaje (GearSix), drawer con radio PERMANENT/PERIODIC + toggle auto-asientos + cuenta Apertura Inventario.
+
+**FASE 2 — Fix stock inicial**
+- ProductModal: toggle "Generar asiento por inventario inicial" (visible si qty>0 y cost>0).
+- createBienesProduct: si `generateOpeningJournal=true`, crea atómicamente (transacción Dexie):
+  - Movimiento ADJUSTMENT con notes "Inventario inicial"
+  - Asiento: Debe Mercaderías / Haber Apertura Inventario
+  - Producto con openingQty=0 para evitar doble conteo en costing.
+- Backward compat: productos viejos con openingQty>0 y sin movimiento inicial siguen usando la capa virtual.
+
+**FASE 3 — Compras/Ventas por modo**
+- buildJournalEntriesForMovement:
+  - PURCHASE: si PERIODIC → debita Compras; si PERMANENT → debita Mercaderías.
+  - SALE: si PERIODIC → solo asiento venta (sin CMV); si PERMANENT → venta + CMV.
+  - ADJUSTMENT: sin cambios.
+- Stock subledger siempre se incrementa/decrementa (independiente de modo contable).
+
+**FASE 4 — Cierre modo periódico**
+- closing.ts: +`generatePeriodicClosingEntries` genera 3 asientos estándar:
+  1. CMV ← EI (Debe CMV / Haber Mercaderías)
+  2. CMV ← Compras Netas (Debe CMV / Haber Compras)
+  3. EF → Mercaderías (Debe Mercaderías / Haber CMV)
+- bienes.ts: +`generatePeriodicClosingJournalEntries` con idempotencia (chequea sourceType=periodic_closing).
+- UI: título y botón mode-aware, handler distingue PERIODIC (3 asientos) de PERMANENT (ajuste diferencia).
+
+**FASE 5 — RT6: corrección Compras/Resultados**
+- PartidaRT6: +`inventoryRole?: 'periodic_movement'`.
+- autoGeneratePartidasRT6: acepta `periodicMovementAccountIds`, tagea partidas de compras.
+- CierreValuacionPage: lee BienesSettings, identifica cuentas mapeadas de compras en modo PERIODIC, pasa IDs.
+- Step2RT6Panel: filtra partidas con `inventoryRole=periodic_movement` del tab Resultados, muestra banner informativo "Compras excluidas, se refunden en CMV al cierre".
+
+---
+
+### Decisiones contables
+
+1. **Asiento apertura**: Debe Mercaderías / Haber Apertura Inventario (3.2.01 default = Resultados Acumulados). Correcto contablemente: el inventario inicial tiene contrapartida en la apertura de ejercicio.
+
+2. **3 asientos de cierre periódico**: Sigue el modelo estándar argentino de refundición. Mercaderías queda en EF, Compras saldada a 0, CMV = resultado del ejercicio.
+
+3. **RT6 – Compras**: En modo periódico, las cuentas de Compras son no monetarias (se reexpresan) pero NO deben aparecer como resultado final aislado. Se etiquetan con `inventoryRole=periodic_movement` y se excluyen de la vista Resultados RT6. El CMV final aparece vía la cuenta CMV post-cierre.
+
+---
+
+### Pendientes / TODOs post-implementación
+
+- [ ] QA manual: PERMANENT (crear producto con stock inicial → asiento, compra → Mercaderías, venta → 2 asientos)
+- [ ] QA manual: PERIODIC (compra → Compras, venta → sin CMV, cierre → 3 asientos)
+- [ ] QA manual: RT6 (PERIODIC, Compras no en resultados, CMV sí)
+- [ ] Bonificaciones/devoluciones: estructura prepared (AccountMappingKey tiene gastos/bonif/devol), pero sin UI de captura
+- [ ] Breakdown compras por mes como orígenes RT6: diferido
+- [ ] Reversal de cierre periódico: función `generateReversalEntryLines` existe pero no hay UI para usarla
 
 ---

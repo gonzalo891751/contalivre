@@ -44,6 +44,7 @@ import { getInitialMonetaryClass, applyOverrides, isExcluded, getAccountType } f
 import { computeBalances } from '../../core/ledger/computeBalances';
 import { createEntry, updateEntry } from '../../storage/entries';
 import { computeVoucherHash, findEntryByVoucherKey } from '../../core/cierre-valuacion/sync';
+import { loadBienesSettings } from '../../storage/bienes';
 
 // Phosphor icon class names (consistent with prototype)
 const ICON_CLASSES = {
@@ -558,7 +559,7 @@ export default function CierreValuacionPage() {
     };
 
     // RT6 Panel handlers
-    const handleAnalyzeMayor = useCallback(() => {
+    const handleAnalyzeMayor = useCallback(async () => {
         if (!state || !allJournalEntries) return;
 
         // Validate closingDate before proceeding
@@ -581,6 +582,25 @@ export default function CierreValuacionPage() {
                 : allJournalEntries;
             const balancesForAnalysis = computeBalances(entriesForAnalysis, allAccounts, closingDate);
 
+            // Load inventory settings to identify periodic movement accounts
+            let periodicMovementAccountIds: Set<string> | undefined;
+            try {
+                const bienesSettings = await loadBienesSettings();
+                if (bienesSettings.inventoryMode === 'PERIODIC') {
+                    const periodicKeys = ['compras', 'gastosCompras', 'bonifCompras', 'devolCompras'] as const;
+                    const ids = new Set<string>();
+                    for (const key of periodicKeys) {
+                        const mappedId = bienesSettings.accountMappings?.[key];
+                        if (mappedId) {
+                            // Resolve: mapping stores code, find account by code
+                            const acc = allAccounts.find(a => a.id === mappedId || a.code === mappedId);
+                            if (acc) ids.add(acc.id);
+                        }
+                    }
+                    if (ids.size > 0) periodicMovementAccountIds = ids;
+                }
+            } catch { /* bienes settings not available, skip */ }
+
             const result = autoGeneratePartidasRT6(
                 allAccounts,
                 balancesForAnalysis,
@@ -590,6 +610,7 @@ export default function CierreValuacionPage() {
                     closingDate,
                     groupByMonth: true,
                     minLotAmount: 0,
+                    periodicMovementAccountIds,
                 }
             );
 

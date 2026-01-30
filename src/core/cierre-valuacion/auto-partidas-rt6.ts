@@ -31,6 +31,8 @@ export interface AutoGenerateOptions {
     groupByMonth?: boolean;
     /** Minimum lot amount to include (filter noise) */
     minLotAmount?: number;
+    /** Account IDs that are periodic inventory movement accounts (compras, bonif, devol) */
+    periodicMovementAccountIds?: Set<string>;
 }
 
 /**
@@ -70,7 +72,7 @@ export function autoGeneratePartidasRT6(
     overrides: Record<string, AccountOverride>,
     options: AutoGenerateOptions
 ): AutoGenerateResult {
-    const { startOfPeriod, closingDate, groupByMonth = true, minLotAmount = 0 } = options;
+    const { startOfPeriod, closingDate, groupByMonth = true, minLotAmount = 0, periodicMovementAccountIds } = options;
 
     const partidas: PartidaRT6[] = [];
     const stats = {
@@ -157,6 +159,10 @@ export function autoGeneratePartidasRT6(
         );
 
         if (partida && partida.items.length > 0) {
+            // Tag periodic inventory movement accounts
+            if (periodicMovementAccountIds?.has(account.id)) {
+                partida.inventoryRole = 'periodic_movement';
+            }
             partidas.push(partida);
             stats.partidasGenerated++;
             stats.lotsGenerated += partida.items.length;

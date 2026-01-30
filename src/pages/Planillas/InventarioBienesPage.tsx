@@ -19,6 +19,7 @@ import {
     LinkSimple,
     ArrowSquareOut,
     Sparkle,
+    GearSix,
 } from '@phosphor-icons/react'
 import { usePeriodYear } from '../../hooks/usePeriodYear'
 import { DEFAULT_ACCOUNT_CODES } from '../../core/inventario/types'
@@ -30,6 +31,7 @@ import type {
     ProductValuation,
     BienesKPIs,
     AccountMappingKey,
+    InventoryMode,
 } from '../../core/inventario/types'
 import type { Account, JournalEntry } from '../../core/models'
 import {
@@ -50,6 +52,7 @@ import {
     deleteBienesMovementWithJournal,
     reconcileMovementJournalLinks,
     clearBienesPeriodData,
+    generatePeriodicClosingJournalEntries,
 } from '../../storage'
 import { db } from '../../storage/db'
 import {
@@ -126,6 +129,14 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         category: 'cmv',
         codes: [DEFAULT_ACCOUNT_CODES.cmv, '4.3.01'],
         nameAny: ['cmv', 'costo mercader', 'costo de mercader', 'costo mercaderia'],
+    },
+    {
+        key: 'aperturaInventario',
+        label: 'Apertura Inventario',
+        category: 'mercaderias',
+        codes: [DEFAULT_ACCOUNT_CODES.aperturaInventario, '3.2.01'],
+        nameAny: ['apertura', 'resultados acumulados'],
+        optional: true,
     },
     {
         key: 'ventas',
@@ -327,13 +338,19 @@ export default function InventarioBienesPage() {
         )
     }, [products, productSearch])
 
-    const handleSaveProduct = async (product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const handleSaveProduct = async (
+        product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>,
+        options?: { generateOpeningJournal?: boolean }
+    ) => {
         try {
             if (editingProduct) {
                 await updateBienesProduct(editingProduct.id, { ...product, periodId: editingProduct.periodId || periodId })
                 showToast('Producto actualizado', 'success')
             } else {
-                await createBienesProduct({ ...product, periodId })
+                await createBienesProduct(
+                    { ...product, periodId },
+                    options?.generateOpeningJournal ? { generateOpeningJournal: true } : undefined,
+                )
                 showToast('Producto creado', 'success')
             }
             await loadData()
@@ -499,6 +516,28 @@ export default function InventarioBienesPage() {
         } else {
             showToast(result.error || 'Error', 'error')
         }
+    }
+
+    const handleChangeInventoryMode = async (mode: InventoryMode) => {
+        if (!settings) return
+        const updated: BienesSettings = {
+            ...settings,
+            inventoryMode: mode,
+            lastUpdated: new Date().toISOString(),
+        }
+        await saveBienesSettings(updated)
+        setSettings(updated)
+    }
+
+    const handleChangeAutoJournal = async (auto: boolean) => {
+        if (!settings) return
+        const updated: BienesSettings = {
+            ...settings,
+            autoJournalEntries: auto,
+            lastUpdated: new Date().toISOString(),
+        }
+        await saveBienesSettings(updated)
+        setSettings(updated)
     }
 
     const handleAccountMappingChange = (key: AccountMappingKey, value: { code: string }) => {
@@ -742,6 +781,41 @@ export default function InventarioBienesPage() {
     }
 
     const handleGenerateClosingEntry = async () => {
+        const isPeriodic = settings?.inventoryMode === 'PERIODIC'
+
+        if (isPeriodic) {
+            // PERIODIC mode: generate 3 standard closing entries
+            if (closingPhysicalValue <= 0) {
+                showToast('Ingresa el inventario final fisico para generar los asientos', 'error')
+                return
+            }
+            if (!confirm('Se generaran los asientos de cierre periodico (EI a CMV, Compras a CMV, EF a Mercaderias). Continuar?')) {
+                return
+            }
+            setClosingIsSaving(true)
+            try {
+                const result = await generatePeriodicClosingJournalEntries({
+                    existenciaInicial,
+                    comprasNetas: comprasPeriodo,
+                    existenciaFinal: closingPhysicalValue,
+                    closingDate: new Date().toISOString().split('T')[0],
+                    periodId,
+                    periodLabel: `${periodId}`,
+                })
+                if (result.error) {
+                    showToast(result.error, 'error')
+                } else {
+                    showToast(`Cierre generado: ${result.entryIds.length} asientos, CMV = ${formatCurrency(result.cmv)}`, 'success')
+                }
+            } catch (error) {
+                showToast(error instanceof Error ? error.message : 'Error al generar asientos', 'error')
+            } finally {
+                setClosingIsSaving(false)
+            }
+            return
+        }
+
+        // PERMANENT mode: single adjustment entry for physical vs theoretical difference
         if (!mercaderiasAccountId || !diferenciaInventarioAccountId) {
             showToast('Faltan cuentas Mercaderias o Diferencia de inventario', 'error')
             return
@@ -751,12 +825,8 @@ export default function InventarioBienesPage() {
             return
         }
 
-        const existenciaInicial = products.reduce((sum, p) => sum + p.openingQty * p.openingUnitCost, 0)
-        const comprasPeriodo = movements
-            .filter(m => m.type === 'PURCHASE')
-            .reduce((sum, m) => sum + m.subtotal, 0)
-        const inventarioTeorico = kpis.stockValue
-        const diferencia = closingPhysicalValue - inventarioTeorico
+        const inventarioTeoricoLocal = kpis.stockValue
+        const diferencia = closingPhysicalValue - inventarioTeoricoLocal
 
         if (Math.abs(diferencia) < 0.01) {
             showToast('No hay diferencias para ajustar', 'error')
@@ -810,7 +880,7 @@ export default function InventarioBienesPage() {
                     sourceModule: 'inventory',
                     sourceType: 'closing',
                     sourceId: closingId,
-                    inventarioTeorico,
+                    inventarioTeorico: inventarioTeoricoLocal,
                     inventarioFisico: closingPhysicalValue,
                     diferencia,
                     existenciaInicial,
@@ -1266,6 +1336,14 @@ export default function InventarioBienesPage() {
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
+                    {/* Inventory Mode Badge */}
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                        settings?.inventoryMode === 'PERIODIC'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-blue-100 text-blue-700'
+                    }`}>
+                        {settings?.inventoryMode === 'PERIODIC' ? 'Diferencias' : 'Permanente'}
+                    </span>
                     {/* Costing Method Selector */}
                     <div className="flex items-center gap-2 text-sm">
                         <span className="text-slate-500">Metodo:</span>
@@ -1286,6 +1364,14 @@ export default function InventarioBienesPage() {
                             </span>
                         )}
                     </div>
+                    {/* Settings Gear */}
+                    <button
+                        onClick={openAccountConfigModal}
+                        className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                        title="Configuracion del modulo"
+                    >
+                        <GearSix size={20} />
+                    </button>
                 </div>
             </header>
 
@@ -2008,7 +2094,12 @@ export default function InventarioBienesPage() {
                     <div className="space-y-6 animate-fade-in max-w-3xl mx-auto">
                         <div className="text-center mb-6">
                             <h3 className="text-2xl font-bold text-slate-900">Cierre de Inventario</h3>
-                            <p className="text-slate-500">Calcula el costo de ventas por metodo {settings?.costMethod}.</p>
+                            <p className="text-slate-500">
+                                {settings?.inventoryMode === 'PERIODIC'
+                                    ? 'Modo Diferencias: CMV = EI + Compras Netas - EF. Genera 3 asientos de refundicion.'
+                                    : `Modo Permanente: ajuste de inventario fisico vs teorico (${settings?.costMethod}).`
+                                }
+                            </p>
                         </div>
 
                         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
@@ -2147,7 +2238,7 @@ export default function InventarioBienesPage() {
                                 className="w-full mt-6 py-3 rounded-lg font-semibold bg-gradient-to-r from-blue-600 to-emerald-500 text-white shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                                 title={closingPhysicalValue <= 0 ? 'Ingresa el inventario final fisico' : undefined}
                             >
-                                {closingIsSaving ? 'Generando...' : 'Generar Asiento de Cierre'}
+                                {closingIsSaving ? 'Generando...' : settings?.inventoryMode === 'PERIODIC' ? 'Generar Asientos de Cierre Periodico' : 'Generar Asiento de Cierre'}
                             </button>
                         </div>
                     </div>
@@ -2163,6 +2254,7 @@ export default function InventarioBienesPage() {
                         setProductModalOpen(false)
                         setEditingProduct(null)
                     }}
+                    defaultAutoJournal={settings?.autoJournalEntries ?? true}
                 />
             )}
 
@@ -2206,6 +2298,57 @@ export default function InventarioBienesPage() {
                             </button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                            {/* Inventory Mode & Auto-Journal */}
+                            <div className="space-y-4">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-2">
+                                    Modo contable
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="inventoryMode"
+                                            value="PERMANENT"
+                                            checked={(settings?.inventoryMode || 'PERMANENT') === 'PERMANENT'}
+                                            onChange={() => handleChangeInventoryMode('PERMANENT')}
+                                            className="accent-blue-600"
+                                        />
+                                        <div>
+                                            <span className="text-sm font-medium text-slate-700">Permanente</span>
+                                            <p className="text-[11px] text-slate-400">CMV automatico en cada venta</p>
+                                        </div>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="inventoryMode"
+                                            value="PERIODIC"
+                                            checked={settings?.inventoryMode === 'PERIODIC'}
+                                            onChange={() => handleChangeInventoryMode('PERIODIC')}
+                                            className="accent-blue-600"
+                                        />
+                                        <div>
+                                            <span className="text-sm font-medium text-slate-700">Diferencias</span>
+                                            <p className="text-[11px] text-slate-400">CMV al cierre (EI + CN - EF)</p>
+                                        </div>
+                                    </label>
+                                </div>
+                                <label className="flex items-center gap-2 cursor-pointer mt-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={settings?.autoJournalEntries ?? true}
+                                        onChange={(e) => handleChangeAutoJournal(e.target.checked)}
+                                        className="accent-blue-600 rounded"
+                                    />
+                                    <span className="text-sm text-slate-700">Generar asientos automaticamente al registrar movimientos</span>
+                                </label>
+                            </div>
+
+                            <div className="border-t border-slate-100 pt-4">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-3">
+                                    Cuentas contables
+                                </div>
+                            </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {REQUIRED_BIENES_RULES.map(rule => {
                                     const selected = mappingAccounts.get(rule.key)

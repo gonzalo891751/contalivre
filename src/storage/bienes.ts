@@ -30,7 +30,9 @@ const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
     ivaDF: { code: '2.1.03.01', names: ['IVA Debito Fiscal'] },
     ventas: { code: '4.1.01', names: ['Ventas'] },
     cmv: { code: '4.3.01', names: ['Costo mercaderias vendidas'] },
+    compras: { code: '5.1.03', names: ['Compras'] },
     diferenciaInventario: { code: '4.3.02', names: ['Diferencia de inventario'] },
+    aperturaInventario: { code: '3.2.01', names: ['Apertura inventario', 'Resultados acumulados'] },
     caja: { code: '1.1.01.01', names: ['Caja'] },
     banco: { code: '1.1.01.02', names: ['Bancos cuenta corriente', 'Banco cuenta corriente', 'Bancos'] },
     proveedores: { code: '2.1.01.01', names: ['Proveedores'] },
@@ -145,6 +147,7 @@ const buildJournalEntriesForMovement = async (
 
     const accounts = await db.accounts.toArray()
     const settings = await loadBienesSettings()
+    const isPeriodic = settings.inventoryMode === 'PERIODIC'
 
     const mercaderiasId = resolveAccountId(accounts, {
         mappedId: product?.accountMercaderias || settings.accountMappings?.mercaderias || null,
@@ -163,16 +166,23 @@ const buildJournalEntriesForMovement = async (
         code: ACCOUNT_FALLBACKS.cmv.code,
         names: ACCOUNT_FALLBACKS.cmv.names,
     })
+    const comprasId = isPeriodic
+        ? resolveMappedAccountId(accounts, settings, 'compras', 'compras')
+        : null
     const diferenciaId = resolveMappedAccountId(accounts, settings, 'diferenciaInventario', 'diferenciaInventario')
     const contraId = resolveCounterpartyAccountId(accounts, movement)
 
+    // Determine which account receives the purchase debit
+    const purchaseDebitAccountId = isPeriodic ? (comprasId || mercaderiasId) : mercaderiasId
+
     const missing: string[] = []
-    if (!mercaderiasId) missing.push('Mercaderias')
+    if (!purchaseDebitAccountId && movement.type === 'PURCHASE') missing.push(isPeriodic ? 'Compras' : 'Mercaderias')
+    if (!mercaderiasId && movement.type !== 'PURCHASE') missing.push('Mercaderias')
     if (!contraId && (movement.type === 'PURCHASE' || movement.type === 'SALE')) missing.push('Cuenta contrapartida')
     if (movement.type === 'PURCHASE' && !ivaCFId && movement.ivaAmount > 0) missing.push('IVA Credito Fiscal')
     if (movement.type === 'SALE' && !ivaDFId && movement.ivaAmount > 0) missing.push('IVA Debito Fiscal')
     if (movement.type === 'SALE' && !ventasId) missing.push('Ventas')
-    if (movement.type === 'SALE' && !cmvId) missing.push('CMV')
+    if (movement.type === 'SALE' && !isPeriodic && !cmvId) missing.push('CMV')
     if (movement.type === 'ADJUSTMENT' && !diferenciaId) missing.push('Diferencia de inventario')
 
     if (missing.length > 0) {
@@ -201,8 +211,10 @@ const buildJournalEntriesForMovement = async (
     const total = movement.total
 
     if (movement.type === 'PURCHASE') {
+        // PERIODIC: Debe Compras / PERMANENT: Debe Mercaderias
+        const purchaseDesc = isPeriodic ? 'Compra (cuenta Compras)' : 'Compra de mercaderias'
         const lines: EntryLine[] = [
-            { accountId: mercaderiasId!, debit: subtotal, credit: 0, description: 'Compra de mercaderias' },
+            { accountId: purchaseDebitAccountId!, debit: subtotal, credit: 0, description: purchaseDesc },
         ]
         if (ivaAmount > 0 && ivaCFId) {
             lines.push({ accountId: ivaCFId, debit: ivaAmount, credit: 0, description: 'IVA credito fiscal' })
@@ -212,6 +224,7 @@ const buildJournalEntriesForMovement = async (
     }
 
     if (movement.type === 'SALE') {
+        // Asiento de venta (siempre)
         const saleLines: EntryLine[] = [
             { accountId: contraId!, debit: total, credit: 0, description: 'Cobro / Deudores' },
             { accountId: ventasId!, debit: 0, credit: subtotal, description: 'Ventas' },
@@ -221,12 +234,15 @@ const buildJournalEntriesForMovement = async (
         }
         pushEntry(`Venta mercaderias - ${product?.name || movement.productId}`, saleLines, { journalRole: 'sale' })
 
-        const cmvAmount = movement.costTotalAssigned
-        const cmvLines: EntryLine[] = [
-            { accountId: cmvId!, debit: cmvAmount, credit: 0, description: 'CMV' },
-            { accountId: mercaderiasId!, debit: 0, credit: cmvAmount, description: 'Salida de mercaderias' },
-        ]
-        pushEntry(`CMV venta - ${product?.name || movement.productId}`, cmvLines, { journalRole: 'cogs' })
+        // Asiento de CMV (solo en modo PERMANENT)
+        if (!isPeriodic && cmvId && mercaderiasId) {
+            const cmvAmount = movement.costTotalAssigned
+            const cmvLines: EntryLine[] = [
+                { accountId: cmvId, debit: cmvAmount, credit: 0, description: 'CMV' },
+                { accountId: mercaderiasId, debit: 0, credit: cmvAmount, description: 'Salida de mercaderias' },
+            ]
+            pushEntry(`CMV venta - ${product?.name || movement.productId}`, cmvLines, { journalRole: 'cogs' })
+        }
     }
 
     if (movement.type === 'ADJUSTMENT') {
@@ -301,7 +317,22 @@ const stripInventoryLinkFromEntry = (entry: JournalEntry, movementId: string): J
  */
 export async function loadBienesSettings(): Promise<BienesSettings> {
     const settings = await db.bienesSettings.get('bienes-settings')
-    if (settings) return settings
+    if (settings) {
+        // Backward compatibility: fill new fields if missing
+        let needsUpdate = false
+        if (!settings.inventoryMode) {
+            settings.inventoryMode = 'PERMANENT'
+            needsUpdate = true
+        }
+        if (settings.autoJournalEntries === undefined) {
+            settings.autoJournalEntries = true
+            needsUpdate = true
+        }
+        if (needsUpdate) {
+            await db.bienesSettings.put(settings)
+        }
+        return settings
+    }
 
     const defaultSettings = createDefaultBienesSettings()
     await db.bienesSettings.put(defaultSettings)
@@ -368,7 +399,8 @@ export async function getBienesProductBySku(sku: string): Promise<BienesProduct 
  * Create new product
  */
 export async function createBienesProduct(
-    product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>
+    product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>,
+    options?: { generateOpeningJournal?: boolean }
 ): Promise<BienesProduct> {
     // Check SKU uniqueness
     const existing = await getBienesProductBySku(product.sku)
@@ -384,8 +416,92 @@ export async function createBienesProduct(
         updatedAt: now,
     }
 
-    await db.bienesProducts.add(newProduct)
-    return newProduct
+    const hasOpening = product.openingQty > 0 && product.openingUnitCost > 0
+    const shouldGenerateJournal = hasOpening && options?.generateOpeningJournal
+
+    if (!hasOpening || !shouldGenerateJournal) {
+        // No opening movement needed, just save product as-is
+        await db.bienesProducts.add(newProduct)
+        return newProduct
+    }
+
+    // Create initial stock movement + journal entry atomically
+    const settings = await loadBienesSettings()
+    const openingAmount = product.openingQty * product.openingUnitCost
+
+    const initialMovement: BienesMovement = {
+        id: generateInventoryId('bmov'),
+        date: product.openingDate,
+        type: 'ADJUSTMENT',
+        productId: newProduct.id,
+        quantity: product.openingQty,
+        periodId: product.periodId,
+        unitCost: product.openingUnitCost,
+        ivaRate: 0,
+        ivaAmount: 0,
+        subtotal: openingAmount,
+        total: openingAmount,
+        costMethod: settings.costMethod,
+        costUnitAssigned: 0,
+        costTotalAssigned: 0,
+        notes: 'Inventario inicial',
+        autoJournal: true,
+        linkedJournalEntryIds: [],
+        journalStatus: 'generated',
+        createdAt: now,
+        updatedAt: now,
+    }
+
+    // Build opening journal entry: Debe Mercaderias / Haber Apertura Inventario
+    const allAccounts = await db.accounts.toArray()
+    const mercaderiasId = resolveAccountId(allAccounts, {
+        mappedId: product.accountMercaderias || settings.accountMappings?.mercaderias || null,
+        code: ACCOUNT_FALLBACKS.mercaderias.code,
+        names: ACCOUNT_FALLBACKS.mercaderias.names,
+    })
+    const aperturaId = resolveMappedAccountId(allAccounts, settings, 'aperturaInventario', 'aperturaInventario')
+
+    if (!mercaderiasId || !aperturaId) {
+        throw new Error(`Faltan cuentas contables para inventario inicial: ${!mercaderiasId ? 'Mercaderias' : ''} ${!aperturaId ? 'Apertura Inventario' : ''}`.trim())
+    }
+
+    const journalEntry: Omit<JournalEntry, 'id'> = {
+        date: product.openingDate,
+        memo: `Inventario inicial - ${product.name}`,
+        lines: [
+            { accountId: mercaderiasId, debit: openingAmount, credit: 0, description: 'Inventario inicial mercaderias' },
+            { accountId: aperturaId, debit: 0, credit: openingAmount, description: 'Contrapartida apertura inventario' },
+        ],
+        sourceModule: 'inventory',
+        sourceId: initialMovement.id,
+        sourceType: 'opening',
+        createdAt: now,
+        metadata: {
+            sourceModule: 'inventory',
+            sourceId: initialMovement.id,
+            sourceType: 'opening',
+            movementId: initialMovement.id,
+            productId: newProduct.id,
+            productName: product.name,
+            journalRole: 'opening_stock',
+        },
+    }
+
+    // Save atomically: product (with openingQty=0 to avoid double count) + movement + entry
+    const productToSave: BienesProduct = {
+        ...newProduct,
+        openingQty: 0,
+        openingUnitCost: 0,
+    }
+
+    await db.transaction('rw', db.bienesProducts, db.bienesMovements, db.entries, async () => {
+        const createdEntry = await createEntry(journalEntry)
+        initialMovement.linkedJournalEntryIds = [createdEntry.id]
+        await db.bienesProducts.add(productToSave)
+        await db.bienesMovements.add(initialMovement)
+    })
+
+    return productToSave
 }
 
 /**
@@ -1195,4 +1311,108 @@ export async function getProductsWithLowStock(): Promise<BienesProduct[]> {
 export async function getAllBienesSKUs(): Promise<string[]> {
     const products = await getAllBienesProducts()
     return products.map(p => p.sku)
+}
+
+// ========================================
+// Periodic Closing - Entry Generation
+// ========================================
+
+/**
+ * Check if periodic closing entries already exist for a given period
+ */
+export async function hasPeriodicClosingEntries(periodId: string): Promise<boolean> {
+    const entries = await db.entries.toArray()
+    return entries.some(e =>
+        e.sourceModule === 'inventory' &&
+        e.sourceType === 'periodic_closing' &&
+        e.metadata?.periodId === periodId
+    )
+}
+
+/**
+ * Generate and persist periodic closing entries (3-entry standard)
+ * Idempotent: won't duplicate if already generated for this period.
+ *
+ * @returns Created entry IDs or error
+ */
+export async function generatePeriodicClosingJournalEntries(
+    data: {
+        existenciaInicial: number
+        comprasNetas: number
+        existenciaFinal: number
+        closingDate: string
+        periodId: string
+        periodLabel: string
+    }
+): Promise<{ entryIds: string[]; cmv: number; error?: string }> {
+    // Idempotency check
+    const alreadyExists = await hasPeriodicClosingEntries(data.periodId)
+    if (alreadyExists) {
+        return { entryIds: [], cmv: 0, error: 'Ya se generaron asientos de cierre para este periodo.' }
+    }
+
+    const settings = await loadBienesSettings()
+    if (settings.inventoryMode !== 'PERIODIC') {
+        return { entryIds: [], cmv: 0, error: 'El modo de inventario no es Periodico (Diferencias).' }
+    }
+
+    const allAccounts = await db.accounts.toArray()
+
+    const mercaderiasId = resolveMappedAccountId(allAccounts, settings, 'mercaderias', 'mercaderias')
+    const comprasId = resolveMappedAccountId(allAccounts, settings, 'compras', 'compras')
+    const cmvId = resolveMappedAccountId(allAccounts, settings, 'cmv', 'cmv')
+
+    const missing: string[] = []
+    if (!mercaderiasId) missing.push('Mercaderias')
+    if (!comprasId) missing.push('Compras')
+    if (!cmvId) missing.push('CMV')
+    if (missing.length > 0) {
+        return { entryIds: [], cmv: 0, error: `Faltan cuentas: ${missing.join(', ')}` }
+    }
+
+    const { generatePeriodicClosingEntries } = await import('../core/inventario/closing')
+
+    const { entries: closingEntries, cmv } = generatePeriodicClosingEntries(
+        {
+            existenciaInicial: data.existenciaInicial,
+            comprasNetas: data.comprasNetas,
+            existenciaFinal: data.existenciaFinal,
+        },
+        {
+            mercaderiasId: mercaderiasId!,
+            comprasId: comprasId!,
+            cmvId: cmvId!,
+        },
+        data.periodLabel
+    )
+
+    if (closingEntries.length === 0) {
+        return { entryIds: [], cmv, error: 'No hay asientos de cierre que generar (valores en cero).' }
+    }
+
+    const now = new Date().toISOString()
+    const entryIds: string[] = []
+
+    await db.transaction('rw', db.entries, async () => {
+        for (const closingEntry of closingEntries) {
+            const created = await createEntry({
+                date: data.closingDate,
+                memo: closingEntry.memo,
+                lines: closingEntry.lines,
+                sourceModule: 'inventory',
+                sourceId: `periodic-closing-${data.periodId}`,
+                sourceType: 'periodic_closing',
+                createdAt: now,
+                metadata: {
+                    sourceModule: 'inventory',
+                    sourceType: 'periodic_closing',
+                    periodId: data.periodId,
+                    journalRole: 'periodic_closing',
+                },
+            })
+            entryIds.push(created.id)
+        }
+    })
+
+    return { entryIds, cmv }
 }

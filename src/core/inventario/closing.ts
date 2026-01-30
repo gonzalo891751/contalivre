@@ -176,6 +176,95 @@ export function generateClosingEntryLines(
     return lines
 }
 
+// ========================================
+// Periodic Closing (3-entry standard)
+// ========================================
+
+/**
+ * Account IDs needed for periodic closing entries
+ */
+export interface PeriodicClosingAccounts {
+    mercaderiasId: string
+    comprasId: string
+    cmvId: string
+}
+
+/**
+ * Data for periodic closing calculation
+ */
+export interface PeriodicClosingData {
+    existenciaInicial: number   // $ value of opening inventory
+    comprasNetas: number        // Net purchases in the period
+    existenciaFinal: number     // $ value of closing inventory (physical count)
+}
+
+/**
+ * Generate the 3 standard periodic closing entries:
+ * 1) Transfer EI to CMV:      Debe CMV / Haber Mercaderias (EI)
+ * 2) Transfer Compras to CMV:  Debe CMV / Haber Compras (ComprasNetas)
+ * 3) Recognize EF:             Debe Mercaderias / Haber CMV (EF)
+ *
+ * Result: Mercaderias = EF, Compras = 0, CMV = EI + CN - EF
+ */
+export function generatePeriodicClosingEntries(
+    data: PeriodicClosingData,
+    accounts: PeriodicClosingAccounts,
+    periodLabel: string
+): { entries: { memo: string; lines: EntryLine[] }[]; cmv: number } {
+    const { existenciaInicial, comprasNetas, existenciaFinal } = data
+    const { mercaderiasId, comprasId, cmvId } = accounts
+    const cmv = existenciaInicial + comprasNetas - existenciaFinal
+
+    const entries: { memo: string; lines: EntryLine[] }[] = []
+
+    // 1) Transfer EI to CMV
+    if (existenciaInicial > 0.01) {
+        entries.push({
+            memo: `Cierre periodico ${periodLabel} - Transferencia EI a CMV`,
+            lines: [
+                { accountId: cmvId, debit: existenciaInicial, credit: 0, description: 'CMV - Existencia Inicial' },
+                { accountId: mercaderiasId, debit: 0, credit: existenciaInicial, description: 'Mercaderias - Transferencia EI' },
+            ],
+        })
+    }
+
+    // 2) Transfer Compras Netas to CMV
+    if (Math.abs(comprasNetas) > 0.01) {
+        if (comprasNetas > 0) {
+            entries.push({
+                memo: `Cierre periodico ${periodLabel} - Transferencia Compras a CMV`,
+                lines: [
+                    { accountId: cmvId, debit: comprasNetas, credit: 0, description: 'CMV - Compras Netas' },
+                    { accountId: comprasId, debit: 0, credit: comprasNetas, description: 'Compras - Refundicion al cierre' },
+                ],
+            })
+        } else {
+            // Negative net purchases (more returns/discounts than purchases)
+            const absAmount = Math.abs(comprasNetas)
+            entries.push({
+                memo: `Cierre periodico ${periodLabel} - Transferencia Compras a CMV`,
+                lines: [
+                    { accountId: comprasId, debit: absAmount, credit: 0, description: 'Compras - Refundicion al cierre' },
+                    { accountId: cmvId, debit: 0, credit: absAmount, description: 'CMV - Compras Netas (negativo)' },
+                ],
+            })
+        }
+    }
+
+    // 3) Recognize EF
+    if (existenciaFinal > 0.01) {
+        entries.push({
+            memo: `Cierre periodico ${periodLabel} - Reconocimiento EF`,
+            lines: [
+                { accountId: mercaderiasId, debit: existenciaFinal, credit: 0, description: 'Mercaderias - Existencia Final' },
+                { accountId: cmvId, debit: 0, credit: existenciaFinal, description: 'CMV - Existencia Final' },
+            ],
+        })
+    }
+
+    return { entries, cmv }
+}
+
 /**
  * Generate reversal entry lines (inverse of closing entry)
  */

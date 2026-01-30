@@ -109,6 +109,9 @@ export {
     // Queries
     getProductsWithLowStock,
     getAllBienesSKUs,
+    // Periodic Closing
+    hasPeriodicClosingEntries,
+    generatePeriodicClosingJournalEntries,
 } from './bienes'
 
 // Moneda Extranjera
