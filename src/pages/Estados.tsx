@@ -15,6 +15,7 @@ import {
 import { EstadoResultadosDocument } from '../components/Estados/EstadoResultados'
 import { buildEstadoResultados, getFiscalYearDates } from '../domain/reports/estadoResultados'
 import { ImportComparativeModal, type ImportedRecord } from '../components/Estados/EstadoResultados/ImportComparativeModal'
+import { usePeriodYear } from '../hooks/usePeriodYear'
 
 // New components for redesigned header/toolbar
 import { EstadosHeader, type EstadosTab } from '../components/Estados/EstadosHeader'
@@ -149,13 +150,19 @@ export default function Estados() {
 
     const [isExporting, setIsExporting] = useState(false)
 
-    // Current year for periods
-    const currentYear = new Date().getFullYear()
+    // Current year for periods (Global Store)
+    const { year: globalYear, start: globalStart, end: globalEnd } = usePeriodYear()
+    const currentYear = globalYear
 
     // ============================================
     // Estado de Resultados (ER) Controls
     // ============================================
     const [erSelectedYear, setErSelectedYear] = useState(currentYear)
+
+    // Sync with global year change
+    useEffect(() => {
+        setErSelectedYear(globalYear)
+    }, [globalYear])
     const [erShowComparative, setErShowComparative] = useState(false)
     const [erShowDetails, setErShowDetails] = useState(true)
     const erFiscalYears = useMemo(() => [currentYear, currentYear - 1, currentYear - 2], [currentYear])
@@ -294,7 +301,16 @@ export default function Estados() {
     const estadoResultadosData = useMemo(() => {
         if (!accounts || !entries) return null
 
-        const { fromDate, toDate } = getFiscalYearDates(erSelectedYear)
+        let fromDate, toDate
+        if (erSelectedYear === globalYear) {
+            fromDate = globalStart
+            toDate = globalEnd
+        } else {
+            // Fallback for past years (using calendar year)
+            // TODO: In the future, we might want to store historical fiscal year dates
+            ({ fromDate, toDate } = getFiscalYearDates(erSelectedYear))
+        }
+
         const { fromDate: compFromDate, toDate: compToDate } = getFiscalYearDates(erSelectedYear - 1)
 
         return buildEstadoResultados({
@@ -307,7 +323,7 @@ export default function Estados() {
             comparativeToDate: compToDate,
             comparativeOverrides: erComparativeOverrides
         })
-    }, [accounts, entries, erSelectedYear, erComparativeOverrides])
+    }, [accounts, entries, erSelectedYear, erComparativeOverrides, globalYear, globalStart, globalEnd])
 
     // ============================================
     // ESP Info Items (for toolbar accordion)
@@ -486,6 +502,8 @@ export default function Estados() {
                             empresaName={empresaName}
                             netIncomeFromER={estadoResultadosData?.resultadoNeto}
                             pnFromBalance={statements?.balanceSheet.totalEquity}
+                            periodStart={globalStart}
+                            periodEnd={globalEnd}
                         />
                     </div>
                 )}
@@ -502,6 +520,7 @@ export default function Estados() {
                             empresaName={empresaName}
                             empresaId={empresaId}
                             comparativeData={espShowComparative && hasEspComparativeData ? espComparativeData ?? undefined : undefined}
+                            periodEnd={globalEnd}
                         />
                     </div>
                 )}

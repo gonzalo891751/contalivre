@@ -2842,3 +2842,48 @@ Calcular y mostrar Existencia Final (EF) por método de costeo (FIFO/PEPS, LIFO,
 **Build:** PASS
 
 ---
+
+## CHECKPOINT #GLOBAL-PERIOD-REFACTOR
+**Fecha:** 2026-01-30
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Refactorizar el manejo del Periodo Global para soportar rangos de fechas personalizados (Ejercicio Económico) en lugar de solo Año Calendario, y corregir bugs de valuación de inventario asociados.
+
+---
+
+### Resumen de Cambios
+
+1.  **Store Global (`usePeriodYear`):**
+    *   Refactorizado para almacenar `start` y `end` junto con `year`.
+    *   Soporte legacy: convierte automáticamente años numéricos a rangos calendario (01/01 - 31/12).
+2.  **UI Header (`PeriodPicker`):**
+    *   Dropdown expandido con selectores de fecha Inicio/Fin.
+    *   Validación de rangos.
+3.  **Corrección Inventario (`InventarioBienesPage`):**
+    *   Valuación al cierre usa `period.end` exacto.
+    *   Índices de inflación se buscan por el mes de cierre real.
+4.  **Reportes Contables (`Estados.tsx`):**
+    *   Integración completa con el periodo global.
+    *   `Estado de Resultados`, `Evolución del Patrimonio Neto` y `Notas` usan las fechas exactas del ejercicio seleccionado.
+
+---
+
+### Archivos Modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/hooks/usePeriodYear.ts` | Store con start/end + migración legacy |
+| `src/ui/Layout/TopHeader/PeriodPicker.tsx` | Inputs de fecha + validación |
+| `src/pages/Planillas/InventarioBienesPage.tsx` | Valuación con fechas dinámicas |
+| `src/pages/Estados.tsx` | Integración de contexto global en reportes |
+| `src/components/Estados/EvolucionPNTab.tsx` | Props de fechas custom |
+| `src/components/Estados/NotasAnexosTab.tsx` | Props de fechas custom |
+
+---
+
+### Verificación
+
+```bash
+npm run build  # PASS
+```
+
+---

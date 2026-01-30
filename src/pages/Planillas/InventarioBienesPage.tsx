@@ -200,7 +200,7 @@ const OPTIONAL_BIENES_RULES = BIENES_ACCOUNT_RULES.filter(rule => rule.optional)
  */
 export default function InventarioBienesPage() {
     // State
-    const { year: periodYear } = usePeriodYear()
+    const { year: periodYear, start: periodStart, end: periodEnd } = usePeriodYear()
     const periodId = String(periodYear)
     const [activeTab, setActiveTab] = useState<TabId>('dashboard')
     const [settings, setSettings] = useState<BienesSettings | null>(null)
@@ -304,24 +304,45 @@ export default function InventarioBienesPage() {
 
     // Computed values
     const yearRange = useMemo(() => {
-        const startDate = new Date(periodYear, 0, 1)
-        const endDate = new Date(periodYear, 11, 31)
-        const toISO = (date: Date) => date.toISOString().split('T')[0]
+        const [y, m, d] = periodStart.split('-').map(Number)
+        const prev = new Date(y, m - 1, d - 1)
+        const prevLabel = prev.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
         return {
-            start: toISO(startDate),
-            end: toISO(endDate),
+            start: periodStart,
+            end: periodEnd,
+            prevLabel,
         }
-    }, [periodYear])
+    }, [periodStart, periodEnd])
 
     const monthRange = useMemo(() => {
         const now = new Date()
-        const monthIndex = now.getMonth()
-        const startDate = new Date(periodYear, monthIndex, 1)
-        const endDate = new Date(periodYear, monthIndex + 1, 0)
+
+        // Parse dates safely (Local time)
+        const parseDate = (s: string) => {
+            const [y, m, d] = s.split('-').map(Number)
+            return new Date(y, m - 1, d)
+        }
+
+        const pStart = parseDate(periodStart)
+        const pEnd = parseDate(periodEnd)
+
+        // Determine target date (clamped to period)
+        let target = now
+        if (now < pStart) target = pStart
+        else if (now > pEnd) target = pEnd
+
+        const year = target.getFullYear()
+        const monthIndex = target.getMonth()
+
+        const startDate = new Date(year, monthIndex, 1)
+        const endDate = new Date(year, monthIndex + 1, 0)
+
         const prevMonthIndex = monthIndex - 1
-        const prevStartDate = prevMonthIndex >= 0 ? new Date(periodYear, prevMonthIndex, 1) : null
-        const prevEndDate = prevMonthIndex >= 0 ? new Date(periodYear, prevMonthIndex + 1, 0) : null
-        const toISO = (date: Date) => date.toISOString().split('T')[0]
+        const prevStartDate = prevMonthIndex >= 0 ? new Date(year, prevMonthIndex, 1) : null
+        const prevEndDate = prevMonthIndex >= 0 ? new Date(year, prevMonthIndex + 1, 0) : null
+
+        const toISO = (date: Date) => date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
+
         return {
             start: toISO(startDate),
             end: toISO(endDate),
@@ -329,7 +350,7 @@ export default function InventarioBienesPage() {
             prevEnd: prevEndDate ? toISO(prevEndDate) : null,
             label: startDate.toLocaleDateString('es-AR', { month: 'short', year: 'numeric' }),
         }
-    }, [periodYear])
+    }, [periodStart, periodEnd])
 
     const valuations = useMemo<ProductValuation[]>(() => {
         if (!settings) return []
@@ -354,7 +375,7 @@ export default function InventarioBienesPage() {
     // Homogeneous ending inventory valuation (FIFO layers reexpressed to closing month)
     const efHomogenea = useMemo<EndingInventoryValuation | null>(() => {
         if (!settings || products.length === 0) return null
-        const closingDate = `${periodYear}-12-31`
+        const closingDate = periodEnd
         const closingPeriod = getPeriodFromDate(closingDate)
         return computeEndingInventoryValuation({
             products,
@@ -387,14 +408,16 @@ export default function InventarioBienesPage() {
             const mercCode = resolveCode(mappings.mercaderias, DEFAULT_ACCOUNT_CODES.mercaderias)
 
             // EI: balance of Mercaderías up to day before period start
-            const dayBefore = new Date(periodYear, 0, 0) // Dec 31 of previous year
-            const eiEndDate = dayBefore.toISOString().split('T')[0]
+            const [oy, om, od] = periodStart.split('-').map(Number)
+            const dayBefore = new Date(oy, om - 1, od - 1)
+            const eiEndDate = dayBefore.getFullYear() + '-' + String(dayBefore.getMonth() + 1).padStart(2, '0') + '-' + String(dayBefore.getDate()).padStart(2, '0')
+
             const eiBalance = await getAccountBalanceByCode(mercCode, undefined, eiEndDate)
             setExistenciaInicialLedger(eiBalance)
 
             // Sub-account balances for the period (yearRange)
-            const start = `${periodYear}-01-01`
-            const end = `${periodYear}-12-31`
+            const start = periodStart
+            const end = periodEnd
 
             const codes = {
                 gastosCompras: resolveCode(mappings.gastosCompras, DEFAULT_ACCOUNT_CODES.gastosCompras),
@@ -929,7 +952,7 @@ export default function InventarioBienesPage() {
                     ventas: cierreBalances.ventas,
                     bonifVentas: cierreBalances.bonifVentas,
                     devolVentas: cierreBalances.devolVentas,
-                    closingDate: new Date().toISOString().split('T')[0],
+                    closingDate: periodEnd,
                     periodId,
                     periodLabel: `${periodId}`,
                 })
@@ -1000,7 +1023,7 @@ export default function InventarioBienesPage() {
         setClosingIsSaving(true)
         try {
             await createEntry({
-                date: new Date().toISOString().split('T')[0],
+                date: periodEnd,
                 memo,
                 lines,
                 sourceModule: 'inventory',
@@ -1468,11 +1491,10 @@ export default function InventarioBienesPage() {
                 </div>
                 <div className="flex items-center gap-3">
                     {/* Inventory Mode Badge */}
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                        settings?.inventoryMode === 'PERIODIC'
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-blue-100 text-blue-700'
-                    }`}>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${settings?.inventoryMode === 'PERIODIC'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-blue-100 text-blue-700'
+                        }`}>
                         {settings?.inventoryMode === 'PERIODIC' ? 'Diferencias' : 'Permanente'}
                     </span>
                     {/* Costing Method Selector */}
@@ -1513,11 +1535,10 @@ export default function InventarioBienesPage() {
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
-                            className={`pb-3 px-1 text-sm transition-all whitespace-nowrap flex items-center gap-2 border-b-2 ${
-                                activeTab === tab.id
-                                    ? 'text-blue-600 border-blue-600 font-semibold'
-                                    : 'text-slate-500 border-transparent hover:text-slate-900 hover:border-slate-200'
-                            }`}
+                            className={`pb-3 px-1 text-sm transition-all whitespace-nowrap flex items-center gap-2 border-b-2 ${activeTab === tab.id
+                                ? 'text-blue-600 border-blue-600 font-semibold'
+                                : 'text-slate-500 border-transparent hover:text-slate-900 hover:border-slate-200'
+                                }`}
                         >
                             {tab.label}
                             {tab.id === 'conciliacion' && conciliacionCount > 0 && (
@@ -1548,9 +1569,8 @@ export default function InventarioBienesPage() {
                                     {formatCurrency(kpis.stockValue)}
                                 </div>
                                 {stockDelta !== null ? (
-                                    <div className={`text-xs font-medium mt-1 flex items-center gap-1 ${
-                                        stockDelta >= 0 ? 'text-emerald-600' : 'text-red-600'
-                                    }`}>
+                                    <div className={`text-xs font-medium mt-1 flex items-center gap-1 ${stockDelta >= 0 ? 'text-emerald-600' : 'text-red-600'
+                                        }`}>
                                         <TrendUp weight="bold" size={12} /> {stockDelta >= 0 ? '+' : ''}{stockDelta.toFixed(1)}% vs mes anterior
                                     </div>
                                 ) : (
@@ -1587,9 +1607,8 @@ export default function InventarioBienesPage() {
                                     Mes {monthRange.label}
                                 </div>
                                 {salesDelta !== null ? (
-                                    <div className={`text-xs font-medium mt-1 flex items-center gap-1 ${
-                                        salesDelta >= 0 ? 'text-emerald-600' : 'text-red-600'
-                                    }`}>
+                                    <div className={`text-xs font-medium mt-1 flex items-center gap-1 ${salesDelta >= 0 ? 'text-emerald-600' : 'text-red-600'
+                                        }`}>
                                         <TrendUp weight="bold" size={12} /> {salesDelta >= 0 ? '+' : ''}{salesDelta.toFixed(1)}% vs mes anterior
                                     </div>
                                 ) : (
@@ -1662,7 +1681,7 @@ export default function InventarioBienesPage() {
                                             Existencia Final ({settings?.costMethod})
                                         </h3>
                                         <p className="text-[10px] text-slate-400 mt-0.5">
-                                            Valuacion al cierre ({periodYear}-12)
+                                            Valuacion al cierre ({getPeriodFromDate(periodEnd)})
                                         </p>
                                     </div>
                                     <Scales className="text-indigo-500" size={20} weight="duotone" />
@@ -2135,27 +2154,27 @@ export default function InventarioBienesPage() {
                                             const isMissing = mov.journalStatus === 'missing'
                                             return (
                                                 <div key={mov.id} className="border border-slate-200 rounded-lg p-3">
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <div>
-                                                        <div className="text-sm font-semibold text-slate-900">
-                                                            {product?.name || 'Producto eliminado'}
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <div>
+                                                            <div className="text-sm font-semibold text-slate-900">
+                                                                {product?.name || 'Producto eliminado'}
+                                                            </div>
+                                                            <div className="text-xs text-slate-500">
+                                                                {formatDate(mov.date)} • {mov.type}
+                                                            </div>
                                                         </div>
-                                                        <div className="text-xs text-slate-500">
-                                                            {formatDate(mov.date)} • {mov.type}
+                                                        <div className="font-mono text-sm text-slate-700">
+                                                            {formatCurrency(mov.total)}
                                                         </div>
                                                     </div>
-                                                    <div className="font-mono text-sm text-slate-700">
-                                                        {formatCurrency(mov.total)}
-                                                    </div>
-                                                </div>
 
-                                                <div className="mt-3 flex flex-wrap gap-2">
-                                                    <button
-                                                        onClick={() => handleGenerateJournal(mov.id)}
-                                                        className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100"
-                                                    >
-                                                        {hasError ? 'Reintentar' : isMissing ? 'Regenerar asiento' : 'Generar asiento'}
-                                                    </button>
+                                                    <div className="mt-3 flex flex-wrap gap-2">
+                                                        <button
+                                                            onClick={() => handleGenerateJournal(mov.id)}
+                                                            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                                        >
+                                                            {hasError ? 'Reintentar' : isMissing ? 'Regenerar asiento' : 'Generar asiento'}
+                                                        </button>
                                                         <button
                                                             onClick={() => handleStartLinkMovement(mov)}
                                                             className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white text-slate-600 border border-slate-200"
@@ -2182,13 +2201,12 @@ export default function InventarioBienesPage() {
                                                                         {entry.memo || 'Asiento sin leyenda'}
                                                                     </span>
                                                                     <span
-                                                                        className={`px-2 py-0.5 rounded-full border text-[10px] ${
-                                                                            score === 'high'
-                                                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                                                                : score === 'medium'
-                                                                                    ? 'bg-blue-50 text-blue-700 border-blue-100'
-                                                                                    : 'bg-slate-100 text-slate-600 border-slate-200'
-                                                                        }`}
+                                                                        className={`px-2 py-0.5 rounded-full border text-[10px] ${score === 'high'
+                                                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                                                            : score === 'medium'
+                                                                                ? 'bg-blue-50 text-blue-700 border-blue-100'
+                                                                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                                                                            }`}
                                                                     >
                                                                         {score === 'high' ? 'Alto' : score === 'medium' ? 'Medio' : 'Bajo'}
                                                                     </span>
@@ -2285,13 +2303,12 @@ export default function InventarioBienesPage() {
                                                                             {product?.name || 'Movimiento'} • {movement.type}
                                                                         </span>
                                                                         <span
-                                                                            className={`px-2 py-0.5 rounded-full border text-[10px] ${
-                                                                                score === 'high'
-                                                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                                                                    : score === 'medium'
-                                                                                        ? 'bg-blue-50 text-blue-700 border-blue-100'
-                                                                                        : 'bg-slate-100 text-slate-600 border-slate-200'
-                                                                            }`}
+                                                                            className={`px-2 py-0.5 rounded-full border text-[10px] ${score === 'high'
+                                                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                                                                : score === 'medium'
+                                                                                    ? 'bg-blue-50 text-blue-700 border-blue-100'
+                                                                                    : 'bg-slate-100 text-slate-600 border-slate-200'
+                                                                                }`}
                                                                         >
                                                                             {score === 'high' ? 'Alto' : score === 'medium' ? 'Medio' : 'Bajo'}
                                                                         </span>
@@ -2335,11 +2352,10 @@ export default function InventarioBienesPage() {
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${
-                                        hasSavedMappings
-                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                            : 'bg-slate-50 text-slate-500 border-slate-200'
-                                    }`}>
+                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${hasSavedMappings
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                        : 'bg-slate-50 text-slate-500 border-slate-200'
+                                        }`}>
                                         {hasSavedMappings ? 'Configurado' : 'Sin configurar'}
                                     </span>
                                     <button
@@ -2376,7 +2392,7 @@ export default function InventarioBienesPage() {
                                         <span className="text-sm font-medium text-slate-500">Existencia Inicial</span>
                                         <p className="text-xs text-slate-400">
                                             {existenciaInicialLedger !== null
-                                                ? `Saldo Mercaderias al 31/12/${periodYear - 1}`
+                                                ? `Saldo Mercaderias al ${yearRange.prevLabel}`
                                                 : 'Desde inventario inicial de productos'
                                             }
                                         </p>
@@ -3289,11 +3305,10 @@ export default function InventarioBienesPage() {
                                             <button
                                                 key={entry.id}
                                                 onClick={() => setSelectedLinkEntryId(entry.id)}
-                                                className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-md border ${
-                                                    selectedLinkEntryId === entry.id
-                                                        ? 'border-blue-200 bg-blue-50 text-blue-700'
-                                                        : 'border-slate-200 bg-white text-slate-600'
-                                                }`}
+                                                className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-md border ${selectedLinkEntryId === entry.id
+                                                    ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                                    : 'border-slate-200 bg-white text-slate-600'
+                                                    }`}
                                             >
                                                 <span className="truncate">{entry.memo || 'Asiento sin leyenda'}</span>
                                                 <span className="text-[10px] uppercase">
@@ -3368,11 +3383,10 @@ export default function InventarioBienesPage() {
                                                 <button
                                                     key={movement.id}
                                                     onClick={() => setSelectedLinkMovementId(movement.id)}
-                                                    className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-md border ${
-                                                        selectedLinkMovementId === movement.id
-                                                            ? 'border-blue-200 bg-blue-50 text-blue-700'
-                                                            : 'border-slate-200 bg-white text-slate-600'
-                                                    }`}
+                                                    className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-md border ${selectedLinkMovementId === movement.id
+                                                        ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                                        : 'border-slate-200 bg-white text-slate-600'
+                                                        }`}
                                                 >
                                                     <span className="truncate">{product?.name || 'Movimiento'} • {movement.type}</span>
                                                     <span className="text-[10px] uppercase">
@@ -3406,9 +3420,8 @@ export default function InventarioBienesPage() {
             {/* Toast */}
             {toast && (
                 <div
-                    className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-slide-in ${
-                        toast.type === 'success' ? 'bg-slate-900 text-white' : 'bg-red-600 text-white'
-                    }`}
+                    className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-slide-in ${toast.type === 'success' ? 'bg-slate-900 text-white' : 'bg-red-600 text-white'
+                        }`}
                 >
                     {toast.type === 'success' ? (
                         <CheckCircle className="text-emerald-400" size={20} weight="fill" />
