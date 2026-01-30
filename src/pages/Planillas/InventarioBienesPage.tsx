@@ -242,6 +242,9 @@ export default function InventarioBienesPage() {
     const [closingPhysicalValue, setClosingPhysicalValue] = useState<number | null>(null)
     const [closingIsSaving, setClosingIsSaving] = useState(false)
     const [existenciaInicialLedger, setExistenciaInicialLedger] = useState<number | null>(null)
+    // Date for opening balance calculation
+    const [openingBalanceDate, setOpeningBalanceDate] = useState<string>('')
+
     // Sub-account balances for cierre (loaded from ledger for the period)
     const [cierreBalances, setCierreBalances] = useState<{
         gastosCompras: number; bonifCompras: number; devolCompras: number
@@ -299,8 +302,20 @@ export default function InventarioBienesPage() {
     useEffect(() => {
         if (settings) {
             setAccountMappingsDraft(settings.accountMappings || {})
+            // Initialize opening balance date from settings or default
+            if (settings.openingBalanceDate) {
+                setOpeningBalanceDate(settings.openingBalanceDate)
+            } else {
+                // Smart default logic will run in the balance effect if string is empty, 
+                // but we need to initialize it.
+                // Actually, let's leave it empty to trigger "auto" logic, OR set it once here?
+                // Better: if empty, the effect below calculates "auto" and sets it? 
+                // No, we want the effect to use it if set, or calculate if not.
+                // Let's settle on: if settings has it, use it. If not, use periodStart initially.
+                setOpeningBalanceDate(periodStart)
+            }
         }
-    }, [settings])
+    }, [settings, periodStart])
 
     // Computed values
     const yearRange = useMemo(() => {
@@ -407,13 +422,73 @@ export default function InventarioBienesPage() {
             const mappings = settings?.accountMappings || {}
             const mercCode = resolveCode(mappings.mercaderias, DEFAULT_ACCOUNT_CODES.mercaderias)
 
-            // EI: balance of Mercaderías up to day before period start
-            const [oy, om, od] = periodStart.split('-').map(Number)
-            const dayBefore = new Date(oy, om - 1, od - 1)
-            const eiEndDate = dayBefore.getFullYear() + '-' + String(dayBefore.getMonth() + 1).padStart(2, '0') + '-' + String(dayBefore.getDate()).padStart(2, '0')
+            // Determine EI Date and Balance (Smart Default Logic)
+            let finalEiDate = openingBalanceDate
+            let finalEiBalance = 0
 
-            const eiBalance = await getAccountBalanceByCode(mercCode, undefined, eiEndDate)
-            setExistenciaInicialLedger(eiBalance)
+            // If user hasn't selected a date yet (or we are initializing), try to find best default
+            if (!finalEiDate) {
+                finalEiDate = periodStart
+            }
+
+            // Only strictly re-calculate if we are in "auto" mode? 
+            // The requirement says: "Default inteligente: a) periodStart b) dayBeforeStart ... Si usuario cambia, usar ESA".
+            // So we respect `openingBalanceDate` state. 
+            // BUT, if we want to implement the "smart default" on first load, we might need a separate effect or check.
+            // Let's do this: 
+            // 1. Calculate balance at periodStart
+            // 2. Calculate balance at dayBeforeStart
+            // 3. If settings.openingBalanceDate is defined, just use that.
+            // 4. If NOT defined, pick best one and SET it? Or just use it for display?
+            // Requirement 3 says: "Guardar la fecha elegida en BienesSettings... Al cargar... si existe... usarlo".
+
+
+
+            // Note: getAccountBalanceByCode returns sum of movements in range.
+            // For "Saldo al...", we want balance from beginning of time up to DATE.
+            // getAccountBalanceByCode(code, undefined, date) does exactly that (undefined start = beginning).
+
+            // We need to support the "Smart Check" only if we haven't manually locked a date?
+            // "Default inteligente... Si el usuario cambia la fecha manualmente, usar ESA fecha"
+            // Let's implement the smart check whenever `openingBalanceDate` matches `periodStart` or is empty?
+            // No, that might be confusing. 
+            // Let's implement the smart logic ONLY if settings.openingBalanceDate is MISSING.
+
+            if (!settings?.openingBalanceDate) {
+                // Smart logic
+                const [y, m, d] = periodStart.split('-').map(Number)
+                const dayBefore = new Date(y, m - 1, d - 1)
+                const dayBeforeISO = dayBefore.getFullYear() + '-' + String(dayBefore.getMonth() + 1).padStart(2, '0') + '-' + String(dayBefore.getDate()).padStart(2, '0')
+
+                const balStart = await getAccountBalanceByCode(mercCode, undefined, periodStart)
+                const balBefore = await getAccountBalanceByCode(mercCode, undefined, dayBeforeISO)
+
+                // c) Si balance(periodStart) != 0 usar periodStart; 
+                // si es 0 y dayBeforeStart != 0 usar dayBeforeStart; 
+                // si ambos 0 usar periodStart.
+
+                if (balStart !== 0) {
+                    finalEiDate = periodStart
+                    finalEiBalance = balStart
+                } else if (balBefore !== 0) {
+                    finalEiDate = dayBeforeISO
+                    finalEiBalance = balBefore
+                } else {
+                    finalEiDate = periodStart
+                    finalEiBalance = 0
+                }
+
+                // Update state if different (avoid loops)
+                if (openingBalanceDate !== finalEiDate) {
+                    setOpeningBalanceDate(finalEiDate)
+                }
+            } else {
+                // Use explicit date
+                finalEiDate = openingBalanceDate
+                finalEiBalance = await getAccountBalanceByCode(mercCode, undefined, finalEiDate)
+            }
+
+            setExistenciaInicialLedger(finalEiBalance)
 
             // Sub-account balances for the period (yearRange)
             const start = periodStart
@@ -448,7 +523,27 @@ export default function InventarioBienesPage() {
         }
 
         loadCierreBalances()
-    }, [periodYear, settings?.accountMappings, accounts])
+    }, [periodYear, settings?.accountMappings, accounts, openingBalanceDate, periodStart, periodEnd, settings?.openingBalanceDate])
+
+    const handleOpeningDateChange = async (newDate: string) => {
+        setOpeningBalanceDate(newDate)
+        if (settings) {
+            const updated: BienesSettings = {
+                ...settings,
+                openingBalanceDate: newDate,
+                lastUpdated: new Date().toISOString(),
+            }
+            await saveBienesSettings(updated)
+            setSettings(updated) // This will trigger the effect again, but it's safe
+        }
+    }
+
+    // Format Display Date for UI
+    const getDisplayDate = (isoDate: string) => {
+        if (!isoDate) return ''
+        const [y, m, d] = isoDate.split('-')
+        return `${d}/${m}/${y}`
+    }
 
     const existenciaInicial = existenciaInicialLedger !== null ? existenciaInicialLedger : existenciaInicialFallback
 
@@ -2389,10 +2484,18 @@ export default function InventarioBienesPage() {
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center py-2 border-b border-slate-200">
                                     <div>
-                                        <span className="text-sm font-medium text-slate-500">Existencia Inicial</span>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="text-sm font-medium text-slate-500">Existencia Inicial</span>
+                                            <input
+                                                type="date"
+                                                value={openingBalanceDate || ''}
+                                                onChange={(e) => handleOpeningDateChange(e.target.value)}
+                                                className="text-xs border border-slate-200 rounded px-2 py-0.5 text-slate-600 bg-slate-50 focus:ring-1 focus:ring-blue-500 outline-none"
+                                            />
+                                        </div>
                                         <p className="text-xs text-slate-400">
                                             {existenciaInicialLedger !== null
-                                                ? `Saldo Mercaderias al ${yearRange.prevLabel}`
+                                                ? `Saldo Mercaderias al ${getDisplayDate(openingBalanceDate)}`
                                                 : 'Desde inventario inicial de productos'
                                             }
                                         </p>

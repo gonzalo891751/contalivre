@@ -414,6 +414,8 @@ export interface BienesSettings {
     // Account mappings (for Etapa 2)
     accountMappings: Partial<Record<AccountMappingKey, string>>
     periodGoals?: Record<string, { salesTarget?: number; marginTarget?: number }>
+    // Date for opening balance calculation (optional, defaults to auto logic)
+    openingBalanceDate?: string
     lastUpdated: string
 }
 

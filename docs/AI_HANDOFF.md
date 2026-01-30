@@ -9,6 +9,28 @@
 
 ---
 
+## CHECKPOINT #FIX-INV-EXISTENCIA-INICIAL
+**Fecha:** 2026-01-30
+**Estado:** COMPLETADO - Build PENDING
+**Objetivo:** Fix cálculo "Existencia Inicial" en Inventario, permitiendo seleccionar fecha de corte (balance contable) y persistiendo la selección.
+
+### Archivos tocados
+- `src/pages/Planillas/InventarioBienesPage.tsx`
+- `src/core/inventario/types.ts`
+
+### Cambios clave
+1. **Existencia Inicial Contable:** Se reemplazó el cálculo basado en productos (`openingQty * openingUnitCost`) por el saldo real de la cuenta contable "Mercaderías" (`getAccountBalanceByCode`).
+2. **Selector de Fecha:** Se agregó un date picker en la tarjeta de "Existencia Inicial" para que el usuario defina la fecha de corte del saldo inicial.
+3. **Lógica Default Inteligente:** Si no hay fecha guardada, sugiere `periodStart` o `dayBeforeStart` basándose en cuál tiene saldo > 0.
+4. **Persistencia:** La fecha seleccionada se guarda en `BienesSettings.openingBalanceDate`.
+
+### QA
+```bash
+npm run build  # PENDING
+```
+
+---
+
 ## CHECKPOINT #FIX-RT6-MOV-BC-MAYOR
 **Fecha:** 2026-01-30  
 **Estado:** COMPLETADO - Build PASS  
