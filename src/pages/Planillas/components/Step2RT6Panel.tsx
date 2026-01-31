@@ -41,6 +41,7 @@ interface Step2RT6PanelProps {
     lastAnalysis?: string;
     closingEntriesDetected?: boolean;
     closingEntriesCount?: number;
+    existingRT6Entries?: boolean;
 
     // Handlers
     onAnalyzeMayor: () => void;
@@ -112,6 +113,7 @@ export function Step2RT6Panel({
     lastAnalysis,
     closingEntriesDetected = false,
     closingEntriesCount = 0,
+    existingRT6Entries = false,
     onAnalyzeMayor,
     onClearAll,
     onRecalculate,
@@ -392,7 +394,14 @@ export function Step2RT6Panel({
                         <i className="ph-fill ph-magic-wand" />
                     </div>
                     <div className="rt6-action-text">
-                        <h2 className="rt6-action-title">Calcular automáticamente</h2>
+                        <h2 className="rt6-action-title">
+                            Calcular automáticamente
+                            {existingRT6Entries && (
+                                <span className="rt6-status-badge success">
+                                    <i className="ph-bold ph-check" /> Asientos Generados
+                                </span>
+                            )}
+                        </h2>
                         <p className="rt6-action-desc">
                             Calculamos y sugerimos la clasificación RT6 automáticamente a partir de los saldos del período.
                             {lastAnalysis && (
@@ -1220,6 +1229,22 @@ export function Step2RT6Panel({
                     border-radius: 4px;
                     font-size: 0.75rem;
                     color: #6B7280;
+                }
+                .rt6-status-badge {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                    margin-left: 12px;
+                    padding: 2px 8px;
+                    border-radius: 9999px;
+                    font-size: 0.75rem;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                }
+                .rt6-status-badge.success {
+                    background: #ECFDF5;
+                    color: #059669;
+                    border: 1px solid #A7F3D0;
                 }
                 .rt6-action-buttons {
                     display: flex;

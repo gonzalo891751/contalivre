@@ -328,6 +328,17 @@ export default function CierreValuacionPage() {
         [allJournalEntries, allAccounts, closingDate]
     );
 
+    // Detect existing RT6 entries
+    const existingRT6Entries = useMemo(() => {
+        if (!allJournalEntries || !closingDate) return false;
+        return allJournalEntries.some(e =>
+             // Check metadata first
+             (e.metadata?.source === 'cierre' && e.metadata?.step === 'RT6') ||
+             // Fallback to text match
+             (e.memo?.toLowerCase().includes('ajuste por inflacion') && e.date === closingDate)
+        );
+    }, [allJournalEntries, closingDate]);
+
     // Ledger balances for RT6 classification
     const ledgerBalances = useLedgerBalances(allJournalEntries, allAccounts, { closingDate });
 
@@ -1015,6 +1026,7 @@ export default function CierreValuacionPage() {
                             lastAnalysis={lastMayorAnalysis}
                             closingEntriesDetected={closingEntryIdsDetected.length > 0}
                             closingEntriesCount={closingEntryIdsDetected.length}
+                            existingRT6Entries={existingRT6Entries}
                             onAnalyzeMayor={handleAnalyzeMayor}
                             onClearAll={handleClearAll}
                             onRecalculate={handleRecalculate}

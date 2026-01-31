@@ -3248,3 +3248,25 @@ npm run build  # PASS
 ```
 
 ---
+
+## CHECKPOINT #INV-PROMPT2D-STEP2-IGNORE-RT6-ASIENTOS
+
+**Resumen:**
+Se solucionó el problema donde el Paso 2 duplicaba orígenes al detectar asientos RT6 generados previamente (creando 'Lote 2'). Ahora se filtran esos movimientos. Además, se agregó un indicador visual 'Asientos Generados' en el panel del Paso 2.
+
+**Archivos tocados:**
+- \src/core/cierre-valuacion/auto-partidas-rt6.ts\: Nueva función \isRT6AdjustmentMovement\ y uso en filtros.
+- \src/pages/Planillas/components/Step2RT6Panel.tsx\: Prop \existingRT6Entries\ y badge UI.
+- \src/pages/Planillas/CierreValuacionPage.tsx\: Detección de asientos RT6 y pase de prop.
+
+**QA:**
+1. Generar asientos RT6 (Paso 4).
+2. Volver al Paso 2 -> Verificar que NO aparece 'Lote 2' y SI aparece el badge 'Asientos Generados'.
+3. Borrar asientos -> Verificar que desaparece el badge.
+
+**Comandos:**
+- \
+px tsc --noEmit\
+- \
+px vite build\
+
