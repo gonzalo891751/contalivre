@@ -1898,7 +1898,8 @@ export async function generatePeriodicClosingJournalEntries(
         gastosCompras: number
         bonifCompras: number
         devolCompras: number
-        existenciaFinal: number
+        existenciaFinalTeorica: number
+        existenciaFinalFisica?: number | null
         ventas: number
         bonifVentas: number
         devolVentas: number
@@ -1906,16 +1907,16 @@ export async function generatePeriodicClosingJournalEntries(
         periodId: string
         periodLabel: string
     }
-): Promise<{ entryIds: string[]; cmv: number; error?: string }> {
+): Promise<{ entryIds: string[]; cmv: number; difInv: number; error?: string }> {
     // Idempotency check
     const alreadyExists = await hasPeriodicClosingEntries(data.periodId)
     if (alreadyExists) {
-        return { entryIds: [], cmv: 0, error: 'Ya se generaron asientos de cierre para este periodo.' }
+        return { entryIds: [], cmv: 0, difInv: 0, error: 'Ya se generaron asientos de cierre para este periodo.' }
     }
 
     const settings = await loadBienesSettings()
     if (settings.inventoryMode !== 'PERIODIC') {
-        return { entryIds: [], cmv: 0, error: 'El modo de inventario no es Periodico (Diferencias).' }
+        return { entryIds: [], cmv: 0, difInv: 0, error: 'El modo de inventario no es Periodico (Diferencias).' }
     }
 
     const allAccounts = await db.accounts.toArray()
@@ -1930,7 +1931,13 @@ export async function generatePeriodicClosingJournalEntries(
     if (!comprasId) missing.push('Compras')
     if (!cmvId) missing.push('CMV')
     if (missing.length > 0) {
-        return { entryIds: [], cmv: 0, error: `Faltan cuentas: ${missing.join(', ')}. Configura las cuentas primero.` }
+        return { entryIds: [], cmv: 0, difInv: 0, error: `Faltan cuentas: ${missing.join(', ')}. Configura las cuentas primero.` }
+    }
+
+    // Diferencia de inventario account (required if physical EF is provided)
+    const diferenciaInventarioId = resolveMappedAccountId(allAccounts, settings, 'diferenciaInventario', 'diferenciaInventario')
+    if (data.existenciaFinalFisica != null && !diferenciaInventarioId) {
+        return { entryIds: [], cmv: 0, difInv: 0, error: 'Falta cuenta Diferencia de inventario (4.3.02). Configura la cuenta para poder generar asientos con inventario fisico.' }
     }
 
     // Optional sub-accounts (for refundición)
@@ -1943,14 +1950,15 @@ export async function generatePeriodicClosingJournalEntries(
 
     const { generatePeriodicClosingEntries } = await import('../core/inventario/closing')
 
-    const { entries: closingEntries, cmv } = generatePeriodicClosingEntries(
+    const { entries: closingEntries, cmv, difInv } = generatePeriodicClosingEntries(
         {
             existenciaInicial: data.existenciaInicial,
             compras: data.compras,
             gastosCompras: data.gastosCompras,
             bonifCompras: data.bonifCompras,
             devolCompras: data.devolCompras,
-            existenciaFinal: data.existenciaFinal,
+            existenciaFinalTeorica: data.existenciaFinalTeorica,
+            existenciaFinalFisica: data.existenciaFinalFisica,
             ventas: data.ventas,
             bonifVentas: data.bonifVentas,
             devolVentas: data.devolVentas,
@@ -1965,12 +1973,13 @@ export async function generatePeriodicClosingJournalEntries(
             ventasId: ventasId || undefined,
             bonifVentasId: bonifVentasId || undefined,
             devolVentasId: devolVentasId || undefined,
+            diferenciaInventarioId: diferenciaInventarioId || undefined,
         },
         data.periodLabel
     )
 
     if (closingEntries.length === 0) {
-        return { entryIds: [], cmv, error: 'No hay asientos de cierre que generar (valores en cero).' }
+        return { entryIds: [], cmv, difInv, error: 'No hay asientos de cierre que generar (valores en cero).' }
     }
 
     const now = new Date().toISOString()
@@ -1997,5 +2006,5 @@ export async function generatePeriodicClosingJournalEntries(
         }
     })
 
-    return { entryIds, cmv }
+    return { entryIds, cmv, difInv }
 }

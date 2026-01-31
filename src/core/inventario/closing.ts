@@ -195,6 +195,8 @@ export interface PeriodicClosingAccounts {
     ventasId?: string
     bonifVentasId?: string
     devolVentasId?: string
+    // Diferencia de inventario (required if existenciaFinalFisica is provided)
+    diferenciaInventarioId?: string
 }
 
 /**
@@ -206,7 +208,8 @@ export interface PeriodicClosingData {
     gastosCompras: number       // Purchase expenses (freight, insurance)
     bonifCompras: number        // Purchase discounts/bonifications
     devolCompras: number        // Purchase returns
-    existenciaFinal: number     // $ value of closing inventory (physical count)
+    existenciaFinalTeorica: number  // $ EF calculated by costing method (FIFO/LIFO/PPP)
+    existenciaFinalFisica?: number | null  // $ EF from physical count (optional)
     // Ventas netas (optional)
     ventas: number
     bonifVentas: number
@@ -242,12 +245,17 @@ export function generatePeriodicClosingEntries(
     data: PeriodicClosingData,
     accounts: PeriodicClosingAccounts,
     periodLabel: string
-): { entries: { memo: string; lines: EntryLine[] }[]; cmv: number; comprasNetas: number; ventasNetas: number } {
-    const { existenciaInicial, gastosCompras, bonifCompras, devolCompras, existenciaFinal } = data
+): { entries: { memo: string; lines: EntryLine[] }[]; cmv: number; comprasNetas: number; ventasNetas: number; difInv: number } {
+    const { existenciaInicial, gastosCompras, bonifCompras, devolCompras, existenciaFinalTeorica } = data
     const { mercaderiasId, comprasId, cmvId } = accounts
     const comprasNetas = computeComprasNetas(data)
-    const cmv = existenciaInicial + comprasNetas - existenciaFinal
+    // CMV uses EF teórica (system-calculated), NOT physical
+    const cmv = existenciaInicial + comprasNetas - existenciaFinalTeorica
     const ventasNetas = data.ventas - data.bonifVentas - data.devolVentas
+
+    // DifInv: only if physical was provided and differs from teórica
+    const hasFisica = data.existenciaFinalFisica != null
+    const difInv = hasFisica ? (data.existenciaFinalFisica! - existenciaFinalTeorica) : 0
 
     const entries: { memo: string; lines: EntryLine[] }[] = []
 
@@ -313,9 +321,9 @@ export function generatePeriodicClosingEntries(
     }
 
     // ──────────────────────────────────────────
-    // 3) Determinación CMV
+    // 3) Determinación CMV (using EF teórica)
     //    Debe CMV / Haber Mercaderías (por monto CMV)
-    //    Post: Mercaderías = EI + CN - CMV = EF
+    //    Post: Mercaderías = EI + CN - CMV = EF_teorica
     // ──────────────────────────────────────────
     if (Math.abs(cmv) > 0.01) {
         if (cmv > 0) {
@@ -363,7 +371,37 @@ export function generatePeriodicClosingEntries(
         })
     }
 
-    return { entries, cmv, comprasNetas, ventasNetas }
+    // ──────────────────────────────────────────
+    // 5) Diferencia de Inventario (solo si EF física fue informada y difiere)
+    //    DifInv = EF_fisica - EF_teorica
+    //    Si DifInv < 0 (faltante): Debe Dif.Inv / Haber Mercaderías
+    //    Si DifInv > 0 (sobrante): Debe Mercaderías / Haber Dif.Inv
+    //    Post: Mercaderías = EF_fisica
+    // ──────────────────────────────────────────
+    if (Math.abs(difInv) > 0.01 && accounts.diferenciaInventarioId) {
+        const absDif = Math.abs(difInv)
+        if (difInv < 0) {
+            // Faltante / pérdida
+            entries.push({
+                memo: `Cierre periodico ${periodLabel} - Diferencia de inventario (faltante)`,
+                lines: [
+                    { accountId: accounts.diferenciaInventarioId, debit: absDif, credit: 0, description: 'Diferencia de inventario - faltante' },
+                    { accountId: mercaderiasId, debit: 0, credit: absDif, description: 'Mercaderias - ajuste por diferencia fisica' },
+                ],
+            })
+        } else {
+            // Sobrante / ganancia
+            entries.push({
+                memo: `Cierre periodico ${periodLabel} - Diferencia de inventario (sobrante)`,
+                lines: [
+                    { accountId: mercaderiasId, debit: absDif, credit: 0, description: 'Mercaderias - ajuste por diferencia fisica' },
+                    { accountId: accounts.diferenciaInventarioId, debit: 0, credit: absDif, description: 'Diferencia de inventario - sobrante' },
+                ],
+            })
+        }
+    }
+
+    return { entries, cmv, comprasNetas, ventasNetas, difInv }
 }
 
 /**

@@ -15,7 +15,10 @@
       "Bash(npx tsc:*)",
       "Bash(npx vite build:*)",
       "Bash(dir:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(python3:*)",
+      "Bash(/c/Python313/python:*)",
+      "Bash(del \"D:\\\\Git\\\\ContaLivre\\\\src\\\\pages\\\\Planillas\\\\_cierre_replacement.tsx\")"
     ]
   }
 }

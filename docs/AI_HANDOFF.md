@@ -2,6 +2,95 @@
 
 ---
 
+## CHECKPOINT #CIERRE-UI-FACELIFT-RT6-TOGGLE
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** UI Facelift de la pestaña Cierre de Inventario (Bienes de Cambio) para igualar el prototipo docs/prototypes/cierrecambio.html + RT6 toggle visible siempre.
+
+### Cambios clave
+1. **Extracción de componente**: Se creó `CierreInventarioTab.tsx` con sub-componentes:
+   - `CierreHeader`: Título grande con font-display, badge modo (DIFERENCIAS/PERMANENTE), toggle RT6 siempre visible, botón "Configurar cuentas"
+   - `StatusBar`: Chips estilo píldora con iconos (Movimientos, Cuentas, Conciliación, Valuación, RT6)
+   - `CMVCard`: Tabla de cálculo con columnas Histórico + Homogéneo (condicional), filas destacadas, separadores
+   - `AuditoriaFisica`: Sección ámbar con input EF físico y cálculo DifInv
+   - `AsientosPreviewCard`: Preview de asientos con tabs RESUMEN/DETALLE, cards coloreadas por tipo
+   - `KPIGrid`: Grid 2x2 con Ventas Netas, Resultado Bruto, Margen %, Mercaderías Final
+   - `CtaButton`: Botón gradiente azul→verde con hover y shadow
+
+2. **Toggle RT6 siempre visible**:
+   - Antes: solo visible si `rt6HasData=true`
+   - Ahora: visible siempre, deshabilitado si RT6 no aplicado, con tooltip explicativo
+   - Cuando habilitado, muestra columna "Homogéneo" en tabla y KPIs
+
+3. **Visual matching prototipo**:
+   - Layout 2 columnas (1.2fr / 1fr) en desktop, 1 col en mobile
+   - Tipografía: font-display (Outfit), font-body (Inter), font-mono (JetBrains Mono) - ya configuradas en Tailwind
+   - Iconos Phosphor (CheckCircle, WarningCircle, Calculator, Scales, etc.)
+   - Colores brand: `brand-primary` (#3B82F6), gradiente en botón
+   - Cards con border-radius, shadows, separadores dashed
+
+4. **Lógica preservada**:
+   - CMV = EI + ComprasNetas - EF_teórica (sin cambios)
+   - DifInv = EF_física - EF_teórica (asiento separado, no altera CMV)
+   - Cierre funciona sin EF física (usa teórica, omite DifInv)
+
+### Archivos tocados
+- `src/pages/Planillas/components/CierreInventarioTab.tsx` (NUEVO - 1000+ líneas)
+- `src/pages/Planillas/InventarioBienesPage.tsx` (import + reemplazo del tab cierre inline)
+- `docs/AI_HANDOFF.md`
+
+### Validación manual sugerida
+1. **Tab Cierre visual**: Verificar que se asemeja al prototipo (header, chips, 2 columnas, cards)
+2. **Toggle RT6 sin datos**: Switch deshabilitado, opacity reducida, título "Mostrar Homogéneo" visible
+3. **Toggle RT6 con datos**: Switch activo, al encender aparece columna "Homogéneo" en tabla CMV y KPIs
+4. **Chips de estado**: Movimientos OK/Sin datos, Cuentas OK/Configurar, Conciliación pend/OK, RT6 OK/N/A
+5. **Preview asientos**: Cards coloreadas (slate, green, blue, amber) con entradas numeradas
+6. **Botón gradiente**: "Generar Asientos de Cierre" con gradiente azul→verde y hover effect
+7. **Mobile**: Layout apilado en 1 columna
+
+### Comandos
+- npm run build  # PASS (tsc -b + vite build)
+
+---
+
+## CHECKPOINT #CIERRE-V2-DIFINV
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Separar Diferencia de Inventario del CMV en modo periódico + UI V2 del Cierre matching prototipo.
+
+### Bug corregido
+CMV absorbía la diferencia de inventario (usaba EF_física). Ahora:
+- **CMV = EI + ComprasNetas - EF_teórica** (siempre usa inventario teórico del motor de costeo)
+- **DifInv = EF_física - EF_teórica** (asiento separado contra cuenta 4.3.02)
+- Si no se ingresa EF física, CMV se genera solo con EF teórica y DifInv se omite.
+
+### Cambios clave
+1. **closing.ts**: `PeriodicClosingData` ahora recibe `existenciaFinalTeorica` + `existenciaFinalFisica?`. CMV usa teórica. Paso 5 genera asiento DifInv (Faltante: D DifInv / H Merc; Sobrante: D Merc / H DifInv). Return incluye `difInv`.
+2. **bienes.ts**: `generatePeriodicClosingJournalEntries` pasa los nuevos campos y resuelve `diferenciaInventarioId` via `resolveMappedAccountId`. Valida que exista cuenta DifInv si se provee EF física. Return incluye `difInv`.
+3. **InventarioBienesPage.tsx**:
+   - `cmvPorDiferencia` usa `inventarioTeorico` (no efEfectivo)
+   - Handler PERIODIC pasa `existenciaFinalTeorica`/`existenciaFinalFisica` y muestra DifInv en confirm/toast
+   - **UI V2 completa**: 2 columnas (tabla cálculo + preview/KPIs), toggle Homogéneo (RT6), status chips, entry preview cards con DifInv, KPI grid, botón habilitado sin EF física en PERIODIC
+   - Eliminadas variables no usadas (`getDisplayDate`, `efEfectivo`)
+
+### Archivos tocados
+- src/core/inventario/closing.ts
+- src/storage/bienes.ts
+- src/pages/Planillas/InventarioBienesPage.tsx
+- docs/AI_HANDOFF.md
+
+### Validación manual sugerida
+1. **Cierre periódico sin EF física**: CMV = EI + CN - EF teórica; no genera asiento DifInv; botón habilitado.
+2. **Cierre periódico con EF física < teórica (faltante)**: CMV igual; DifInv negativo; asiento D: Dif.Inventario / H: Mercaderías.
+3. **Cierre periódico con EF física > teórica (sobrante)**: DifInv positivo; asiento D: Mercaderías / H: Dif.Inventario.
+4. **Toggle Homogéneo**: columna aparece/desaparece con valores RT6 ajustados.
+5. **Preview cards**: reflejan exactamente los asientos que se generarán (1-5 según corresponda).
+
+### Comandos
+- npm run build  # PASS (tsc -b + vite build)
+
+---
+
 ## CHECKPOINT #INV-AJUSTES-BONIF-DESC-POST
 **Fecha:** 2026-01-31
 **Estado:** COMPLETADO - Build PASS (tsc + vite)
