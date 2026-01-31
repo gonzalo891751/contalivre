@@ -273,13 +273,13 @@ export const DEFAULT_ACCOUNT_CODES: Record<AccountMappingKey, string> = {
     mercaderias: '1.1.04.01',
     cmv: '5.1.01',
     variacionExistencias: '5.1.99',
-    compras: '5.1.03',
-    gastosCompras: '5.1.04',
-    bonifCompras: '5.1.05',
-    devolCompras: '5.1.06',
+    compras: '4.8.01',
+    gastosCompras: '4.8.02',
+    bonifCompras: '4.8.03',
+    devolCompras: '4.8.04',
     ventas: '4.1.01',
-    bonifVentas: '4.1.03',
-    devolVentas: '4.1.04',
+    bonifVentas: '4.8.05',
+    devolVentas: '4.8.06',
     ivaCF: '1.1.03.01',
     ivaDF: '2.1.03.01',
     diferenciaInventario: '4.3.02',
@@ -306,7 +306,14 @@ export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT' | 
  * Sub-classification for VALUE_ADJUSTMENT movements.
  * Distinguishes the origin so journal generation and UI labels are correct.
  */
-export type AdjustmentKind = 'RT6' | 'CAPITALIZATION' | 'OTHER'
+export type AdjustmentKind =
+    | 'RT6'
+    | 'CAPITALIZATION'
+    | 'BONUS_PURCHASE'
+    | 'BONUS_SALE'
+    | 'DISCOUNT_PURCHASE'
+    | 'DISCOUNT_SALE'
+    | 'OTHER'
 
 /**
  * Journal integration status for inventory movements
@@ -382,6 +389,11 @@ export interface BienesMovement {
     costMethod: CostingMethod      // Snapshot of method at transaction time
     costUnitAssigned: number       // Assigned cost per unit (for SALE/ADJUSTMENT)
     costTotalAssigned: number      // Total cost assigned (for CMV calculation)
+    costLayersUsed?: {             // Layers consumed (for SALE, FIFO/LIFO)
+        movementId: string
+        quantity: number
+        unitCost: number
+    }[]
     // Bonificaciones, descuentos, gastos (optional)
     bonificacionPct?: number       // % commercial discount (reduces base price)
     bonificacionAmount?: number    // $ calculated bonificación

@@ -20,6 +20,7 @@ import {
 } from '../core/inventario/types'
 import {
     calculateExitCost,
+    calculateProductValuation,
     canChangeCostingMethod,
 } from '../core/inventario/costing'
 import { createEntry } from './entries'
@@ -30,20 +31,29 @@ const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
     ivaDF: { code: '2.1.03.01', names: ['IVA Debito Fiscal'] },
     ventas: { code: '4.1.01', names: ['Ventas'] },
     cmv: { code: '4.3.01', names: ['Costo mercaderias vendidas'] },
-    compras: { code: '5.1.03', names: ['Compras'] },
+    compras: { code: '4.8.01', names: ['Compras'] },
     diferenciaInventario: { code: '4.3.02', names: ['Diferencia de inventario'] },
     aperturaInventario: { code: '3.2.01', names: ['Apertura inventario', 'Resultados acumulados'] },
-    gastosCompras: { code: '4.8.02', names: ['Gastos sobre compras'] },
-    bonifCompras: { code: '4.8.03', names: ['Bonificaciones sobre compras'] },
-    devolCompras: { code: '4.8.04', names: ['Devoluciones sobre compras'] },
-    bonifVentas: { code: '4.8.05', names: ['Bonificaciones sobre ventas'] },
-    devolVentas: { code: '4.8.06', names: ['Devoluciones sobre ventas'] },
+    gastosCompras: { code: '4.8.02', names: ['Gastos sobre compras', 'Gastos s/compras'] },
+    bonifCompras: { code: '4.8.03', names: ['Bonificaciones sobre compras', 'Bonif. s/compras'] },
+    devolCompras: { code: '4.8.04', names: ['Devoluciones sobre compras', 'Devol. s/compras'] },
+    bonifVentas: { code: '4.8.05', names: ['Bonificaciones sobre ventas', 'Bonif. s/ventas'] },
+    devolVentas: { code: '4.8.06', names: ['Devoluciones sobre ventas', 'Devol. s/ventas'] },
     descuentosObtenidos: { code: '4.6.09', names: ['Descuentos obtenidos'] },
     descuentosOtorgados: { code: '4.2.01', names: ['Descuentos otorgados'] },
     caja: { code: '1.1.01.01', names: ['Caja'] },
     banco: { code: '1.1.01.02', names: ['Bancos cuenta corriente', 'Banco cuenta corriente', 'Bancos'] },
     proveedores: { code: '2.1.01.01', names: ['Proveedores'] },
     deudores: { code: '1.1.02.01', names: ['Deudores por ventas'] },
+}
+
+const ACCOUNT_CODE_ALIASES: Partial<Record<keyof typeof ACCOUNT_FALLBACKS, { codes: string[]; nameAny?: string[] }>> = {
+    compras: { codes: ['5.1.03'], nameAny: ['compra'] },
+    gastosCompras: { codes: ['5.1.04', '4.8.03', '5.1.05'], nameAny: ['gasto', 'flete', 'seguro'] },
+    bonifCompras: { codes: ['5.1.05', '4.8.02', '5.1.04'], nameAny: ['bonif'] },
+    devolCompras: { codes: ['5.1.06'], nameAny: ['devol'] },
+    bonifVentas: { codes: ['4.1.03'], nameAny: ['bonif'] },
+    devolVentas: { codes: ['4.1.04'], nameAny: ['devol'] },
 }
 
 const normalizeText = (value: string) => value
@@ -90,11 +100,26 @@ const resolveMappedAccountId = (
 ) => {
     const mappedId = settings.accountMappings?.[key] || null
     const fallback = ACCOUNT_FALLBACKS[fallbackKey]
-    return resolveAccountId(accounts, {
+    const resolved = resolveAccountId(accounts, {
         mappedId,
         code: fallback?.code,
         names: fallback?.names,
     })
+    if (resolved) return resolved
+
+    const alias = ACCOUNT_CODE_ALIASES[fallbackKey]
+    if (alias?.codes && alias.codes.length > 0) {
+        for (const code of alias.codes) {
+            const acc = accounts.find(a => a.code === code)
+            if (!acc) continue
+            if (!alias.nameAny || alias.nameAny.length === 0) return acc.id
+            const name = normalizeText(acc.name)
+            if (alias.nameAny.some(token => name.includes(normalizeText(token)))) {
+                return acc.id
+            }
+        }
+    }
+    return null
 }
 
 const resolveCounterpartyAccountId = (
@@ -107,7 +132,12 @@ const resolveCounterpartyAccountId = (
     const isCheque = method.includes('cheque')
     const isEfectivo = method.includes('efectivo')
 
-    if (movement.type === 'PURCHASE') {
+    const isPurchaseAdjust = movement.type === 'VALUE_ADJUSTMENT'
+        && (movement.adjustmentKind === 'BONUS_PURCHASE' || movement.adjustmentKind === 'DISCOUNT_PURCHASE')
+    const isSaleAdjust = movement.type === 'VALUE_ADJUSTMENT'
+        && (movement.adjustmentKind === 'BONUS_SALE' || movement.adjustmentKind === 'DISCOUNT_SALE')
+
+    if (movement.type === 'PURCHASE' || isPurchaseAdjust) {
         if (isCuenta) {
             return resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores)
         }
@@ -120,7 +150,7 @@ const resolveCounterpartyAccountId = (
         return resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores) || resolveAccountId(accounts, ACCOUNT_FALLBACKS.caja)
     }
 
-    if (movement.type === 'SALE') {
+    if (movement.type === 'SALE' || isSaleAdjust) {
         if (isCuenta) {
             return resolveAccountId(accounts, ACCOUNT_FALLBACKS.deudores)
         }
@@ -295,6 +325,128 @@ const buildCapitalizationJournalEntries = async (
     }
 }
 
+/**
+ * Build journal entries for post adjustments (bonificaciones / descuentos financieros).
+ */
+const buildPostAdjustmentJournalEntries = async (
+    movement: BienesMovement,
+    product?: BienesProduct
+): Promise<{ entries: Omit<JournalEntry, 'id'>[]; error?: string }> => {
+    const accounts = await db.accounts.toArray()
+    const settings = await loadBienesSettings()
+    const ivaCFId = resolveMappedAccountId(accounts, settings, 'ivaCF', 'ivaCF')
+    const ivaDFId = resolveMappedAccountId(accounts, settings, 'ivaDF', 'ivaDF')
+    const bonifComprasId = resolveMappedAccountId(accounts, settings, 'bonifCompras', 'bonifCompras')
+    const bonifVentasId = resolveMappedAccountId(accounts, settings, 'bonifVentas', 'bonifVentas')
+    const descuentosObtenidosId = resolveMappedAccountId(accounts, settings, 'descuentosObtenidos', 'descuentosObtenidos')
+    const descuentosOtorgadosId = resolveMappedAccountId(accounts, settings, 'descuentosOtorgados', 'descuentosOtorgados')
+    const hasSplits = movement.paymentSplits && movement.paymentSplits.length > 0
+    const contraId = resolveCounterpartyAccountId(accounts, movement)
+
+    const neto = movement.subtotal || movement.valueDelta || 0
+    const ivaAmount = movement.ivaAmount || 0
+    const total = movement.total || neto + ivaAmount
+
+    const missing: string[] = []
+    if (!hasSplits && !contraId) missing.push('Cuenta contrapartida')
+
+    switch (movement.adjustmentKind) {
+        case 'BONUS_PURCHASE':
+            if (!bonifComprasId) missing.push('Bonificaciones s/compras')
+            if (ivaAmount > 0 && !ivaCFId) missing.push('IVA Credito Fiscal')
+            break
+        case 'BONUS_SALE':
+            if (!bonifVentasId) missing.push('Bonificaciones s/ventas')
+            if (ivaAmount > 0 && !ivaDFId) missing.push('IVA Debito Fiscal')
+            break
+        case 'DISCOUNT_PURCHASE':
+            if (!descuentosObtenidosId) missing.push('Descuentos obtenidos')
+            break
+        case 'DISCOUNT_SALE':
+            if (!descuentosOtorgadosId) missing.push('Descuentos otorgados')
+            break
+        default:
+            return { entries: [], error: 'Ajuste de bonif/desc sin adjustmentKind valido.' }
+    }
+
+    if (missing.length > 0) {
+        return { entries: [], error: `Faltan cuentas contables: ${missing.join(', ')}` }
+    }
+
+    if (neto <= 0) {
+        return { entries: [], error: 'El ajuste no tiene importe para generar asiento.' }
+    }
+
+    const metadata = buildEntryMetadata(movement, product)
+    const lines: EntryLine[] = []
+
+    const pushContraDebit = () => {
+        if (hasSplits) {
+            movement.paymentSplits!.forEach(split => {
+                lines.push({ accountId: split.accountId, debit: split.amount, credit: 0, description: 'Contrapartida' })
+            })
+        } else {
+            lines.push({ accountId: contraId!, debit: total, credit: 0, description: 'Contrapartida' })
+        }
+    }
+
+    const pushContraCredit = () => {
+        if (hasSplits) {
+            movement.paymentSplits!.forEach(split => {
+                lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: 'Contrapartida' })
+            })
+        } else {
+            lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Contrapartida' })
+        }
+    }
+
+    if (movement.adjustmentKind === 'BONUS_PURCHASE') {
+        pushContraDebit()
+        lines.push({ accountId: bonifComprasId!, debit: 0, credit: neto, description: 'Bonificacion s/compras' })
+        if (ivaAmount > 0 && ivaCFId) {
+            lines.push({ accountId: ivaCFId, debit: 0, credit: ivaAmount, description: 'IVA CF reversion' })
+        }
+    }
+
+    if (movement.adjustmentKind === 'BONUS_SALE') {
+        lines.push({ accountId: bonifVentasId!, debit: neto, credit: 0, description: 'Bonificacion s/ventas' })
+        if (ivaAmount > 0 && ivaDFId) {
+            lines.push({ accountId: ivaDFId, debit: ivaAmount, credit: 0, description: 'IVA DF reversion' })
+        }
+        pushContraCredit()
+    }
+
+    if (movement.adjustmentKind === 'DISCOUNT_PURCHASE') {
+        pushContraDebit()
+        lines.push({ accountId: descuentosObtenidosId!, debit: 0, credit: total, description: 'Descuento financiero obtenido' })
+    }
+
+    if (movement.adjustmentKind === 'DISCOUNT_SALE') {
+        lines.push({ accountId: descuentosOtorgadosId!, debit: total, credit: 0, description: 'Descuento financiero otorgado' })
+        pushContraCredit()
+    }
+
+    const memoMap: Record<string, string> = {
+        BONUS_PURCHASE: 'Bonificacion post-compra',
+        BONUS_SALE: 'Bonificacion post-venta',
+        DISCOUNT_PURCHASE: 'Descuento financiero obtenido',
+        DISCOUNT_SALE: 'Descuento financiero otorgado',
+    }
+
+    return {
+        entries: [{
+            date: movement.date,
+            memo: `${memoMap[movement.adjustmentKind!] || 'Ajuste post'} - ${product?.name || movement.productId}`,
+            lines,
+            sourceModule: 'inventory',
+            sourceId: movement.id,
+            sourceType: 'value_adjustment',
+            createdAt: new Date().toISOString(),
+            metadata: { ...metadata, journalRole: 'post_adjustment' },
+        }],
+    }
+}
+
 const buildJournalEntriesForMovement = async (
     movement: BienesMovement,
     product?: BienesProduct
@@ -321,6 +473,14 @@ const buildJournalEntriesForMovement = async (
         // CAPITALIZATION: generate purchase-like journal entry for capitalizable expense
         if (movement.adjustmentKind === 'CAPITALIZATION') {
             return buildCapitalizationJournalEntries(movement, product)
+        }
+        if (
+            movement.adjustmentKind === 'BONUS_PURCHASE'
+            || movement.adjustmentKind === 'BONUS_SALE'
+            || movement.adjustmentKind === 'DISCOUNT_PURCHASE'
+            || movement.adjustmentKind === 'DISCOUNT_SALE'
+        ) {
+            return buildPostAdjustmentJournalEntries(movement, product)
         }
         // Legacy or unknown — no adjustmentKind: safe fallback, don't generate
         // (Retrocompat: old VALUE_ADJUSTMENT without adjustmentKind = RT6 conciliation)
@@ -507,12 +667,20 @@ const buildJournalEntriesForMovement = async (
 
             // Asiento de CMV (solo en modo PERMANENT)
             if (!isPeriodic && cmvId && mercaderiasId) {
-                const cmvAmount = movement.costTotalAssigned
-                const cmvLines: EntryLine[] = [
-                    { accountId: cmvId, debit: cmvAmount, credit: 0, description: 'CMV' },
-                    { accountId: mercaderiasId, debit: 0, credit: cmvAmount, description: 'Salida de mercaderias' },
-                ]
-                pushEntry(`CMV venta - ${product?.name || movement.productId}`, cmvLines, { journalRole: 'cogs' })
+                const cmvAmount = Math.abs(movement.costTotalAssigned || 0)
+                if (cmvAmount > 0) {
+                    const cmvLines: EntryLine[] = movement.isDevolucion
+                        ? [
+                            { accountId: mercaderiasId, debit: cmvAmount, credit: 0, description: 'Reingreso de mercaderias' },
+                            { accountId: cmvId, debit: 0, credit: cmvAmount, description: 'Reversion CMV' },
+                        ]
+                        : [
+                            { accountId: cmvId, debit: cmvAmount, credit: 0, description: 'CMV' },
+                            { accountId: mercaderiasId, debit: 0, credit: cmvAmount, description: 'Salida de mercaderias' },
+                        ]
+                    const memoPrefix = movement.isDevolucion ? 'Reversion CMV' : 'CMV venta'
+                    pushEntry(`${memoPrefix} - ${product?.name || movement.productId}`, cmvLines, { journalRole: 'cogs' })
+                }
             }
         }
     }
@@ -866,6 +1034,7 @@ export async function createBienesMovement(
     // Calculate costs for exits
     let costUnitAssigned = 0
     let costTotalAssigned = 0
+    let costLayersUsed: BienesMovement['costLayersUsed'] | undefined
     let product: BienesProduct | undefined
 
     if (movement.type === 'VALUE_ADJUSTMENT') {
@@ -920,7 +1089,33 @@ export async function createBienesMovement(
         return vaMovement
     }
 
-    if (movement.type === 'SALE' || (movement.type === 'ADJUSTMENT' && movement.quantity < 0)) {
+    if (movement.type === 'SALE' && movement.isDevolucion) {
+        product = await getBienesProductById(movement.productId)
+        if (!product) {
+            throw new Error('Producto no encontrado')
+        }
+
+        const existingMovements = await getBienesMovementsByProduct(movement.productId, movement.periodId)
+        const source = movement.sourceMovementId
+            ? existingMovements.find(m => m.id === movement.sourceMovementId)
+            : undefined
+        const qty = Math.abs(movement.quantity)
+
+        if (source?.costLayersUsed && source.costLayersUsed.length > 0) {
+            const sourceQty = Math.abs(source.quantity || 0)
+            const ratio = sourceQty > 0 ? qty / sourceQty : 0
+            const totalCost = source.costLayersUsed.reduce((sum, layer) => sum + (layer.unitCost * layer.quantity * ratio), 0)
+            costTotalAssigned = totalCost
+            costUnitAssigned = qty > 0 ? totalCost / qty : 0
+        } else if (source?.costUnitAssigned) {
+            costUnitAssigned = source.costUnitAssigned
+            costTotalAssigned = costUnitAssigned * qty
+        } else {
+            const valuation = calculateProductValuation(product, existingMovements, settings.costMethod)
+            costUnitAssigned = valuation.averageCost
+            costTotalAssigned = costUnitAssigned * qty
+        }
+    } else if (movement.type === 'SALE' || (movement.type === 'ADJUSTMENT' && movement.quantity < 0)) {
         product = await getBienesProductById(movement.productId)
         if (!product) {
             throw new Error('Producto no encontrado')
@@ -942,6 +1137,9 @@ export async function createBienesMovement(
 
         costUnitAssigned = costResult.unitCost
         costTotalAssigned = costResult.totalCost
+        if (movement.type === 'SALE') {
+            costLayersUsed = costResult.layersUsed
+        }
     }
     if (!product) {
         product = await getBienesProductById(movement.productId)
@@ -953,6 +1151,7 @@ export async function createBienesMovement(
         costMethod: settings.costMethod,
         costUnitAssigned,
         costTotalAssigned,
+        costLayersUsed,
         linkedJournalEntryIds: movement.linkedJournalEntryIds || [],
         journalStatus: movement.autoJournal ? 'generated' : 'none',
         createdAt: now,
@@ -1128,7 +1327,30 @@ export async function updateBienesMovementWithJournal(
     }
 
     // Recalculate costs for exits
-    if (baseMovement.type === 'SALE' || (baseMovement.type === 'ADJUSTMENT' && baseMovement.quantity < 0)) {
+    if (baseMovement.type === 'SALE' && baseMovement.isDevolucion) {
+        const existingMovements = await getBienesMovementsByProduct(baseMovement.productId, baseMovement.periodId)
+        const movementsForCost = existingMovements.filter(movement => movement.id !== id)
+        const source = baseMovement.sourceMovementId
+            ? movementsForCost.find(movement => movement.id === baseMovement.sourceMovementId)
+            : undefined
+        const qty = Math.abs(baseMovement.quantity)
+
+        if (source?.costLayersUsed && source.costLayersUsed.length > 0) {
+            const sourceQty = Math.abs(source.quantity || 0)
+            const ratio = sourceQty > 0 ? qty / sourceQty : 0
+            const totalCost = source.costLayersUsed.reduce((sum, layer) => sum + (layer.unitCost * layer.quantity * ratio), 0)
+            baseMovement.costTotalAssigned = totalCost
+            baseMovement.costUnitAssigned = qty > 0 ? totalCost / qty : 0
+        } else if (source?.costUnitAssigned) {
+            baseMovement.costUnitAssigned = source.costUnitAssigned
+            baseMovement.costTotalAssigned = baseMovement.costUnitAssigned * qty
+        } else {
+            const valuation = calculateProductValuation(product, movementsForCost, settings.costMethod)
+            baseMovement.costUnitAssigned = valuation.averageCost
+            baseMovement.costTotalAssigned = baseMovement.costUnitAssigned * qty
+        }
+        baseMovement.costLayersUsed = undefined
+    } else if (baseMovement.type === 'SALE' || (baseMovement.type === 'ADJUSTMENT' && baseMovement.quantity < 0)) {
         const existingMovements = await getBienesMovementsByProduct(baseMovement.productId, baseMovement.periodId)
         const movementsForCost = existingMovements.filter(movement => movement.id !== id)
         const qty = baseMovement.type === 'SALE' ? baseMovement.quantity : Math.abs(baseMovement.quantity)
@@ -1140,9 +1362,13 @@ export async function updateBienesMovementWithJournal(
 
         baseMovement.costUnitAssigned = costResult.unitCost
         baseMovement.costTotalAssigned = costResult.totalCost
+        if (baseMovement.type === 'SALE') {
+            baseMovement.costLayersUsed = costResult.layersUsed
+        }
     } else {
         baseMovement.costUnitAssigned = 0
         baseMovement.costTotalAssigned = 0
+        baseMovement.costLayersUsed = undefined
     }
 
     const linkedIds = existing.linkedJournalEntryIds || []

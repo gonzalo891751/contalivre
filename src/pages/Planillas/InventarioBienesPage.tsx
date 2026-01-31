@@ -141,14 +141,14 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         key: 'compras',
         label: 'Compras',
         category: 'compras',
-        codes: [DEFAULT_ACCOUNT_CODES.compras, '4.8.01'],
+        codes: [DEFAULT_ACCOUNT_CODES.compras, '4.8.01', '5.1.03'],
         nameAny: ['compra'],
     },
     {
         key: 'gastosCompras',
         label: 'Gastos sobre compras',
         category: 'compras',
-        codes: [DEFAULT_ACCOUNT_CODES.gastosCompras, '4.8.02'],
+        codes: [DEFAULT_ACCOUNT_CODES.gastosCompras, '4.8.02', '5.1.04'],
         nameAny: ['gasto', 'flete', 'seguro', 'compra'],
         optional: true,
     },
@@ -156,14 +156,14 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         key: 'bonifCompras',
         label: 'Bonificaciones sobre compras',
         category: 'compras',
-        codes: [DEFAULT_ACCOUNT_CODES.bonifCompras, '4.8.03'],
+        codes: [DEFAULT_ACCOUNT_CODES.bonifCompras, '4.8.03', '5.1.05'],
         nameAll: ['bonif', 'compra'],
     },
     {
         key: 'devolCompras',
         label: 'Devoluciones sobre compras',
         category: 'compras',
-        codes: [DEFAULT_ACCOUNT_CODES.devolCompras, '4.8.04'],
+        codes: [DEFAULT_ACCOUNT_CODES.devolCompras, '4.8.04', '5.1.06'],
         nameAll: ['devol', 'compra'],
     },
     {
@@ -193,7 +193,7 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         key: 'bonifVentas',
         label: 'Bonificaciones sobre ventas',
         category: 'ventas',
-        codes: [DEFAULT_ACCOUNT_CODES.bonifVentas, '4.8.05'],
+        codes: [DEFAULT_ACCOUNT_CODES.bonifVentas, '4.8.05', '4.1.03'],
         nameAll: ['bonif', 'venta'],
         optional: true,
     },
@@ -201,7 +201,7 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         key: 'devolVentas',
         label: 'Devoluciones sobre ventas',
         category: 'ventas',
-        codes: [DEFAULT_ACCOUNT_CODES.devolVentas, '4.8.06'],
+        codes: [DEFAULT_ACCOUNT_CODES.devolVentas, '4.8.06', '4.1.04'],
         nameAll: ['devol', 'venta'],
         optional: true,
     },
@@ -452,13 +452,33 @@ export default function InventarioBienesPage() {
 
     useEffect(() => {
         // Resolve account code from mapping (could be an ID or a code)
-        const resolveCode = (mappedValue: string | undefined, defaultCode: string): string => {
+        const resolveCode = (
+            mappedValue: string | undefined,
+            defaultCodes: string | string[],
+            options?: { aliasCodes?: string[]; nameAny?: string[] }
+        ): string => {
+            const codes = Array.isArray(defaultCodes) ? defaultCodes : [defaultCodes]
             if (mappedValue) {
                 if (mappedValue.includes('.')) return mappedValue
                 const acc = accounts?.find(a => a.id === mappedValue)
-                return acc?.code || defaultCode
+                return acc?.code || codes[0]
             }
-            return defaultCode
+            for (const code of Array.from(new Set(codes))) {
+                const acc = accounts?.find(a => a.code === code)
+                if (acc) return acc.code
+            }
+            if (options?.aliasCodes && options.aliasCodes.length > 0) {
+                for (const code of options.aliasCodes) {
+                    const acc = accounts?.find(a => a.code === code)
+                    if (!acc) continue
+                    if (!options.nameAny || options.nameAny.length === 0) return acc.code
+                    const haystack = acc.name.toLowerCase()
+                    if (options.nameAny.some(token => haystack.includes(token.toLowerCase()))) {
+                        return acc.code
+                    }
+                }
+            }
+            return codes[0]
         }
 
         const loadCierreBalances = async () => {
@@ -538,12 +558,20 @@ export default function InventarioBienesPage() {
             const end = periodEnd
 
             const codes = {
-                gastosCompras: resolveCode(mappings.gastosCompras, DEFAULT_ACCOUNT_CODES.gastosCompras),
-                bonifCompras: resolveCode(mappings.bonifCompras, DEFAULT_ACCOUNT_CODES.bonifCompras),
-                devolCompras: resolveCode(mappings.devolCompras, DEFAULT_ACCOUNT_CODES.devolCompras),
+                gastosCompras: resolveCode(
+                    mappings.gastosCompras,
+                    [DEFAULT_ACCOUNT_CODES.gastosCompras, '4.8.02', '5.1.04'],
+                    { aliasCodes: ['4.8.03', '5.1.05'], nameAny: ['gasto', 'flete', 'seguro'] }
+                ),
+                bonifCompras: resolveCode(
+                    mappings.bonifCompras,
+                    [DEFAULT_ACCOUNT_CODES.bonifCompras, '4.8.03', '5.1.05'],
+                    { aliasCodes: ['4.8.02', '5.1.04'], nameAny: ['bonif'] }
+                ),
+                devolCompras: resolveCode(mappings.devolCompras, [DEFAULT_ACCOUNT_CODES.devolCompras, '4.8.04', '5.1.06']),
                 ventas: resolveCode(mappings.ventas, DEFAULT_ACCOUNT_CODES.ventas),
-                bonifVentas: resolveCode(mappings.bonifVentas, DEFAULT_ACCOUNT_CODES.bonifVentas),
-                devolVentas: resolveCode(mappings.devolVentas, DEFAULT_ACCOUNT_CODES.devolVentas),
+                bonifVentas: resolveCode(mappings.bonifVentas, [DEFAULT_ACCOUNT_CODES.bonifVentas, '4.8.05', '4.1.03']),
+                devolVentas: resolveCode(mappings.devolVentas, [DEFAULT_ACCOUNT_CODES.devolVentas, '4.8.06', '4.1.04']),
             }
 
             const [gastosCompras, bonifCompras, devolCompras, ventas, bonifVentas, devolVentas] = await Promise.all([
@@ -590,16 +618,57 @@ export default function InventarioBienesPage() {
 
     const existenciaInicial = existenciaInicialLedger !== null ? existenciaInicialLedger : existenciaInicialFallback
 
-    // Compras brutas del período (from movements)
-    const comprasBrutas = useMemo(() => {
-        return movements
-            .filter(m => m.type === 'PURCHASE')
+    const cierreMovements = useMemo(() => {
+        const comprasMovs = movements.filter(m => m.type === 'PURCHASE' && !m.isDevolucion && m.quantity > 0)
+        const compras = comprasMovs.reduce((sum, m) => sum + m.subtotal + (m.bonificacionAmount || 0), 0)
+        const gastosComprasFromPurchases = movements.reduce(
+            (sum, m) => sum + (m.type === 'PURCHASE' && !m.isDevolucion ? (m.gastosCompra || 0) : 0),
+            0
+        )
+        const gastosComprasFromCapitalization = movements
+            .filter(m => m.type === 'VALUE_ADJUSTMENT' && m.adjustmentKind === 'CAPITALIZATION')
+            .reduce((sum, m) => sum + (m.gastosCompra ?? m.valueDelta ?? 0), 0)
+        const gastosCompras = gastosComprasFromPurchases + gastosComprasFromCapitalization
+        const devolCompras = movements
+            .filter(m => m.type === 'PURCHASE' && m.isDevolucion)
             .reduce((sum, m) => sum + m.subtotal, 0)
+        const bonifComprasInline = comprasMovs.reduce((sum, m) => sum + (m.bonificacionAmount || 0), 0)
+        const bonifCompras = movements
+            .filter(m => m.type === 'VALUE_ADJUSTMENT' && m.adjustmentKind === 'BONUS_PURCHASE')
+            .reduce((sum, m) => sum + m.subtotal, 0) + bonifComprasInline
+
+        const ventasMovs = movements.filter(m => m.type === 'SALE' && !m.isDevolucion)
+        const ventas = ventasMovs.reduce((sum, m) => sum + m.subtotal + (m.bonificacionAmount || 0), 0)
+        const devolVentas = movements
+            .filter(m => m.type === 'SALE' && m.isDevolucion)
+            .reduce((sum, m) => sum + m.subtotal, 0)
+        const bonifVentasInline = ventasMovs.reduce((sum, m) => sum + (m.bonificacionAmount || 0), 0)
+        const bonifVentas = movements
+            .filter(m => m.type === 'VALUE_ADJUSTMENT' && m.adjustmentKind === 'BONUS_SALE')
+            .reduce((sum, m) => sum + m.subtotal, 0) + bonifVentasInline
+
+        return {
+            compras,
+            gastosCompras,
+            bonifCompras,
+            devolCompras,
+            ventas,
+            bonifVentas,
+            devolVentas,
+        }
     }, [movements])
 
+    const cierreTotals = useMemo(() => ({
+        ...cierreBalances,
+        ...cierreMovements,
+    }), [cierreBalances, cierreMovements])
+
+    const comprasBrutas = cierreMovements.compras
+    const ventasBrutas = cierreMovements.ventas
+
     // Full CMV formula: CMV = EI + (Compras + Gastos - Bonif - Devol) - EF
-    const comprasNetas = comprasBrutas + cierreBalances.gastosCompras - cierreBalances.bonifCompras - cierreBalances.devolCompras
-    const ventasNetas = cierreBalances.ventas - cierreBalances.bonifVentas - cierreBalances.devolVentas
+    const comprasNetas = comprasBrutas + cierreTotals.gastosCompras - cierreTotals.bonifCompras - cierreTotals.devolCompras
+    const ventasNetas = ventasBrutas - cierreTotals.bonifVentas - cierreTotals.devolVentas
 
     const inventarioTeorico = kpis.stockValue
     // EF efectivo: si el usuario cargó un valor físico, usar ese; si no, usar teórico
@@ -1260,13 +1329,13 @@ export default function InventarioBienesPage() {
                 const result = await generatePeriodicClosingJournalEntries({
                     existenciaInicial,
                     compras: comprasBrutas,
-                    gastosCompras: cierreBalances.gastosCompras,
-                    bonifCompras: cierreBalances.bonifCompras,
-                    devolCompras: cierreBalances.devolCompras,
+                    gastosCompras: cierreTotals.gastosCompras,
+                    bonifCompras: cierreTotals.bonifCompras,
+                    devolCompras: cierreTotals.devolCompras,
                     existenciaFinal: closingPhysicalValue,
-                    ventas: cierreBalances.ventas,
-                    bonifVentas: cierreBalances.bonifVentas,
-                    devolVentas: cierreBalances.devolVentas,
+                    ventas: cierreTotals.ventas,
+                    bonifVentas: cierreTotals.bonifVentas,
+                    devolVentas: cierreTotals.devolVentas,
                     closingDate: periodEnd,
                     periodId,
                     periodLabel: `${periodId}`,
@@ -2311,6 +2380,13 @@ export default function InventarioBienesPage() {
                                                 }
                                                 // Distinguish sub-types by adjustmentKind and qty
                                                 let typeInfo = typeLabels[mov.type] || { label: mov.type, color: 'bg-slate-50 text-slate-600' }
+                                                if (mov.isDevolucion) {
+                                                    if (mov.type === 'PURCHASE') {
+                                                        typeInfo = { label: 'Devolucion compra', color: 'bg-rose-50 text-rose-700' }
+                                                    } else if (mov.type === 'SALE') {
+                                                        typeInfo = { label: 'Devolucion venta', color: 'bg-rose-50 text-rose-700' }
+                                                    }
+                                                }
                                                 // PURCHASE with qty=0 is a "solo gasto" (expense-only, no stock)
                                                 if (mov.type === 'PURCHASE' && mov.quantity === 0) {
                                                     typeInfo = { label: 'Gasto s/compra', color: 'bg-amber-50 text-amber-700' }
@@ -2318,13 +2394,23 @@ export default function InventarioBienesPage() {
                                                 if (mov.type === 'VALUE_ADJUSTMENT') {
                                                     if (mov.adjustmentKind === 'CAPITALIZATION') {
                                                         typeInfo = { label: 'Gasto Capitaliz.', color: 'bg-amber-50 text-amber-700' }
+                                                    } else if (mov.adjustmentKind === 'BONUS_PURCHASE') {
+                                                        typeInfo = { label: 'Bonif. compra', color: 'bg-indigo-50 text-indigo-700' }
+                                                    } else if (mov.adjustmentKind === 'BONUS_SALE') {
+                                                        typeInfo = { label: 'Bonif. venta', color: 'bg-indigo-50 text-indigo-700' }
+                                                    } else if (mov.adjustmentKind === 'DISCOUNT_PURCHASE') {
+                                                        typeInfo = { label: 'Desc. obtenido', color: 'bg-slate-100 text-slate-700' }
+                                                    } else if (mov.adjustmentKind === 'DISCOUNT_SALE') {
+                                                        typeInfo = { label: 'Desc. otorgado', color: 'bg-slate-100 text-slate-700' }
                                                     } else if (mov.adjustmentKind === 'RT6' || mov.rt6Period || mov.rt6SourceEntryId) {
                                                         typeInfo = { label: 'Ajuste RT6', color: 'bg-violet-50 text-violet-700' }
                                                     } else {
                                                         typeInfo = { label: 'Ajuste Valor', color: 'bg-slate-100 text-slate-600' }
                                                     }
                                                 }
-                                                const isEntry = mov.type === 'PURCHASE' || (mov.type === 'ADJUSTMENT' && mov.quantity > 0)
+                                                const isEntry = (mov.type === 'PURCHASE' && !mov.isDevolucion)
+                                                    || (mov.type === 'SALE' && mov.isDevolucion)
+                                                    || (mov.type === 'ADJUSTMENT' && mov.quantity > 0)
                                                 const journalStatus = mov.journalStatus || ((mov.linkedJournalEntryIds || []).length > 0 ? 'generated' : 'none')
                                                 const hasEntries = (mov.linkedJournalEntryIds || []).length > 0
                                                 const statusConfig: Record<string, { label: string; className: string }> = {
@@ -2992,37 +3078,37 @@ export default function InventarioBienesPage() {
                                     <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
                                         <span className="text-xs text-slate-400">+ Gastos sobre compras</span>
                                         <div className="text-right">
-                                            <span className={`font-mono text-xs ${cierreBalances.gastosCompras > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                                {formatCurrency(cierreBalances.gastosCompras)}
+                                            <span className={`font-mono text-xs ${cierreTotals.gastosCompras > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                                {formatCurrency(cierreTotals.gastosCompras)}
                                             </span>
                                             {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.gastosAdj !== 0 && (
                                                 <div className="text-[10px] font-mono text-indigo-600">
-                                                    Homog: {formatCurrency(cierreBalances.gastosCompras + rt6CierreAdjustments.gastosAdj)}
+                                                    Homog: {formatCurrency(cierreTotals.gastosCompras + rt6CierreAdjustments.gastosAdj)}
                                                 </div>
                                             )}
                                         </div>
                                     </div>
-                                    {cierreBalances.bonifCompras > 0 && (
+                                    {cierreTotals.bonifCompras > 0 && (
                                         <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
                                             <span className="text-xs text-slate-400">− Bonificaciones s/compras</span>
                                             <div className="text-right">
-                                                <span className="font-mono text-xs text-red-400">({formatCurrency(cierreBalances.bonifCompras)})</span>
+                                                <span className="font-mono text-xs text-red-400">({formatCurrency(cierreTotals.bonifCompras)})</span>
                                                 {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.bonifAdj !== 0 && (
                                                     <div className="text-[10px] font-mono text-indigo-600">
-                                                        Homog: ({formatCurrency(cierreBalances.bonifCompras - rt6CierreAdjustments.bonifAdj)})
+                                                        Homog: ({formatCurrency(cierreTotals.bonifCompras - rt6CierreAdjustments.bonifAdj)})
                                                     </div>
                                                 )}
                                             </div>
                                         </div>
                                     )}
-                                    {cierreBalances.devolCompras > 0 && (
+                                    {cierreTotals.devolCompras > 0 && (
                                         <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
                                             <span className="text-xs text-slate-400">− Devoluciones s/compras</span>
                                             <div className="text-right">
-                                                <span className="font-mono text-xs text-red-400">({formatCurrency(cierreBalances.devolCompras)})</span>
+                                                <span className="font-mono text-xs text-red-400">({formatCurrency(cierreTotals.devolCompras)})</span>
                                                 {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.devolAdj !== 0 && (
                                                     <div className="text-[10px] font-mono text-indigo-600">
-                                                        Homog: ({formatCurrency(cierreBalances.devolCompras - rt6CierreAdjustments.devolAdj)})
+                                                        Homog: ({formatCurrency(cierreTotals.devolCompras - rt6CierreAdjustments.devolAdj)})
                                                     </div>
                                                 )}
                                             </div>
@@ -3041,6 +3127,36 @@ export default function InventarioBienesPage() {
                                             )}
                                         </div>
                                     </div>
+                                    {(ventasBrutas > 0 || cierreTotals.bonifVentas > 0 || cierreTotals.devolVentas > 0) && (
+                                        <div className="mt-3 space-y-2">
+                                            <div className="flex justify-between items-center py-1.5 border-b border-slate-100">
+                                                <span className="text-sm font-medium text-slate-500 flex items-center gap-2">
+                                                    <Plus className="text-blue-500" size={14} weight="bold" /> Ventas (brutas)
+                                                </span>
+                                                <span className="font-mono text-sm font-medium text-blue-600">
+                                                    {formatCurrency(ventasBrutas)}
+                                                </span>
+                                            </div>
+                                            {cierreTotals.bonifVentas > 0 && (
+                                                <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
+                                                    <span className="text-xs text-slate-400">- Bonificaciones s/ventas</span>
+                                                    <span className="font-mono text-xs text-red-400">({formatCurrency(cierreTotals.bonifVentas)})</span>
+                                                </div>
+                                            )}
+                                            {cierreTotals.devolVentas > 0 && (
+                                                <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
+                                                    <span className="text-xs text-slate-400">- Devoluciones s/ventas</span>
+                                                    <span className="font-mono text-xs text-red-400">({formatCurrency(cierreTotals.devolVentas)})</span>
+                                                </div>
+                                            )}
+                                            <div className="flex justify-between items-center py-2 border-b border-slate-200 bg-slate-50 px-2 rounded">
+                                                <span className="text-sm font-semibold text-slate-700">= Ventas Netas</span>
+                                                <span className="font-mono text-base font-bold text-blue-700">
+                                                    {formatCurrency(ventasNetas)}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
                                 </>) : (
                                     <div className="flex justify-between items-center py-2 border-b border-slate-200">
                                         <span className="text-sm font-medium text-slate-500 flex items-center gap-2">
@@ -3150,14 +3266,14 @@ export default function InventarioBienesPage() {
                                     <div className="font-mono text-xs space-y-4">
                                         {/* Helper for preview lines */}
                                         {/* 1. Refundición de subcuentas */}
-                                        {(cierreBalances.gastosCompras > 0.01 || cierreBalances.bonifCompras > 0.01 || cierreBalances.devolCompras > 0.01) && (
+                                        {(cierreTotals.gastosCompras > 0.01 || cierreTotals.bonifCompras > 0.01 || cierreTotals.devolCompras > 0.01) && (
                                             <div className="space-y-1">
                                                 <div className="text-slate-400 text-[10px] uppercase font-bold">1. Refundicion subcuentas de compras</div>
-                                                {cierreBalances.gastosCompras > 0.01 && (<>
+                                                {cierreTotals.gastosCompras > 0.01 && (<>
                                                     <div className="flex justify-between">
                                                         <span>Compras</span>
                                                         <div className="flex gap-4">
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.gastosCompras)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.gastosCompras)}</span>
                                                             <span className="w-24 text-right text-slate-400">-</span>
                                                         </div>
                                                     </div>
@@ -3165,15 +3281,15 @@ export default function InventarioBienesPage() {
                                                         <span>&nbsp;&nbsp;a Gastos s/compras</span>
                                                         <div className="flex gap-4">
                                                             <span className="w-24 text-right text-slate-400">-</span>
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.gastosCompras)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.gastosCompras)}</span>
                                                         </div>
                                                     </div>
                                                 </>)}
-                                                {cierreBalances.bonifCompras > 0.01 && (<>
+                                                {cierreTotals.bonifCompras > 0.01 && (<>
                                                     <div className="flex justify-between">
                                                         <span>Bonif s/compras</span>
                                                         <div className="flex gap-4">
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.bonifCompras)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.bonifCompras)}</span>
                                                             <span className="w-24 text-right text-slate-400">-</span>
                                                         </div>
                                                     </div>
@@ -3181,15 +3297,15 @@ export default function InventarioBienesPage() {
                                                         <span>&nbsp;&nbsp;a Compras</span>
                                                         <div className="flex gap-4">
                                                             <span className="w-24 text-right text-slate-400">-</span>
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.bonifCompras)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.bonifCompras)}</span>
                                                         </div>
                                                     </div>
                                                 </>)}
-                                                {cierreBalances.devolCompras > 0.01 && (<>
+                                                {cierreTotals.devolCompras > 0.01 && (<>
                                                     <div className="flex justify-between">
                                                         <span>Devol s/compras</span>
                                                         <div className="flex gap-4">
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.devolCompras)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.devolCompras)}</span>
                                                             <span className="w-24 text-right text-slate-400">-</span>
                                                         </div>
                                                     </div>
@@ -3197,7 +3313,7 @@ export default function InventarioBienesPage() {
                                                         <span>&nbsp;&nbsp;a Compras</span>
                                                         <div className="flex gap-4">
                                                             <span className="w-24 text-right text-slate-400">-</span>
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.devolCompras)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.devolCompras)}</span>
                                                         </div>
                                                     </div>
                                                 </>)}
@@ -3208,7 +3324,7 @@ export default function InventarioBienesPage() {
                                         {Math.abs(comprasNetas) > 0.01 && (
                                             <div className="space-y-1">
                                                 <div className="text-slate-400 text-[10px] uppercase font-bold">
-                                                    {(cierreBalances.gastosCompras > 0.01 || cierreBalances.bonifCompras > 0.01 || cierreBalances.devolCompras > 0.01) ? '2' : '1'}. Compras Netas a Mercaderias
+                                                    {(cierreTotals.gastosCompras > 0.01 || cierreTotals.bonifCompras > 0.01 || cierreTotals.devolCompras > 0.01) ? '2' : '1'}. Compras Netas a Mercaderias
                                                 </div>
                                                 {comprasNetas > 0 ? (<>
                                                     <div className="flex justify-between">
@@ -3250,7 +3366,7 @@ export default function InventarioBienesPage() {
                                                 <div className="text-slate-400 text-[10px] uppercase font-bold">
                                                     {(() => {
                                                         let n = 1
-                                                        if (cierreBalances.gastosCompras > 0.01 || cierreBalances.bonifCompras > 0.01 || cierreBalances.devolCompras > 0.01) n++
+                                                        if (cierreTotals.gastosCompras > 0.01 || cierreTotals.bonifCompras > 0.01 || cierreTotals.devolCompras > 0.01) n++
                                                         if (Math.abs(comprasNetas) > 0.01) n++
                                                         return n
                                                     })()}. Determinacion CMV
@@ -3290,14 +3406,14 @@ export default function InventarioBienesPage() {
                                         )}
 
                                         {/* 4. Neteo Ventas Netas (optional) */}
-                                        {(cierreBalances.bonifVentas > 0.01 || cierreBalances.devolVentas > 0.01) && (
+                                        {(cierreTotals.bonifVentas > 0.01 || cierreTotals.devolVentas > 0.01) && (
                                             <div className="space-y-1">
                                                 <div className="text-slate-400 text-[10px] uppercase font-bold">Neteo Ventas Netas</div>
-                                                {cierreBalances.bonifVentas > 0.01 && (<>
+                                                {cierreTotals.bonifVentas > 0.01 && (<>
                                                     <div className="flex justify-between">
                                                         <span>Ventas</span>
                                                         <div className="flex gap-4">
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.bonifVentas)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.bonifVentas)}</span>
                                                             <span className="w-24 text-right text-slate-400">-</span>
                                                         </div>
                                                     </div>
@@ -3305,15 +3421,15 @@ export default function InventarioBienesPage() {
                                                         <span>&nbsp;&nbsp;a Bonif s/ventas</span>
                                                         <div className="flex gap-4">
                                                             <span className="w-24 text-right text-slate-400">-</span>
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.bonifVentas)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.bonifVentas)}</span>
                                                         </div>
                                                     </div>
                                                 </>)}
-                                                {cierreBalances.devolVentas > 0.01 && (<>
+                                                {cierreTotals.devolVentas > 0.01 && (<>
                                                     <div className="flex justify-between">
                                                         <span>Ventas</span>
                                                         <div className="flex gap-4">
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.devolVentas)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.devolVentas)}</span>
                                                             <span className="w-24 text-right text-slate-400">-</span>
                                                         </div>
                                                     </div>
@@ -3321,7 +3437,7 @@ export default function InventarioBienesPage() {
                                                         <span>&nbsp;&nbsp;a Devol s/ventas</span>
                                                         <div className="flex gap-4">
                                                             <span className="w-24 text-right text-slate-400">-</span>
-                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreBalances.devolVentas)}</span>
+                                                            <span className="w-24 text-right font-bold">{formatCurrency(cierreTotals.devolVentas)}</span>
                                                         </div>
                                                     </div>
                                                 </>)}

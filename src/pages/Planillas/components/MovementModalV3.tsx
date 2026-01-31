@@ -50,7 +50,7 @@ import type { Account } from '../../../core/models'
 import AccountSearchSelect from '../../../ui/AccountSearchSelect'
 
 type MainTab = 'compra' | 'venta' | 'ajuste'
-type AjusteSubTab = 'devoluciones' | 'stock' | 'rt6' | 'diferencia'
+type AjusteSubTab = 'devoluciones' | 'stock' | 'rt6' | 'bonif_desc'
 type DevolucionTipo = 'DEVOLUCION_COMPRA' | 'DEVOLUCION_VENTA'
 
 interface GastoAccesorio {
@@ -160,6 +160,19 @@ export default function MovementModalV3({
         valueDelta: 0,
         notes: '',
     })
+
+    const [postAdjust, setPostAdjust] = useState({
+        applyOn: 'PURCHASE' as 'PURCHASE' | 'SALE',
+        productId: products[0]?.id || '',
+        originalMovementId: '',
+        kind: 'BONUS' as 'BONUS' | 'DISCOUNT',
+        inputMode: 'PCT' as 'PCT' | 'AMOUNT',
+        value: 0,
+        notes: '',
+    })
+    const [postAdjustSplits, setPostAdjustSplits] = useState<PaymentSplit[]>([
+        { id: 'post-split-1', accountId: '', amount: 0 }
+    ])
 
     const [isSaving, setIsSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -304,8 +317,32 @@ export default function MovementModalV3({
             }))
     }, [movements, devolucion.productId, devolucion.tipo])
 
+    const availableMovementsForPostAdjust = useMemo(() => {
+        if (!movements) return []
+        const filterType = postAdjust.applyOn === 'PURCHASE' ? 'PURCHASE' : 'SALE'
+        return movements
+            .filter(m =>
+                m.productId === postAdjust.productId &&
+                m.type === filterType &&
+                !m.isDevolucion &&
+                m.quantity > 0
+            )
+            .map(m => ({
+                id: m.id,
+                label: `${m.date} - ${m.reference || m.id.slice(0, 8)} - Qty: ${m.quantity}`,
+                subtotal: m.subtotal,
+                ivaRate: m.ivaRate,
+                counterparty: m.counterparty,
+                reference: m.reference,
+            }))
+    }, [movements, postAdjust.productId, postAdjust.applyOn])
+
     const availablePurchasesForAssociation = useMemo(() => {
         if (!movements) return []
+        const layerQtyByMovement = new Map<string, number>()
+        selectedValuation?.layers.forEach(layer => {
+            layerQtyByMovement.set(layer.movementId, (layerQtyByMovement.get(layer.movementId) || 0) + layer.quantity)
+        })
         return movements
             .filter(m =>
                 m.productId === formData.productId &&
@@ -313,17 +350,25 @@ export default function MovementModalV3({
                 !m.isDevolucion &&
                 m.quantity > 0
             )
+            .filter(m => (layerQtyByMovement.get(m.id) || 0) > 0)
             .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
-            .map(m => ({
-                id: m.id,
-                label: `${m.date} - ${m.reference || m.id.slice(0, 8)} - Qty: ${m.quantity}`,
-            }))
-    }, [movements, formData.productId])
+            .map(m => {
+                const remaining = layerQtyByMovement.get(m.id) || 0
+                return {
+                    id: m.id,
+                    label: `${m.date} - ${m.reference || m.id.slice(0, 8)} - Qty: ${m.quantity} (Rem: ${remaining})`,
+                }
+            })
+    }, [movements, formData.productId, selectedValuation])
 
     // Selected original movement for return
     const selectedOriginalMovement = useMemo(() => {
         return availableMovementsForReturn.find(m => m.id === devolucion.originalMovementId)
     }, [availableMovementsForReturn, devolucion.originalMovementId])
+
+    const selectedPostMovement = useMemo(() => {
+        return availableMovementsForPostAdjust.find(m => m.id === postAdjust.originalMovementId)
+    }, [availableMovementsForPostAdjust, postAdjust.originalMovementId])
 
     useEffect(() => {
         if (!formData.isSoloGasto || !formData.sourceMovementId) return
@@ -332,6 +377,23 @@ export default function MovementModalV3({
             setFormData(prev => ({ ...prev, sourceMovementId: '' }))
         }
     }, [formData.isSoloGasto, formData.sourceMovementId, availablePurchasesForAssociation])
+
+    useEffect(() => {
+        if (!postAdjust.originalMovementId) return
+        const exists = availableMovementsForPostAdjust.some(m => m.id === postAdjust.originalMovementId)
+        if (!exists) {
+            setPostAdjust(prev => ({ ...prev, originalMovementId: '' }))
+        }
+    }, [postAdjust.originalMovementId, availableMovementsForPostAdjust])
+
+    useEffect(() => {
+        if (!accounts || postAdjustSplits.length === 0) return
+        if (postAdjustSplits[0].accountId) return
+        const targetCode = postAdjust.applyOn === 'PURCHASE' ? '2.1.01.01' : '1.1.02.01'
+        const acc = accounts.find(a => a.code === targetCode)
+        if (!acc) return
+        setPostAdjustSplits(prev => prev.map((s, i) => (i === 0 ? { ...s, accountId: acc.id } : s)))
+    }, [accounts, postAdjust.applyOn, postAdjustSplits])
 
     // Return calculations
     const devolucionCalculations = useMemo(() => {
@@ -349,6 +411,24 @@ export default function MovementModalV3({
 
         return { unitValue, subtotal, iva, total }
     }, [selectedOriginalMovement, devolucion])
+
+    const postAdjustCalculations = useMemo(() => {
+        const base = selectedPostMovement?.subtotal || 0
+        const neto = postAdjust.inputMode === 'PCT'
+            ? base * (postAdjust.value / 100)
+            : postAdjust.value
+        const isBonus = postAdjust.kind === 'BONUS'
+        const ivaRate = isBonus ? (selectedPostMovement?.ivaRate || 21) : 0
+        const iva = isBonus ? neto * (ivaRate / 100) : 0
+        const total = neto + iva
+        return { base, neto, ivaRate, iva, total }
+    }, [postAdjust, selectedPostMovement])
+
+    const postAdjustSplitTotals = useMemo(() => {
+        const assigned = postAdjustSplits.reduce((sum, s) => sum + s.amount, 0)
+        const remaining = postAdjustCalculations.total - assigned
+        return { assigned, remaining }
+    }, [postAdjustSplits, postAdjustCalculations.total])
 
     // Available movements for RT6 adjustment
     const availableMovementsForRT6 = useMemo(() => {
@@ -440,6 +520,36 @@ export default function MovementModalV3({
         }))
     }
 
+    const handleAddPostSplit = () => {
+        setPostAdjustSplits(prev => [
+            ...prev,
+            { id: `post-split-${Date.now()}`, accountId: '', amount: 0 }
+        ])
+    }
+
+    const handleRemovePostSplit = (id: string) => {
+        setPostAdjustSplits(prev => prev.filter(s => s.id !== id))
+    }
+
+    const handlePostSplitChange = (id: string, field: 'accountId' | 'amount', value: string | number) => {
+        setPostAdjustSplits(prev => prev.map(s => {
+            if (s.id !== id) return s
+            return { ...s, [field]: value }
+        }))
+    }
+
+    const handleAutoFillPostSplit = () => {
+        const zeroSplit = postAdjustSplits.find(s => s.amount === 0)
+        if (zeroSplit) {
+            handlePostSplitChange(zeroSplit.id, 'amount', postAdjustSplitTotals.remaining)
+        } else {
+            setPostAdjustSplits(prev => [
+                ...prev,
+                { id: `post-split-${Date.now()}`, accountId: '', amount: postAdjustSplitTotals.remaining }
+            ])
+        }
+    }
+
     const devolucionSplitTotals = useMemo(() => {
         const assigned = devolucionSplits.reduce((sum, s) => sum + s.amount, 0)
         const remaining = devolucionCalculations.total - assigned
@@ -489,11 +599,12 @@ export default function MovementModalV3({
             setIsSaving(true)
             try {
                 const isCompra = devolucion.tipo === 'DEVOLUCION_COMPRA'
+                const qty = isCompra ? -devolucion.cantidadDevolver : devolucion.cantidadDevolver
                 await onSave({
                     type: isCompra ? 'PURCHASE' : 'SALE',
                     productId: devolucion.productId,
                     date: formData.date,
-                    quantity: -devolucion.cantidadDevolver, // negative for return
+                    quantity: qty,
                     periodId,
                     unitCost: isCompra ? devolucionCalculations.unitValue : undefined,
                     unitPrice: !isCompra ? devolucionCalculations.unitValue : undefined,
@@ -509,10 +620,73 @@ export default function MovementModalV3({
                     reference: formData.reference || undefined,
                     autoJournal: formData.autoJournal,
                     isDevolucion: true,
+                    sourceMovementId: devolucion.originalMovementId,
                 })
                 onClose()
             } catch (e) {
                 setError(e instanceof Error ? e.message : 'Error al guardar devolucion')
+                setIsSaving(false)
+            }
+            return
+        }
+
+        // Ajuste - Bonif/Descuentos post
+        if (mainTab === 'ajuste' && ajusteSubTab === 'bonif_desc') {
+            if (!postAdjust.originalMovementId) {
+                setError('Selecciona un movimiento original para ajustar')
+                return
+            }
+            if (postAdjust.value <= 0) {
+                setError('El monto o porcentaje debe ser mayor a 0')
+                return
+            }
+
+            const invalidSplit = postAdjustSplits.find(s => !s.accountId || s.amount <= 0)
+            if (invalidSplit) {
+                setError('Completa todas las cuentas de contrapartida con importe mayor a 0')
+                return
+            }
+            if (Math.abs(postAdjustSplitTotals.remaining) > 1) {
+                setError(`El total asignado no coincide. Diferencia: ${formatCurrency(postAdjustSplitTotals.remaining)}`)
+                return
+            }
+            if (postAdjustCalculations.neto <= 0) {
+                setError('El importe neto del ajuste debe ser mayor a 0')
+                return
+            }
+
+            setIsSaving(true)
+            try {
+                const isPurchase = postAdjust.applyOn === 'PURCHASE'
+                const adjustmentKind = isPurchase
+                    ? (postAdjust.kind === 'BONUS' ? 'BONUS_PURCHASE' : 'DISCOUNT_PURCHASE')
+                    : (postAdjust.kind === 'BONUS' ? 'BONUS_SALE' : 'DISCOUNT_SALE')
+                const counterparty = selectedPostMovement?.counterparty || formData.counterparty || undefined
+                await onSave({
+                    type: 'VALUE_ADJUSTMENT',
+                    adjustmentKind,
+                    productId: postAdjust.productId,
+                    date: formData.date,
+                    quantity: 0,
+                    periodId,
+                    unitCost: 0,
+                    unitPrice: 0,
+                    ivaRate: postAdjustCalculations.ivaRate as IVARate,
+                    ivaAmount: postAdjustCalculations.iva,
+                    subtotal: postAdjustCalculations.neto,
+                    total: postAdjustCalculations.total,
+                    costMethod,
+                    counterparty,
+                    paymentMethod: 'MIXTO',
+                    paymentSplits: postAdjustSplits.map(s => ({ accountId: s.accountId, amount: s.amount, method: 'AJUSTE' })),
+                    notes: postAdjust.notes || undefined,
+                    reference: selectedPostMovement?.reference || formData.reference || undefined,
+                    autoJournal: formData.autoJournal,
+                    sourceMovementId: postAdjust.originalMovementId,
+                })
+                onClose()
+            } catch (e) {
+                setError(e instanceof Error ? e.message : 'Error al guardar ajuste')
                 setIsSaving(false)
             }
             return
@@ -599,12 +773,6 @@ export default function MovementModalV3({
                 setError(e instanceof Error ? e.message : 'Error al guardar ajuste RT6')
                 setIsSaving(false)
             }
-            return
-        }
-
-        // Ajuste - Diferencia de Cambio (placeholder)
-        if (mainTab === 'ajuste' && ajusteSubTab === 'diferencia') {
-            setError('La funcionalidad de Diferencia de Inventario se implementara en una proxima version.')
             return
         }
 
@@ -863,14 +1031,15 @@ export default function MovementModalV3({
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setAjusteSubTab('diferencia')}
-                                        className={`px-4 py-1.5 text-sm font-${ajusteSubTab === 'diferencia' ? 'semibold' : 'medium'} ${
-                                            ajusteSubTab === 'diferencia'
+                                        onClick={() => setAjusteSubTab('bonif_desc')}
+                                        className={`px-4 py-1.5 text-sm font-${ajusteSubTab === 'bonif_desc' ? 'semibold' : 'medium'} ${
+                                            ajusteSubTab === 'bonif_desc'
                                                 ? 'text-blue-600 border-b-2 border-blue-600'
                                                 : 'text-slate-500 hover:text-slate-700'
                                         }`}
                                     >
-                                        Diferencia de Cambio
+                                        <Percent size={14} weight="bold" className="inline mr-1" />
+                                        Bonif. / Descuentos
                                     </button>
                                 </div>
                             </div>
@@ -1284,10 +1453,10 @@ export default function MovementModalV3({
                             </div>
                         )}
 
-                        {/* DIFERENCIA DE CAMBIO (placeholder) */}
-                        {mainTab === 'ajuste' && ajusteSubTab === 'diferencia' && (
+                        {/* BONIF / DESCUENTOS POST */}
+                        {mainTab === 'ajuste' && ajusteSubTab === 'bonif_desc' && (
                             <div className="space-y-6 animate-fade-in">
-                                {/* FECHA - Diferencia */}
+                                {/* FECHA */}
                                 <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                     <div className="w-48">
                                         <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -1302,15 +1471,228 @@ export default function MovementModalV3({
                                     </div>
                                 </section>
 
-                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-                                    <Info size={20} className="text-amber-600 mt-0.5" />
-                                    <div>
-                                        <h4 className="text-sm font-semibold text-amber-800">Funcionalidad en desarrollo</h4>
-                                        <p className="text-xs text-amber-700 mt-1">
-                                            La funcionalidad de Diferencia de Inventario homogenea se implementara proximamente.
-                                        </p>
+                                {/* Aplicar sobre */}
+                                <section className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                                    <label className="block text-xs font-semibold text-indigo-800 mb-2">Aplicar sobre</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPostAdjust(prev => ({ ...prev, applyOn: 'PURCHASE', originalMovementId: '' }))}
+                                            className={`py-2.5 text-sm font-semibold rounded-lg border transition-all ${
+                                                postAdjust.applyOn === 'PURCHASE'
+                                                    ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                                            }`}
+                                        >
+                                            Compra
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPostAdjust(prev => ({ ...prev, applyOn: 'SALE', originalMovementId: '' }))}
+                                            className={`py-2.5 text-sm font-semibold rounded-lg border transition-all ${
+                                                postAdjust.applyOn === 'SALE'
+                                                    ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                                            }`}
+                                        >
+                                            Venta
+                                        </button>
                                     </div>
-                                </div>
+                                </section>
+
+                                {/* Producto */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <Package size={16} weight="duotone" className="text-blue-600" /> Producto
+                                    </h3>
+                                    <select
+                                        value={postAdjust.productId}
+                                        onChange={(e) => setPostAdjust(prev => ({ ...prev, productId: e.target.value, originalMovementId: '' }))}
+                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                    >
+                                        {products.map((p) => {
+                                            const val = valuations.find((v) => v.product.id === p.id)
+                                            return (
+                                                <option key={p.id} value={p.id}>
+                                                    {p.name} (Stock: {val?.currentStock || 0})
+                                                </option>
+                                            )
+                                        })}
+                                    </select>
+                                </section>
+
+                                {/* Movimiento original */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <MagnifyingGlass size={16} weight="duotone" className="text-indigo-600" /> Movimiento original
+                                    </h3>
+                                    <select
+                                        value={postAdjust.originalMovementId}
+                                        onChange={(e) => setPostAdjust(prev => ({ ...prev, originalMovementId: e.target.value }))}
+                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    >
+                                        <option value="">Selecciona un movimiento...</option>
+                                        {availableMovementsForPostAdjust.map(m => (
+                                            <option key={m.id} value={m.id}>{m.label}</option>
+                                        ))}
+                                    </select>
+                                    {availableMovementsForPostAdjust.length === 0 && (
+                                        <p className="text-xs text-slate-400 mt-2">
+                                            No hay movimientos disponibles para este producto.
+                                        </p>
+                                    )}
+                                </section>
+
+                                {/* Tipo de Ajuste */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <Percent size={16} weight="duotone" className="text-purple-600" /> Tipo de Ajuste
+                                    </h3>
+                                    <select
+                                        value={postAdjust.kind}
+                                        onChange={(e) => setPostAdjust(prev => ({ ...prev, kind: e.target.value as 'BONUS' | 'DISCOUNT' }))}
+                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-purple-500 outline-none"
+                                    >
+                                        {postAdjust.applyOn === 'PURCHASE' ? (
+                                            <>
+                                                <option value="BONUS">Bonificacion sobre compras</option>
+                                                <option value="DISCOUNT">Descuento obtenido (financiero)</option>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <option value="BONUS">Bonificacion sobre ventas</option>
+                                                <option value="DISCOUNT">Descuento otorgado (financiero)</option>
+                                            </>
+                                        )}
+                                    </select>
+                                </section>
+
+                                {/* Importe */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <Tag size={16} weight="duotone" className="text-emerald-600" /> Importe del ajuste
+                                    </h3>
+                                    <div className="flex gap-2 mb-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPostAdjust(prev => ({ ...prev, inputMode: 'PCT' }))}
+                                            className={`px-3 py-1.5 text-xs font-semibold rounded-md border ${
+                                                postAdjust.inputMode === 'PCT' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-500 border-slate-200'
+                                            }`}
+                                        >
+                                            %
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPostAdjust(prev => ({ ...prev, inputMode: 'AMOUNT' }))}
+                                            className={`px-3 py-1.5 text-xs font-semibold rounded-md border ${
+                                                postAdjust.inputMode === 'AMOUNT' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-500 border-slate-200'
+                                            }`}
+                                        >
+                                            $
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">{postAdjust.inputMode === 'PCT' ? 'Porcentaje' : 'Monto'}</label>
+                                            <div className="relative">
+                                                {postAdjust.inputMode === 'AMOUNT' && <span className="absolute left-3 top-2 text-slate-400 text-sm">$</span>}
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.01"
+                                                    value={postAdjust.value || ''}
+                                                    onChange={(e) => setPostAdjust(prev => ({ ...prev, value: Number(e.target.value) }))}
+                                                    className={`w-full ${postAdjust.inputMode === 'AMOUNT' ? 'pl-8' : 'pl-3'} pr-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-emerald-500 outline-none`}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="text-xs text-slate-500 space-y-1">
+                                            <div className="flex justify-between"><span>Base</span><span className="font-mono">{formatCurrency(postAdjustCalculations.base)}</span></div>
+                                            <div className="flex justify-between"><span>Neto</span><span className="font-mono">{formatCurrency(postAdjustCalculations.neto)}</span></div>
+                                            <div className="flex justify-between"><span>IVA</span><span className="font-mono">{formatCurrency(postAdjustCalculations.iva)}</span></div>
+                                            <div className="flex justify-between font-semibold"><span>Total</span><span className="font-mono">{formatCurrency(postAdjustCalculations.total)}</span></div>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* Contrapartidas */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <Wallet size={16} weight="duotone" className="text-blue-600" /> Contrapartidas
+                                    </h3>
+                                    <div className="space-y-3">
+                                        {postAdjustSplits.map((split) => (
+                                            <div key={split.id} className="flex items-center gap-3 relative">
+                                                <div className="flex-1 relative">
+                                                    <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1 z-10">CUENTA</label>
+                                                    <AccountSearchSelect
+                                                        accounts={accounts || []}
+                                                        value={split.accountId}
+                                                        onChange={(val) => handlePostSplitChange(split.id, 'accountId', val)}
+                                                        placeholder="Buscar cuenta..."
+                                                        inputClassName="h-[52px] pt-4 text-sm"
+                                                    />
+                                                </div>
+                                                <div className="w-1/3 relative">
+                                                    <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1">IMPORTE</label>
+                                                    <input
+                                                        type="number"
+                                                        value={split.amount || ''}
+                                                        onChange={(e) => handlePostSplitChange(split.id, 'amount', Number(e.target.value))}
+                                                        className="w-full px-3 py-3 pt-5 border border-slate-300 rounded-lg text-sm font-mono text-right outline-none focus:border-blue-500 bg-white h-[52px]"
+                                                        placeholder="0,00"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemovePostSplit(split.id)}
+                                                    className="mt-2 p-2 text-slate-300 hover:text-red-500 transition-colors"
+                                                    title="Eliminar linea"
+                                                >
+                                                    <Trash size={18} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center">
+                                        <span className="text-xs text-slate-500 italic">Selecciona la contrapartida del ajuste.</span>
+                                        <button
+                                            type="button"
+                                            onClick={handleAddPostSplit}
+                                            className="text-xs font-semibold text-blue-600 cursor-pointer hover:underline flex items-center gap-1"
+                                        >
+                                            <Plus weight="bold" /> Agregar otra cuenta
+                                        </button>
+                                    </div>
+                                    <div className="flex justify-between items-center mt-3">
+                                        <button
+                                            type="button"
+                                            onClick={handleAutoFillPostSplit}
+                                            className="text-[10px] uppercase font-bold text-slate-400 hover:text-slate-600"
+                                        >
+                                            Autocompletar restante
+                                        </button>
+                                        <div className="text-right">
+                                            <div className="text-[10px] uppercase font-bold text-slate-400">Restante</div>
+                                            <div className={`font-mono font-bold text-sm ${Math.abs(postAdjustSplitTotals.remaining) > 1 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                                {formatCurrency(postAdjustSplitTotals.remaining)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* Notas */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <label className="block text-xs font-semibold text-slate-700 mb-1">Notas / Referencia</label>
+                                    <input
+                                        type="text"
+                                        value={postAdjust.notes}
+                                        onChange={(e) => setPostAdjust(prev => ({ ...prev, notes: e.target.value }))}
+                                        placeholder="Ej: Ajuste post-factura"
+                                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                                    />
+                                </section>
                             </div>
                         )}
 
@@ -1898,6 +2280,45 @@ export default function MovementModalV3({
                                 </div>
                             )}
 
+                            {/* SUMMARY CARD - Bonif/Descuentos */}
+                            {mainTab === 'ajuste' && ajusteSubTab === 'bonif_desc' && selectedPostMovement && (
+                                <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 mb-6 shadow-sm">
+                                    <h4 className="text-sm font-display font-bold text-slate-900 mb-4">Resumen Ajuste</h4>
+
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between text-slate-600">
+                                            <span>Tipo</span>
+                                            <span className="font-semibold">
+                                                {postAdjust.kind === 'BONUS' ? 'Bonificacion' : 'Descuento financiero'}
+                                                {' '}
+                                                {postAdjust.applyOn === 'PURCHASE' ? '(Compra)' : '(Venta)'}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-500">
+                                            <span>Base movimiento</span>
+                                            <span className="font-mono">{formatCurrency(postAdjustCalculations.base)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-600 font-medium pt-2 border-t border-slate-200">
+                                            <span>Neto ajuste</span>
+                                            <span className="font-mono">{formatCurrency(postAdjustCalculations.neto)}</span>
+                                        </div>
+                                        {postAdjust.kind === 'BONUS' && (
+                                            <div className="flex justify-between text-slate-500">
+                                                <span>IVA ({postAdjustCalculations.ivaRate}%)</span>
+                                                <span className="font-mono">{formatCurrency(postAdjustCalculations.iva)}</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="mt-4 pt-3 border-t border-slate-300 flex justify-between items-center">
+                                        <span className="text-lg font-display font-bold text-slate-900">Total Ajuste</span>
+                                        <span className="text-2xl font-display font-bold text-emerald-600 tracking-tight">
+                                            {formatCurrency(postAdjustCalculations.total)}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* PREVIEW ASIENTO - RT6 */}
                             {mainTab === 'ajuste' && ajusteSubTab === 'rt6' && rt6.valueDelta !== 0 && (
                                 <div>
@@ -1951,6 +2372,103 @@ export default function MovementModalV3({
                                     <p className="text-[10px] text-slate-400 mt-2 text-center">
                                         *Asiento automatico RT6 — Mercaderias vs RECPAM.
                                     </p>
+                                </div>
+                            )}
+
+                            {/* PREVIEW ASIENTO - Bonif/Descuentos */}
+                            {mainTab === 'ajuste' && ajusteSubTab === 'bonif_desc' && selectedPostMovement && postAdjustCalculations.neto > 0 && (
+                                <div>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-6 h-6 rounded bg-emerald-600 text-white flex items-center justify-center text-xs">
+                                            <Robot size={14} weight="fill" />
+                                        </div>
+                                        <span className="text-xs font-bold text-emerald-600 uppercase">Vista Previa Contable</span>
+                                    </div>
+
+                                    <div className="bg-slate-900 rounded-lg p-4 font-mono text-xs text-slate-300 shadow-inner">
+                                        <table className="w-full">
+                                            <thead>
+                                                <tr className="text-slate-500 border-b border-slate-700">
+                                                    <th className="text-left pb-2 font-normal">Cuenta</th>
+                                                    <th className="text-right pb-2 font-normal">Debe</th>
+                                                    <th className="text-right pb-2 font-normal">Haber</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-700/50">
+                                                {postAdjust.applyOn === 'PURCHASE' ? (
+                                                    postAdjust.kind === 'BONUS' ? (
+                                                        <>
+                                                            <tr>
+                                                                <td className="py-1.5 text-white">Proveedores / Caja</td>
+                                                                <td className="py-1.5 text-right text-emerald-400">{postAdjustCalculations.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                            </tr>
+                                                            <tr>
+                                                                <td className="py-1.5 pl-4 text-slate-400">a Bonif. s/compras</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                                <td className="py-1.5 text-right text-white">{postAdjustCalculations.neto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                            </tr>
+                                                            {postAdjustCalculations.iva > 0 && (
+                                                                <tr>
+                                                                    <td className="py-1.5 pl-4 text-slate-400">a IVA CF (Reversion)</td>
+                                                                    <td className="py-1.5 text-right">-</td>
+                                                                    <td className="py-1.5 text-right text-white">{postAdjustCalculations.iva.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                                </tr>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <tr>
+                                                                <td className="py-1.5 text-white">Proveedores / Caja</td>
+                                                                <td className="py-1.5 text-right text-emerald-400">{postAdjustCalculations.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                            </tr>
+                                                            <tr>
+                                                                <td className="py-1.5 pl-4 text-slate-400">a Desc. obtenidos</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                                <td className="py-1.5 text-right text-white">{postAdjustCalculations.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                            </tr>
+                                                        </>
+                                                    )
+                                                ) : (
+                                                    postAdjust.kind === 'BONUS' ? (
+                                                        <>
+                                                            <tr>
+                                                                <td className="py-1.5 text-white">Bonif. s/ventas</td>
+                                                                <td className="py-1.5 text-right text-emerald-400">{postAdjustCalculations.neto.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                            </tr>
+                                                            {postAdjustCalculations.iva > 0 && (
+                                                                <tr>
+                                                                    <td className="py-1.5 text-white">IVA DF (Reversion)</td>
+                                                                    <td className="py-1.5 text-right text-emerald-400">{postAdjustCalculations.iva.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                                    <td className="py-1.5 text-right">-</td>
+                                                                </tr>
+                                                            )}
+                                                            <tr>
+                                                                <td className="py-1.5 pl-4 text-slate-400">a Deudores / Caja</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                                <td className="py-1.5 text-right text-white">{postAdjustCalculations.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                            </tr>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <tr>
+                                                                <td className="py-1.5 text-white">Desc. otorgados</td>
+                                                                <td className="py-1.5 text-right text-emerald-400">{postAdjustCalculations.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                            </tr>
+                                                            <tr>
+                                                                <td className="py-1.5 pl-4 text-slate-400">a Deudores / Caja</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                                <td className="py-1.5 text-right text-white">{postAdjustCalculations.total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                            </tr>
+                                                        </>
+                                                    )
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             )}
 

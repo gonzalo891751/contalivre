@@ -2,6 +2,70 @@
 
 ---
 
+## CHECKPOINT #INV-AJUSTES-BONIF-DESC-POST
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Corregir devolucion venta en cierre/kardex, agregar ajustes post (bonif/desc) sin cantidad, y endurecer cierre basado en movimientos.
+
+### Cambios clave
+1. **Ajustes post (Bonif/Desc)**: `AdjustmentKind` ampliado (BONUS_/DISCOUNT_ compra/venta). MovementModalV3 agrega sub-tab **Bonif. / Descuentos** con selector de compra/venta + movimiento origen, %/monto, contrapartidas y preview contable.
+2. **Asientos post**: nuevo builder `buildPostAdjustmentJournalEntries()` en `bienes.ts` con cuentas correctas (Bonif/Desc + IVA reverso + contrapartida). Soporta splits y valida balance. `resolveCounterpartyAccountId()` ahora resuelve contrapartidas para VALUE_ADJUSTMENT post.
+3. **Costing**: VALUE_ADJUSTMENT solo afecta capas si `adjustmentKind` es RT6 o CAPITALIZATION (bonif/desc no tocan stock).
+4. **Cierre**: totales por movimientos (no ledger). Compras/Ventas brutas incluyen bonif inline y ajustes post; lineas de Bonif/Devol se muestran y afectan netos segun formula.
+5. **Kardex**: labels para ajustes post (Bonif compra/venta, Desc obtenido/otorgado).
+
+### Archivos tocados
+- src/core/inventario/types.ts
+- src/core/inventario/costing.ts
+- src/storage/bienes.ts
+- src/pages/Planillas/components/MovementModalV3.tsx
+- src/pages/Planillas/InventarioBienesPage.tsx
+- docs/AI_HANDOFF.md
+
+### Validacion manual sugerida
+1. **Devolucion venta parcial**: Kardex "Devolucion venta", qty +, stock sube; Cierre muestra "- Devoluciones sobre ventas".
+2. **Bonif venta post (2%)**: movimiento qty=0, kind=BONUS_SALE; asiento Debe Bonif s/ventas + IVA DF, Haber Deudores/Caja; Cierre resta en Ventas Netas.
+3. **Bonif compra post (2%)**: movimiento qty=0, kind=BONUS_PURCHASE; asiento Debe Proveedores/Caja, Haber Bonif s/compras + IVA CF; Cierre resta en Compras Netas.
+4. **Desc financiero post venta**: asiento SIN IVA; NO afecta Ventas Netas.
+5. **Desc financiero post compra**: asiento SIN IVA; NO afecta Compras Netas.
+
+### Comandos
+- npm run build  # PASS (tsc -b + vite build)
+
+---
+
+
+## CHECKPOINT #FIX-DEVOLUCIONES-CODIGOS-GASTOS
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Normalizar mapeos 4.8.xx, corregir solo gasto a Gastos s/compras, y arreglar devoluciones (Kardex + signo + capas).
+
+### Cambios clave
+1. **Mapeo de cuentas (4.8.xx)**: DEFAULT_ACCOUNT_CODES y ACCOUNT_FALLBACKS alineados a 4.8.01/02/03/04/05/06. Se agregaron alias para compatibilidad con codigos viejos 5.1.xx y para instalaciones con gastos/bonif cruzados (alias por codigo + validacion por nombre).
+2. **Solo gasto (qty=0)**: asiento capitalizable y no-capitalizable siempre debita **Gastos sobre compras**; aparece en Cierre bajo Compras brutas y suma en Compras netas.
+3. **Imputar gasto a compra**: selector opcional en V3 (Solo gasto) con compras con saldo remanente (capas). Persiste `sourceMovementId` para asignar costo a la capa correspondiente.
+4. **Devolucion venta/compra**: Kardex etiqueta como devolucion, signo correcto, stock reingresa/egresa segun corresponda. Se guarda `sourceMovementId` en devoluciones para recomponer capas. Sale return revierte CMV en modo permanente.
+5. **Capas/FIFO**: SALE guarda `costLayersUsed`. Devolucion venta reingresa capas en proporcion al consumo original; devolucion compra consume capas del movimiento origen.
+
+### Archivos tocados
+- src/core/inventario/types.ts
+- src/core/inventario/costing.ts
+- src/storage/bienes.ts
+- src/pages/Planillas/components/MovementModalV3.tsx
+- src/pages/Planillas/InventarioBienesPage.tsx
+- docs/AI_HANDOFF.md
+
+### Validacion manual sugerida
+A) Solo gasto gravado IVA (capitalizar OFF) -> D: Gastos s/compras, D: IVA CF, H: Banco; aparece en Cierre sumando gastos; Compras netas sube.
+B) Solo gasto gravado IVA (capitalizar ON + imputar a compra) -> asiento igual; costo de capa sube (EF teorica/FIFO sube) sin qty.
+C) Devolucion venta parcial -> Kardex "Devolucion venta", qty +, EF teorica sube; CMV revierte (modo permanente).
+D) Devolucion compra parcial -> qty -, Kardex "Devolucion compra", Cierre resta devoluciones sobre compras.
+
+### Comandos
+- npm run build  # PASS (tsc -b + vite build)
+
+---
+
 
 ## CHECKPOINT #FIX-SOLO-GASTO-GASTOS-CIERRE-ASSOC
 **Fecha:** 2026-01-31
