@@ -2,6 +2,51 @@
 
 ---
 
+## CHECKPOINT #INVENTARIO-DASHBOARD-PREMIUM
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS, 48/48 Tests PASS
+**Objetivo:** Dashboard de Inventario premium: fix doble reexpresion RT6, KPIs completos, composicion real en tarjeta, mini chart, tooltips sin solape.
+
+### Fases Completadas
+
+**F0 - Diagnostico:** Identificados root causes de (a) composicion llena sin consumo (ProductValuationCard usaba solo layers activos sin historial), (b) tooltip cortado (posicion absoluta sin Portal), (c) doble reexpresion RT6 (buildCostLayers ajustaba unitCost + valuation-homogenea aplicaba coef encima).
+
+**F1 - Fix contable RT6 (critico):** Agregado `currencyBasis?: 'HIST' | 'CIERRE'` a CostLayer. Cuando VALUE_ADJUSTMENT RT6 ajusta un layer, se marca `currencyBasis: 'CIERRE'`. En `reexpressLayer()`, si `currencyBasis === 'CIERRE'`, coef=1. Resultado: ValHist==ValHomog cuando capas ya fueron reexpresadas. 3 tests unitarios cubren: layer marcado, convergencia ValHist/ValHomog, caso mixto.
+
+**F2 - Dashboard default Ejercicio + KPIs:** Default cambiado a 'ejercicio', persistido en localStorage (`inventario.dashboard.rangeMode`). KPIs expandidos a 6 cards: Stock Valuado, Ventas Netas, CMV, Resultado Bruto, Sell-through (u.vendidas/u.ingresadas), Rotacion (anualizada).
+
+**F3 - Tarjeta producto composicion real + tooltip Portal:** ProductValuationCard reescrito con: `buildLayerHistory()` para barras con consumo real (greyed + striped para consumido, color para remanente), tooltip via `createPortal` (posicionamiento inteligente arriba/abajo segun viewport), costo unitario hist/homog por producto, ventas netas del producto.
+
+**F4 - Mini chart:** Grafico de barras simple (divs) para ventas. Modo Ejercicio: 12 barras mensuales. Modo Mes: barras semanales. Sin dependencia de libs externas.
+
+**F5 - Accesibilidad:** Tooltips con `tabIndex`, `role="button"`, `aria-describedby`, `aria-label`. Escape cierra tooltip. Focus trigger en segmentos de composicion.
+
+**F6 - Tests + build:** `npm run build` PASS, `npm run test` 48/48 PASS (3 nuevos tests RT6).
+
+### Archivos Tocados
+| Archivo | Accion | LOC aprox |
+|---|---|---|
+| src/core/inventario/types.ts | Agregado CurrencyBasis + campo en CostLayer | +15 |
+| src/core/inventario/costing.ts | Marca currencyBasis='CIERRE' en RT6 adjustments | +5 |
+| src/core/inventario/valuation-homogenea.ts | Respeta currencyBasis en reexpressLayer() | +10 |
+| src/pages/Planillas/InventarioBienesPage.tsx | Default ejercicio, localStorage, KPIs mejorados, mini chart, props a card | +120 |
+| src/pages/Planillas/components/ProductValuationCard.tsx | Reescrito: lot history, Portal tooltip, a11y, product KPIs | ~280 (rewrite) |
+| tests/costing.test.ts | 3 tests RT6 double reexpression | +160 |
+| docs/AI_HANDOFF.md | Este checkpoint | +40 |
+
+### Decisiones Tecnicas
+- **RT6 fix:** Opcion A (currencyBasis en CostLayer). Elegida por ser minima, retrocompatible (campo opcional), y trazable.
+- **Composicion bar:** Usa `buildLayerHistory()` (mismo motor del Drawer) para datos reales. Fallback a layers de valuacion si no hay history.
+- **Mini chart:** Divs puros (sin recharts/chart.js). Suficiente para el caso de uso sin agregar bundle weight.
+- **Tooltip:** Portal con posicionamiento dinamico (arriba si hay espacio, abajo si no). Se cierra en scroll.
+
+### Validacion
+- `npm run build`: PASS (37s)
+- `npm run test`: 48/48 PASS (incl. 3 nuevos RT6)
+- Checklist: todos los items cumplidos
+
+---
+
 ## CHECKPOINT #FIX-PN-RETIROS-330401
 **Fecha:** 2026-01-31
 **Estado:** COMPLETADO - Build PASS
