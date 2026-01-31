@@ -357,6 +357,13 @@ export interface BienesProduct {
 }
 
 /**
+ * Currency basis for cost layers (RT6/RECPAM)
+ * - 'HIST': Historical cost (original purchase value)
+ * - 'CIERRE': Already reexpressed to closing currency (post RT6 adjustment)
+ */
+export type CurrencyBasis = 'HIST' | 'CIERRE'
+
+/**
  * Cost layer for FIFO/LIFO tracking
  */
 export interface CostLayer {
@@ -364,6 +371,13 @@ export interface CostLayer {
     quantity: number               // Remaining quantity in layer
     unitCost: number               // Unit cost of this layer
     movementId: string             // Reference to original purchase movement
+    /**
+     * Currency basis of the unitCost:
+     * - 'HIST' (default): Historical cost, needs reexpression for homogeneous valuation
+     * - 'CIERRE': Already reexpressed to closing currency (via RT6 VALUE_ADJUSTMENT)
+     *            When 'CIERRE', valuation-homogenea uses coef=1 to avoid double reexpression
+     */
+    currencyBasis?: CurrencyBasis
 }
 
 /**

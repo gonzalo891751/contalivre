@@ -193,6 +193,11 @@ export function buildCostLayers(
                     for (const layer of targetLayers) {
                         const share = layer.quantity / totalTargetQty
                         layer.unitCost += (delta * share) / layer.quantity
+                        // RT6 adjustments reexpress cost to closing currency
+                        // Mark layer to prevent double reexpression in valuation-homogenea
+                        if (mov.adjustmentKind === 'RT6') {
+                            layer.currencyBasis = 'CIERRE'
+                        }
                     }
                 }
             }

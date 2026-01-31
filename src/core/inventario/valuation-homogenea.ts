@@ -95,6 +95,9 @@ export interface EndingInventoryValuation {
 
 /**
  * Reexpress a single cost layer to homogeneous values
+ *
+ * IMPORTANT: If layer.currencyBasis === 'CIERRE', the layer has already been
+ * reexpressed via RT6 VALUE_ADJUSTMENT. In this case, coef=1 to avoid double reexpression.
  */
 export function reexpressLayer(
     layer: CostLayer,
@@ -104,7 +107,11 @@ export function reexpressLayer(
     const originPeriod = getPeriodFromDate(layer.date)
     const indexOrigen = getIndexForPeriod(indices, originPeriod) ?? null
     const indexCierre = getIndexForPeriod(indices, closingPeriod) ?? null
-    const coef = calculateCoef(indexCierre ?? undefined, indexOrigen ?? undefined)
+
+    // If layer is already in closing currency (post RT6), use coef=1
+    // This prevents double reexpression when RT6 adjustments have been applied
+    const isAlreadyReexpressed = layer.currencyBasis === 'CIERRE'
+    const coef = isAlreadyReexpressed ? 1 : calculateCoef(indexCierre ?? undefined, indexOrigen ?? undefined)
 
     return {
         date: layer.date,
@@ -113,7 +120,7 @@ export function reexpressLayer(
         movementId: layer.movementId,
         originPeriod,
         closingPeriod,
-        indexOrigen,
+        indexOrigen: isAlreadyReexpressed ? indexCierre : indexOrigen,  // Show closing index as origin when already reexpressed
         indexCierre,
         coef,
         unitCostHomog: layer.unitCost * coef,

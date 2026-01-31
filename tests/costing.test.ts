@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildCostLayers, calculateProductValuation } from '../src/core/inventario/costing'
+import { reexpressLayer } from '../src/core/inventario/valuation-homogenea'
 import type { BienesProduct, BienesMovement } from '../src/core/inventario/types'
 
 /**
@@ -321,5 +322,220 @@ describe('Costing Engine - Devoluciones de Venta (PEPS)', () => {
         // El punto es que NO debe haber lotes de marzo
         const marchLayers = layers.filter(l => l.date.startsWith('2026-03'))
         expect(marchLayers.length).toBe(0)
+    })
+})
+
+// ========================================
+// RT6 Double Reexpression Tests (FASE 1)
+// ========================================
+
+describe('RT6 Double Reexpression Prevention', () => {
+    const now = new Date().toISOString()
+    const base = {
+        productId: 'prod-lata-tomate',
+        ivaRate: 21 as const,
+        costMethod: 'FIFO' as const,
+        autoJournal: false,
+        linkedJournalEntryIds: [],
+        journalStatus: 'none' as const,
+        createdAt: now,
+        updatedAt: now,
+    }
+
+    function makeProduct(): BienesProduct {
+        return {
+            id: 'prod-lata-tomate',
+            sku: 'LAT-001',
+            name: 'Lata de Tomate',
+            unit: 'u',
+            category: 'MERCADERIA',
+            reorderPoint: 10,
+            ivaRate: 21,
+            openingQty: 0,
+            openingUnitCost: 0,
+            openingDate: '2026-01-01',
+            createdAt: now,
+            updatedAt: now,
+        }
+    }
+
+    it('RT6 adjustment marks layers with currencyBasis CIERRE', () => {
+        const product = makeProduct()
+        const movements: BienesMovement[] = [
+            {
+                ...base,
+                id: 'mov-compra-001',
+                date: '2026-01-15',
+                type: 'PURCHASE',
+                quantity: 100,
+                unitCost: 10,
+                ivaAmount: 210,
+                subtotal: 1000,
+                total: 1210,
+                costUnitAssigned: 10,
+                costTotalAssigned: 1000,
+            },
+            // RT6 adjustment: reexpress 1000 → 1200 (20% inflation)
+            {
+                ...base,
+                id: 'mov-rt6-001',
+                date: '2026-06-30',
+                type: 'VALUE_ADJUSTMENT',
+                adjustmentKind: 'RT6',
+                quantity: 0,
+                ivaAmount: 0,
+                subtotal: 200,
+                total: 200,
+                valueDelta: 200,
+                costUnitAssigned: 0,
+                costTotalAssigned: 0,
+                rt6Period: '2026-06',
+                rt6SourceEntryId: 'entry-rt6-001',
+            },
+        ]
+
+        const layers = buildCostLayers(product, movements, 'FIFO')
+
+        expect(layers.length).toBe(1)
+        expect(layers[0].quantity).toBe(100)
+        // Unit cost should be 12 (10 + 200/100)
+        expect(layers[0].unitCost).toBe(12)
+        // Layer should be marked as CIERRE
+        expect(layers[0].currencyBasis).toBe('CIERRE')
+    })
+
+    it('After RT6, ValHist equals ValHomog (coef=1 for CIERRE layers)', () => {
+        // This test uses the valuation-homogenea module
+        // reexpressLayer imported at top of file
+
+        const product = makeProduct()
+        const movements: BienesMovement[] = [
+            {
+                ...base,
+                id: 'mov-compra-001',
+                date: '2026-01-15',
+                type: 'PURCHASE',
+                quantity: 100,
+                unitCost: 10,
+                ivaAmount: 210,
+                subtotal: 1000,
+                total: 1210,
+                costUnitAssigned: 10,
+                costTotalAssigned: 1000,
+            },
+            {
+                ...base,
+                id: 'mov-rt6-001',
+                date: '2026-06-30',
+                type: 'VALUE_ADJUSTMENT',
+                adjustmentKind: 'RT6',
+                quantity: 0,
+                ivaAmount: 0,
+                subtotal: 200,
+                total: 200,
+                valueDelta: 200,
+                costUnitAssigned: 0,
+                costTotalAssigned: 0,
+                rt6Period: '2026-06',
+                rt6SourceEntryId: 'entry-rt6-001',
+            },
+        ]
+
+        const layers = buildCostLayers(product, movements, 'FIFO')
+        expect(layers[0].currencyBasis).toBe('CIERRE')
+
+        // Reexpress with some indices - coef should be 1 since layer is CIERRE
+        const indices = [
+            { period: '2026-01', value: 100 },
+            { period: '2026-06', value: 120 },
+        ]
+        const homogLayer = reexpressLayer(layers[0], '2026-06', indices)
+
+        // Coef should be 1 (not 1.2) because layer is already reexpressed
+        expect(homogLayer.coef).toBe(1)
+        // totalHomog should equal totalOrigen
+        expect(homogLayer.totalHomog).toBe(homogLayer.totalOrigen)
+    })
+
+    it('Mixed layers: only non-RT6 layers get reexpressed', () => {
+        // reexpressLayer imported at top of file
+
+        const product = makeProduct()
+        const movements: BienesMovement[] = [
+            // Purchase 1: 50 @ $10 (January)
+            {
+                ...base,
+                id: 'mov-compra-001',
+                date: '2026-01-15',
+                type: 'PURCHASE',
+                quantity: 50,
+                unitCost: 10,
+                ivaAmount: 105,
+                subtotal: 500,
+                total: 605,
+                costUnitAssigned: 10,
+                costTotalAssigned: 500,
+            },
+            // Purchase 2: 50 @ $15 (March) - not yet RT6 adjusted
+            {
+                ...base,
+                id: 'mov-compra-002',
+                date: '2026-03-10',
+                type: 'PURCHASE',
+                quantity: 50,
+                unitCost: 15,
+                ivaAmount: 157.5,
+                subtotal: 750,
+                total: 907.5,
+                costUnitAssigned: 15,
+                costTotalAssigned: 750,
+            },
+            // RT6 adjustment ONLY for purchase 1 (targeted)
+            {
+                ...base,
+                id: 'mov-rt6-001',
+                date: '2026-06-30',
+                type: 'VALUE_ADJUSTMENT',
+                adjustmentKind: 'RT6',
+                quantity: 0,
+                sourceMovementId: 'mov-compra-001',
+                ivaAmount: 0,
+                subtotal: 100,
+                total: 100,
+                valueDelta: 100, // 500 → 600 (20% inflation on Jan purchase)
+                costUnitAssigned: 0,
+                costTotalAssigned: 0,
+                rt6Period: '2026-06',
+                rt6SourceEntryId: 'entry-rt6-001',
+            },
+        ]
+
+        const layers = buildCostLayers(product, movements, 'FIFO')
+
+        expect(layers.length).toBe(2)
+
+        // Layer 1 (January): should be CIERRE
+        expect(layers[0].currencyBasis).toBe('CIERRE')
+        expect(layers[0].unitCost).toBe(12) // 10 + 100/50
+
+        // Layer 2 (March): should be HIST (not adjusted)
+        expect(layers[1].currencyBasis).toBeUndefined()
+        expect(layers[1].unitCost).toBe(15)
+
+        const indices = [
+            { period: '2026-01', value: 100 },
+            { period: '2026-03', value: 110 },
+            { period: '2026-06', value: 120 },
+        ]
+
+        // Layer 1 reexpression: coef=1 (already CIERRE)
+        const homog1 = reexpressLayer(layers[0], '2026-06', indices)
+        expect(homog1.coef).toBe(1)
+        expect(homog1.totalHomog).toBe(homog1.totalOrigen)
+
+        // Layer 2 reexpression: coef=120/110 ≈ 1.0909 (still HIST)
+        const homog2 = reexpressLayer(layers[1], '2026-06', indices)
+        expect(homog2.coef).toBeCloseTo(120 / 110, 4)
+        expect(homog2.totalHomog).toBeCloseTo(750 * (120 / 110), 0)
     })
 })

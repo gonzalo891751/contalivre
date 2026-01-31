@@ -301,8 +301,18 @@ export default function InventarioBienesPage() {
     // New dashboard lots drawer
     const [dashboardLotsProduct, setDashboardLotsProduct] = useState<ProductEndingValuation | null>(null)
 
-    // KPI Range Mode: 'month' = mes actual, 'ejercicio' = acumulado ejercicio
-    const [kpiRangeMode, setKpiRangeMode] = useState<'month' | 'ejercicio'>('month')
+    // KPI Range Mode: default 'ejercicio', persist in localStorage
+    const [kpiRangeMode, setKpiRangeMode] = useState<'month' | 'ejercicio'>(() => {
+        try {
+            const saved = localStorage.getItem('inventario.dashboard.rangeMode')
+            if (saved === 'month' || saved === 'ejercicio') return saved
+        } catch { /* ignore */ }
+        return 'ejercicio'
+    })
+    const changeKpiRangeMode = useCallback((mode: 'month' | 'ejercicio') => {
+        setKpiRangeMode(mode)
+        try { localStorage.setItem('inventario.dashboard.rangeMode', mode) } catch { /* ignore */ }
+    }, [])
 
     // Configuracion de cuentas Bienes de Cambio (conciliacion)
     const [accountMappingsDraft, setAccountMappingsDraft] = useState<Partial<Record<AccountMappingKey, string>>>({})
@@ -1693,39 +1703,124 @@ export default function InventarioBienesPage() {
     const salesGoal = typeof periodGoals.salesTarget === 'number' ? periodGoals.salesTarget : null
     const marginGoal = typeof periodGoals.marginTarget === 'number' ? periodGoals.marginTarget : 40
 
-    const salesDelta = useMemo(() => {
-        const { prevStart, prevEnd } = monthRange
-        if (!prevStart || !prevEnd) return null
-        const prevSales = movements
-            .filter(m => m.type === 'SALE' && m.date >= prevStart && m.date <= prevEnd)
-            .reduce((sum, m) => sum + m.subtotal, 0)
-        if (prevSales <= 0 || kpis.salesPeriod <= 0) return null
-        return ((kpis.salesPeriod - prevSales) / prevSales) * 100
-    }, [kpis.salesPeriod, monthRange, movements])
-
-    const stockDelta = useMemo(() => {
-        if (!settings) return null
-        const { prevEnd } = monthRange
-        if (!prevEnd) return null
-        const currentCutoff = monthRange.end
-        const prevCutoff = prevEnd
-
-        const currentMovements = movements.filter(m => m.date <= currentCutoff)
-        const prevMovements = movements.filter(m => m.date <= prevCutoff)
-
-        const currentStock = calculateAllValuations(products, currentMovements, settings.costMethod)
-            .reduce((sum, v) => sum + v.totalValue, 0)
-        const prevStock = calculateAllValuations(products, prevMovements, settings.costMethod)
-            .reduce((sum, v) => sum + v.totalValue, 0)
-
-        if (prevStock <= 0 || currentStock <= 0) return null
-        return ((currentStock - prevStock) / prevStock) * 100
-    }, [monthRange, movements, products, settings])
-
     const salesProgress = useMemo(() => {
         if (!salesGoal || salesGoal <= 0) return null
         return Math.min(1, kpis.salesPeriod / salesGoal)
     }, [kpis.salesPeriod, salesGoal])
+
+    // Enhanced KPIs for dashboard (FASE 2)
+    const enhancedKPIs = useMemo(() => {
+        const rangeMovements = movements.filter(m =>
+            m.date >= kpiDateRange.start && m.date <= kpiDateRange.end
+        )
+        // Sales net: ventas - devoluciones venta - bonif ventas
+        const salesGross = rangeMovements
+            .filter(m => m.type === 'SALE' && !m.isDevolucion)
+            .reduce((s, m) => s + m.subtotal, 0)
+        const salesReturns = rangeMovements
+            .filter(m => m.type === 'SALE' && m.isDevolucion)
+            .reduce((s, m) => s + m.subtotal, 0)
+        const ventasNetas = salesGross - salesReturns
+
+        // CMV for range
+        const cmv = rangeMovements
+            .filter(m => m.type === 'SALE' || (m.type === 'ADJUSTMENT' && m.quantity < 0))
+            .reduce((s, m) => {
+                if (m.type === 'SALE' && m.isDevolucion) return s - Math.abs(m.costTotalAssigned || 0)
+                return s + (m.costTotalAssigned || 0)
+            }, 0)
+
+        const resultadoBruto = ventasNetas - cmv
+
+        // Sell-through: units sold net / units entered net
+        const unitsSoldNet = rangeMovements
+            .filter(m => m.type === 'SALE' && !m.isDevolucion)
+            .reduce((s, m) => s + m.quantity, 0)
+            - rangeMovements
+                .filter(m => m.type === 'SALE' && m.isDevolucion)
+                .reduce((s, m) => s + Math.abs(m.quantity), 0)
+        const unitsEnteredNet = rangeMovements
+            .filter(m => m.type === 'PURCHASE' && !m.isDevolucion)
+            .reduce((s, m) => s + m.quantity, 0)
+            - rangeMovements
+                .filter(m => m.type === 'PURCHASE' && m.isDevolucion)
+                .reduce((s, m) => s + Math.abs(m.quantity), 0)
+        const sellThrough = unitsEnteredNet > 0 ? (unitsSoldNet / unitsEnteredNet) * 100 : 0
+
+        // Rotation (annualized): CMV annualized / Average Stock
+        const stockValue = kpis.stockValue
+        const daysInRange = Math.max(1, Math.round(
+            (new Date(kpiDateRange.end + 'T00:00:00').getTime() - new Date(kpiDateRange.start + 'T00:00:00').getTime()) / (1000 * 60 * 60 * 24)
+        ))
+        const cmvAnnualized = (cmv / daysInRange) * 365
+        const rotation = stockValue > 0 ? cmvAnnualized / stockValue : 0
+
+        // Cost unit actual
+        const costUnitActual = kpis.totalUnits > 0 ? stockValue / kpis.totalUnits : 0
+
+        return { ventasNetas, cmv, resultadoBruto, sellThrough, rotation, costUnitActual, unitsSoldNet, unitsEnteredNet }
+    }, [movements, kpiDateRange, kpis])
+
+    // Per-product sales for ProductValuationCard
+    const perProductSales = useMemo(() => {
+        const salesByProduct = new Map<string, number>()
+        movements
+            .filter(m => m.type === 'SALE' && m.date >= kpiDateRange.start && m.date <= kpiDateRange.end)
+            .forEach(m => {
+                const current = salesByProduct.get(m.productId) || 0
+                if (m.isDevolucion) {
+                    salesByProduct.set(m.productId, current - m.subtotal)
+                } else {
+                    salesByProduct.set(m.productId, current + m.subtotal)
+                }
+            })
+        return salesByProduct
+    }, [movements, kpiDateRange])
+
+    // Mini chart data: monthly or weekly aggregation of sales
+    const miniChartData = useMemo(() => {
+        if (kpiRangeMode === 'ejercicio') {
+            // Monthly bars for the exercise year
+            const months: { label: string; value: number }[] = []
+            const pStart = new Date(periodStart + 'T00:00:00')
+            for (let i = 0; i < 12; i++) {
+                const mDate = new Date(pStart.getFullYear(), pStart.getMonth() + i, 1)
+                const mEnd = new Date(pStart.getFullYear(), pStart.getMonth() + i + 1, 0)
+                const mStartISO = mDate.getFullYear() + '-' + String(mDate.getMonth() + 1).padStart(2, '0') + '-01'
+                const mEndISO = mEnd.getFullYear() + '-' + String(mEnd.getMonth() + 1).padStart(2, '0') + '-' + String(mEnd.getDate()).padStart(2, '0')
+                const sales = movements
+                    .filter(m => m.type === 'SALE' && !m.isDevolucion && m.date >= mStartISO && m.date <= mEndISO)
+                    .reduce((s, m) => s + m.subtotal, 0)
+                months.push({
+                    label: mDate.toLocaleDateString('es-AR', { month: 'short' }),
+                    value: sales,
+                })
+            }
+            return months
+        } else {
+            // Weekly bars for current month
+            const weeks: { label: string; value: number }[] = []
+            const mStart = new Date(monthRange.start + 'T00:00:00')
+            const mEnd = new Date(monthRange.end + 'T00:00:00')
+            let weekStart = new Date(mStart)
+            let weekNum = 1
+            while (weekStart <= mEnd) {
+                const wEnd = new Date(weekStart)
+                wEnd.setDate(wEnd.getDate() + 6)
+                if (wEnd > mEnd) wEnd.setTime(mEnd.getTime())
+                const wStartISO = weekStart.getFullYear() + '-' + String(weekStart.getMonth() + 1).padStart(2, '0') + '-' + String(weekStart.getDate()).padStart(2, '0')
+                const wEndISO = wEnd.getFullYear() + '-' + String(wEnd.getMonth() + 1).padStart(2, '0') + '-' + String(wEnd.getDate()).padStart(2, '0')
+                const sales = movements
+                    .filter(m => m.type === 'SALE' && !m.isDevolucion && m.date >= wStartISO && m.date <= wEndISO)
+                    .reduce((s, m) => s + m.subtotal, 0)
+                weeks.push({ label: `S${weekNum}`, value: sales })
+                weekStart = new Date(wEnd)
+                weekStart.setDate(weekStart.getDate() + 1)
+                weekNum++
+            }
+            return weeks
+        }
+    }, [kpiRangeMode, movements, periodStart, monthRange])
 
     const getMovementAmounts = useCallback((movement: BienesMovement) => {
         if (movement.type === 'SALE') {
@@ -1963,7 +2058,7 @@ export default function InventarioBienesPage() {
                     {/* KPI Range Toggle */}
                     <div className="hidden sm:flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
                         <button
-                            onClick={() => setKpiRangeMode('month')}
+                            onClick={() => changeKpiRangeMode('month')}
                             className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
                                 kpiRangeMode === 'month'
                                     ? 'bg-white text-slate-900 shadow-sm'
@@ -1973,7 +2068,7 @@ export default function InventarioBienesPage() {
                             Mes
                         </button>
                         <button
-                            onClick={() => setKpiRangeMode('ejercicio')}
+                            onClick={() => changeKpiRangeMode('ejercicio')}
                             className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
                                 kpiRangeMode === 'ejercicio'
                                     ? 'bg-white text-slate-900 shadow-sm'
@@ -2055,121 +2150,117 @@ export default function InventarioBienesPage() {
                 {/* DASHBOARD TAB */}
                 {activeTab === 'dashboard' && (
                     <div className="space-y-6 animate-fade-in">
-                        {/* KPIs */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                        Stock Valuado
-                                    </span>
-                                    <Coins className="text-blue-600" size={20} weight="duotone" />
+                        {/* KPIs - Row 1: Primary metrics */}
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                            {/* Stock Valuado */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Stock Valuado</span>
+                                    <Coins className="text-blue-600 shrink-0" size={16} weight="duotone" />
                                 </div>
-                                <div className="font-mono text-2xl font-medium text-slate-900">
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums truncate">
                                     {formatCurrency(kpis.stockValue)}
                                 </div>
-                                {stockDelta !== null ? (
-                                    <div className={`text-xs font-medium mt-1 flex items-center gap-1 ${stockDelta >= 0 ? 'text-emerald-600' : 'text-red-600'
-                                        }`}>
-                                        <TrendUp weight="bold" size={12} /> {stockDelta >= 0 ? '+' : ''}{stockDelta.toFixed(1)}% vs mes anterior
+                                <div className="text-[10px] text-slate-400 mt-0.5">{kpis.totalUnits.toLocaleString()} u. · {kpis.totalProducts} prod.</div>
+                            </div>
+
+                            {/* Ventas Netas */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Ventas Netas</span>
+                                    <ChartBar className="text-purple-500 shrink-0" size={16} weight="duotone" />
+                                </div>
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums truncate">
+                                    {formatCurrency(enhancedKPIs.ventasNetas)}
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">{kpiDateRange.label}</div>
+                                {salesProgress !== null && (
+                                    <div className="h-1 w-full bg-gray-100 rounded-full mt-2 overflow-hidden">
+                                        <div className="h-full bg-purple-500 rounded-full" style={{ width: `${salesProgress * 100}%` }} />
                                     </div>
-                                ) : (
-                                    <div className="text-xs text-slate-400 mt-1">Sin base previa</div>
                                 )}
                             </div>
 
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                        Unidades
-                                    </span>
-                                    <Package className="text-emerald-600" size={20} weight="duotone" />
+                            {/* CMV */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">CMV</span>
+                                    <Scales className="text-amber-500 shrink-0" size={16} weight="duotone" />
                                 </div>
-                                <div className="font-mono text-2xl font-medium text-slate-900">
-                                    {kpis.totalUnits.toLocaleString()} <span className="text-sm text-slate-500 font-sans">u.</span>
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums truncate">
+                                    {formatCurrency(enhancedKPIs.cmv)}
                                 </div>
-                                <div className="text-xs text-slate-500 mt-1">
-                                    {kpis.totalProducts} productos activos
+                                <div className="text-[10px] text-slate-400 mt-0.5">Costo merc. vendida</div>
+                            </div>
+
+                            {/* Resultado Bruto */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Resultado Bruto</span>
+                                    <TrendUp className={enhancedKPIs.resultadoBruto >= 0 ? 'text-emerald-500' : 'text-red-500'} size={16} weight="bold" />
+                                </div>
+                                <div className={`font-mono text-xl font-bold tabular-nums truncate ${enhancedKPIs.resultadoBruto >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                                    {formatCurrency(enhancedKPIs.resultadoBruto)}
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">
+                                    Margen: {kpis.grossMargin.toFixed(1)}%
+                                    <button type="button" onClick={() => openGoalModal('margin')} className="ml-1 text-slate-400 hover:text-slate-600 underline">obj {marginGoal.toFixed(0)}%</button>
                                 </div>
                             </div>
 
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                        Ventas (Periodo)
-                                    </span>
-                                    <ChartBar className="text-purple-500" size={20} weight="duotone" />
+                            {/* Sell-through */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Sell-through</span>
+                                    <ArrowsLeftRight className="text-sky-500 shrink-0" size={16} weight="duotone" />
                                 </div>
-                                <div className="font-mono text-2xl font-medium text-slate-900">
-                                    {formatCurrency(kpis.salesPeriod)}
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums">
+                                    {enhancedKPIs.sellThrough.toFixed(0)}%
                                 </div>
-                                <div className="text-xs text-slate-400 mt-1">
-                                    {kpiDateRange.label}
+                                <div className="text-[10px] text-slate-400 mt-0.5">
+                                    {enhancedKPIs.unitsSoldNet} vend / {enhancedKPIs.unitsEnteredNet} ingr
                                 </div>
-                                {salesDelta !== null ? (
-                                    <div className={`text-xs font-medium mt-1 flex items-center gap-1 ${salesDelta >= 0 ? 'text-emerald-600' : 'text-red-600'
-                                        }`}>
-                                        <TrendUp weight="bold" size={12} /> {salesDelta >= 0 ? '+' : ''}{salesDelta.toFixed(1)}% vs mes anterior
-                                    </div>
-                                ) : (
-                                    <div className="text-xs text-slate-400 mt-1">Sin base previa</div>
-                                )}
-                                {salesProgress !== null ? (
-                                    <>
-                                        <div className="h-1 w-full bg-gray-100 rounded-full mt-3 overflow-hidden">
-                                            <div
-                                                className="h-full bg-purple-500 rounded-full"
-                                                style={{ width: `${salesProgress * 100}%` }}
-                                            />
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => openGoalModal('sales')}
-                                            className="text-xs text-slate-500 mt-2 hover:text-slate-700"
-                                        >
-                                            Obj: {formatCurrency(salesGoal ?? 0)} (editar)
-                                        </button>
-                                    </>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => openGoalModal('sales')}
-                                        className="text-xs text-slate-400 mt-2 hover:text-slate-600"
-                                    >
-                                        Sin objetivo configurado
-                                    </button>
-                                )}
                             </div>
 
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                        Margen Bruto
-                                    </span>
-                                    <div className="flex items-center gap-2 text-orange-500">
-                                        <Percent size={20} weight="duotone" />
-                                        <span
-                                            className="text-xs text-slate-400"
-                                            title="Margen bruto = (Ventas - CMV) / Ventas"
-                                        >
-                                            <Info size={14} />
-                                        </span>
-                                    </div>
+                            {/* Rotacion */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Rotacion</span>
+                                    <Percent className="text-orange-500 shrink-0" size={16} weight="duotone" />
                                 </div>
-                                <div className="font-mono text-2xl font-medium text-slate-900">
-                                    {kpis.grossMargin.toFixed(1)}%
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums">
+                                    {enhancedKPIs.rotation.toFixed(1)}x
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => openGoalModal('margin')}
-                                    className="text-xs text-slate-500 mt-1 hover:text-slate-700"
-                                >
-                                    Objetivo: {marginGoal.toFixed(1)}%
-                                </button>
-                                {kpis.salesPeriod <= 0 && (
-                                    <div className="text-xs text-slate-400 mt-1">- Sin ventas en el periodo</div>
-                                )}
+                                <div className="text-[10px] text-slate-400 mt-0.5">Anualizada · C/u {formatCurrency(enhancedKPIs.costUnitActual)}</div>
                             </div>
                         </div>
+
+                        {/* Mini Chart (FASE 4) */}
+                        {miniChartData.some(d => d.value > 0) && (
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                        Ventas {kpiRangeMode === 'ejercicio' ? 'por Mes' : 'por Semana'}
+                                    </h3>
+                                    <span className="text-[10px] text-slate-400">{kpiDateRange.label}</span>
+                                </div>
+                                <div className="flex items-end gap-1 h-20">
+                                    {(() => {
+                                        const maxVal = Math.max(...miniChartData.map(d => d.value), 1)
+                                        return miniChartData.map((d, i) => (
+                                            <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                                                <div
+                                                    className={`w-full rounded-t transition-all ${d.value > 0 ? 'bg-gradient-to-t from-blue-500 to-blue-400' : 'bg-slate-100'}`}
+                                                    style={{ height: `${Math.max(2, (d.value / maxVal) * 100)}%` }}
+                                                    title={`${d.label}: ${formatCurrency(d.value)}`}
+                                                />
+                                                <span className="text-[9px] text-slate-400 truncate w-full text-center">{d.label}</span>
+                                            </div>
+                                        ))
+                                    })()}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Stock valuado por producto */}
                         {efHomogenea && efHomogenea.products.length > 0 && (
@@ -2194,6 +2285,9 @@ export default function InventarioBienesPage() {
                                         method={settings?.costMethod || 'FIFO'}
                                         formatCurrency={formatCurrency}
                                         onViewLots={() => setDashboardLotsProduct(pv)}
+                                        bienesProduct={products.find(p => p.id === pv.product.id)}
+                                        movements={movements}
+                                        productSales={perProductSales.get(pv.product.id) || 0}
                                     />
                                 ))}
                             </div>
