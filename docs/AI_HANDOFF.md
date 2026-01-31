@@ -2,6 +2,142 @@
 
 ---
 
+## CHECKPOINT #INV-PROMPT2C-RT6-PASO2-INVENTARIO-CIERRE-HOMOG
+**Fecha:** 2026-01-30
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Conectar desglose RT6 Paso 2 (por periodo/origen) con VALUE_ADJUSTMENT en inventario + cierre historico vs homogeneo.
+
+### Archivos creados
+- `src/core/inventario/rt6-apply-plan.ts` — Funcion pura `buildRT6InventoryApplyPlan` que construye plan de aplicacion RT6
+
+### Archivos tocados
+- `src/pages/Planillas/InventarioBienesPage.tsx` — Preview, apply, y cierre tab actualizados
+- `src/core/inventario/types.ts` — Campo `originCategory` agregado a `BienesMovement`
+- `docs/AI_HANDOFF.md` — Este checkpoint
+
+### Cambios clave
+
+#### A. Plan de Aplicacion RT6 (FASE 1)
+1. **`buildRT6InventoryApplyPlan()`**: Lee `CierreValuacionState` (partidasRT6 + indices) y:
+   - Identifica partidas RT6 relevantes a inventario (Mercaderias, Compras, Gastos, Bonif, Devol) por `accountId`
+   - Computa cada partida con `computeRT6Partida` para obtener `itemsComputed` con coef/homog
+   - Para cada lote calcula `delta = homog - importeBase`
+   - Mapea cada lote a movimientos reales de inventario:
+     - EI → distribuve por valor de apertura de productos
+     - Compras → distribuve por compras en el mismo periodo YYYY-MM
+     - Gastos/Bonif/Devol → fallback a compras del mismo periodo
+   - Redondeo: ultimo item absorbe diferencia
+   - Si un origen no tiene match → `unmatchedOrigins` y `isValid = false`
+
+2. **Tipos exportados**: `RT6ApplyPlanItem`, `RT6InventoryApplyPlan`, `OriginCategory`, `UnmatchedOrigin`
+
+#### B. Preview RT6 con Desglose por Origen (FASE 2)
+1. **`handleOpenRT6Preview`** ahora es `async`: carga `CierreValuacionState` y llama a `buildRT6InventoryApplyPlan`
+2. **Modal de preview**: Agrupa items por `originCategory + period` (EI 2025-01, Compras 2025-02, etc.)
+3. Cada grupo muestra movimientos target con producto, id corto, valor historico, valueDelta
+4. Si hay origenes sin match: banner rojo y boton "Confirmar y aplicar" deshabilitado
+5. Total control con diferencia de redondeo visible
+
+#### C. Aplicacion con Trazabilidad (FASE 3)
+1. **`handleConfirmRT6Apply`** usa items del plan, setea `originCategory` en cada `VALUE_ADJUSTMENT`
+2. Cada movimiento tiene: `rt6SourceEntryId`, `rt6Period`, `originCategory`, `notes` con label + targetMovementId
+3. Campo `originCategory` agregado como opcional a `BienesMovement` (sin migracion)
+
+#### D. Cierre Tab: Historico vs Homogeneo (FASE 4)
+1. **`rt6CierreAdjustments`** (useMemo): agrega VALUE_ADJUSTMENT por originCategory
+2. Cada fila del cierre (EI, Compras, Gastos, Bonif, Devol, CN, CMV) muestra:
+   - Valor historico (como antes)
+   - "Homog: $X" en indigo cuando hay ajustes RT6 aplicados
+3. CMV homogeneo calcula: (EI+adj) + (CN+adj) - (EF homogenea o EF efectivo)
+
+### QA
+```bash
+npx tsc --noEmit   # PASS
+npx vite build      # PASS
+```
+
+### Validacion manual
+1. `/planillas/cierre-valuacion` → Paso 2 → verificar partidas con cuentas de inventario
+2. `/operaciones/inventario` → Conciliacion → "Aplicar a Inventario" en RT6
+3. Preview: ver EI + compras por mes con deltas, no "producto unico" generico
+4. Confirmar → crea VALUE_ADJUSTMENT con originCategory y memo trazable
+5. Click mismo RT6 → "YA APLICADO"
+6. Cierre tab → EI/Compras/CMV con "Homog:" visible
+
+### Deshacer
+```bash
+git checkout HEAD -- src/pages/Planillas/InventarioBienesPage.tsx src/core/inventario/types.ts docs/AI_HANDOFF.md
+rm src/core/inventario/rt6-apply-plan.ts
+```
+
+---
+
+## CHECKPOINT #INV-PROMPT2B-CONCILIACION-V2-RT6-PREVIEW
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Conciliación V2 visualmente cercana al prototipo + Preview seguro para RT6 (no ejecuta directo).
+
+### Archivos tocados
+- `src/pages/Planillas/InventarioBienesPage.tsx`
+
+### Cambios clave
+
+#### A. Preview RT6 (FASE 1)
+1. **Nuevos tipos `RT6PreviewData` / `RT6PreviewMovement`**: Describen la vista previa de movimientos VALUE_ADJUSTMENT que se crearían.
+2. **`handleOpenRT6Preview(entry)`**: Reemplaza al viejo `handleApplyRT6Adjustment`. Construye el preview (delta total, movimientos por producto/prorrateo, modo single/prorate) y abre modal. NO ejecuta persistencia.
+3. **`handleConfirmRT6Apply()`**: Lee `rt6PreviewData` y ejecuta la creación de movimientos VALUE_ADJUSTMENT (mismo camino que antes, pero solo tras confirmación explícita).
+4. **Modal de preview RT6**: Muestra asiento origen (id, fecha, memo, importe), delta total con signo, lista de movimientos a crear (producto, valueDelta, compra origen si aplica), total de control, y mensaje "No modifica costo de origen, solo costo homogéneo". Botón "Confirmar y aplicar" / "Cancelar". Si ya fue aplicado, muestra badge "YA APLICADO" y deshabilita botón.
+5. **Estado**: `rt6PreviewOpen`, `rt6PreviewData`, `rt6ApplyingId` (loading state durante aplicación).
+
+#### B. Conciliación "igual al prototipo" (FASE 2)
+1. **Panel headers simplificados**: "En Inventario" (Panel A) y "En Diario" (Panel B) como títulos principales, sin subtítulo redundante. Badges "Falta asiento" / "Falta mov. stock" alineados a la derecha.
+2. **RT6 cards mejoradas**: Título "Ajuste por Inflación (RECPAM)", descripción contextual, label "Pérdida/Ganancia neta" debajo del monto.
+3. **Botones RT6 como prototipo**: "Aplicar a Inventario" (azul grande, flex-1) + "Ver asiento" (outline secundario). Reemplaza el viejo botón pequeño.
+4. **Sugerencias de impacto**: Sección con chips horizontales mostrando las cuentas matcheadas (Mercaderías, Compras, Gastos, etc.) con icono Sparkle. Solo para cards RT6.
+5. **Cards estándar**: Mantienen "Sugerencias" con score badges (Alto/Medio/Bajo) para vincular.
+
+### QA
+```bash
+npx tsc --noEmit   # PASS
+npx vite build      # PASS
+```
+
+### Validación manual
+1. `npm run dev` → abrir /operaciones/inventario → Conciliación
+2. Verificar headers "En Inventario" / "En Diario" con badges
+3. Cards RT6: botón azul "Aplicar a Inventario" + "Ver asiento" + chips de impacto
+4. Click "Aplicar a Inventario" → abre modal preview → verificar datos
+5. Cancelar → nada cambia
+6. Confirmar → crea movimientos → card desaparece de pendientes
+
+### Deshacer
+```bash
+git checkout HEAD -- src/pages/Planillas/InventarioBienesPage.tsx docs/AI_HANDOFF.md
+```
+
+---
+
+## CHECKPOINT #INV-PROMPT2A-UI-WIRING
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build FALLA (Error: spawn EPERM en esbuild/vite)
+**Objetivo:** Conciliación V2 visible en /operaciones/inventario y MovementModalV2 activo en “Nuevo Movimiento”, con indicador V2.
+
+### Archivos tocados
+- `src/pages/Planillas/InventarioBienesPage.tsx`
+
+### Cambios clave
+1. **Conciliación V2:** header con badge “V2”, KPIs (Sin Asiento / Sin Movimiento / RT6 Pendientes), filtros rápidos, búsqueda y pills de conteo.
+2. **Split view:** paneles “Movimientos sin asiento” y “Asientos sin movimiento” con cards, badges y empty state del prototipo.
+3. **Modal V2:** “Nuevo Movimiento” usa `MovementModalV2`, con handler RT6 batch y `facpceIndices` adaptado.
+
+### QA
+```bash
+npm run build  # FALLA: Error spawn EPERM (esbuild/vite.config.ts)
+```
+
+### Pendientes
+- Reintentar `npm run build` en entorno local con permisos/antivirus.
+
 ## CHECKPOINT #FIX-RT6-RT17-SIGNS-V2
 **Fecha:** 2026-01-30
 **Estado:** COMPLETADO - Build PASS
@@ -3031,6 +3167,77 @@ Calcular y mostrar Existencia Final (EF) por método de costeo (FIFO/PEPS, LIFO,
 | `src/pages/Estados.tsx` | Integración de contexto global en reportes |
 | `src/components/Estados/EvolucionPNTab.tsx` | Props de fechas custom |
 | `src/components/Estados/NotasAnexosTab.tsx` | Props de fechas custom |
+
+---
+
+### Verificación
+
+```bash
+npm run build  # PASS
+```
+
+---
+
+## CHECKPOINT #INV-PROMPT1-CONCILIATION
+**Fecha:** 2026-01-30
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Implementar UI de Conciliación, Modal V2 con tabs Compra/Venta/Ajuste, y RT6 manual con carrito + filtro auto-partidas.
+
+---
+
+### Resumen de Cambios
+
+#### 1. Conciliation Tab UI (InventarioBienesPage.tsx)
+- Split view con tabla izquierda (asientos contables) y tabla derecha (movimientos inventario)
+- KPIs: "Sin Asiento", "Sin Movimiento", "RT6 Pendientes"
+- Filtros de estado: Todos, Pendientes, Vinculados
+- Drawer lateral para detalle de selección
+- Detección de asientos RT6 via memo "ajuste por inflaci" o sourceModule === 'cierre-valuacion'
+- Acción "Aplicar RT6" para crear VALUE_ADJUSTMENT desde asiento RT6
+
+#### 2. Modal V2 - MovementModalV2.tsx (NUEVO)
+- Tabs principales: Compra / Venta / Ajuste
+- Sub-tabs en Ajuste: Stock / RT6 Inflación / Diferencia Inventario
+- Formularios completos para cada tipo de movimiento
+- Sistema de carrito RT6 para ajustes batch
+- Preview de asiento contable con rubros (Mercaderías/RECPAM)
+- Interface RT6CartItem para items de ajuste
+
+#### 3. RT6 Application Logic
+- VALUE_ADJUSTMENT movement type con campos:
+  - `valueDelta`: cambio en $ de valuación
+  - `rt6Period`: período YYYY-MM del ajuste
+  - `rt6SourceEntryId`: ID del asiento RT6 fuente
+- `handleApplyRT6Adjustment()`: crea VALUE_ADJUSTMENT desde asiento RT6
+- Distribución proporcional del delta entre capas existentes en costing.ts
+
+#### 4. Filter in auto-partidas-rt6.ts
+- Nueva función `filterManualRT6InventoryMovements()`:
+  - Excluye movements con memo "ajuste por inflación (manual)"
+  - Aplicada en `generatePartidaForAccount()` y `generateMovimientoBienesDeCambioPartida()`
+  - Evita doble conteo de ajustes manuales de inventario en RT6 automático
+
+---
+
+### Archivos Modificados/Creados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/pages/Planillas/components/MovementModalV2.tsx` | **NUEVO** - Modal completo con tabs Compra/Venta/Ajuste |
+| `src/pages/Planillas/InventarioBienesPage.tsx` | Conciliation tab UI, RT6 application, KPIs |
+| `src/core/inventario/types.ts` | Campos RT6 en BienesMovement (valueDelta, rt6Period, rt6SourceEntryId) |
+| `src/core/inventario/costing.ts` | VALUE_ADJUSTMENT handling in buildCostLayers |
+| `src/storage/bienes.ts` | VALUE_ADJUSTMENT support, linkedEntryId field |
+| `src/core/cierre-valuacion/auto-partidas-rt6.ts` | filterManualRT6InventoryMovements() para evitar doble conteo |
+
+---
+
+### Reglas de Negocio Implementadas
+
+1. **VALUE_ADJUSTMENT**: Solo modifica valor (no cantidad), distribuye delta entre capas existentes
+2. **RT6 Manual**: Memo = "Ajuste por inflación (manual)" para distinguir de RT6 automático
+3. **Filter**: Excluye movimientos con memo RT6 manual de auto-partidas
+4. **Conciliation**: Link bidireccional entre asientos contables y movimientos inventario
 
 ---
 

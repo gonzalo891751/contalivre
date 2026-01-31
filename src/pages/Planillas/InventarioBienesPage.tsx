@@ -2,6 +2,9 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
     Package,
+    Notebook,
+    ArrowsLeftRight,
+    WarningCircle,
     Coins,
     ChartBar,
     Percent,
@@ -69,11 +72,40 @@ import {
 import type { IndexRow } from '../../core/cierre-valuacion/types'
 import { getPeriodFromDate } from '../../core/cierre-valuacion/calc'
 import { loadCierreValuacionState } from '../../storage'
+import {
+    buildRT6InventoryApplyPlan,
+    type RT6InventoryApplyPlan,
+    type RT6ApplyPlanItem,
+    type OriginCategory,
+} from '../../core/inventario/rt6-apply-plan'
 import ProductModal from './components/ProductModal'
-import MovementModal from './components/MovementModal'
+import MovementModalV2 from './components/MovementModalV2'
 import { AccountAutocomplete } from './components/AccountAutocomplete'
 
 type TabId = 'dashboard' | 'productos' | 'movimientos' | 'conciliacion' | 'cierre'
+type ConciliationFilter = 'all' | 'compras' | 'ventas' | 'rt6'
+
+interface RT6CartItem {
+    id: string
+    productId: string
+    productName: string
+    concepto: string
+    originMovementId?: string
+    originMovementLabel?: string
+    valorOrigen: number
+    coeficiente: number
+    valorHomogeneo: number
+    delta: number
+}
+
+// RT6 Preview Modal types
+interface RT6PreviewData {
+    entry: JournalEntry
+    adjustmentAmount: number
+    entryPeriod: string
+    plan: RT6InventoryApplyPlan
+    isAlreadyApplied?: boolean
+}
 
 const TABS: { id: TabId; label: string; badge?: number }[] = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -227,8 +259,15 @@ export default function InventarioBienesPage() {
     const [manualEditAction, setManualEditAction] = useState<'keep' | 'regenerate' | null>(null)
     const [manualDeletePrompt, setManualDeletePrompt] = useState<BienesMovement | null>(null)
 
+    // RT6 Preview Modal
+    const [rt6PreviewOpen, setRt6PreviewOpen] = useState(false)
+    const [rt6PreviewData, setRt6PreviewData] = useState<RT6PreviewData | null>(null)
+    const [rt6ApplyingId, setRt6ApplyingId] = useState<string | null>(null)
+
     // Search
     const [productSearch, setProductSearch] = useState('')
+    const [conciliationFilter, setConciliationFilter] = useState<ConciliationFilter>('all')
+    const [conciliationSearch, setConciliationSearch] = useState('')
 
     // Toast
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
@@ -572,6 +611,19 @@ export default function InventarioBienesPage() {
     }, [valuations])
 
     const costMethodLocked = useMemo(() => !canChangeCostingMethod(movements), [movements])
+
+    // RT6 VALUE_ADJUSTMENT aggregation for cierre tab (histórico vs homogéneo)
+    const rt6CierreAdjustments = useMemo(() => {
+        const vaMovements = movements.filter(m => m.type === 'VALUE_ADJUSTMENT' && m.rt6SourceEntryId)
+        const eiAdj = vaMovements.filter(m => m.originCategory === 'EI').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const comprasAdj = vaMovements.filter(m => m.originCategory === 'COMPRAS').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const gastosAdj = vaMovements.filter(m => m.originCategory === 'GASTOS_COMPRA').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const bonifAdj = vaMovements.filter(m => m.originCategory === 'BONIF_COMPRA').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const devolAdj = vaMovements.filter(m => m.originCategory === 'DEVOL_COMPRA').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const hasAny = vaMovements.length > 0
+        const totalAdj = eiAdj + comprasAdj + gastosAdj + bonifAdj + devolAdj
+        return { eiAdj, comprasAdj, gastosAdj, bonifAdj, devolAdj, totalAdj, hasAny }
+    }, [movements])
 
     const filteredProducts = useMemo(() => {
         if (!productSearch) return products
@@ -991,11 +1043,21 @@ export default function InventarioBienesPage() {
         setMovementModalOpen(true)
     }
 
-    const handleApplyRT6Adjustment = async (entry: JournalEntry) => {
+    /**
+     * buildRT6Preview: Construye un preview con desglose por origen (Paso 2 RT6)
+     * usando CierreValuacionState. Abre el modal de confirmación.
+     */
+    const handleOpenRT6Preview = async (entry: JournalEntry) => {
         if (products.length === 0) {
             showToast('Crea al menos un producto antes de aplicar ajustes RT6', 'error')
             return
         }
+
+        // Check if already applied (by looking for VALUE_ADJUSTMENT with this rt6SourceEntryId)
+        const existingAdjustments = movements.filter(m =>
+            m.type === 'VALUE_ADJUSTMENT' && m.rt6SourceEntryId === entry.id
+        )
+        const isAlreadyApplied = existingAdjustments.length > 0
 
         // Find inventory-relevant lines in the RT6 entry (compras, bonif, devol, mercaderias accounts)
         const inventoryLines = entry.lines.filter(line => {
@@ -1016,102 +1078,122 @@ export default function InventarioBienesPage() {
             return
         }
 
-        // Get the entry period (YYYY-MM)
         const entryPeriod = entry.date.substring(0, 7)
 
-        // Find purchases in the same period to prorate
-        const periodPurchases = movements.filter(m =>
-            m.type === 'PURCHASE'
-            && !m.isDevolucion
-            && m.date.substring(0, 7) === entryPeriod
-        )
-
-        if (periodPurchases.length === 0 && products.length === 1) {
-            // Fallback: single product, assign 100% to it
-            const product = products[0]
-            if (!confirm(`No hay compras en ${entryPeriod}. Asignar ajuste de ${formatCurrency(adjustmentAmount)} al producto "${product.name}"?`)) {
-                return
-            }
-            try {
-                await createBienesMovement({
-                    date: entry.date,
-                    type: 'VALUE_ADJUSTMENT',
-                    productId: product.id,
-                    quantity: 0,
-                    periodId,
-                    ivaRate: 0,
-                    ivaAmount: 0,
-                    subtotal: Math.abs(adjustmentAmount),
-                    total: Math.abs(adjustmentAmount),
-                    costMethod: settings?.costMethod || 'PPP',
-                    valueDelta: adjustmentAmount,
-                    rt6Period: entryPeriod,
-                    rt6SourceEntryId: entry.id,
-                    notes: `Ajuste RT6 inflacion - ${entryPeriod}`,
-                    reference: entry.id.slice(0, 8),
-                    autoJournal: false,
-                    linkedJournalEntryIds: [entry.id],
-                })
-                showToast('Ajuste RT6 aplicado: 1 movimiento creado', 'success')
-                await loadData()
-                return
-            } catch (error) {
-                showToast(error instanceof Error ? error.message : 'Error al aplicar ajuste RT6', 'error')
-                return
-            }
+        // Build inventory account map from resolved accounts
+        const inventoryAccountMap = {
+            mercaderias: inventoryAccountResolution.byKey.get('mercaderias')?.account.id,
+            compras: inventoryAccountResolution.byKey.get('compras')?.account.id,
+            gastosCompras: inventoryAccountResolution.byKey.get('gastosCompras')?.account.id,
+            bonifCompras: inventoryAccountResolution.byKey.get('bonifCompras')?.account.id,
+            devolCompras: inventoryAccountResolution.byKey.get('devolCompras')?.account.id,
         }
 
-        if (periodPurchases.length === 0) {
-            showToast(`No hay compras en ${entryPeriod} para prorratear. Vincule manualmente.`, 'error')
-            return
-        }
+        // Load cierre-valuacion state for Step 2 RT6 data
+        try {
+            const cierreState = await loadCierreValuacionState()
+            const plan = buildRT6InventoryApplyPlan({
+                adjustmentAmount,
+                inventoryAccountMap,
+                movements,
+                products,
+                cierreState,
+            })
 
-        // Prorate by purchase subtotal
-        const totalPurchases = periodPurchases.reduce((sum, m) => sum + m.subtotal, 0)
-        if (totalPurchases <= 0) {
-            showToast('Total de compras en el periodo es cero, no se puede prorratear', 'error')
-            return
+            setRt6PreviewData({
+                entry,
+                adjustmentAmount,
+                entryPeriod,
+                plan,
+                isAlreadyApplied,
+            })
+            setRt6PreviewOpen(true)
+        } catch (error) {
+            console.error('Error building RT6 apply plan:', error)
+            showToast('Error al construir plan RT6: ' + (error instanceof Error ? error.message : 'desconocido'), 'error')
         }
+    }
 
-        const confirmMsg = periodPurchases.length === 1
-            ? `Aplicar ajuste RT6 de ${formatCurrency(adjustmentAmount)} a compra de "${products.find(p => p.id === periodPurchases[0].productId)?.name || 'producto'}"?`
-            : `Prorratear ajuste RT6 de ${formatCurrency(adjustmentAmount)} entre ${periodPurchases.length} compras del periodo ${entryPeriod}?`
-        if (!confirm(confirmMsg)) return
+    /**
+     * handleConfirmRT6Apply: Ejecuta la creación de movimientos VALUE_ADJUSTMENT
+     * basándose en el plan RT6 con desglose por origen.
+     */
+    const handleConfirmRT6Apply = async () => {
+        if (!rt6PreviewData || !rt6PreviewData.plan.isValid) return
+
+        const { entry, plan } = rt6PreviewData
+
+        setRt6ApplyingId(entry.id)
 
         try {
-            let remaining = adjustmentAmount
-            for (let i = 0; i < periodPurchases.length; i++) {
-                const purchase = periodPurchases[i]
-                const isLast = i === periodPurchases.length - 1
-                const share = isLast
-                    ? remaining
-                    : Math.round(((purchase.subtotal / totalPurchases) * adjustmentAmount) * 100) / 100
-                remaining = Math.round((remaining - share) * 100) / 100
-
+            for (const item of plan.items) {
                 await createBienesMovement({
                     date: entry.date,
                     type: 'VALUE_ADJUSTMENT',
-                    productId: purchase.productId,
+                    productId: item.productId,
                     quantity: 0,
                     periodId,
                     ivaRate: 0,
                     ivaAmount: 0,
-                    subtotal: Math.abs(share),
-                    total: Math.abs(share),
+                    subtotal: Math.abs(item.valueDelta),
+                    total: Math.abs(item.valueDelta),
                     costMethod: settings?.costMethod || 'PPP',
-                    valueDelta: share,
-                    rt6Period: entryPeriod,
+                    valueDelta: item.valueDelta,
+                    rt6Period: item.period,
                     rt6SourceEntryId: entry.id,
-                    notes: `Ajuste RT6 inflacion - ${entryPeriod} (prorrateo ${i + 1}/${periodPurchases.length})`,
+                    originCategory: item.originCategory,
+                    notes: `${item.label}${item.targetMovementId ? ' | Mov:' + item.targetMovementId.slice(0, 8) : ''}`,
                     reference: entry.id.slice(0, 8),
                     autoJournal: false,
                     linkedJournalEntryIds: [entry.id],
                 })
             }
-            showToast(`Ajuste RT6 aplicado: ${periodPurchases.length} movimiento(s) creados`, 'success')
+            showToast(`Ajuste RT6 aplicado: ${plan.items.length} movimiento(s) creados`, 'success')
+            setRt6PreviewOpen(false)
+            setRt6PreviewData(null)
             await loadData()
         } catch (error) {
             showToast(error instanceof Error ? error.message : 'Error al aplicar ajuste RT6', 'error')
+        } finally {
+            setRt6ApplyingId(null)
+        }
+    }
+
+    const handleSaveRT6Batch = async (items: RT6CartItem[], generateJournal: boolean, date: string) => {
+        if (!settings) {
+            showToast('Configura el modulo antes de registrar ajustes RT6', 'error')
+            return
+        }
+        if (products.length === 0) {
+            showToast('Crea al menos un producto antes de registrar ajustes RT6', 'error')
+            return
+        }
+        const entryPeriod = date.substring(0, 7)
+        try {
+            for (const item of items) {
+                await createBienesMovement({
+                    date,
+                    type: 'VALUE_ADJUSTMENT',
+                    productId: item.productId,
+                    quantity: 0,
+                    periodId,
+                    ivaRate: 0,
+                    ivaAmount: 0,
+                    subtotal: Math.abs(item.delta),
+                    total: Math.abs(item.delta),
+                    costMethod: settings.costMethod,
+                    valueDelta: item.delta,
+                    rt6Period: entryPeriod,
+                    notes: `Ajuste RT6 manual - ${entryPeriod} (${item.concepto})`,
+                    reference: item.originMovementId?.slice(0, 8),
+                    autoJournal: generateJournal,
+                    linkedJournalEntryIds: [],
+                })
+            }
+            showToast(`Ajustes RT6 registrados: ${items.length}`, 'success')
+            await loadData()
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Error al registrar ajustes RT6', 'error')
         }
     }
 
@@ -1657,6 +1739,55 @@ export default function InventarioBienesPage() {
     }, [inventoryEntries, linkedEntryIds])
 
     const conciliacionCount = movementsWithoutEntry.length + entriesWithoutMovement.length
+    const rt6PendingCount = useMemo(() => {
+        return entriesWithoutMovement.filter(entry => getEntryInventoryMatch(entry).isRT6).length
+    }, [entriesWithoutMovement, getEntryInventoryMatch])
+
+    const filteredMovementsWithoutEntry = useMemo(() => {
+        const term = conciliationSearch.trim().toLowerCase()
+        return movementsWithoutEntry.filter(movement => {
+            if (conciliationFilter === 'compras' && movement.type !== 'PURCHASE') return false
+            if (conciliationFilter === 'ventas' && movement.type !== 'SALE') return false
+            if (conciliationFilter === 'rt6') {
+                const notes = movement.notes?.toLowerCase() || ''
+                if (movement.type !== 'VALUE_ADJUSTMENT' && !notes.includes('rt6')) return false
+            }
+            if (!term) return true
+            const product = products.find(p => p.id === movement.productId)
+            const haystack = [
+                product?.name,
+                product?.sku,
+                movement.type,
+                movement.reference,
+                movement.notes,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase()
+            return haystack.includes(term) || Math.abs(movement.total).toString().includes(term)
+        })
+    }, [movementsWithoutEntry, conciliationFilter, conciliationSearch, products])
+
+    const filteredEntriesWithoutMovement = useMemo(() => {
+        const term = conciliationSearch.trim().toLowerCase()
+        return entriesWithoutMovement.filter(entry => {
+            const match = getEntryInventoryMatch(entry)
+            if (conciliationFilter === 'compras' && match.category !== 'compras') return false
+            if (conciliationFilter === 'ventas' && !(match.category === 'ventas' || match.category === 'cmv')) return false
+            if (conciliationFilter === 'rt6' && !match.isRT6) return false
+            if (!term) return true
+            const haystack = [
+                entry.memo,
+                entry.id,
+                match.category,
+                entry.sourceModule,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase()
+            return haystack.includes(term) || Math.abs(getEntryTotal(entry)).toString().includes(term)
+        })
+    }, [entriesWithoutMovement, conciliationFilter, conciliationSearch, getEntryInventoryMatch, getEntryTotal])
 
     const getEntryCandidatesForMovement = useCallback((movement: BienesMovement) => {
         return inventoryEntries
@@ -2330,21 +2461,125 @@ export default function InventarioBienesPage() {
                 {/* CONCILIACION TAB */}
                 {activeTab === 'conciliacion' && (
                     <div className="space-y-6 animate-fade-in">
-                        <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                                <div className="bg-blue-50 p-2 rounded-full">
-                                    <Scales className="text-blue-600" size={22} weight="duotone" />
-                                </div>
-                                <div>
-                                    <h3 className="text-slate-900 font-semibold text-sm">
-                                        Conciliacion Inventario vs Contabilidad
-                                    </h3>
-                                    <p className="text-xs text-slate-500">
-                                        Detecta movimientos sin asiento y asientos sin movimiento.
-                                    </p>
+                        <div className="max-w-7xl mx-auto">
+                            <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-blue-50 p-2 rounded-full">
+                                        <Scales className="text-blue-600" size={22} weight="duotone" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-slate-900 font-semibold text-sm flex items-center gap-2">
+                                            Conciliación Inventario vs Contabilidad
+                                            <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                                                V2
+                                            </span>
+                                        </h3>
+                                        <p className="text-xs text-slate-500">
+                                            Detecta movimientos sin asiento y asientos sin movimiento.
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
-                            <div className="flex gap-2 text-xs">
+
+                            <div className="flex flex-wrap gap-4 items-center justify-between mb-6">
+                                <div className="flex flex-wrap gap-4">
+                                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-orange-50 text-orange-600">
+                                            <WarningCircle size={20} weight="duotone" />
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-slate-500 uppercase font-bold tracking-wide">Sin Asiento</div>
+                                            <div className="font-display font-bold text-xl text-slate-900">
+                                                {movementsWithoutEntry.length}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
+                                            <ArrowsLeftRight size={20} weight="duotone" />
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-slate-500 uppercase font-bold tracking-wide">Sin Movimiento</div>
+                                            <div className="font-display font-bold text-xl text-slate-900">
+                                                {entriesWithoutMovement.length}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 ring-2 ring-blue-500/10">
+                                        <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
+                                            <TrendUp size={20} weight="duotone" />
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-indigo-600 uppercase font-bold tracking-wide">RT6 Pendientes</div>
+                                            <div className="font-display font-bold text-xl text-slate-900">
+                                                {rt6PendingCount}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={openNewMovementModal}
+                                        className="px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 bg-gradient-to-r from-blue-600 to-emerald-500 text-white shadow-lg shadow-blue-500/20 hover:shadow-xl transition-all"
+                                    >
+                                        <Plus size={16} weight="bold" /> Nuevo Movimiento
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-4 text-sm">
+                                <span className="text-slate-500 font-medium px-2">Filtrar:</span>
+                                <button
+                                    onClick={() => setConciliationFilter('all')}
+                                    className={`px-3 py-1.5 rounded-full font-medium transition-colors ${conciliationFilter === 'all'
+                                        ? 'bg-slate-200 text-slate-800'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'
+                                        }`}
+                                >
+                                    Todos
+                                </button>
+                                <button
+                                    onClick={() => setConciliationFilter('compras')}
+                                    className={`px-3 py-1.5 rounded-full font-medium transition-colors ${conciliationFilter === 'compras'
+                                        ? 'bg-slate-200 text-slate-800'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'
+                                        }`}
+                                >
+                                    Compras
+                                </button>
+                                <button
+                                    onClick={() => setConciliationFilter('ventas')}
+                                    className={`px-3 py-1.5 rounded-full font-medium transition-colors ${conciliationFilter === 'ventas'
+                                        ? 'bg-slate-200 text-slate-800'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'
+                                        }`}
+                                >
+                                    Ventas
+                                </button>
+                                <button
+                                    onClick={() => setConciliationFilter('rt6')}
+                                    className={`px-3 py-1.5 rounded-full font-medium transition-colors ${conciliationFilter === 'rt6'
+                                        ? 'bg-slate-200 text-slate-800'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'
+                                        }`}
+                                >
+                                    RT6 (Ajustes)
+                                </button>
+                                <div className="ml-auto flex items-center gap-2">
+                                    <div className="relative">
+                                        <MagnifyingGlass size={16} className="absolute left-3 top-2.5 text-slate-400" />
+                                        <input
+                                            type="text"
+                                            value={conciliationSearch}
+                                            onChange={(e) => setConciliationSearch(e.target.value)}
+                                            placeholder="Buscar producto o importe..."
+                                            aria-label="Buscar en conciliacion"
+                                            className="pl-9 pr-3 py-1.5 rounded-lg border border-slate-200 text-sm w-60 focus:outline-none focus:border-blue-500 transition-colors"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2 text-xs">
                                 <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 font-semibold">
                                     Movimientos sin asiento: {movementsWithoutEntry.length}
                                 </span>
@@ -2354,7 +2589,7 @@ export default function InventarioBienesPage() {
                             </div>
                         </div>
                         {inventoryAccountResolution.usedHeuristic && (
-                            <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
+                            <div className="max-w-7xl mx-auto bg-amber-50 border border-amber-100 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
                                 <Info size={16} className="mt-0.5" />
                                 <div>
                                     Detectamos cuentas de bienes de cambio por nombre o codigo. Recomendado: configurarlas en Operaciones → Inventario → Cierre.
@@ -2362,51 +2597,82 @@ export default function InventarioBienesPage() {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* Panel A */}
-                            <div className="bg-white rounded-xl border border-slate-200 p-5">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h4 className="text-sm font-semibold text-slate-900">Movimientos sin asiento</h4>
-                                    <span className="text-xs text-slate-400">Panel A</span>
-                                </div>
-
-                                {movementsWithoutEntry.length === 0 ? (
-                                    <div className="text-center text-slate-500 text-sm py-8">
-                                        Todo conciliado en inventario.
+                        <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-6 items-start h-full">
+                            {/* Panel A — En Inventario */}
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full min-h-[500px]">
+                                <header className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
+                                    <div className="flex items-center gap-2">
+                                        <Package className="text-slate-400" size={18} weight="fill" />
+                                        <h3 className="font-display font-bold text-slate-800">En Inventario</h3>
                                     </div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {movementsWithoutEntry.map((mov) => {
+                                    <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-md">
+                                        Falta asiento
+                                    </span>
+                                </header>
+
+                                <div className="p-4 flex flex-col gap-3">
+                                    {filteredMovementsWithoutEntry.length === 0 ? (
+                                        <div className="mt-auto p-6 text-center">
+                                            <p className="text-sm text-slate-400 italic">
+                                                &quot;Chequeá estos movimientos, parecen estar colgados sin su contraparte contable.&quot; — Boti
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                        {filteredMovementsWithoutEntry.map((mov) => {
                                             const product = products.find(p => p.id === mov.productId)
                                             const candidates = getEntryCandidatesForMovement(mov)
                                             const hasError = mov.journalStatus === 'error'
                                             const isMissing = mov.journalStatus === 'missing'
+                                            const typeLabel = mov.type === 'PURCHASE'
+                                                ? 'COMPRA'
+                                                : mov.type === 'SALE'
+                                                    ? 'VENTA'
+                                                    : mov.type === 'VALUE_ADJUSTMENT'
+                                                        ? 'AJUSTE RT6'
+                                                        : 'AJUSTE'
+                                            const stockDelta = mov.type === 'SALE'
+                                                ? -Math.abs(mov.quantity)
+                                                : mov.quantity
+                                            const unitLabel = product?.unit || 'u.'
                                             return (
-                                                <div key={mov.id} className="border border-slate-200 rounded-lg p-3">
-                                                    <div className="flex items-center justify-between gap-3">
+                                                <div
+                                                    key={mov.id}
+                                                    className="bg-white border border-slate-200 rounded-xl p-3 cursor-pointer group relative overflow-hidden transition-all duration-200 hover:border-blue-200"
+                                                >
+                                                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-orange-400" />
+                                                    <div className="flex justify-between items-start mb-2 pl-2">
                                                         <div>
-                                                            <div className="text-sm font-semibold text-slate-900">
+                                                            <div className="text-xs font-bold text-slate-500 mb-0.5">
+                                                                {typeLabel} • {formatDate(mov.date).toUpperCase()}
+                                                            </div>
+                                                            <div className="font-semibold text-slate-900">
                                                                 {product?.name || 'Producto eliminado'}
                                                             </div>
                                                             <div className="text-xs text-slate-500">
-                                                                {formatDate(mov.date)} • {mov.type}
+                                                                Stock: {stockDelta >= 0 ? '+' : ''}{stockDelta.toLocaleString('es-AR')} {unitLabel}
                                                             </div>
                                                         </div>
-                                                        <div className="font-mono text-sm text-slate-700">
-                                                            {formatCurrency(mov.total)}
+                                                        <div className="text-right">
+                                                            <div className="font-mono font-medium text-slate-900">
+                                                                {formatCurrency(mov.total)}
+                                                            </div>
+                                                            <div className="bg-orange-50 text-orange-600 border border-orange-100 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded mt-1">
+                                                                SIN ASIENTO
+                                                            </div>
                                                         </div>
                                                     </div>
 
-                                                    <div className="mt-3 flex flex-wrap gap-2">
+                                                    <div className="pl-2 flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
                                                         <button
                                                             onClick={() => handleGenerateJournal(mov.id)}
-                                                            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                                            className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-medium hover:bg-blue-100"
                                                         >
-                                                            {hasError ? 'Reintentar' : isMissing ? 'Regenerar asiento' : 'Generar asiento'}
+                                                            {hasError ? 'Reintentar' : isMissing ? 'Regenerar asiento' : 'Generar Asiento'}
                                                         </button>
                                                         <button
                                                             onClick={() => handleStartLinkMovement(mov)}
-                                                            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white text-slate-600 border border-slate-200"
+                                                            className="text-xs bg-slate-50 text-slate-600 px-2 py-1 rounded font-medium hover:bg-slate-100"
                                                         >
                                                             Vincular
                                                         </button>
@@ -2448,22 +2714,29 @@ export default function InventarioBienesPage() {
                                         })}
                                     </div>
                                 )}
+                                </div>
                             </div>
 
-                            {/* Panel B */}
-                            <div className="bg-white rounded-xl border border-slate-200 p-5">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h4 className="text-sm font-semibold text-slate-900">Asientos sin movimiento</h4>
-                                    <span className="text-xs text-slate-400">Panel B</span>
-                                </div>
-
-                                {entriesWithoutMovement.length === 0 ? (
-                                    <div className="text-center text-slate-500 text-sm py-8">
-                                        No hay asientos pendientes de inventario.
+                            {/* Panel B — En Diario */}
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full min-h-[500px]">
+                                <header className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
+                                    <div className="flex items-center gap-2">
+                                        <Notebook className="text-slate-400" size={18} weight="fill" />
+                                        <h3 className="font-display font-bold text-slate-800">En Diario</h3>
                                     </div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {entriesWithoutMovement.map((entry) => {
+                                    <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-md">
+                                        Falta mov. stock
+                                    </span>
+                                </header>
+
+                                <div className="p-4 flex flex-col gap-4">
+                                    {filteredEntriesWithoutMovement.length === 0 ? (
+                                        <div className="text-center text-slate-500 text-sm py-8">
+                                            No hay asientos pendientes de inventario.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                        {filteredEntriesWithoutMovement.map((entry) => {
                                             const total = getEntryTotal(entry)
                                             const candidates = getMovementCandidatesForEntry(entry)
                                             const entryMatch = getEntryInventoryMatch(entry)
@@ -2471,58 +2744,116 @@ export default function InventarioBienesPage() {
                                             const triggerAccountName = entryMatch.triggerAccountId
                                                 ? getAccountName(entryMatch.triggerAccountId)
                                                 : null
+                                            const isRT6 = entryMatch.isRT6
                                             return (
-                                                <div key={entry.id} className="border border-slate-200 rounded-lg p-3">
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <div>
-                                                            <div className="text-sm font-semibold text-slate-900">
-                                                                {entry.memo || 'Asiento sin leyenda'}
-                                                            </div>
-                                                            <div className="text-xs text-slate-500">
-                                                                {formatDate(entry.date)} • {entry.id.slice(0, 8)}
-                                                            </div>
-                                                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 mt-1">
-                                                                <span className="px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-600 font-semibold">
-                                                                    {entryTypeLabel}
+                                                <div
+                                                    key={entry.id}
+                                                    className={`bg-white border ${isRT6 ? 'border-blue-200' : 'border-slate-200'} rounded-xl p-0 shadow-sm relative overflow-hidden`}
+                                                >
+                                                    <div className={`px-4 py-2 border-b ${isRT6 ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100'} flex justify-between items-center`}>
+                                                        <div className="flex items-center gap-2">
+                                                            {isRT6 && (
+                                                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700">
+                                                                    RT6 (INFLACION)
                                                                 </span>
-                                                                {triggerAccountName && (
-                                                                    <span className="text-slate-400">
+                                                            )}
+                                                            <span className="text-xs text-slate-700 font-medium">
+                                                                {entry.memo || 'Asiento sin leyenda'}
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-xs text-slate-500">
+                                                            {formatDate(entry.date).toUpperCase()}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="p-4">
+                                                        <div className="flex justify-between items-start">
+                                                            <div className="pr-4">
+                                                                <h4 className="font-semibold text-slate-900 text-sm">
+                                                                    {isRT6 ? 'Ajuste por Inflación (RECPAM)' : (entry.memo || 'Asiento sin leyenda')}
+                                                                </h4>
+                                                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                                                    {isRT6
+                                                                        ? 'Este asiento refleja la pérdida/ganancia de poder adquisitivo, pero no se aplicó al valor del stock.'
+                                                                        : entryTypeLabel
+                                                                    }
+                                                                </p>
+                                                                {!isRT6 && triggerAccountName && (
+                                                                    <p className="text-xs text-slate-400 mt-1">
                                                                         Cuenta: {triggerAccountName}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            <div className="text-right shrink-0">
+                                                                <div className="font-mono font-bold text-lg text-slate-900">
+                                                                    {formatCurrency(total)}
+                                                                </div>
+                                                                <div className="text-[10px] text-slate-400 mt-1 uppercase">
+                                                                    {isRT6 ? (total >= 0 ? 'Pérdida neta' : 'Ganancia neta') : `#${entry.id.slice(0, 8)}`}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Actions */}
+                                                        <div className="mt-4 flex flex-wrap gap-2">
+                                                            {entryMatch.category === 'rt6_adjustment' ? (<>
+                                                                <button
+                                                                    onClick={() => handleOpenRT6Preview(entry)}
+                                                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 px-3 rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5"
+                                                                >
+                                                                    <Sparkle size={14} weight="bold" /> Aplicar a Inventario
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleStartLinkEntry(entry)}
+                                                                    className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-50 text-slate-600"
+                                                                >
+                                                                    Ver asiento
+                                                                </button>
+                                                            </>) : (<>
+                                                                <button
+                                                                    onClick={() => handleCreateMovementFromEntry(entry)}
+                                                                    className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded font-medium hover:bg-emerald-100"
+                                                                >
+                                                                    Crear movimiento
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleStartLinkEntry(entry)}
+                                                                    className="text-xs bg-slate-50 text-slate-600 px-2 py-1 rounded font-medium hover:bg-slate-100"
+                                                                >
+                                                                    Vincular
+                                                                </button>
+                                                            </>)}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Sugerencias de impacto (RT6) / Sugerencias (standard) */}
+                                                    {isRT6 ? (
+                                                        <div className="bg-slate-50 p-3 border-t border-slate-100">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <Sparkle className="text-purple-500" size={14} weight="duotone" />
+                                                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                                                                    Sugerencias de impacto
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex gap-2 overflow-x-auto">
+                                                                {(entryMatch.matchedKeys || []).map((key: string) => (
+                                                                    <span key={key} className="text-xs bg-white border border-slate-200 px-2 py-1 rounded text-slate-600 whitespace-nowrap">
+                                                                        {key === 'mercaderias' ? 'Mercaderías (Global)' :
+                                                                         key === 'compras' ? 'Compras' :
+                                                                         key === 'gastosCompras' ? 'Gastos s/Compras' :
+                                                                         key === 'bonifCompras' ? 'Bonif. s/Compras' :
+                                                                         key === 'devolCompras' ? 'Devol. s/Compras' : key}
+                                                                    </span>
+                                                                ))}
+                                                                {(entryMatch.matchedKeys || []).length === 0 && (
+                                                                    <span className="text-xs bg-white border border-slate-200 px-2 py-1 rounded text-slate-600 whitespace-nowrap">
+                                                                        Mercaderías (Global)
                                                                     </span>
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <div className="font-mono text-sm text-slate-700">
-                                                            {formatCurrency(total)}
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="mt-3 flex flex-wrap gap-2">
-                                                        {entryMatch.category === 'rt6_adjustment' ? (
-                                                            <button
-                                                                onClick={() => handleApplyRT6Adjustment(entry)}
-                                                                className="px-2.5 py-1 text-xs font-semibold rounded-md bg-violet-50 text-violet-700 border border-violet-100"
-                                                            >
-                                                                Aplicar ajuste RT6
-                                                            </button>
-                                                        ) : (
-                                                            <button
-                                                                onClick={() => handleCreateMovementFromEntry(entry)}
-                                                                className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100"
-                                                            >
-                                                                Crear movimiento
-                                                            </button>
-                                                        )}
-                                                        <button
-                                                            onClick={() => handleStartLinkEntry(entry)}
-                                                            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white text-slate-600 border border-slate-200"
-                                                        >
-                                                            Vincular
-                                                        </button>
-                                                    </div>
-
-                                                    {candidates.length > 0 && (
-                                                        <div className="mt-3 border-t border-dashed border-slate-200 pt-2 space-y-2">
+                                                    ) : candidates.length > 0 ? (
+                                                        <div className="bg-slate-50 p-3 border-t border-slate-100 space-y-2">
                                                             <div className="text-[10px] uppercase tracking-wider text-slate-400">
                                                                 Sugerencias
                                                             </div>
@@ -2554,12 +2885,13 @@ export default function InventarioBienesPage() {
                                                                 )
                                                             })}
                                                         </div>
-                                                    )}
+                                                    ) : null}
                                                 </div>
                                             )
                                         })}
                                     </div>
                                 )}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2643,9 +2975,16 @@ export default function InventarioBienesPage() {
                                             }
                                         </p>
                                     </div>
-                                    <span className="font-mono text-lg font-medium text-slate-900">
-                                        {formatCurrency(existenciaInicial)}
-                                    </span>
+                                    <div className="text-right">
+                                        <span className="font-mono text-lg font-medium text-slate-900">
+                                            {formatCurrency(existenciaInicial)}
+                                        </span>
+                                        {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.eiAdj !== 0 && (
+                                            <div className="text-[10px] font-mono text-indigo-600">
+                                                Homog: {formatCurrency(existenciaInicial + rt6CierreAdjustments.eiAdj)}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
 
                                 {settings?.inventoryMode === 'PERIODIC' ? (<>
@@ -2654,33 +2993,68 @@ export default function InventarioBienesPage() {
                                         <span className="text-sm font-medium text-slate-500 flex items-center gap-2">
                                             <Plus className="text-green-500" size={14} weight="bold" /> Compras (brutas)
                                         </span>
-                                        <span className="font-mono text-sm font-medium text-green-600">
-                                            {formatCurrency(comprasBrutas)}
-                                        </span>
+                                        <div className="text-right">
+                                            <span className="font-mono text-sm font-medium text-green-600">
+                                                {formatCurrency(comprasBrutas)}
+                                            </span>
+                                            {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.comprasAdj !== 0 && (
+                                                <div className="text-[10px] font-mono text-indigo-600">
+                                                    Homog: {formatCurrency(comprasBrutas + rt6CierreAdjustments.comprasAdj)}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                     {cierreBalances.gastosCompras > 0 && (
                                         <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
                                             <span className="text-xs text-slate-400">+ Gastos sobre compras</span>
-                                            <span className="font-mono text-xs text-slate-500">{formatCurrency(cierreBalances.gastosCompras)}</span>
+                                            <div className="text-right">
+                                                <span className="font-mono text-xs text-slate-500">{formatCurrency(cierreBalances.gastosCompras)}</span>
+                                                {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.gastosAdj !== 0 && (
+                                                    <div className="text-[10px] font-mono text-indigo-600">
+                                                        Homog: {formatCurrency(cierreBalances.gastosCompras + rt6CierreAdjustments.gastosAdj)}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     )}
                                     {cierreBalances.bonifCompras > 0 && (
                                         <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
                                             <span className="text-xs text-slate-400">− Bonificaciones s/compras</span>
-                                            <span className="font-mono text-xs text-red-400">({formatCurrency(cierreBalances.bonifCompras)})</span>
+                                            <div className="text-right">
+                                                <span className="font-mono text-xs text-red-400">({formatCurrency(cierreBalances.bonifCompras)})</span>
+                                                {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.bonifAdj !== 0 && (
+                                                    <div className="text-[10px] font-mono text-indigo-600">
+                                                        Homog: ({formatCurrency(cierreBalances.bonifCompras - rt6CierreAdjustments.bonifAdj)})
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     )}
                                     {cierreBalances.devolCompras > 0 && (
                                         <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
                                             <span className="text-xs text-slate-400">− Devoluciones s/compras</span>
-                                            <span className="font-mono text-xs text-red-400">({formatCurrency(cierreBalances.devolCompras)})</span>
+                                            <div className="text-right">
+                                                <span className="font-mono text-xs text-red-400">({formatCurrency(cierreBalances.devolCompras)})</span>
+                                                {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.devolAdj !== 0 && (
+                                                    <div className="text-[10px] font-mono text-indigo-600">
+                                                        Homog: ({formatCurrency(cierreBalances.devolCompras - rt6CierreAdjustments.devolAdj)})
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     )}
                                     <div className="flex justify-between items-center py-2 border-b border-slate-200 bg-slate-50 px-2 rounded">
                                         <span className="text-sm font-semibold text-slate-700">= Compras Netas</span>
-                                        <span className="font-mono text-base font-bold text-green-700">
-                                            {formatCurrency(comprasNetas)}
-                                        </span>
+                                        <div className="text-right">
+                                            <span className="font-mono text-base font-bold text-green-700">
+                                                {formatCurrency(comprasNetas)}
+                                            </span>
+                                            {rt6CierreAdjustments.hasAny && (rt6CierreAdjustments.comprasAdj + rt6CierreAdjustments.gastosAdj + rt6CierreAdjustments.bonifAdj + rt6CierreAdjustments.devolAdj) !== 0 && (
+                                                <div className="text-[10px] font-mono text-indigo-600">
+                                                    Homog: {formatCurrency(comprasNetas + rt6CierreAdjustments.comprasAdj + rt6CierreAdjustments.gastosAdj + rt6CierreAdjustments.bonifAdj + rt6CierreAdjustments.devolAdj)}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </>) : (
                                     <div className="flex justify-between items-center py-2 border-b border-slate-200">
@@ -2764,9 +3138,20 @@ export default function InventarioBienesPage() {
                                             <p className="text-xs text-amber-500">Usando EF teorico. Ingresa el inventario fisico para valor definitivo.</p>
                                         )}
                                     </div>
-                                    <span className={`font-mono text-2xl font-bold ${esFisicoDefinido ? 'text-blue-600' : 'text-slate-400'}`}>
-                                        {formatCurrency(cmvPorDiferencia)}
-                                    </span>
+                                    <div className="text-right">
+                                        <span className={`font-mono text-2xl font-bold ${esFisicoDefinido ? 'text-blue-600' : 'text-slate-400'}`}>
+                                            {formatCurrency(cmvPorDiferencia)}
+                                        </span>
+                                        {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.totalAdj !== 0 && (
+                                            <div className="text-xs font-mono text-indigo-600">
+                                                Homog: {formatCurrency(
+                                                    (existenciaInicial + rt6CierreAdjustments.eiAdj)
+                                                    + (comprasNetas + rt6CierreAdjustments.comprasAdj + rt6CierreAdjustments.gastosAdj + rt6CierreAdjustments.bonifAdj + rt6CierreAdjustments.devolAdj)
+                                                    - (efHomogenea?.totalEndingValueHomog ?? efEfectivo)
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 
@@ -3035,13 +3420,18 @@ export default function InventarioBienesPage() {
             )}
 
             {movementModalOpen && settings && (
-                <MovementModal
+                <MovementModalV2
                     products={products}
                     valuations={valuations}
                     costMethod={settings.costMethod}
                     onSave={handleSaveMovement}
+                    onSaveRT6Batch={handleSaveRT6Batch}
                     initialData={movementPrefill || undefined}
                     mode={editingMovement ? 'edit' : 'create'}
+                    accounts={accounts}
+                    facpceIndices={facpceIndices.map(indexRow => ({ period: indexRow.period, index: indexRow.value }))}
+                    periodId={periodId}
+                    movements={movements}
                     onClose={() => {
                         setMovementModalOpen(false)
                         setMovementPrefill(null)
@@ -3779,6 +4169,211 @@ export default function InventarioBienesPage() {
                                     )}
                                 </div>
                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* RT6 Preview Modal */}
+            {rt6PreviewOpen && rt6PreviewData && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+                        onClick={() => {
+                            if (!rt6ApplyingId) {
+                                setRt6PreviewOpen(false)
+                                setRt6PreviewData(null)
+                            }
+                        }}
+                    />
+                    <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-fade-in">
+                        {/* Header */}
+                        <div className="bg-blue-50 border-b border-blue-100 px-6 py-4 flex justify-between items-start">
+                            <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200 bg-white text-blue-700">
+                                        RT6 (INFLACIÓN)
+                                    </span>
+                                    {rt6PreviewData.isAlreadyApplied && (
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                            YA APLICADO
+                                        </span>
+                                    )}
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-900">
+                                    Vista previa: Ajuste RT6
+                                </h3>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    Revisá los movimientos que se crearán antes de confirmar.
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    if (!rt6ApplyingId) {
+                                        setRt6PreviewOpen(false)
+                                        setRt6PreviewData(null)
+                                    }
+                                }}
+                                disabled={!!rt6ApplyingId}
+                                className="p-2 text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-50"
+                            >
+                                <X size={20} weight="bold" />
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
+                            {/* Entry Source Info */}
+                            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-2">
+                                    Asiento Origen
+                                </div>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <div className="font-semibold text-slate-900">
+                                            {rt6PreviewData.entry.memo || 'Ajuste por inflación'}
+                                        </div>
+                                        <div className="text-xs text-slate-500">
+                                            #{rt6PreviewData.entry.id.slice(0, 8)} · {formatDate(rt6PreviewData.entry.date)}
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className={`font-mono font-bold text-xl ${rt6PreviewData.adjustmentAmount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            {rt6PreviewData.adjustmentAmount >= 0 ? '+' : ''}{formatCurrency(rt6PreviewData.adjustmentAmount)}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400 uppercase">
+                                            Delta total
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Info message */}
+                            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start gap-3">
+                                <Info className="text-blue-600 mt-0.5 shrink-0" size={16} weight="fill" />
+                                <p className="text-xs text-blue-800">
+                                    <strong>Esto NO cambia cantidades.</strong> Actualiza la valuacion homogenea vinculada a RT6 Paso 2 por periodo de origen.
+                                </p>
+                            </div>
+
+                            {/* Unmatched origins warning */}
+                            {rt6PreviewData.plan.unmatchedOrigins.length > 0 && (
+                                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <WarningCircle className="text-red-600 shrink-0" size={16} weight="fill" />
+                                        <span className="text-xs font-bold text-red-800">Origenes sin match en inventario</span>
+                                    </div>
+                                    <ul className="text-xs text-red-700 space-y-1 ml-6">
+                                        {rt6PreviewData.plan.unmatchedOrigins.map((u, i) => (
+                                            <li key={i}>{u.label} ({u.accountCode}) — {formatCurrency(u.delta)}</li>
+                                        ))}
+                                    </ul>
+                                    <p className="text-[10px] text-red-500 mt-2">No se puede aplicar hasta resolver estos origenes.</p>
+                                </div>
+                            )}
+
+                            {/* Desglose por origen (Paso 2) */}
+                            <div>
+                                <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">
+                                    Desglose por origen — Paso 2 ({rt6PreviewData.plan.items.length} ajustes)
+                                </h4>
+                                <div className="space-y-4">
+                                    {(() => {
+                                        // Group items by originCategory + period
+                                        const groups = new Map<string, RT6ApplyPlanItem[]>()
+                                        for (const item of rt6PreviewData.plan.items) {
+                                            const key = `${item.originCategory}|${item.period}`
+                                            if (!groups.has(key)) groups.set(key, [])
+                                            groups.get(key)!.push(item)
+                                        }
+                                        const CATEGORY_LABELS: Record<OriginCategory, string> = {
+                                            EI: 'Existencia Inicial',
+                                            COMPRAS: 'Compras',
+                                            GASTOS_COMPRA: 'Gastos s/compra',
+                                            BONIF_COMPRA: 'Bonif s/compra',
+                                            DEVOL_COMPRA: 'Devol s/compra',
+                                        }
+                                        return Array.from(groups.entries()).map(([key, groupItems]) => {
+                                            const [cat, period] = key.split('|') as [OriginCategory, string]
+                                            const groupDelta = groupItems.reduce((s, i) => s + i.valueDelta, 0)
+                                            return (
+                                                <div key={key} className="border border-slate-200 rounded-lg overflow-hidden">
+                                                    <div className="bg-slate-50 px-3 py-2 flex justify-between items-center border-b border-slate-100">
+                                                        <span className="text-xs font-semibold text-slate-700">
+                                                            {CATEGORY_LABELS[cat]} — {period}
+                                                        </span>
+                                                        <span className={`font-mono text-xs font-bold ${groupDelta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                            {groupDelta >= 0 ? '+' : ''}{formatCurrency(groupDelta)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="divide-y divide-slate-100">
+                                                        {groupItems.map((item, idx) => {
+                                                            const prod = products.find(p => p.id === item.productId)
+                                                            return (
+                                                                <div key={idx} className="px-3 py-2 flex justify-between items-center">
+                                                                    <div>
+                                                                        <div className="text-sm text-slate-800">{prod?.name || 'Producto'}</div>
+                                                                        <div className="text-[10px] text-slate-400">
+                                                                            {item.targetMovementId ? `#${item.targetMovementId.slice(0, 8)}` : 'Apertura'} · Hist: {formatCurrency(item.historicalValue)}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className={`font-mono text-sm font-semibold ${item.valueDelta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                                        {item.valueDelta >= 0 ? '+' : ''}{formatCurrency(item.valueDelta)}
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )
+                                        })
+                                    })()}
+                                </div>
+
+                                {/* Total Control */}
+                                <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center">
+                                    <div>
+                                        <span className="text-sm font-medium text-slate-700">Total control</span>
+                                        {Math.abs(rt6PreviewData.plan.roundingDiff) > 0.01 && (
+                                            <span className="text-[10px] text-amber-500 ml-2">
+                                                Dif. redondeo: {formatCurrency(rt6PreviewData.plan.roundingDiff)}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className={`font-mono font-bold text-lg ${rt6PreviewData.plan.totalDeltaControl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {rt6PreviewData.plan.totalDeltaControl >= 0 ? '+' : ''}{formatCurrency(rt6PreviewData.plan.totalDeltaControl)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="border-t border-slate-200 px-6 py-4 flex justify-end gap-3 bg-slate-50">
+                            <button
+                                onClick={() => {
+                                    setRt6PreviewOpen(false)
+                                    setRt6PreviewData(null)
+                                }}
+                                disabled={!!rt6ApplyingId}
+                                className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-white disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleConfirmRT6Apply}
+                                disabled={!!rt6ApplyingId || rt6PreviewData.isAlreadyApplied || !rt6PreviewData.plan.isValid}
+                                className="px-6 py-2 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
+                            >
+                                {rt6ApplyingId ? (
+                                    <>Aplicando...</>
+                                ) : rt6PreviewData.isAlreadyApplied ? (
+                                    <>Ya aplicado</>
+                                ) : !rt6PreviewData.plan.isValid ? (
+                                    <>Origenes sin match</>
+                                ) : (
+                                    <><CheckCircle size={16} weight="fill" /> Confirmar y aplicar</>
+                                )}
+                            </button>
                         </div>
                     </div>
                 </div>

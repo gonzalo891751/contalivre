@@ -387,6 +387,7 @@ export interface BienesMovement {
     valueDelta?: number            // $ change in valuation (positive = increase, negative = decrease)
     rt6Period?: string             // YYYY-MM period of the RT6 adjustment
     rt6SourceEntryId?: string      // Journal entry ID of the RT6 asiento that originated this
+    originCategory?: 'EI' | 'COMPRAS' | 'GASTOS_COMPRA' | 'BONIF_COMPRA' | 'DEVOL_COMPRA'  // RT6 origin category for cierre breakdown
     // Additional info
     counterparty?: string          // Supplier name (PURCHASE) or Customer (SALE)
     paymentMethod?: string         // Efectivo, Cuenta Corriente, etc.
