@@ -131,8 +131,8 @@ function CierreHeader({
 
                 {/* RT6 Toggle — always visible */}
                 <label
-                    className={`flex items-center gap-2 select-none ${rt6HasData ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
-                    title={rt6HasData ? 'Activar ajuste por inflación (RT6)' : 'RT6 no aplicado. Ir a Ajuste → Inflación (RT6) y aplicar.'}
+                    className={`flex items-center gap-2 select-none ${rt6HasData ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                    title={rt6HasData ? 'Activar ajuste por inflación (RT6)' : 'Disponible cuando existan movimientos de RT6 / reexpresión'}
                 >
                     <button
                         type="button"
@@ -140,15 +140,15 @@ function CierreHeader({
                         aria-checked={showHomogeneo}
                         disabled={!rt6HasData}
                         onClick={() => rt6HasData && setShowHomogeneo(!showHomogeneo)}
-                        className={`relative w-10 h-[22px] rounded-full transition-colors ${showHomogeneo && rt6HasData ? 'bg-brand-primary' : 'bg-slate-200'} ${!rt6HasData ? 'opacity-50' : ''}`}
+                        className={`relative w-10 h-[22px] rounded-full transition-colors ${showHomogeneo && rt6HasData ? 'bg-brand-primary' : 'bg-slate-200'} ${!rt6HasData ? 'border border-slate-300' : ''}`}
                     >
                         <span
-                            className={`absolute top-[3px] left-[3px] w-4 h-4 bg-white rounded-full shadow transition-transform ${showHomogeneo && rt6HasData ? 'translate-x-[18px]' : ''}`}
+                            className={`absolute top-[3px] left-[3px] w-4 h-4 rounded-full shadow transition-transform ${showHomogeneo && rt6HasData ? 'translate-x-[18px]' : ''} ${!rt6HasData ? 'bg-slate-50' : 'bg-white'}`}
                         />
                     </button>
                     <div className="leading-tight">
-                        <span className="text-sm font-semibold block">Mostrar Homogéneo</span>
-                        <span className="text-[10px] text-slate-400">Ajuste RT6</span>
+                        <span className="text-sm font-semibold block text-slate-700">Mostrar Homogéneo</span>
+                        <span className="text-[10px] text-slate-500">Ajuste RT6</span>
                     </div>
                 </label>
 
@@ -818,7 +818,7 @@ function CtaButton({
             <button
                 onClick={handleGenerateClosingEntry}
                 disabled={disabled}
-                className="flex items-center gap-2 px-6 py-3 rounded-lg font-semibold text-white text-base bg-brand-gradient shadow-[0_4px_12px_rgba(37,99,235,0.3)] hover:shadow-[0_6px_16px_rgba(37,99,235,0.4)] hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none disabled:translate-y-0"
+                className="flex items-center gap-2 px-6 py-3 rounded-lg font-semibold text-white text-base bg-brand-gradient shadow-[0_4px_12px_rgba(37,99,235,0.3)] hover:shadow-[0_6px_16px_rgba(37,99,235,0.4)] hover:-translate-y-0.5 transition-all disabled:cursor-not-allowed disabled:shadow-none disabled:translate-y-0 disabled:bg-none disabled:bg-slate-200 disabled:border disabled:border-slate-300 disabled:text-slate-600"
             >
                 <Check size={18} weight="bold" />
                 {closingIsSaving

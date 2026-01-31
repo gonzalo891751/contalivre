@@ -18,7 +18,8 @@
       "Bash(test:*)",
       "Bash(python3:*)",
       "Bash(/c/Python313/python:*)",
-      "Bash(del \"D:\\\\Git\\\\ContaLivre\\\\src\\\\pages\\\\Planillas\\\\_cierre_replacement.tsx\")"
+      "Bash(del \"D:\\\\Git\\\\ContaLivre\\\\src\\\\pages\\\\Planillas\\\\_cierre_replacement.tsx\")",
+      "Bash(npm run test:*)"
     ]
   }
 }

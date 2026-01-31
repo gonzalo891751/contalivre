@@ -2,6 +2,174 @@
 
 ---
 
+## CHECKPOINT #FIX-PN-RETIROS-330401
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Corregir bug crítico donde "Retiros de socios / Distribución" (3.3.04.01) sumaba al PN en lugar de restar (saldo deudor en rubro acreedor).
+
+### Causa Raíz
+La cuenta `3.3.04.01` tenía `normalSide: 'DEBIT'` pero le faltaba `isContra: true` (o mecanismo equivalente) para que el agregador de Estados Contables la tratara como resta dentro del Patrimonio Neto (rubro CREDIT). El sistema sumaba el saldo deudor positivo como un aumento del PN.
+
+### Solución Implementada (Opción A/B)
+1.  **Seed Update (`src/storage/seed.ts`):** Se agregó `isContra: true` a la definición de `3.3.04.01`.
+2.  **Reparación Automática (`src/storage/seed.ts`):** Nueva función `repairEquityAccounts()` que detecta la cuenta en la DB y le aplica `isContra: true` si falta.
+3.  **Ejecución en Init (`src/ui/Layout/MainLayout.tsx`):** Se llama a `repairEquityAccounts()` al iniciar la app (junto a `loadSeedData` y `repairDefaultFxAccounts`), asegurando que usuarios existentes reciban el fix sin perder datos.
+
+### Archivos Tocados
+- `src/storage/seed.ts`: Definición de cuenta + función repair.
+- `src/storage/index.ts`: Export de función repair.
+- `src/ui/Layout/MainLayout.tsx`: Llamada en `useEffect`.
+- `docs/AI_HANDOFF.md`: Este checkpoint.
+
+### Validación
+- **Usuarios nuevos:** Reciben la cuenta correcta desde el inicio.
+- **Usuarios existentes:** Al recargar la página, se corrige el flag `isContra` en IndexedDB.
+- **Resultado:** En Estado de Situación Patrimonial, "Retiros" aparece restando y la ecuación patrimonial cuadra.
+
+---
+
+## CHECKPOINT #KPI-RANGE-TOGGLE-P2
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Agregar toggle Mes/Ejercicio para KPIs del dashboard de inventario.
+
+### Cambios clave
+1. **Nuevo estado `kpiRangeMode`:**
+   - `'month'`: KPIs calculados para el mes actual (default)
+   - `'ejercicio'`: KPIs calculados para todo el ejercicio (periodStart → periodEnd)
+
+2. **`kpiDateRange` memo:**
+   - Calcula `start`, `end`, `label` según el modo seleccionado
+   - Usado por `calculateBienesKPIs()` para filtrar movimientos
+
+3. **UI Toggle en header:**
+   - Botones estilo "tabs" con efecto de selección (bg-white + shadow)
+   - Ubicado junto al badge de período
+   - Badge muestra etiqueta dinámica según el modo
+
+4. **KPIs actualizados:**
+   - Ventas (Periodo) ahora muestra el rango correcto
+   - Etiqueta cambia de "ene. 2026" a "Ejercicio" según modo
+
+### Archivos tocados
+- `src/pages/Planillas/InventarioBienesPage.tsx` (~15 líneas)
+- `docs/AI_HANDOFF.md`
+
+### Validación
+```bash
+npm run build  # PASS (tsc -b + vite build)
+```
+
+### Test manual sugerido
+1. Ir a Dashboard de Inventario
+2. Ver toggle [Mes] | [Ejercicio] en el header
+3. Click en "Ejercicio": KPIs de Ventas/CMV/Margen cambian a acumulado
+4. Click en "Mes": KPIs vuelven al mes actual
+5. Badge junto al toggle muestra "Ejercicio" o "ene. 2026" según modo
+
+---
+
+## CHECKPOINT #LAYER-HISTORY-DRAWER-P1
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Implementar motor de historial de lotes (`layer-history.ts`) y actualizar ProductLotsDrawer para mostrar lotes agotados + barras de progreso reales + tooltips con eventos.
+
+### Cambios clave
+1. **`src/core/inventario/layer-history.ts` (NUEVO):**
+   - `buildLayerHistory(product, movements, method)` → `LotHistory[]`
+   - Mantiene TODOS los lotes (incluyendo agotados, `isExhausted: true`)
+   - Registra eventos por lote: CREATION, CONSUMPTION, RETURN, ADJUSTMENT
+   - Cada lote tiene `initialQuantity` y `currentQuantity` para barras reales
+   - `getLotHistorySummary()` para estadísticas agregadas
+
+2. **`src/pages/Planillas/components/ProductLotsDrawer.tsx`:**
+   - Nuevos props opcionales: `bienesProduct`, `movements` para habilitar historial real
+   - Si se pasan, usa `buildLayerHistory()`; si no, fallback a layers existentes
+   - **Barras de progreso reales**: segmento consumido (striped) + segmento remanente (azul)
+   - **Lotes agotados visibles**: mostrados en gris con badge "Agotado"
+   - **Toggle "Mostrar/Ocultar agotados"**: para filtrar vista
+   - **Tooltips con Portal**: evitan overflow, muestran historial de eventos
+   - **Barra resumen global**: total consumido vs total actual
+
+3. **`src/pages/Planillas/InventarioBienesPage.tsx`:**
+   - Pasa `bienesProduct` y `movements` al drawer
+
+### Archivos tocados
+- `src/core/inventario/layer-history.ts` (NUEVO - ~280 LOC)
+- `src/pages/Planillas/components/ProductLotsDrawer.tsx` (reescrito - ~420 LOC)
+- `src/pages/Planillas/InventarioBienesPage.tsx` (2 líneas agregadas)
+- `docs/AI_HANDOFF.md`
+
+### Validación
+```bash
+npm run build  # PASS (tsc -b + vite build)
+npm run test -- tests/costing.test.ts  # 5/5 passed
+```
+
+### Test manual sugerido
+1. Crear producto con compras y ventas
+2. Abrir "Ver lotes" desde Dashboard
+3. Verificar: lotes agotados aparecen en gris
+4. Verificar: barras muestran proporción consumido/remanente real
+5. Hover sobre lote: tooltip con historial de eventos
+6. Click "Ocultar agotados": lotes grises desaparecen
+
+### Próximo paso
+**P2: Toggle Mes/Ejercicio** en InventarioBienesPage para KPIs con selector de rango
+
+---
+
+## CHECKPOINT #FIX-DEVOLUCIONES-PEPS-P0
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite) - Tests PASS (5/5)
+**Objetivo:** Corregir bug crítico P0 donde devoluciones de venta creaban nuevo lote con fecha de devolución, rompiendo la antigüedad PEPS.
+
+### Problema corregido
+**Antes (BUG):**
+- Devolución de venta hacía `layers.push({ date: mov.date, ... })` con fecha de devolución
+- Mercadería devuelta quedaba "al final de la cola" PEPS
+- Ejemplo: Compra Ene, Venta Feb, Devolución Mar → 2 lotes (Ene=50, Mar=10)
+
+**Después (FIX):**
+- Devolución busca capa original via `sourceMovementId` + `costLayersUsed`
+- Si capa existe: suma cantidad a la capa existente
+- Si capa fue consumida: recrea con fecha ORIGINAL del movimiento fuente
+- Ejemplo: Compra Ene, Venta Feb, Devolución Mar → 1 lote (Ene=60)
+
+### Cambios clave
+1. **`src/core/inventario/costing.ts` - `buildCostLayers()`:**
+   - Bloque de devolución de venta (líneas 88-160) completamente reescrito
+   - Nueva lógica: `existingLayer.quantity += qtyToRestore` en vez de `layers.push()`
+   - Busca `movementsById.get(usedLayer.movementId)` para obtener fecha original
+   - Fallback: si no hay `costLayersUsed`, usa `sourceMovementId`
+   - Último recurso: agrega a capa más antigua para mantener prioridad FIFO
+
+2. **`tests/costing.test.ts` (NUEVO):**
+   - Test case "Lata de Tomate" del audit
+   - 5 tests cubriendo: devolución simple, sin sourceMovementId, múltiples devoluciones, devolución de múltiples lotes
+
+### Archivos tocados
+- `src/core/inventario/costing.ts` (modificado)
+- `tests/costing.test.ts` (NUEVO)
+- `docs/AI_HANDOFF.md` (este checkpoint)
+
+### Validación
+```bash
+npm run test -- --run tests/costing.test.ts  # 5 passed
+npm run build  # PASS (tsc -b + vite build)
+```
+
+### Test manual sugerido
+1. Crear producto "Lata de Tomate"
+2. Cargar: Compra 100u @ $10 (Ene), Venta 50u (Feb), Devolución 10u (Mar)
+3. Verificar en Dashboard: debe haber 1 solo lote con fecha Enero y 60 unidades
+4. La barra de lotes no debe mostrar lote de Marzo
+
+### Próximo paso
+**P1: Crear `layer-history.ts` + actualizar ProductLotsDrawer** para mostrar historial real de lotes (agotados visibles, barras consumido/remanente)
+
+---
+
 ## CHECKPOINT #CIERRE-UI-FACELIFT-RT6-TOGGLE
 **Fecha:** 2026-01-31
 **Estado:** COMPLETADO - Build PASS (tsc + vite)

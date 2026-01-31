@@ -301,6 +301,9 @@ export default function InventarioBienesPage() {
     // New dashboard lots drawer
     const [dashboardLotsProduct, setDashboardLotsProduct] = useState<ProductEndingValuation | null>(null)
 
+    // KPI Range Mode: 'month' = mes actual, 'ejercicio' = acumulado ejercicio
+    const [kpiRangeMode, setKpiRangeMode] = useState<'month' | 'ejercicio'>('month')
+
     // Configuracion de cuentas Bienes de Cambio (conciliacion)
     const [accountMappingsDraft, setAccountMappingsDraft] = useState<Partial<Record<AccountMappingKey, string>>>({})
     const [accountMappingsSaving, setAccountMappingsSaving] = useState(false)
@@ -417,6 +420,14 @@ export default function InventarioBienesPage() {
         return calculateAllValuations(products, movements, settings.costMethod)
     }, [products, movements, settings])
 
+    // Determine KPI date range based on mode
+    const kpiDateRange = useMemo(() => {
+        if (kpiRangeMode === 'ejercicio') {
+            return { start: periodStart, end: periodEnd, label: 'Ejercicio' }
+        }
+        return { start: monthRange.start, end: monthRange.end, label: monthRange.label }
+    }, [kpiRangeMode, periodStart, periodEnd, monthRange])
+
     const kpis = useMemo<BienesKPIs>(() => {
         if (!settings) {
             return {
@@ -429,8 +440,8 @@ export default function InventarioBienesPage() {
                 lowStockAlerts: 0,
             }
         }
-        return calculateBienesKPIs(products, movements, settings.costMethod, monthRange.start, monthRange.end)
-    }, [products, movements, settings, monthRange])
+        return calculateBienesKPIs(products, movements, settings.costMethod, kpiDateRange.start, kpiDateRange.end)
+    }, [products, movements, settings, kpiDateRange])
 
     // Homogeneous ending inventory valuation (FIFO layers reexpressed to closing month)
     const efHomogenea = useMemo<EndingInventoryValuation | null>(() => {
@@ -1949,9 +1960,32 @@ export default function InventarioBienesPage() {
                     <h2 className="text-lg font-display font-semibold text-slate-900">
                         Bienes de Cambio (Mercaderias)
                     </h2>
-                    <div className="hidden sm:flex items-center px-2 py-1 bg-slate-100 rounded-md border border-slate-200 text-xs font-mono text-slate-600">
+                    {/* KPI Range Toggle */}
+                    <div className="hidden sm:flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                        <button
+                            onClick={() => setKpiRangeMode('month')}
+                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                                kpiRangeMode === 'month'
+                                    ? 'bg-white text-slate-900 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            Mes
+                        </button>
+                        <button
+                            onClick={() => setKpiRangeMode('ejercicio')}
+                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                                kpiRangeMode === 'ejercicio'
+                                    ? 'bg-white text-slate-900 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            Ejercicio
+                        </button>
+                    </div>
+                    <div className="hidden sm:flex items-center px-2 py-1 bg-slate-50 rounded-md text-xs font-mono text-slate-500">
                         <span className="w-2 h-2 rounded-full bg-green-500 mr-2" />
-                        Periodo {monthRange.label}
+                        {kpiDateRange.label}
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -2069,7 +2103,7 @@ export default function InventarioBienesPage() {
                                     {formatCurrency(kpis.salesPeriod)}
                                 </div>
                                 <div className="text-xs text-slate-400 mt-1">
-                                    Mes {monthRange.label}
+                                    {kpiDateRange.label}
                                 </div>
                                 {salesDelta !== null ? (
                                     <div className={`text-xs font-medium mt-1 flex items-center gap-1 ${salesDelta >= 0 ? 'text-emerald-600' : 'text-red-600'
@@ -3707,6 +3741,8 @@ export default function InventarioBienesPage() {
                 closingPeriod={getPeriodFromDate(periodEnd)}
                 formatCurrency={formatCurrency}
                 onClose={() => setDashboardLotsProduct(null)}
+                bienesProduct={dashboardLotsProduct?.product}
+                movements={movements}
             />
 
             {/* Layers Drawer (EF Homogénea detail per product) */}

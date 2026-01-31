@@ -86,39 +86,78 @@ export function buildCostLayers(
         } else if (mov.type === 'SALE' || (mov.type === 'ADJUSTMENT' && mov.quantity < 0)) {
             // Consume from layers based on method
             if (mov.type === 'SALE' && mov.isDevolucion) {
+                // SALE RETURN: Restore to ORIGINAL layers (preserve FIFO date priority)
+                // DO NOT create new layers with return date - this breaks PEPS ordering
                 const qtyToReturn = Math.abs(mov.quantity)
                 if (qtyToReturn > 0) {
                     const source = mov.sourceMovementId ? movementsById.get(mov.sourceMovementId) : undefined
                     const sourceLayers = source?.costLayersUsed || []
+
                     if (sourceLayers.length > 0 && source?.quantity) {
+                        // Restore proportionally to original layers used by the sale
                         const sourceQty = Math.abs(source.quantity)
                         const ratio = sourceQty > 0 ? qtyToReturn / sourceQty : 0
-                        sourceLayers.forEach(layer => {
-                            const qty = layer.quantity * ratio
-                            if (qty > 0) {
-                                layers.push({
-                                    date: mov.date,
-                                    quantity: qty,
-                                    unitCost: layer.unitCost,
-                                    movementId: layer.movementId,
-                                })
+
+                        sourceLayers.forEach(usedLayer => {
+                            const qtyToRestore = usedLayer.quantity * ratio
+                            if (qtyToRestore > 0) {
+                                // Find existing layer with same movementId to restore to
+                                const existingLayer = layers.find(l => l.movementId === usedLayer.movementId)
+
+                                if (existingLayer) {
+                                    // Layer still exists: add back the returned quantity
+                                    existingLayer.quantity += qtyToRestore
+                                } else {
+                                    // Layer was fully consumed: recreate with ORIGINAL date
+                                    // Get original purchase date from movement
+                                    const originalMov = movementsById.get(usedLayer.movementId)
+                                    const originalDate = originalMov?.date || mov.date // fallback to return date only if original not found
+
+                                    layers.push({
+                                        date: originalDate,
+                                        quantity: qtyToRestore,
+                                        unitCost: usedLayer.unitCost,
+                                        movementId: usedLayer.movementId,
+                                    })
+                                }
                             }
                         })
                     } else if (mov.costUnitAssigned && qtyToReturn > 0) {
-                        layers.push({
-                            date: mov.date,
-                            quantity: qtyToReturn,
-                            unitCost: mov.costUnitAssigned,
-                            movementId: mov.sourceMovementId || mov.id,
-                        })
+                        // Fallback: no costLayersUsed, use sourceMovementId to find original layer
+                        const targetMovementId = mov.sourceMovementId || mov.id
+                        const existingLayer = layers.find(l => l.movementId === targetMovementId)
+
+                        if (existingLayer) {
+                            existingLayer.quantity += qtyToReturn
+                        } else {
+                            // Get original date from source movement
+                            const originalMov = mov.sourceMovementId ? movementsById.get(mov.sourceMovementId) : undefined
+                            const originalDate = originalMov?.date || mov.date
+
+                            layers.push({
+                                date: originalDate,
+                                quantity: qtyToReturn,
+                                unitCost: mov.costUnitAssigned,
+                                movementId: targetMovementId,
+                            })
+                        }
                     } else if (qtyToReturn > 0) {
+                        // Last resort fallback: use average cost, try to find any existing layer
                         const totalQty = layers.reduce((s, l) => s + l.quantity, 0)
                         const avgCost = totalQty > 0
                             ? layers.reduce((s, l) => s + l.quantity * l.unitCost, 0) / totalQty
                             : 0
-                        if (avgCost > 0) {
+                        if (avgCost > 0 && layers.length > 0) {
+                            // Add to oldest layer to maintain FIFO priority
+                            const oldestLayer = [...layers].sort((a, b) => a.date.localeCompare(b.date))[0]
+                            oldestLayer.quantity += qtyToReturn
+                        } else if (avgCost > 0) {
+                            // No layers exist, create one with original source date if available
+                            const originalMov = mov.sourceMovementId ? movementsById.get(mov.sourceMovementId) : undefined
+                            const originalDate = originalMov?.date || mov.date
+
                             layers.push({
-                                date: mov.date,
+                                date: originalDate,
                                 quantity: qtyToReturn,
                                 unitCost: avgCost,
                                 movementId: mov.sourceMovementId || mov.id,

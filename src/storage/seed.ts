@@ -2,7 +2,7 @@ import { db, generateId, cleanupDuplicateAccounts } from './db'
 import type { Account, AccountKind, AccountSection, StatementGroup, NormalSide } from '../core/models'
 
 // Current seed version - increment when seed structure changes
-const SEED_VERSION = 10
+const SEED_VERSION = 11
 
 /**
  * Definición de cuenta para el seed
@@ -73,6 +73,9 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '1.1.03.03', name: 'Anticipos a acreedores varios', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03' },
     { code: '1.1.03.04', name: 'Comisiones a cobrar', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03' },
     { code: '1.1.03.05', name: 'Indemnizaciones a cobrar', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03' },
+    { code: '1.1.03.06', name: 'IVA a favor', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'TAX_CREDITS', parentCode: '1.1.03' },
+    { code: '1.1.03.07', name: 'Retenciones IVA de terceros', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'TAX_CREDITS', parentCode: '1.1.03' },
+    { code: '1.1.03.08', name: 'Percepciones IVA de terceros', kind: 'ASSET', section: 'CURRENT', group: 'Otros créditos', statementGroup: 'TAX_CREDITS', parentCode: '1.1.03' },
     // 1.1.03.10 - Créditos con socios, accionistas y personal
     { code: '1.1.03.10', name: 'Créditos con socios y personal', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03', isHeader: true },
     { code: '1.1.03.11', name: 'Anticipos de personal', kind: 'ASSET', section: 'CURRENT', group: 'Créditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.10' },
@@ -160,6 +163,9 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '2.1.03.01', name: 'IVA Débito Fiscal', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas fiscales', statementGroup: 'TAX_LIABILITIES', parentCode: '2.1.03' },
     { code: '2.1.03.02', name: 'Impuestos a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas fiscales', statementGroup: 'TAX_LIABILITIES', parentCode: '2.1.03' },
     { code: '2.1.03.03', name: 'Retenciones a depositar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas fiscales', statementGroup: 'TAX_LIABILITIES', parentCode: '2.1.03' },
+    { code: '2.1.03.04', name: 'IVA a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas fiscales', statementGroup: 'TAX_LIABILITIES', parentCode: '2.1.03' },
+    { code: '2.1.03.05', name: 'Retenciones IVA a terceros', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas fiscales', statementGroup: 'TAX_LIABILITIES', parentCode: '2.1.03' },
+    { code: '2.1.03.06', name: 'Percepciones IVA a terceros', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas fiscales', statementGroup: 'TAX_LIABILITIES', parentCode: '2.1.03' },
 
     // 2.1.04 - Anticipos y diferidos
     { code: '2.1.04', name: 'Anticipos y diferidos', kind: 'LIABILITY', section: 'CURRENT', group: 'Anticipos', statementGroup: 'DEFERRED_INCOME', parentCode: '2.1', isHeader: true },
@@ -219,7 +225,7 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '3.3.03.99', name: 'Ajustes ejercicios anteriores (Genérico)', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.03' },
     // 3.3.04 - Distribuciones y retiros
     { code: '3.3.04', name: 'Distribuciones y retiros', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3', isHeader: true },
-    { code: '3.3.04.01', name: 'Retiros de socios / Distribución', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.04', normalSide: 'DEBIT' },
+    { code: '3.3.04.01', name: 'Retiros de socios / Distribución', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.04', normalSide: 'DEBIT', isContra: true },
     { code: '3.3.04.02', name: 'Dividendos declarados (en efectivo)', kind: 'EQUITY', section: 'CURRENT', group: 'Resultados acumulados', statementGroup: 'RETAINED_EARNINGS', parentCode: '3.3.04', normalSide: 'DEBIT' },
 
     // ============================================
@@ -481,5 +487,19 @@ export async function repairDefaultFxAccounts(): Promise<void> {
 
     if (newAccounts.length > 0) {
         await db.accounts.bulkAdd(newAccounts)
+    }
+}
+
+/**
+ * Repara cuentas de Patrimonio Neto (3.3.04.01) para que sean isContra: true.
+ * Esto corrige el problema donde los retiros suman al PN en lugar de restar.
+ */
+export async function repairEquityAccounts(): Promise<void> {
+    const accounts = await db.accounts.toArray()
+    const retiros = accounts.find(a => a.code === '3.3.04.01')
+
+    if (retiros && !retiros.isContra) {
+        await db.accounts.update(retiros.id, { isContra: true })
+        console.log('✓ Reparado: 3.3.04.01 Retiros ahora es isContra: true')
     }
 }
