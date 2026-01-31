@@ -3270,3 +3270,22 @@ px tsc --noEmit\
 - \
 px vite build\
 
+
+## CHECKPOINT #INV-RT6-CONCILIACION-PLAN-POR-ASIENTO-EI-MATCH-RECPAM-EXCLUDE
+
+**Resumen:**
+1. **Modal RT6 (Conciliación):** Se corrigió para que el plan de aplicación sea específico del asiento seleccionado (scope por accounts), evitando totales globales incorrectos.
+2. **Matching EI:** Se mejoró la heurística para reconocer movimientos de apertura (type ADJUSTMENT + fecha inicio) como EI válido, resolviendo 'Orígenes sin match'.
+3. **UX Cierre:** Se excluyó RECPAM y cuentas de RESULTADOS de la lista 'Cuentas sin clasificar' en el Paso 2 RT6.
+
+**Archivos tocados:**
+- \src/core/inventario/rt6-apply-plan.ts\: Nuevo input \ffectedAccountIds\, lógica de scope, matching EI mejorado.
+- \src/pages/Planillas/InventarioBienesPage.tsx\: Pasaje de scope y fecha apertura al builder del plan.
+- \src/pages/Planillas/components/Step2RT6Panel.tsx\: Filtro para excluir RESULTADOS/RECPAM de unclassified.
+
+**Comandos:**
+- \
+px tsc --noEmit\
+- \
+px vite build\
+

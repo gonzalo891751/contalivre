@@ -1089,6 +1089,10 @@ export default function InventarioBienesPage() {
             devolCompras: inventoryAccountResolution.byKey.get('devolCompras')?.account.id,
         }
 
+        // Identify accounts affected by this specific RT6 entry to scope the plan
+        // This prevents the plan from including adjustments for accounts not present in this entry
+        const affectedAccountIds = new Set(entry.lines.map(l => l.accountId).filter(Boolean) as string[])
+
         // Load cierre-valuacion state for Step 2 RT6 data
         try {
             const cierreState = await loadCierreValuacionState()
@@ -1098,6 +1102,8 @@ export default function InventarioBienesPage() {
                 movements,
                 products,
                 cierreState,
+                affectedAccountIds,
+                openingDate: openingBalanceDate,
             })
 
             setRt6PreviewData({

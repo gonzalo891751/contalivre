@@ -219,8 +219,17 @@ export function Step2RT6Panel({
             if (classifiedIds.has(acc.id)) return false;
             // Check if account code is in any RT6 partida
             if (noMonetariaIds.has(acc.code)) return false;
+            
+            // Check balance
             const bal = balances.get(acc.id);
             if (!bal || bal.balance === 0) return false;
+
+            // Exclude RESULTADOS and RECPAM from unclassified list
+            // They are neither monetary nor non-monetary in the traditional sense for classification
+            const type = getAccountType(acc);
+            if (type === 'RESULTADOS') return false;
+            if (acc.code === '4.6.05' || acc.name.toLowerCase().includes('recpam')) return false;
+
             return true;
         }).map(acc => ({
             account: acc,

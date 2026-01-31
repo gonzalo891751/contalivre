@@ -71,6 +71,10 @@ export interface BuildRT6PlanInput {
     products: BienesProduct[]
     /** CierreValuacion persisted state (has partidasRT6 + indices + closingDate) */
     cierreState: CierreValuacionState
+    /** Optional: filter RT6 partidas by account IDs (scope to specific journal entry) */
+    affectedAccountIds?: Set<string>
+    /** Optional: Explicit opening date for EI matching */
+    openingDate?: string
 }
 
 // ========================================
@@ -78,6 +82,30 @@ export interface BuildRT6PlanInput {
 // ========================================
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
+
+function findOpeningMovement(
+    movements: BienesMovement[],
+    productId: string,
+    openingDate?: string
+): BienesMovement | undefined {
+    // 1. Look for movements on opening date with type ADJUSTMENT
+    if (openingDate) {
+        const openingMov = movements.find(m => 
+            m.productId === productId && 
+            m.date === openingDate && 
+            m.type === 'ADJUSTMENT' && 
+            m.quantity > 0
+        )
+        if (openingMov) return openingMov
+    }
+
+    // 2. Look for movements with "apertura" or "inicial" in notes
+    return movements.find(m => {
+        if (m.productId !== productId) return false
+        const notes = (m.notes || '').toLowerCase()
+        return (notes.includes('apertura') || notes.includes('inicial')) && m.quantity > 0
+    })
+}
 
 function getCategoryForAccountId(
     accountId: string,
@@ -128,7 +156,7 @@ function distributeProportionally(
 // ========================================
 
 export function buildRT6InventoryApplyPlan(input: BuildRT6PlanInput): RT6InventoryApplyPlan {
-    const { adjustmentAmount, inventoryAccountMap, movements, products, cierreState } = input
+    const { adjustmentAmount, inventoryAccountMap, movements, products, cierreState, affectedAccountIds, openingDate } = input
     const { partidasRT6, indices, closingDate } = cierreState
 
     const closingPeriod = getPeriodFromDate(closingDate)
@@ -147,6 +175,12 @@ export function buildRT6InventoryApplyPlan(input: BuildRT6PlanInput): RT6Invento
     const relevantPartidas: { partida: PartidaRT6; category: OriginCategory }[] = []
     for (const p of partidasRT6) {
         if (!p.accountId) continue
+
+        // Scope filter: if affectedAccountIds is provided, skip unmatched accounts
+        if (affectedAccountIds && !affectedAccountIds.has(p.accountId)) {
+            continue
+        }
+
         const cat = accountIdToCategory.get(p.accountId)
         if (cat) {
             relevantPartidas.push({ partida: p, category: cat })
@@ -166,7 +200,13 @@ export function buildRT6InventoryApplyPlan(input: BuildRT6PlanInput): RT6Invento
 
             if (category === 'EI') {
                 // Map to products' opening inventory
-                const productsWithOpening = products.filter(p => (p.openingQty * p.openingUnitCost) > 0)
+                // Heuristic: check product opening fields OR opening movement
+                const productsWithOpening = products.filter(p => {
+                    const hasLegacyOpening = (p.openingQty * p.openingUnitCost) > 0
+                    const hasOpeningMovement = !!findOpeningMovement(movements, p.id, openingDate)
+                    return hasLegacyOpening || hasOpeningMovement
+                })
+
                 if (productsWithOpening.length === 0) {
                     unmatchedOrigins.push({
                         period: lotPeriod,
@@ -177,12 +217,26 @@ export function buildRT6InventoryApplyPlan(input: BuildRT6PlanInput): RT6Invento
                     continue
                 }
 
-                const targets = productsWithOpening.map(p => ({
-                    id: null as string | null,
-                    productId: p.id,
-                    historicalValue: p.openingQty * p.openingUnitCost,
-                    label: `${catLabel} ${lotPeriod} · ${p.name}`,
-                }))
+                const targets = productsWithOpening.map(p => {
+                    // Try to find historical value from opening movement if legacy fields are 0
+                    let historicalValue = p.openingQty * p.openingUnitCost
+                    let targetMovementId = null
+                    
+                    if (historicalValue === 0) {
+                        const openingMov = findOpeningMovement(movements, p.id, openingDate)
+                        if (openingMov) {
+                            historicalValue = openingMov.subtotal
+                            targetMovementId = openingMov.id
+                        }
+                    }
+
+                    return {
+                        id: targetMovementId,
+                        productId: p.id,
+                        historicalValue: historicalValue || 1, // Avoid 0 div
+                        label: `${catLabel} ${lotPeriod} · ${p.name}`,
+                    }
+                })
 
                 const distributed = distributeProportionally(lotDelta, targets)
                 for (const d of distributed) {
