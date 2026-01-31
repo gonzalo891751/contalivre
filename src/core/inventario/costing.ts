@@ -87,11 +87,18 @@ export function buildCostLayers(
         } else if (mov.type === 'VALUE_ADJUSTMENT') {
             // Value-only adjustment (RT6 inflation): distribute across existing layers
             const delta = mov.valueDelta ?? mov.subtotal ?? 0
-            const totalLayerQty = layers.reduce((s, l) => s + l.quantity, 0)
-            if (totalLayerQty > 0 && delta !== 0) {
-                for (const layer of layers) {
-                    const share = layer.quantity / totalLayerQty
-                    layer.unitCost += (delta * share) / layer.quantity
+            if (delta !== 0) {
+                const bySource = mov.sourceMovementId
+                    ? layers.filter(l => l.movementId === mov.sourceMovementId && l.quantity > 0)
+                    : []
+                const targetLayers = bySource.length > 0 ? bySource : layers
+                const totalTargetQty = targetLayers.reduce((s, l) => s + l.quantity, 0)
+                if (totalTargetQty > 0) {
+                    // Distribute by remaining quantity in the targeted layers
+                    for (const layer of targetLayers) {
+                        const share = layer.quantity / totalTargetQty
+                        layer.unitCost += (delta * share) / layer.quantity
+                    }
                 }
             }
         }

@@ -303,6 +303,12 @@ export type CostingMethod = 'FIFO' | 'LIFO' | 'PPP'
 export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT' | 'VALUE_ADJUSTMENT'
 
 /**
+ * Sub-classification for VALUE_ADJUSTMENT movements.
+ * Distinguishes the origin so journal generation and UI labels are correct.
+ */
+export type AdjustmentKind = 'RT6' | 'CAPITALIZATION' | 'OTHER'
+
+/**
  * Journal integration status for inventory movements
  */
 export type JournalStatus = 'generated' | 'linked' | 'none' | 'error' | 'missing' | 'desync'
@@ -383,14 +389,22 @@ export interface BienesMovement {
     descuentoFinancieroAmount?: number // $ calculated descuento
     gastosCompra?: number          // $ purchase expenses (freight, insurance, etc.)
     isDevolucion?: boolean         // True if this is a return (purchase return / sale return)
+    // VALUE_ADJUSTMENT sub-classification
+    adjustmentKind?: AdjustmentKind // 'RT6' | 'CAPITALIZATION' | 'OTHER' — required for VALUE_ADJUSTMENT
     // RT6 inflation adjustment (VALUE_ADJUSTMENT only)
     valueDelta?: number            // $ change in valuation (positive = increase, negative = decrease)
     rt6Period?: string             // YYYY-MM period of the RT6 adjustment
     rt6SourceEntryId?: string      // Journal entry ID of the RT6 asiento that originated this
     originCategory?: 'EI' | 'COMPRAS' | 'GASTOS_COMPRA' | 'BONIF_COMPRA' | 'DEVOL_COMPRA'  // RT6 origin category for cierre breakdown
+    sourceMovementId?: string      // Optional: purchase movement to target cost layers (capitalization)
     // Additional info
     counterparty?: string          // Supplier name (PURCHASE) or Customer (SALE)
     paymentMethod?: string         // Efectivo, Cuenta Corriente, etc.
+    paymentSplits?: {              // Multiple payments/counterparties
+        accountId: string
+        amount: number
+        method?: string
+    }[]
     notes?: string
     reference?: string             // Invoice number, receipt, etc.
     // For Etapa 2: Journal integration

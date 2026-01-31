@@ -1,0 +1,519 @@
+import React, { useState, useMemo } from 'react';
+import { 
+  X, 
+  Search, 
+  Filter, 
+  ArrowRight, 
+  TrendingUp, 
+  Package, 
+  AlertCircle,
+  Calendar,
+  Clock,
+  Layers,
+  ArrowDownRight,
+  ArrowUpRight,
+  Info,
+  CheckCircle2
+} from 'lucide-react';
+
+// --- BRAND TOKENS & UTILS ---
+
+const FontsInjection = () => (
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap');
+    
+    :root {
+      --brand-primary: #3B82F6;
+      --brand-secondary: #10B981;
+      --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+      --text-main: #0F172A;
+      --text-secondary: #64748B;
+      --bg-app: #F8FAFC;
+    }
+    
+    .font-display { font-family: 'Outfit', sans-serif; }
+    .font-body { font-family: 'Inter', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    
+    /* Custom Tooltip Animation */
+    .tooltip-trigger:hover .tooltip-content {
+      opacity: 1;
+      transform: translateY(0);
+      visibility: visible;
+    }
+    
+    /* Custom Scrollbar for Drawer */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background-color: #cbd5e1;
+      border-radius: 20px;
+    }
+  `}</style>
+);
+
+const formatMoney = (val: number) => {
+  return new Intl.NumberFormat('es-AR', {
+    style: 'currency',
+    currency: 'ARS',
+    maximumFractionDigits: 0
+  }).format(val);
+};
+
+// --- MOCK DATA ---
+
+interface Lot {
+  id: string;
+  date: string;
+  displayDate: string; 
+  type: 'EI' | 'Compra';
+  qtyOriginal: number;
+  qtyConsumed: number;
+  qtyRemanente: number;
+  unitCostOrigin: number;
+  coef: number;
+}
+
+const MOCK_LOTS: Lot[] = [
+  { id: 'L1', date: '2025-01-01', displayDate: 'Ene 2025', type: 'EI', qtyOriginal: 100, qtyConsumed: 100, qtyRemanente: 0, unitCostOrigin: 20000, coef: 2.4143 },
+  { id: 'L2', date: '2025-01-15', displayDate: 'Ene 2025', type: 'Compra', qtyOriginal: 30, qtyConsumed: 30, qtyRemanente: 0, unitCostOrigin: 20000, coef: 2.4143 },
+  { id: 'L3', date: '2025-02-10', displayDate: 'Feb 2025', type: 'Compra', qtyOriginal: 50, qtyConsumed: 40, qtyRemanente: 10, unitCostOrigin: 20000, coef: 2.1383 },
+  { id: 'L4', date: '2025-05-20', displayDate: 'May 2025', type: 'Compra', qtyOriginal: 10, qtyConsumed: 0, qtyRemanente: 10, unitCostOrigin: 25000, coef: 1.6484 },
+  { id: 'L5', date: '2025-06-05', displayDate: 'Jun 2025', type: 'Compra', qtyOriginal: 10, qtyConsumed: 0, qtyRemanente: 10, unitCostOrigin: 20000, coef: 1.5294 },
+  { id: 'L6', date: '2025-08-12', displayDate: 'Ago 2025', type: 'Compra', qtyOriginal: 50, qtyConsumed: 0, qtyRemanente: 50, unitCostOrigin: 20000, coef: 1.3204 },
+];
+
+const PRODUCT_DATA = {
+  name: 'Gin Azul',
+  sku: 'G-001',
+  stock: 80,
+  lots: MOCK_LOTS
+};
+
+// Determinar rotación
+const getRotationStatus = (lots: Lot[]) => {
+  const activeLots = lots.filter(l => l.qtyRemanente > 0);
+  if (activeLots.length === 0) return { label: 'Sin Stock', color: 'bg-slate-100 text-slate-500 border-slate-200' };
+  
+  // Heurística simple para demo
+  const oldestActive = activeLots[0]; 
+  const isOld = oldestActive.displayDate.includes('Feb') || oldestActive.displayDate.includes('Ene');
+
+  if (isOld) return { label: 'Rotación Baja', color: 'bg-orange-50 text-orange-700 border-orange-200' };
+  return { label: 'Rotación Alta', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+};
+
+// --- COMPONENTS ---
+
+// Componente Barra de Composición (Stack Bar) con Tooltip Premium
+const CompositionBar = ({ lots }: { lots: Lot[] }) => {
+  const totalOriginal = lots.reduce((acc, l) => acc + l.qtyOriginal, 0);
+  
+  return (
+    <div className="w-full relative group/bar">
+      <div className="h-3 w-full flex rounded-full overflow-hidden bg-slate-100 ring-1 ring-slate-200/50">
+        {lots.map((lot, idx) => {
+          const isConsumed = lot.qtyRemanente === 0;
+          let bgColor = 'bg-slate-200'; // Default consumed
+          
+          if (!isConsumed) {
+            // Gradiente simulado por antigüedad
+            if (lot.displayDate.includes('Feb')) bgColor = 'bg-indigo-500';
+            else if (lot.displayDate.includes('May')) bgColor = 'bg-blue-500';
+            else if (lot.displayDate.includes('Ago')) bgColor = 'bg-sky-400';
+            else bgColor = 'bg-blue-300';
+          }
+
+          const widthPct = (lot.qtyOriginal / totalOriginal) * 100;
+          const subtotalHist = lot.qtyRemanente * lot.unitCostOrigin;
+          const subtotalHomog = subtotalHist * lot.coef;
+          
+          return (
+            <div 
+              key={lot.id}
+              className={`h-full relative tooltip-trigger transition-all duration-300 ${bgColor} ${!isConsumed ? 'hover:brightness-110 cursor-help hover:shadow-[0_0_10px_rgba(59,130,246,0.5)] z-10' : 'z-0'}`}
+              style={{ width: `${widthPct}%` }}
+            >
+              {/* Tooltip Premium */}
+              <div className="tooltip-content opacity-0 invisible absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-56 bg-slate-900/95 backdrop-blur text-white text-xs p-3 rounded-xl shadow-xl z-50 pointer-events-none transition-all duration-200 transform translate-y-2 border border-slate-700/50">
+                <div className="flex justify-between items-center mb-2 border-b border-slate-700 pb-2">
+                    <span className="font-bold text-white">{lot.displayDate}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${isConsumed ? 'bg-slate-700 text-slate-400' : 'bg-emerald-500/20 text-emerald-300'}`}>
+                        {isConsumed ? 'Consumido' : 'Activo'}
+                    </span>
+                </div>
+                
+                <div className="space-y-1 font-mono">
+                    <div className="flex justify-between"><span className="text-slate-400 font-sans">Cant:</span> <span>{lot.qtyRemanente} u.</span></div>
+                    {!isConsumed && (
+                        <>
+                            <div className="flex justify-between"><span className="text-slate-400 font-sans">Hist:</span> <span>{formatMoney(subtotalHist)}</span></div>
+                            <div className="flex justify-between"><span className="text-blue-300 font-sans">Homog:</span> <span className="text-blue-300 font-bold">{formatMoney(subtotalHomog)}</span></div>
+                        </>
+                    )}
+                </div>
+                {/* Flechita del tooltip */}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900/95"></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export default function InventoryDashboard() {
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [method, setMethod] = useState<'peps' | 'ueps' | 'ppp'>('peps');
+  
+  // Cálculos dinámicos
+  const calculations = useMemo(() => {
+    let histTotal = 0;
+    let adjustedTotal = 0;
+    
+    PRODUCT_DATA.lots.forEach(lot => {
+      const subOriginal = lot.qtyRemanente * lot.unitCostOrigin;
+      const unitCierre = lot.unitCostOrigin * lot.coef;
+      const subCierre = lot.qtyRemanente * unitCierre;
+      
+      histTotal += subOriginal;
+      adjustedTotal += subCierre;
+    });
+
+    const diff = adjustedTotal - histTotal;
+    
+    return { histTotal, adjustedTotal, diff };
+  }, []);
+
+  const rotation = getRotationStatus(PRODUCT_DATA.lots);
+
+  // Ordenamiento de lotes según método (para el visual flow)
+  const sortedLots = useMemo(() => {
+    const lots = [...PRODUCT_DATA.lots];
+    if (method === 'peps') {
+        // PEPS: Primero entra (más viejo) -> Primero sale. Visualmente mostramos el orden cronológico.
+        return lots.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    } else if (method === 'ueps') {
+        // UEPS: Último entra -> Primero sale. Visualmente mostramos los más recientes arriba.
+        return lots.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+    // PPP: Orden cronológico por defecto
+    return lots.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [method]);
+
+  return (
+    <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] font-body relative overflow-x-hidden">
+      <FontsInjection />
+
+      {/* HEADER SECTION */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded uppercase tracking-wider">Operaciones</span>
+                <span className="text-slate-400 text-xs">/</span>
+                <span className="text-slate-500 text-xs">Bienes de Cambio</span>
+              </div>
+              <h1 className="text-3xl font-display font-bold text-slate-900">Inventario</h1>
+            </div>
+
+            <div className="flex items-center gap-3">
+               {/* Controls */}
+               <div className="flex items-center bg-slate-100 rounded-lg p-1">
+                  <button 
+                    onClick={() => setMethod('peps')}
+                    className={`px-3 py-1.5 rounded font-medium text-xs transition-all ${method === 'peps' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    PEPS (FIFO)
+                  </button>
+                  <button 
+                    onClick={() => setMethod('ueps')}
+                    className={`px-3 py-1.5 rounded font-medium text-xs transition-all ${method === 'ueps' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    UEPS (LIFO)
+                  </button>
+                  <button 
+                    onClick={() => setMethod('ppp')}
+                    className={`px-3 py-1.5 rounded font-medium text-xs transition-all ${method === 'ppp' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    PPP
+                  </button>
+               </div>
+               <div className="h-6 w-px bg-slate-300 mx-1"></div>
+               <div className="flex items-center gap-2 text-slate-500 text-sm bg-white border border-slate-200 px-3 py-1.5 rounded-lg">
+                  <Calendar size={14} /> Cierre: Dic 2025
+               </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+        
+        {/* FILTERS & SEARCH */}
+        <div className="flex justify-between items-center">
+            <div className="relative w-80">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input type="text" placeholder="Buscar producto..." className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-shadow" />
+            </div>
+            <div className="flex gap-2">
+                <button className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                    <Filter size={14} /> Filtros
+                </button>
+            </div>
+        </div>
+
+        {/* --- PRODUCT CARD (MODIFICADO - REGLA A) --- */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow overflow-hidden group">
+            <div className="p-6">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                    
+                    {/* COL 1: Identity */}
+                    <div className="lg:col-span-3">
+                        <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center text-blue-600 border border-blue-100 shadow-sm shrink-0 group-hover:scale-105 transition-transform">
+                                <Package size={24} />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-display font-bold text-slate-900 leading-tight">{PRODUCT_DATA.name}</h3>
+                                <span className="text-xs font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded">{PRODUCT_DATA.sku}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* COL 2: Composition Bar & Rotation */}
+                    <div className="lg:col-span-4 px-2">
+                        <div className="flex justify-between items-center mb-2">
+                            <div className="flex justify-between text-xs text-slate-500 font-medium gap-2">
+                                <span>Composición (Lotes)</span>
+                            </div>
+                            {/* ROTATION BADGE moved here */}
+                            <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${rotation.color}`}>
+                                <Clock size={10} /> {rotation.label}
+                            </div>
+                        </div>
+                        <CompositionBar lots={PRODUCT_DATA.lots} />
+                    </div>
+
+                    {/* COL 3: Main Metrics (Inventory Focused) */}
+                    <div className="lg:col-span-4 border-l border-slate-100 pl-8 grid grid-cols-3 gap-6">
+                        <div>
+                            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Stock Físico</div>
+                            <div className="text-2xl font-mono font-bold text-slate-900">{PRODUCT_DATA.stock} <span className="text-sm font-sans text-slate-400 font-normal">u.</span></div>
+                        </div>
+                        <div>
+                            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Val. Histórica</div>
+                            <div className="text-lg font-mono font-medium text-slate-600">{formatMoney(calculations.histTotal)}</div>
+                            <div className="text-[10px] text-slate-400">Costo Origen</div>
+                        </div>
+                        <div>
+                            <div className="text-[10px] uppercase tracking-wider text-blue-600 font-bold mb-1">Val. Cierre</div>
+                            <div className="text-lg font-mono font-bold text-blue-700">{formatMoney(calculations.adjustedTotal)}</div>
+                            <div className="text-[10px] text-blue-400">Homogénea</div>
+                        </div>
+                    </div>
+
+                    {/* COL 4: CTA */}
+                    <div className="lg:col-span-1 flex justify-end">
+                        <button 
+                            onClick={() => setIsDrawerOpen(true)}
+                            className="group/btn flex items-center gap-2 text-sm font-semibold text-blue-600 bg-blue-50/50 px-4 py-2 rounded-lg hover:bg-blue-100 transition-colors border border-blue-100"
+                        >
+                            Ver Lotes <ArrowRight size={16} className="group-hover/btn:translate-x-0.5 transition-transform" />
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+      </main>
+
+      {/* --- SIDE DRAWER (MODIFICADO - REGLA B) --- */}
+      
+      {/* Backdrop */}
+      <div 
+        className={`fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-40 transition-opacity duration-300 ${isDrawerOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onClick={() => setIsDrawerOpen(false)}
+      />
+
+      {/* Panel */}
+      <div className={`fixed top-0 right-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50 transform transition-transform duration-500 cubic-bezier(0.25, 1, 0.5, 1) flex flex-col ${isDrawerOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        
+        {/* Drawer Header */}
+        <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
+          <div>
+             <h2 className="text-xl font-display font-bold text-slate-900">
+                Detalle de lotes <span className="text-slate-400 font-medium text-lg ml-1">(flow {method.toUpperCase()})</span>
+             </h2>
+             <p className="text-sm text-slate-500 mt-0.5">Gestión de flujo de inventario y reexpresión de valuación.</p>
+          </div>
+          <button 
+            onClick={() => setIsDrawerOpen(false)}
+            className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <X size={24} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto bg-slate-50/50 custom-scrollbar">
+           <div className="p-8 space-y-8">
+            
+            {/* 1. TOP SUMMARY (INVENTORY FOCUSED) */}
+            <div className="grid grid-cols-3 gap-4">
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
+                    <div className="flex items-center gap-2 mb-2 text-slate-500">
+                        <Package size={16} />
+                        <span className="text-xs font-bold uppercase tracking-wider">Stock Total</span>
+                    </div>
+                    <div className="text-3xl font-mono font-bold text-slate-900 tracking-tight">{PRODUCT_DATA.stock} <span className="text-sm font-sans text-slate-400 font-normal">unid.</span></div>
+                </div>
+                
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
+                    <div className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-2">Valuación Histórica</div>
+                    <div className="text-2xl font-mono font-medium text-slate-600">{formatMoney(calculations.histTotal)}</div>
+                    <div className="text-[10px] text-slate-400 mt-1">Costo de Origen</div>
+                </div>
+
+                <div className="bg-white p-5 rounded-xl border border-blue-200 shadow-sm relative overflow-hidden flex flex-col justify-center">
+                    <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-blue-50 to-indigo-100 rounded-bl-full -mr-6 -mt-6 opacity-60"></div>
+                    <div className="text-xs text-blue-600 font-bold uppercase tracking-wider mb-2">Valuación Homogénea</div>
+                    <div className="text-2xl font-mono font-bold text-blue-700">{formatMoney(calculations.adjustedTotal)}</div>
+                    <div className="text-[10px] text-blue-400 mt-1">Moneda de Cierre</div>
+                </div>
+            </div>
+
+            {/* 2. VISUAL FLOW (LISTA DE LOTES) */}
+            <div>
+                <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                        <Layers size={16} className="text-blue-500" />
+                        Flujo de Lotes ({method.toUpperCase()})
+                    </h3>
+                    <div className="flex gap-2 text-[10px] font-bold uppercase tracking-wide items-center bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
+                        {method === 'peps' ? (
+                            <>
+                                <span className="text-slate-500">Antiguos</span>
+                                <ArrowRight size={12} className="text-slate-300" />
+                                <span className="text-blue-600">Nuevos</span>
+                            </>
+                        ) : method === 'ueps' ? (
+                            <>
+                                <span className="text-blue-600">Nuevos</span>
+                                <ArrowRight size={12} className="text-slate-300" />
+                                <span className="text-slate-500">Antiguos</span>
+                            </>
+                        ) : (
+                            <span className="text-slate-500">Orden Cronológico</span>
+                        )}
+                    </div>
+                </div>
+                
+                <div className="space-y-2">
+                    {sortedLots.map((lot) => {
+                        const isConsumed = lot.qtyRemanente === 0;
+                        return (
+                            <div key={lot.id} className={`flex items-center p-3 rounded-lg border transition-all ${isConsumed ? 'bg-slate-50 border-transparent opacity-60 grayscale-[0.5]' : 'bg-white border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md'}`}>
+                                <div className="w-28 flex flex-col">
+                                    <span className="text-xs font-mono font-medium text-slate-700">{lot.displayDate}</span>
+                                    <span className="text-[10px] text-slate-400">{lot.date}</span>
+                                </div>
+                                <div className="flex-1 px-4 border-l border-slate-100 mx-2">
+                                    <div className="flex justify-between text-xs mb-1.5">
+                                        <span className={`font-semibold ${isConsumed ? 'text-slate-500 line-through' : 'text-slate-900'}`}>{lot.type}</span>
+                                        <span className="font-mono text-slate-600 font-medium">{lot.qtyRemanente} <span className="text-slate-400 font-normal">/ {lot.qtyOriginal}</span></span>
+                                    </div>
+                                    {/* Mini barra de progreso del lote individual */}
+                                    <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                        <div 
+                                            className={`h-full rounded-full ${isConsumed ? 'bg-slate-400' : 'bg-gradient-to-r from-blue-400 to-blue-600'}`} 
+                                            style={{ width: `${(lot.qtyRemanente / lot.qtyOriginal) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                                <div className="w-24 text-right pl-2">
+                                    {isConsumed ? (
+                                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wide">
+                                            Consumido
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-bold rounded uppercase tracking-wide shadow-sm">
+                                            <CheckCircle2 size={10} /> Activo
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        )
+                    })}
+                </div>
+            </div>
+
+            {/* 3. TABLA DETALLADA (MODIFICADO - REGLA C: SIN COEF) */}
+            <div>
+                 <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-3">Detalle de Valuación</h3>
+                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm ring-1 ring-slate-900/5">
+                    <table className="w-full text-sm">
+                        <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
+                            <tr>
+                                <th className="px-5 py-3 text-left font-display text-xs uppercase tracking-wider">Lote / Periodo</th>
+                                <th className="px-5 py-3 text-right font-display text-xs uppercase tracking-wider">Remanente</th>
+                                <th className="px-5 py-3 text-right font-display text-xs uppercase tracking-wider text-slate-500">Costo Unit. (Hist)</th>
+                                <th className="px-5 py-3 text-right font-display text-xs uppercase tracking-wider text-slate-600">Subtotal Hist.</th>
+                                <th className="px-5 py-3 text-right font-display text-xs uppercase tracking-wider bg-blue-50/50 text-blue-700">Subtotal Homog.</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {sortedLots.filter(l => l.qtyRemanente > 0).map(lot => (
+                                <tr key={lot.id} className="hover:bg-slate-50 transition-colors group">
+                                    <td className="px-5 py-3.5 text-slate-900 font-medium">{lot.displayDate}</td>
+                                    <td className="px-5 py-3.5 text-right font-mono text-slate-600">{lot.qtyRemanente}</td>
+                                    <td className="px-5 py-3.5 text-right font-mono text-slate-400 group-hover:text-slate-500">{formatMoney(lot.unitCostOrigin)}</td>
+                                    <td className="px-5 py-3.5 text-right font-mono text-slate-700 font-medium">{formatMoney(lot.qtyRemanente * lot.unitCostOrigin)}</td>
+                                    <td className="px-5 py-3.5 text-right font-mono bg-blue-50/20 font-bold text-blue-700">{formatMoney(lot.qtyRemanente * lot.unitCostOrigin * lot.coef)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                        <tfoot className="bg-slate-50 border-t border-slate-200">
+                             <tr>
+                                <td colSpan={3} className="px-5 py-4 text-right font-bold text-slate-600 uppercase text-xs tracking-wider">Totales Generales</td>
+                                <td className="px-5 py-4 text-right font-mono font-bold text-slate-800 text-lg border-t-2 border-slate-200">{formatMoney(calculations.histTotal)}</td>
+                                <td className="px-5 py-4 text-right font-mono font-bold text-blue-700 text-lg bg-blue-50/20 border-t-2 border-blue-200">{formatMoney(calculations.adjustedTotal)}</td>
+                             </tr>
+                        </tfoot>
+                    </table>
+                 </div>
+                 
+                 {/* Nota Legal RT6 - Discreta */}
+                 <div className="mt-4 flex gap-3 items-start px-2 py-3 bg-slate-50 rounded-lg border border-slate-100">
+                    <Info size={16} className="text-slate-400 mt-0.5 shrink-0" />
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                        <strong className="text-slate-700 font-medium block mb-0.5">Nota de Valuación</strong>
+                        Valuación homogénea reexpresada a moneda de cierre según índices FACPCE (RT6) y fecha de cierre del ejercicio. La diferencia de valuación (${formatMoney(calculations.diff)}) corresponde al RECPAM generado por la tenencia de bienes de cambio.
+                    </p>
+                 </div>
+            </div>
+
+           </div>
+        </div>
+        
+        {/* Footer Actions */}
+        <div className="p-6 border-t border-slate-200 bg-white flex justify-end items-center sticky bottom-0 z-10">
+             <button 
+                onClick={() => setIsDrawerOpen(false)}
+                className="px-6 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 hover:text-slate-900 transition-colors focus:ring-2 focus:ring-slate-200 focus:outline-none"
+             >
+                Cerrar
+             </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}

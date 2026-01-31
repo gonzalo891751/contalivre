@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="es" class="antialiased">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre - Registrar Movimiento v3</title>
+    
+    <!-- Fuentes (Brand Book) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Iconos Phosphor -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- Tailwind CSS (CDN para prototipo rápido) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Configuración Tailwind Extendida (Brand Book) -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',
+                            secondary: '#10B981',
+                        },
+                        slate: {
+                            850: '#151e32',
+                            900: '#0F172A',
+                        }
+                    },
+                    fontFamily: {
+                        display: ['Outfit', 'sans-serif'],
+                        body: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    backgroundImage: {
+                        'brand-gradient': 'linear-gradient(135deg, #2563EB 0%, #10B981 100%)',
+                        'brand-gradient-hover': 'linear-gradient(135deg, #1D4ED8 0%, #059669 100%)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #F1F5F9; color: #0F172A; }
+        h1, h2, h3, h4 { font-family: 'Outfit', sans-serif; }
+        .font-mono-num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+        
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background-color: #CBD5E1; border-radius: 20px; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        /* Animations */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+    </style>
+</head>
+<body class="h-screen w-full flex items-center justify-center overflow-hidden bg-slate-200">
+
+    <!-- BACKDROP -->
+    <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 transition-opacity" aria-hidden="true"></div>
+
+    <!-- MODAL CONTAINER -->
+    <div class="relative w-full max-w-[1250px] h-[92vh] bg-white rounded-2xl shadow-2xl z-50 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        
+        <!-- 1. HEADER -->
+        <header class="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-white shrink-0">
+            <div class="flex items-center gap-4">
+                <div id="header-icon-bg" class="bg-blue-50 p-2 rounded-lg text-brand-primary transition-colors duration-300">
+                    <i id="header-icon" class="ph-duotone ph-package text-2xl"></i>
+                </div>
+                <div>
+                    <h2 id="header-title" class="text-xl font-bold text-slate-900 leading-tight">Registrar Compra</h2>
+                    <p id="header-subtitle" class="text-sm text-slate-500">Inventario / Bienes de Cambio</p>
+                </div>
+            </div>
+
+            <!-- TABS -->
+            <div class="flex bg-slate-100 p-1 rounded-lg">
+                <button onclick="setMode('compra')" id="tab-compra" class="px-6 py-2 rounded-md text-sm font-semibold bg-white text-brand-primary shadow-sm transition-all flex items-center gap-2 border border-slate-200">
+                    <i class="ph-bold ph-arrow-down-left"></i> Compra
+                </button>
+                <button onclick="setMode('venta')" id="tab-venta" class="px-6 py-2 rounded-md text-sm font-medium text-slate-500 hover:text-slate-700 transition-all flex items-center gap-2">
+                    <i class="ph-bold ph-arrow-up-right"></i> Venta
+                </button>
+                <button onclick="setMode('ajuste')" id="tab-ajuste" class="px-6 py-2 rounded-md text-sm font-medium text-slate-500 hover:text-slate-700 transition-all flex items-center gap-2">
+                    <i class="ph-bold ph-sliders"></i> Ajuste
+                </button>
+            </div>
+
+            <button class="text-slate-400 hover:text-red-500 transition-colors p-2 hover:bg-red-50 rounded-full" onclick="alert('Cierra el modal')">
+                <i class="ph-bold ph-x text-xl"></i>
+            </button>
+        </header>
+
+        <!-- 2. CONTENT AREA (Split View) -->
+        <div class="flex flex-1 overflow-hidden">
+            
+            <!-- LEFT: FORM (Scrollable) -->
+            <div class="w-7/12 overflow-y-auto custom-scroll p-6 bg-slate-50 space-y-6 relative">
+                
+                <!-- SECTION: AJUSTE SUB-TABS (Visible only in Adjustment mode) -->
+                <div id="ajuste-controls" class="hidden mb-4 animate-fade-in">
+                    <div class="flex gap-2 border-b border-slate-200 pb-2">
+                        <button class="px-4 py-1.5 text-sm font-semibold text-brand-primary border-b-2 border-brand-primary">Devoluciones</button>
+                        <button class="px-4 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-700">Stock Físico</button>
+                        <button class="px-4 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-700">Diferencia de Cambio</button>
+                    </div>
+                    
+                    <!-- Devolucion Selector -->
+                    <div class="mt-4 bg-orange-50 p-4 rounded-xl border border-orange-100 flex gap-4 items-center">
+                        <div class="flex-1">
+                             <label class="block text-xs font-semibold text-orange-800 mb-1">Movimiento Original a Revertir</label>
+                             <div class="relative group w-full">
+                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <i class="ph-bold ph-arrow-u-up-left text-orange-400"></i>
+                                </div>
+                                <input type="text" class="w-full pl-9 pr-4 py-2 bg-white border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all placeholder:text-slate-400" placeholder="Buscar FC original..." value="FC-A 0001-00002342 (Apple Arg)">
+                            </div>
+                        </div>
+                        <div class="w-32">
+                             <label class="block text-xs font-semibold text-orange-800 mb-1">Cant. a Devolver</label>
+                             <input type="number" id="input-return-qty" class="w-full px-3 py-2 bg-white border border-orange-200 rounded-lg text-sm font-mono-num text-right outline-none focus:border-orange-500" value="1">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION: OPERACIÓN (Common) -->
+                <section class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm animate-fade-in">
+                    <div class="flex justify-between items-start mb-4">
+                        <h3 class="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                            <i class="ph-duotone ph-tag text-brand-primary"></i> Detalle Operación
+                        </h3>
+                        
+                        <!-- Toggle Solo Gasto (Solo visible en Compra) -->
+                        <div id="expense-only-wrapper" class="flex items-center gap-2">
+                            <span class="text-xs font-medium text-slate-500">¿Es solo gasto sin stock?</span>
+                            <label for="toggle-expense-only" class="flex items-center cursor-pointer relative">
+                                <input type="checkbox" id="toggle-expense-only" class="sr-only">
+                                <div class="w-11 h-6 bg-slate-200 rounded-full border border-slate-300 toggle-bg transition-colors duration-200 ease-in-out"></div>
+                                <div class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out shadow-sm transform"></div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-12 gap-4">
+                        <div class="col-span-12">
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Bien de Cambio / Item</label>
+                            <div class="relative">
+                                <i class="ph ph-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-lg"></i>
+                                <input type="text" class="w-full pl-10 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-primary outline-none transition-all placeholder:text-slate-400" placeholder="Buscar por nombre o código..." value="MacBook Pro M3 14 inch">
+                            </div>
+                        </div>
+                        
+                        <div class="col-span-4">
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Cantidad</label>
+                            <input type="number" id="input-qty" oninput="calculate()" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono-num focus:ring-2 focus:ring-brand-primary outline-none transition-all text-right" value="10">
+                        </div>
+
+                        <div class="col-span-4">
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Precio Unitario (Neto)</label>
+                            <div class="relative">
+                                <span class="absolute left-3 top-2 text-slate-400 text-sm">$</span>
+                                <input type="text" id="input-price" oninput="calculate()" class="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono-num focus:ring-2 focus:ring-brand-primary outline-none transition-all text-right" value="250000">
+                            </div>
+                        </div>
+
+                        <div class="col-span-4">
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Total Item</label>
+                            <div id="display-total-item" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono-num text-slate-500 text-right font-medium">
+                                $ 2.500.000
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SECTION: CONDICIONES COMERCIALES (NEW) -->
+                <section class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm animate-fade-in">
+                    <h3 class="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                        <i class="ph-duotone ph-percent text-purple-600"></i> Condiciones Comerciales
+                    </h3>
+                    <div class="grid grid-cols-2 gap-6">
+                        <!-- Bonificación -->
+                        <div class="relative group">
+                            <div class="flex justify-between mb-1">
+                                <label class="block text-xs font-semibold text-slate-700">Bonificación (%)</label>
+                                <i class="ph-fill ph-info text-slate-400 hover:text-brand-primary cursor-help" title="Descuento comercial. Reduce la base imponible y el IVA."></i>
+                            </div>
+                            <div class="relative">
+                                <input type="number" id="input-bonif" oninput="calculate()" class="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono-num focus:ring-2 focus:ring-purple-500 outline-none transition-all text-right" placeholder="0" value="0">
+                                <span class="absolute right-3 top-2 text-slate-400 text-sm">%</span>
+                            </div>
+                            <p class="text-[10px] text-slate-400 mt-1">Impacta Base Imponible e IVA</p>
+                        </div>
+
+                        <!-- Descuento Financiero -->
+                        <div class="relative">
+                            <div class="flex justify-between mb-1">
+                                <label class="block text-xs font-semibold text-slate-700">Descuento Financiero (%)</label>
+                                <i class="ph-fill ph-info text-slate-400 hover:text-brand-primary cursor-help" title="Resultado financiero. No altera el valor del bien, reduce el total a pagar."></i>
+                            </div>
+                            <div class="relative">
+                                <input type="number" id="input-desc-fin" oninput="calculate()" class="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono-num focus:ring-2 focus:ring-purple-500 outline-none transition-all text-right" placeholder="0" value="0">
+                                <span class="absolute right-3 top-2 text-slate-400 text-sm">%</span>
+                            </div>
+                            <p class="text-[10px] text-slate-400 mt-1">Genera resultado financiero</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SECTION: GASTOS ACCESORIOS (Hidden in Venta) -->
+                <section id="section-gastos" class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm animate-fade-in">
+                    <h3 class="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                        <i class="ph-duotone ph-receipt text-brand-secondary"></i> Gastos Accesorios
+                    </h3>
+                    
+                    <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-3 hover:border-blue-300 transition-colors group">
+                        <div class="grid grid-cols-12 gap-3 items-center">
+                            <div class="col-span-5">
+                                <label class="text-[10px] uppercase text-slate-500 font-bold block mb-1">Concepto</label>
+                                <input type="text" class="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:border-brand-primary outline-none" value="Flete y Logística">
+                            </div>
+                            <div class="col-span-3">
+                                <label class="text-[10px] uppercase text-slate-500 font-bold block mb-1">Monto</label>
+                                <input type="text" id="input-gasto" oninput="calculate()" class="w-full px-2 py-1.5 text-sm font-mono-num text-right border border-slate-300 rounded focus:border-brand-primary outline-none" value="50000">
+                            </div>
+                            <div class="col-span-4 flex flex-col gap-1 pl-2 border-l border-slate-200">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" checked class="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-brand-primary">
+                                    <span class="text-[10px] font-medium text-slate-600">Gravado (IVA)</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" checked class="w-3.5 h-3.5 text-teal-600 rounded border-gray-300 focus:ring-teal-500">
+                                    <span class="text-[10px] font-medium text-slate-600">Capitalizar (Stock)</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SECTION: PAGO / COBRO (Typeahead Implementation) -->
+                <section class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-visible z-10 animate-fade-in">
+                    <div class="absolute top-0 right-0 p-3 opacity-10 pointer-events-none">
+                        <i class="ph-duotone ph-wallet text-6xl text-brand-primary"></i>
+                    </div>
+                    
+                    <h3 id="title-pagos" class="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                        <i class="ph-duotone ph-wallet text-brand-primary"></i> Pago / Contrapartidas
+                    </h3>
+
+                    <!-- Payment Rows Container -->
+                    <div class="space-y-3" id="payment-rows-container">
+                        <!-- Typeahead Row 1 -->
+                        <div class="flex items-center gap-3 relative">
+                            <div class="flex-1 relative group">
+                                <label class="text-[10px] font-bold text-slate-400 absolute left-3 top-1 z-10">CUENTA</label>
+                                <div class="relative">
+                                    <div class="absolute left-3 top-4 text-brand-primary"><i class="ph-fill ph-magnifying-glass"></i></div>
+                                    <input type="text" 
+                                           class="w-full pl-9 px-3 py-3 pt-5 text-sm font-medium outline-none bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition-all peer" 
+                                           placeholder="Buscar..." 
+                                           value="Banco Santander RIO C.C."
+                                           onfocus="showSuggestions(this)"
+                                           onblur="hideSuggestions(this)">
+                                    
+                                    <!-- Suggestions Dropdown (Hidden by default) -->
+                                    <div class="hidden peer-focus:block absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-xl mt-1 max-h-48 overflow-y-auto z-50">
+                                        <div class="px-3 py-2 text-xs text-slate-400 bg-slate-50 border-b border-slate-100">
+                                            Tip: escribí "caja", "banco", "prov", "valores"...
+                                        </div>
+                                        <ul class="py-1">
+                                            <li class="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm flex items-center gap-2" onmousedown="selectAccount(this)">
+                                                <i class="ph-fill ph-bank text-blue-500"></i> Banco Santander RIO C.C.
+                                            </li>
+                                            <li class="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm flex items-center gap-2" onmousedown="selectAccount(this)">
+                                                <i class="ph-fill ph-money text-green-500"></i> Caja ARS (Administración)
+                                            </li>
+                                            <li class="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm flex items-center gap-2" onmousedown="selectAccount(this)">
+                                                <i class="ph-fill ph-users text-orange-500"></i> Proveedores Varios
+                                            </li>
+                                            <li class="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm flex items-center gap-2" onmousedown="selectAccount(this)">
+                                                <i class="ph-fill ph-scroll text-purple-500"></i> Valores a Depositar
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="w-1/3 relative">
+                                <label class="text-[10px] font-bold text-slate-400 absolute left-3 top-1">IMPORTE</label>
+                                <input type="text" class="w-full px-3 py-3 pt-5 border border-slate-300 rounded-lg text-sm font-mono-num text-right outline-none focus:border-brand-primary bg-white" value="1.500.000">
+                            </div>
+                            <button class="mt-2 p-2 text-slate-300 hover:text-red-500 transition-colors" title="Eliminar línea">
+                                <i class="ph-bold ph-trash text-lg"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center">
+                        <span class="text-xs text-slate-500 italic">Podés combinar múltiples medios.</span>
+                        <div class="text-xs font-semibold text-brand-primary cursor-pointer hover:underline flex items-center gap-1" onclick="addPaymentRow()">
+                            <i class="ph-bold ph-plus"></i> Agregar otra cuenta
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SECTION: DATOS COMPROBANTE -->
+                <section class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm opacity-90 hover:opacity-100 transition-opacity animate-fade-in">
+                    <h3 class="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                        <i class="ph-duotone ph-files text-slate-500"></i> Comprobante
+                    </h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Entidad / Tercero</label>
+                            <input type="text" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm" value="Apple Argentina S.A.">
+                        </div>
+                         <div class="flex gap-2">
+                             <div class="w-1/3">
+                                <label class="block text-xs font-semibold text-slate-700 mb-1">Tipo</label>
+                                <select class="w-full px-2 py-2 bg-white border border-slate-300 rounded-lg text-sm">
+                                    <option>FC A</option>
+                                    <option>FC B</option>
+                                    <option>Tique</option>
+                                </select>
+                             </div>
+                             <div class="w-2/3">
+                                <label class="block text-xs font-semibold text-slate-700 mb-1">Número</label>
+                                <input type="text" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm" placeholder="0001-00002342">
+                             </div>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="h-10"></div>
+            </div>
+
+            <!-- RIGHT: PREVIEW & ACTIONS (Sticky) -->
+            <div class="w-5/12 bg-white border-l border-slate-200 flex flex-col relative z-20">
+                
+                <div class="flex-1 p-6 overflow-y-auto custom-scroll">
+                    
+                    <!-- SUMMARY CARD -->
+                    <div class="bg-slate-50 rounded-xl p-5 border border-slate-200 mb-6 shadow-sm">
+                        <h4 class="text-sm font-display font-bold text-slate-900 mb-4">Resumen de Importes</h4>
+                        
+                        <div class="space-y-2 text-sm" id="summary-rows">
+                            <!-- Filled dynamically by JS -->
+                        </div>
+
+                        <div class="mt-4 pt-3 border-t border-slate-300 flex justify-between items-center">
+                            <span id="label-total-final" class="text-lg font-display font-bold text-slate-900">Total a Pagar</span>
+                            <span id="val-total-final" class="text-2xl font-display font-bold text-brand-primary tracking-tight">$ 0,00</span>
+                        </div>
+                    </div>
+
+                    <!-- PAYMENT VALIDATION -->
+                    <div class="mb-6">
+                        <div class="flex justify-between text-xs font-semibold uppercase text-slate-400 mb-2 tracking-wider">
+                            <span>Balance de Fondos</span>
+                        </div>
+                        
+                        <!-- Progress Bar -->
+                        <div class="h-2 w-full bg-slate-100 rounded-full overflow-hidden mb-2">
+                            <div id="payment-progress" class="h-full bg-brand-secondary w-0 transition-all duration-500"></div>
+                        </div>
+
+                        <div id="payment-status-box" class="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 transition-colors">
+                            <div class="flex items-center gap-2 text-slate-500 text-sm font-medium">
+                                <i id="payment-status-icon" class="ph-fill ph-circle"></i>
+                                <span id="payment-status-text">Pendiente asignación</span>
+                            </div>
+                            <span id="payment-status-amount" class="font-mono-num font-bold text-slate-700 text-sm">Faltan: $ 0,00</span>
+                        </div>
+                    </div>
+
+                    <!-- PREVIEW ASIENTO -->
+                    <div>
+                        <div class="flex items-center gap-2 mb-3">
+                            <div class="w-6 h-6 rounded bg-brand-primary text-white flex items-center justify-center text-xs">
+                                <i class="ph-fill ph-robot"></i>
+                            </div>
+                            <span class="text-xs font-bold text-brand-primary uppercase">Vista Previa Contable</span>
+                        </div>
+
+                        <div class="bg-slate-850 rounded-lg p-4 font-mono text-xs text-slate-300 shadow-inner relative overflow-hidden group">
+                            <!-- Shine effect -->
+                            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]"></div>
+
+                            <table class="w-full">
+                                <thead>
+                                    <tr class="text-slate-500 border-b border-slate-700">
+                                        <th class="text-left pb-2 font-normal">Cuenta</th>
+                                        <th class="text-right pb-2 font-normal">Debe</th>
+                                        <th class="text-right pb-2 font-normal">Haber</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="accounting-rows" class="divide-y divide-slate-700/50">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <p id="accounting-note" class="text-[10px] text-slate-400 mt-2 text-center">
+                            *Cálculo automático según imputaciones.
+                        </p>
+                    </div>
+
+                </div>
+
+                <!-- FOOTER ACTIONS -->
+                <div class="p-6 border-t border-slate-200 bg-white shrink-0">
+                    <div class="grid grid-cols-2 gap-3">
+                        <button class="px-4 py-3 rounded-xl border border-slate-300 font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
+                            Cancelar
+                        </button>
+                        <button class="px-4 py-3 rounded-xl bg-brand-gradient hover:bg-brand-gradient-hover text-white font-bold shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2">
+                            <i class="ph-bold ph-check"></i>
+                            <span id="btn-confirm-text">Confirmar Compra</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- LOGIC SCRIPT -->
+    <script>
+        // --- STATE & UTILS ---
+        let mode = 'compra'; // compra | venta | ajuste
+        const TAX_RATE = 0.21;
+        
+        const formatMoney = (amount) => {
+            return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(amount);
+        }
+
+        // --- MODE SWITCHING ---
+        function setMode(newMode) {
+            mode = newMode;
+            
+            // UI Updates
+            const tabs = ['compra', 'venta', 'ajuste'];
+            const colors = {
+                compra: 'text-brand-primary border-slate-200 bg-white shadow-sm border',
+                venta: 'text-brand-secondary border-slate-200 bg-white shadow-sm border',
+                ajuste: 'text-orange-500 border-slate-200 bg-white shadow-sm border'
+            };
+
+            tabs.forEach(t => {
+                const btn = document.getElementById(`tab-${t}`);
+                if (t === mode) {
+                    btn.className = `px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${colors[t]}`;
+                    const iconClass = t === 'compra' ? 'ph-arrow-down-left' : (t === 'venta' ? 'ph-arrow-up-right' : 'ph-sliders');
+                    // btn.innerHTML = `<i class="ph-bold ${iconClass}"></i> ${t.charAt(0).toUpperCase() + t.slice(1)}`;
+                } else {
+                    btn.className = 'px-6 py-2 rounded-md text-sm font-medium text-slate-500 hover:text-slate-700 transition-all flex items-center gap-2 opacity-70 hover:opacity-100';
+                }
+            });
+
+            // Section Visibility
+            const sectionGastos = document.getElementById('section-gastos');
+            const sectionAjuste = document.getElementById('ajuste-controls');
+            const titlePagos = document.getElementById('title-pagos');
+            const btnText = document.getElementById('btn-confirm-text');
+            const headerTitle = document.getElementById('header-title');
+            const headerIcon = document.getElementById('header-icon');
+            const headerIconBg = document.getElementById('header-icon-bg');
+
+            if (mode === 'compra') {
+                sectionGastos.classList.remove('hidden');
+                sectionAjuste.classList.add('hidden');
+                titlePagos.innerHTML = '<i class="ph-duotone ph-wallet text-brand-primary"></i> Pago / Contrapartidas';
+                btnText.innerText = 'Confirmar Compra';
+                headerTitle.innerText = 'Registrar Compra';
+                headerIcon.className = 'ph-duotone ph-shopping-cart text-2xl';
+                headerIconBg.className = 'bg-blue-50 p-2 rounded-lg text-brand-primary';
+            } else if (mode === 'venta') {
+                sectionGastos.classList.add('hidden');
+                sectionAjuste.classList.add('hidden');
+                titlePagos.innerHTML = '<i class="ph-duotone ph-hand-coins text-brand-secondary"></i> Cobro / Contrapartidas';
+                btnText.innerText = 'Confirmar Venta';
+                headerTitle.innerText = 'Registrar Venta';
+                headerIcon.className = 'ph-duotone ph-tag text-2xl';
+                headerIconBg.className = 'bg-green-50 p-2 rounded-lg text-brand-secondary';
+            } else {
+                sectionGastos.classList.add('hidden');
+                sectionAjuste.classList.remove('hidden');
+                titlePagos.innerHTML = '<i class="ph-duotone ph-arrows-left-right text-orange-500"></i> Resolución';
+                btnText.innerText = 'Confirmar Ajuste';
+                headerTitle.innerText = 'Registrar Devolución';
+                headerIcon.className = 'ph-duotone ph-arrows-counter-clockwise text-2xl';
+                headerIconBg.className = 'bg-orange-50 p-2 rounded-lg text-orange-500';
+            }
+
+            calculate();
+        }
+
+        // --- CALCULATION CORE ---
+        function calculate() {
+            // Get values
+            const qty = parseFloat(document.getElementById('input-qty').value) || 0;
+            const price = parseFloat(document.getElementById('input-price').value) || 0;
+            const bonifPercent = parseFloat(document.getElementById('input-bonif').value) || 0;
+            const descFinPercent = parseFloat(document.getElementById('input-desc-fin').value) || 0;
+            const gasto = parseFloat(document.getElementById('input-gasto').value) || 0;
+
+            // Logic
+            let subtotalItems = qty * price;
+            
+            // Bonif reduces value
+            let bonifAmount = subtotalItems * (bonifPercent / 100);
+            let netoConBonif = subtotalItems - bonifAmount;
+
+            // Gastos (Only in compra)
+            let gastosTotal = (mode === 'compra') ? gasto : 0;
+
+            // Base Imponible (Neto + Gastos)
+            let baseImponible = netoConBonif + gastosTotal;
+
+            // IVA
+            let ivaAmount = baseImponible * TAX_RATE;
+
+            // Subtotal Comprobante
+            let totalComprobante = baseImponible + ivaAmount;
+
+            // Descuento Financiero (reduces payment, not base)
+            let descFinAmount = totalComprobante * (descFinPercent / 100);
+            
+            let totalFinal = totalComprobante - descFinAmount;
+
+            // Update DOM Displays
+            document.getElementById('display-total-item').innerText = formatMoney(subtotalItems);
+            
+            updateSummaryPanel(subtotalItems, bonifAmount, gastosTotal, baseImponible, ivaAmount, descFinAmount, totalFinal);
+            updateAccountingPreview(netoConBonif, gastosTotal, ivaAmount, descFinAmount, totalFinal);
+            updatePaymentValidation(totalFinal);
+        }
+
+        function updateSummaryPanel(sub, bonif, gastos, base, iva, descFin, total) {
+            const container = document.getElementById('summary-rows');
+            const totalLabel = document.getElementById('label-total-final');
+            const totalVal = document.getElementById('val-total-final');
+
+            let html = `
+                <div class="flex justify-between text-slate-500">
+                    <span>Subtotal Items</span>
+                    <span class="font-mono-num">${formatMoney(sub)}</span>
+                </div>`;
+            
+            if (bonif > 0) {
+                html += `
+                <div class="flex justify-between text-purple-600">
+                    <span>(-) Bonificación (${document.getElementById('input-bonif').value}%)</span>
+                    <span class="font-mono-num">- ${formatMoney(bonif)}</span>
+                </div>`;
+            }
+
+            if (mode === 'compra' && gastos > 0) {
+                html += `
+                <div class="flex justify-between text-slate-500">
+                    <span>(+) Gastos Netos</span>
+                    <span class="font-mono-num">+ ${formatMoney(gastos)}</span>
+                </div>`;
+            }
+
+            html += `
+                <div class="flex justify-between text-slate-600 font-medium pt-2 border-t border-slate-200 border-dashed">
+                    <span>Base Imponible</span>
+                    <span class="font-mono-num">${formatMoney(base)}</span>
+                </div>
+                <div class="flex justify-between text-slate-500">
+                    <span>IVA (21%)</span>
+                    <span class="font-mono-num">${formatMoney(iva)}</span>
+                </div>
+                <div class="flex justify-between text-slate-700 font-bold pt-2 mt-2 border-t border-slate-200">
+                    <span>Subtotal Comprobante</span>
+                    <span class="font-mono-num">${formatMoney(base + iva)}</span>
+                </div>
+            `;
+
+            if (descFin > 0) {
+                html += `
+                <div class="flex justify-between text-emerald-600">
+                    <span>(-) Desc. Financiero</span>
+                    <span class="font-mono-num">- ${formatMoney(descFin)}</span>
+                </div>`;
+            }
+
+            container.innerHTML = html;
+            totalLabel.innerText = mode === 'venta' ? 'Total a Cobrar' : 'Total a Pagar';
+            totalVal.innerText = formatMoney(total);
+        }
+
+        function updateAccountingPreview(neto, gastos, iva, descFin, total) {
+            const tbody = document.getElementById('accounting-rows');
+            let html = '';
+
+            const fmt = (n) => new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2 }).format(n);
+
+            if (mode === 'compra') {
+                // DEBE
+                html += `
+                <tr>
+                    <td class="py-1.5 text-white">Mercaderías (Activo)</td>
+                    <td class="py-1.5 text-right text-emerald-400">${fmt(neto + gastos)}</td>
+                    <td class="py-1.5 text-right">-</td>
+                </tr>
+                <tr>
+                    <td class="py-1.5 text-white">IVA Crédito Fiscal</td>
+                    <td class="py-1.5 text-right text-emerald-400">${fmt(iva)}</td>
+                    <td class="py-1.5 text-right">-</td>
+                </tr>`;
+                
+                // HABER
+                html += `
+                <tr>
+                    <td class="py-1.5 pl-4 text-slate-400">a Caja / Banco / Prov.</td>
+                    <td class="py-1.5 text-right">-</td>
+                    <td class="py-1.5 text-right text-white">${fmt(total)}</td>
+                </tr>`;
+
+                if (descFin > 0) {
+                    html += `
+                    <tr>
+                        <td class="py-1.5 pl-4 text-purple-300">a Desc. Obtenidos (R+)</td>
+                        <td class="py-1.5 text-right">-</td>
+                        <td class="py-1.5 text-right text-white">${fmt(descFin)}</td>
+                    </tr>`;
+                }
+
+            } else if (mode === 'venta') {
+                 // DEBE
+                 html += `
+                <tr>
+                    <td class="py-1.5 text-white">Caja / Deudores (Activo)</td>
+                    <td class="py-1.5 text-right text-emerald-400">${fmt(total)}</td>
+                    <td class="py-1.5 text-right">-</td>
+                </tr>`;
+
+                if (descFin > 0) {
+                     html += `
+                    <tr>
+                        <td class="py-1.5 text-purple-300">Desc. Otorgados (R-)</td>
+                        <td class="py-1.5 text-right text-emerald-400">${fmt(descFin)}</td>
+                        <td class="py-1.5 text-right">-</td>
+                    </tr>`;
+                }
+
+                // HABER
+                html += `
+                <tr>
+                    <td class="py-1.5 pl-4 text-slate-400">a Ventas</td>
+                    <td class="py-1.5 text-right">-</td>
+                    <td class="py-1.5 text-right text-white">${fmt(neto)}</td>
+                </tr>
+                <tr>
+                    <td class="py-1.5 pl-4 text-slate-400">a IVA Débito Fiscal</td>
+                    <td class="py-1.5 text-right">-</td>
+                    <td class="py-1.5 text-right text-white">${fmt(iva)}</td>
+                </tr>`;
+            } else {
+                // AJUSTE (Devolución compra ejemplo simplificado)
+                 html += `
+                <tr>
+                    <td class="py-1.5 text-white">Proveedores / Caja</td>
+                    <td class="py-1.5 text-right text-emerald-400">${fmt(total)}</td>
+                    <td class="py-1.5 text-right">-</td>
+                </tr>
+                <tr>
+                    <td class="py-1.5 pl-4 text-slate-400">a Mercaderías</td>
+                    <td class="py-1.5 text-right">-</td>
+                    <td class="py-1.5 text-right text-white">${fmt(neto)}</td>
+                </tr>
+                <tr>
+                    <td class="py-1.5 pl-4 text-slate-400">a IVA Crédito (Reversión)</td>
+                    <td class="py-1.5 text-right">-</td>
+                    <td class="py-1.5 text-right text-white">${fmt(iva)}</td>
+                </tr>`;
+            }
+
+            tbody.innerHTML = html;
+        }
+
+        // --- PAYMENT VALIDATION ---
+        function updatePaymentValidation(targetTotal) {
+            // Mock sum of payments (usually we would iterate inputs)
+            // For demo, assume current payment inputs = target to simulate "Balanced"
+            // or let's make it static for the demo logic unless we parse dynamic rows.
+            
+            // Let's grab the first row value just to show reactivity
+            const firstRowVal = 1500000; // Hardcoded in HTML for now
+            const currentTotal = firstRowVal; // Just a mock
+
+            const diff = targetTotal - currentTotal;
+            const percentage = Math.min((currentTotal / targetTotal) * 100, 100);
+
+            const bar = document.getElementById('payment-progress');
+            const box = document.getElementById('payment-status-box');
+            const icon = document.getElementById('payment-status-icon');
+            const text = document.getElementById('payment-status-text');
+            const amount = document.getElementById('payment-status-amount');
+
+            // Visual update logic
+            // In a real app, calculate real sum of inputs.
+            // Here, we'll force "Balanced" if diff is small for demo purposes, else Warning
+            
+            // Just for the visual demo, let's pretend it's always balanced if total > 0
+            if (targetTotal > 0) {
+                 bar.style.width = '100%';
+                 bar.className = 'h-full bg-brand-secondary w-full transition-all duration-500';
+                 box.className = 'flex justify-between items-center bg-green-50 px-3 py-2 rounded-lg border border-green-200 transition-colors';
+                 icon.className = 'ph-fill ph-check-circle text-green-600';
+                 text.innerText = 'Pagos asignados correctamente';
+                 text.className = 'text-green-700 text-sm font-medium';
+                 amount.innerText = 'Restante: $ 0,00';
+                 amount.className = 'font-mono-num font-bold text-green-700 text-sm';
+            }
+        }
+
+
+        // --- TYPEAHEAD UI LOGIC ---
+        function showSuggestions(input) {
+            // In real app, toggle based on focus
+        }
+        function hideSuggestions(input) {
+            // In real app, delay hide to allow click
+            setTimeout(() => {
+                const list = input.parentElement.querySelector('div.absolute');
+                // list.classList.add('hidden'); // Commented for easier demo usage
+            }, 200);
+        }
+        function selectAccount(li) {
+            const text = li.innerText.trim();
+            const input = li.closest('.relative').querySelector('input');
+            input.value = text;
+            
+            // Hide list
+            li.parentElement.parentElement.classList.add('hidden');
+        }
+
+        function addPaymentRow() {
+            const container = document.getElementById('payment-rows-container');
+            const newRow = document.createElement('div');
+            newRow.className = 'flex items-center gap-3 relative animate-fade-in';
+            newRow.innerHTML = `
+                <div class="flex-1 relative group">
+                    <div class="relative">
+                        <div class="absolute left-3 top-4 text-slate-400"><i class="ph-fill ph-magnifying-glass"></i></div>
+                        <input type="text" 
+                               class="w-full pl-9 px-3 py-3 text-sm font-medium outline-none bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-brand-primary" 
+                               placeholder="Buscar cuenta..." value="">
+                    </div>
+                </div>
+                <div class="w-1/3 relative">
+                    <input type="text" class="w-full px-3 py-3 border border-slate-300 rounded-lg text-sm font-mono-num text-right outline-none focus:border-brand-primary bg-white" placeholder="0,00">
+                </div>
+                <button class="p-2 text-slate-300 hover:text-red-500 transition-colors" onclick="this.parentElement.remove()">
+                    <i class="ph-bold ph-trash text-lg"></i>
+                </button>
+            `;
+            container.appendChild(newRow);
+        }
+
+        // Init
+        calculate();
+
+    </script>
+</body>
+</html>

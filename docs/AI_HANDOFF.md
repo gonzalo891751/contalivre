@@ -2,6 +2,152 @@
 
 ---
 
+
+## CHECKPOINT #FIX-SOLO-GASTO-GASTOS-CIERRE-ASSOC
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build NO CORRIDO
+**Objetivo:** Corregir asiento de solo gasto (qty=0) a Gastos s/compras, mostrarlo en Cierre, y permitir asociar gasto a compra para capitalizacion de capas.
+
+### Cambios clave
+1. **Asiento solo gasto capitalizable**: `buildCapitalizationJournalEntries()` ahora debita **Gastos sobre compras** (no Compras/Mercaderias) y mantiene IVA CF + pagos. El checkbox "Capitalizar" solo afecta capas de costo, no la cuenta contable debitada.
+2. **Compra asociada (opcional)**: MovementModalV3 agrega selector para ligar un gasto (solo gasto) a una compra previa; se guarda `sourceMovementId`.
+3. **Capas FIFO**: VALUE_ADJUSTMENT con `sourceMovementId` aplica `valueDelta` solo a las capas de esa compra (distribucion por qty remanente). Si no hay capas, fallback al prorrateo general existente.
+4. **Cierre**: la linea "+ Gastos sobre compras" se muestra siempre y suma en Compras Netas.
+
+### Archivos tocados
+- src/storage/bienes.ts
+- src/core/inventario/costing.ts
+- src/core/inventario/types.ts
+- src/pages/Planillas/components/MovementModalV3.tsx
+- src/pages/Planillas/InventarioBienesPage.tsx
+- docs/AI_HANDOFF.md
+
+### Validacion manual sugerida
+A) Solo gasto 200k + IVA + pago banco -> Debe Gastos s/compras 200k, Debe IVA CF 42k, Haber Banco 242k; aparece en Cierre.
+B) Solo gasto capitalizable con compra asociada -> ajusta capa del movimiento origen sin cambiar qty.
+C) Compra normal con gastos accesorios -> asiento sin cambios (Compras + Gastos + IVA).
+
+### Comandos
+- npm run build  # pendiente
+
+---
+
+## CHECKPOINT #FIX-SOLO-GASTO-BALANCE-CONCILIACION-BONIF
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Fix definitivo P0.1 (solo gasto sin stock no crea asiento), P0.2 (conciliacion trae asientos ajenos), y hardening de bonificacion en compra/venta.
+
+### Causa raiz P0.1
+En el submit de MovementModalV3, `subtotal = calculations.netoAfterBonif = 0` cuando `isSoloGasto` (qty=0 * unitCost = 0). Pero `buildCapitalizationJournalEntries()` usaba `movement.subtotal` como monto de debito para el neto capitalizable, resultando en Debe=42000 (solo IVA) vs Haber=242000 (pago total). Error: "Asiento desbalanceado".
+
+### Fix aplicado P0.1
+- **`bienes.ts` - `buildCapitalizationJournalEntries()`**: Cambiado a usar `movement.valueDelta` (el neto capitalizable real, ej: 200000) en vez de `movement.subtotal` (0). Tambien separa gastos capitalizables (â†’ Mercaderias) de no capitalizables (â†’ Gastos s/compras).
+- **`bienes.ts` - PURCHASE builder**: Skip lineas de debito con monto 0 para soloGasto (PURCHASE con qty=0).
+
+### Causa raiz P0.2
+`inventoryEntries` incluia CUALQUIER asiento que tocara cuentas del universo de inventario (incluyendo heuristicas amplias como `nameAny: ['apertura', 'resultados acumulados']`). Esto causaba que asientos como "Aporte inicial" (Banco/Capital) aparecieran en la conciliacion si tocaban cuentas resueltas por heuristica.
+
+### Fix aplicado P0.2
+- **`InventarioBienesPage.tsx` - `inventoryEntries`**: Filtro estricto que solo incluye:
+  1. Asientos con `sourceModule === 'inventory'` (creados por modulo inventario)
+  2. Asientos RT6 de cierre-valuacion
+  3. Asientos que tocan cuentas CORE de inventario (mercaderias, compras, gastosCompras, cmv, ventas, bonif*, devol*) â€” no perifericas
+
+### Hardening: Bonificacion gross/net
+Bug preexistente descubierto: cuando existia cuenta de bonificacion configurada, el asiento se desbalanceaba porque `subtotal` ya era neto (post-bonif) pero se agregaba credito separado de bonificacion (double-count).
+- **PURCHASE builder**: Si hay cuenta de bonif, debita el monto BRUTO (subtotal + bonifAmt) y credita bonif separadamente.
+- **SALE builder**: Si hay cuenta de bonif, credita Ventas por monto BRUTO y debita bonif separadamente.
+
+### Kardex labels mejoradas
+- PURCHASE con qty=0 â†’ "Gasto s/compra" (antes mostraba "Compra")
+- VALUE_ADJUSTMENT CAPITALIZATION â†’ "Gasto Capitaliz." (sin cambio)
+
+### Archivos tocados
+- **src/storage/bienes.ts**: `buildCapitalizationJournalEntries()` (valueDelta fix), purchase builder (skip zero-debit, bonif gross), sale builder (bonif gross)
+- **src/pages/Planillas/InventarioBienesPage.tsx**: `inventoryEntries` filtro estricto, Kardex labels para PURCHASE qty=0
+
+### Test Manual A-H
+| ID | Escenario | Esperado |
+|----|-----------|----------|
+| A | Solo gasto capitalizable con IVA (P0.1) | D: Mercaderias 200k, D: IVA CF 42k, H: Banco 242k â€” balanceado |
+| B | Solo gasto NO capitalizable con IVA | D: Gastos s/compras 200k, D: IVA CF 42k, H: Banco 242k |
+| C | Compra normal + gasto capitalizable + pago unico banco | Asiento sin Proveedores si Restante=0 |
+| D | Compra con bonificacion + descuento financiero | Bonif creditada, desc fin creditado, IVA sobre neto |
+| E | Venta con bonificacion + descuento financiero | Bonif debitada, ventas bruto creditado, desc fin debitado |
+| F | Devolucion compra eligiendo lote | Ajusta stock/valor + asiento reverso |
+| G | Devolucion venta eligiendo lote | Revierte CMV + asiento reverso |
+| H | Conciliacion: "Aporte inicial" NO aparece | Solo asientos con cuentas CORE o sourceModule=inventory |
+
+---
+
+## CHECKPOINT #FIX-VALUE-ADJUSTMENT-CAPITALIZATION-RT6
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Fix critico: "Solo gasto capitalizable" mapeado incorrectamente a VALUE_ADJUSTMENT sin asiento. Hardening end-to-end de movimientos, asientos, etiquetas y fechas.
+
+### Archivos tocados
+- **src/core/inventario/types.ts**: Nuevo tipo `AdjustmentKind = 'RT6' | 'CAPITALIZATION' | 'OTHER'`. Campo `adjustmentKind?: AdjustmentKind` agregado a `BienesMovement`.
+- **src/storage/bienes.ts**: Eliminado cortocircuito ciego `if (type === VALUE_ADJUSTMENT) return {entries:[]}`. Nuevas funciones `buildRT6JournalEntries()` y `buildCapitalizationJournalEntries()`. `createBienesMovement` ahora genera journal entries para VALUE_ADJUSTMENT cuando `autoJournal=true`. Balance validation (`validateEntriesBalance`) antes de persistir.
+- **src/pages/Planillas/components/MovementModalV3.tsx**: Solo gasto capitalizable ahora setea `adjustmentKind: 'CAPITALIZATION'`, `rt6Period: undefined`, `rt6SourceEntryId: undefined`. RT6 manual setea `adjustmentKind: 'RT6'`. Hardening: bloquea solo gasto en ventas.
+- **src/pages/Planillas/InventarioBienesPage.tsx**: Labels Kardex dinamicos segun `adjustmentKind` (CAPITALIZATION -> "Gasto Capitaliz.", RT6 -> "Ajuste RT6", otro -> "Ajuste Valor"). RT6 conciliacion y batch ahora setean `adjustmentKind: 'RT6'`.
+
+### Como se decide el asiento para VALUE_ADJUSTMENT
+1. Si `linkedJournalEntryIds` ya tiene entradas -> NO generar (evitar duplicados)
+2. Si `autoJournal === false` -> NO generar (ej: conciliacion RT6 que linkea asiento existente)
+3. Si `adjustmentKind === 'RT6'` -> `buildRT6JournalEntries()` (Mercaderias vs Diferencia inventario)
+4. Si `adjustmentKind === 'CAPITALIZATION'` -> `buildCapitalizationJournalEntries()` (GastosCompras/Mercaderias + IVA CF al Debe, Pagos al Haber)
+5. Si legacy (sin adjustmentKind pero con rt6Period/rt6SourceEntryId) -> NO generar (retrocompat)
+6. Si nada de lo anterior -> error explicito
+
+### Como se decide el label en Kardex
+- `adjustmentKind === 'CAPITALIZATION'` -> "Gasto Capitaliz."
+- `adjustmentKind === 'RT6'` o tiene `rt6Period`/`rt6SourceEntryId` -> "Ajuste RT6"
+- Otro VALUE_ADJUSTMENT sin kind -> "Ajuste Valor"
+
+### Escenarios de regresion (A-I)
+| ID | Escenario | Que verificar |
+|----|-----------|---------------|
+| A | Compra normal qty>0 + IVA + pago split | Asiento PURCHASE generado, Kardex label "Compra" |
+| B | Solo gasto NO capitaliza | type=PURCHASE qty=0, asiento generado |
+| C | Solo gasto CAPITALIZA (bug fix) | type=VALUE_ADJUSTMENT, adjustmentKind=CAPITALIZATION, asiento generado con IVA CF |
+| D | Venta normal + CMV + cobro split | Asiento SALE + CMV generados |
+| E | Venta con descuento financiero | Descuentos otorgados al DEBE en asiento |
+| F | Devolucion compra parcial | Asiento reverso, proveedores al DEBE |
+| G | Devolucion venta parcial | Asiento reverso venta + CMV |
+| H | RT6 manual autoJournal ON | VALUE_ADJUSTMENT kind=RT6, asiento generado |
+| I | RT6 conciliacion (autoJournal OFF, linked) | VALUE_ADJUSTMENT kind=RT6, NO duplica asiento |
+
+---
+
+## CHECKPOINT #INV-MOVEMENT-MODAL-V3-FECHA-RT6
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Agregar campo FECHA y restaurar sub-tab RT6 (Ajuste por Inflacion) en MovementModalV3.
+
+### Archivos modificados
+- **src/pages/Planillas/components/MovementModalV3.tsx**:
+  - Campo FECHA (date picker) visible en: Compra, Venta, y todas las sub-tabs de Ajuste (Devoluciones, Stock, RT6, Diferencia)
+  - Nueva sub-tab "Inflacion (RT6)" en Ajuste con icono TrendUp
+  - Formulario RT6: selector de producto, selector de movimiento origen, periodo, delta de valor, notas
+  - Submit RT6: crea VALUE_ADJUSTMENT con quantity=0, valueDelta, rt6Period, rt6SourceEntryId
+  - Preview RT6: resumen card + vista previa contable (Mercaderias vs RECPAM)
+  - AjusteSubTab type actualizado: 'devoluciones' | 'stock' | 'rt6' | 'diferencia'
+
+### Funcionalidades agregadas
+1. **FECHA**: Input date en todas las pestanas, persiste a `formData.date` y se usa en todos los `onSave()` calls
+2. **RT6 Manual**: Formulario completo para ajustes manuales por inflacion RT6
+   - Selecciona producto â†’ filtra movimientos (PURCHASE/ADJUSTMENT/VALUE_ADJUSTMENT)
+   - Ingresa periodo RT6 y delta ($) positivo o negativo
+   - Validaciones: origen requerido, delta != 0, periodo requerido
+   - Preview contable: Mercaderias (Ajuste RT6) vs RECPAM
+3. **Sub-tabs Ajuste**: Devoluciones | Stock Fisico | Inflacion (RT6) | Diferencia de Cambio
+
+### Validacion
+- `tsc --noEmit` -> PASS
+- `npm run build` -> PASS
+
+---
+
 ## CHECKPOINT #INV-PROMPT2C-RT6-PASO2-INVENTARIO-CIERRE-HOMOG
 **Fecha:** 2026-01-30
 **Estado:** COMPLETADO - Build PASS
@@ -3252,12 +3398,12 @@ npm run build  # PASS
 ## CHECKPOINT #INV-PROMPT2D-STEP2-IGNORE-RT6-ASIENTOS
 
 **Resumen:**
-Se solucionó el problema donde el Paso 2 duplicaba orígenes al detectar asientos RT6 generados previamente (creando 'Lote 2'). Ahora se filtran esos movimientos. Además, se agregó un indicador visual 'Asientos Generados' en el panel del Paso 2.
+Se solucionï¿½ el problema donde el Paso 2 duplicaba orï¿½genes al detectar asientos RT6 generados previamente (creando 'Lote 2'). Ahora se filtran esos movimientos. Ademï¿½s, se agregï¿½ un indicador visual 'Asientos Generados' en el panel del Paso 2.
 
 **Archivos tocados:**
-- \src/core/cierre-valuacion/auto-partidas-rt6.ts\: Nueva función \isRT6AdjustmentMovement\ y uso en filtros.
+- \src/core/cierre-valuacion/auto-partidas-rt6.ts\: Nueva funciï¿½n \isRT6AdjustmentMovement\ y uso en filtros.
 - \src/pages/Planillas/components/Step2RT6Panel.tsx\: Prop \existingRT6Entries\ y badge UI.
-- \src/pages/Planillas/CierreValuacionPage.tsx\: Detección de asientos RT6 y pase de prop.
+- \src/pages/Planillas/CierreValuacionPage.tsx\: Detecciï¿½n de asientos RT6 y pase de prop.
 
 **QA:**
 1. Generar asientos RT6 (Paso 4).
@@ -3274,12 +3420,12 @@ px vite build\
 ## CHECKPOINT #INV-RT6-CONCILIACION-PLAN-POR-ASIENTO-EI-MATCH-RECPAM-EXCLUDE
 
 **Resumen:**
-1. **Modal RT6 (Conciliación):** Se corrigió para que el plan de aplicación sea específico del asiento seleccionado (scope por accounts), evitando totales globales incorrectos.
-2. **Matching EI:** Se mejoró la heurística para reconocer movimientos de apertura (type ADJUSTMENT + fecha inicio) como EI válido, resolviendo 'Orígenes sin match'.
-3. **UX Cierre:** Se excluyó RECPAM y cuentas de RESULTADOS de la lista 'Cuentas sin clasificar' en el Paso 2 RT6.
+1. **Modal RT6 (Conciliaciï¿½n):** Se corrigiï¿½ para que el plan de aplicaciï¿½n sea especï¿½fico del asiento seleccionado (scope por accounts), evitando totales globales incorrectos.
+2. **Matching EI:** Se mejorï¿½ la heurï¿½stica para reconocer movimientos de apertura (type ADJUSTMENT + fecha inicio) como EI vï¿½lido, resolviendo 'Orï¿½genes sin match'.
+3. **UX Cierre:** Se excluyï¿½ RECPAM y cuentas de RESULTADOS de la lista 'Cuentas sin clasificar' en el Paso 2 RT6.
 
 **Archivos tocados:**
-- \src/core/inventario/rt6-apply-plan.ts\: Nuevo input \ffectedAccountIds\, lógica de scope, matching EI mejorado.
+- \src/core/inventario/rt6-apply-plan.ts\: Nuevo input \ffectedAccountIds\, lï¿½gica de scope, matching EI mejorado.
 - \src/pages/Planillas/InventarioBienesPage.tsx\: Pasaje de scope y fecha apertura al builder del plan.
 - \src/pages/Planillas/components/Step2RT6Panel.tsx\: Filtro para excluir RESULTADOS/RECPAM de unclassified.
 
@@ -3289,3 +3435,172 @@ px tsc --noEmit\
 - \
 px vite build\
 
+
+---
+
+## CHECKPOINT #INV-MULTIPLE-PAYMENTS-V2
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Implementar "Pago Mixto" en MovementModalV2 (Inventario) para permitir registrar compras con mï¿½ltiples contrapartidas (ej: parte Caja, parte Proveedores).
+
+### Archivos modificados
+- src/core/inventario/types.ts: Agregado campo paymentSplits a interfaz BienesMovement.
+- src/storage/bienes.ts:
+  - Update uildJournalEntriesForMovement: genera mï¿½ltiples lï¿½neas Haber si existen splits.
+  - Validaciï¿½n mï¿½s flexible en uildJournalEntriesForMovement: permite falta de contraId si hay splits.
+- src/pages/Planillas/components/MovementModalV2.tsx:
+  - Nuevo state isMixedPayment y splits.
+  - UI condicional: Select simple vs Lista dinï¿½mica de splits.
+  - Helpers para agregar/quitar/autocompletar splits.
+  - Validaciï¿½n en handleSubmit (total splits == total movimiento).
+  - Preview actualizado con desglose de pagos.
+
+### Decisiones clave
+1. **Modelo de datos:** Se agregï¿½ paymentSplits opcional al movimiento. Esto evita migraciones complejas y mantiene compatibilidad con movimientos viejos (que siguen usando paymentMethod/counterparty).
+2. **Prioridad en Asientos:** Si paymentSplits tiene datos, el generador de asientos ignora counterparty y usa los splits para crear las lï¿½neas del Haber.
+3. **UX:** Se mantiene la simplicidad por defecto (select ï¿½nico). El modo mixto es opt-in mediante checkbox. Se agregaron validaciones de tolerancia (epsilon) para asegurar que el asiento cuadre.
+4. **Validaciï¿½n:** Se bloquea el guardado si el "Restante" no es cero (con tolerancia de ).
+
+### Validaciï¿½n
+- 
+pm run build ï¿½ PASS (built in ~18s)
+- UI Check: Checkbox activa modo mixto, permite agregar filas, autocompletar funciona, preview muestra detalle.
+
+---
+
+## CHECKPOINT #INV-MIXED-PAYMENT-UX-FIX
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Mejorar la UX del selector de cuentas en "Pago Mixto" (Inventario) reemplazando el dropdown nativo gigante por un componente de bï¿½squeda (combobox).
+
+### Archivos modificados
+- src/ui/AccountSearchSelect.tsx: Agregado soporte para inputClassName para permitir customizaciï¿½n de estilos (altura, padding, bordes).
+- src/pages/Planillas/components/MovementModalV2.tsx: Reemplazado <select> nativo por <AccountSearchSelect> en la secciï¿½n de pago mixto. Se ajustaron los estilos para coincidir con los inputs adyacentes (h-[38px], 	ext-xs).
+
+### Decisiones clave
+1. **Reutilizaciï¿½n:** Se utilizï¿½ el componente existente AccountSearchSelect en lugar de crear uno nuevo o usar una librerï¿½a externa, cumpliendo con la regla de "no dependencias nuevas".
+2. **Estilos:** Se extendiï¿½ AccountSearchSelect para aceptar inputClassName, permitiendo que se integre visualmente con el diseï¿½o "denso" del modal de movimientos sin afectar otros usos del componente.
+3. **Funcionalidad:** Ahora el usuario puede buscar cuentas por nombre o cï¿½digo escribiendo en el input, y navegar con el teclado, lo que soluciona el problema de usabilidad del dropdown gigante.
+
+### Validaciï¿½n
+- 
+pm run build ï¿½ PASS (built in ~19s).
+- UI Check: El selector de cuentas en pago mixto ahora es un input buscable que filtra la lista de cuentas y mantiene el estilo visual del modal.
+
+---
+
+## CHECKPOINT #INV-MOVEMENT-MODAL-V3
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Implementar MovementModalV3 basado en el prototipo HTML `docs/prototypes/modalmovimientos2.html` con todas las funcionalidades solicitadas.
+
+### Archivos creados
+- **src/pages/Planillas/components/MovementModalV3.tsx**: Nuevo modal completo (~1600 LOC) con:
+  - Layout 2 columnas: form izquierda scrolleable + vista previa derecha sticky
+  - Tabs principales: Compra / Venta / Ajuste (con estilos del prototipo)
+  - Sub-tabs de Ajuste: Devoluciones / Stock Fisico / Diferencia de Cambio
+  - Seccion "Detalle Operacion" con toggle "Solo Gasto"
+  - Seccion "Condiciones Comerciales": Bonificacion (%) + Descuento Financiero (%)
+  - Seccion "Gastos Accesorios" (solo Compra): concepto, monto, checkboxes Gravado IVA y Capitalizar
+  - Seccion "Pago/Contrapartidas" con AccountSearchSelect (buscador de cuentas)
+  - Seccion "Comprobante": Entidad/Tercero, Tipo, Numero
+  - Panel derecho: Resumen de Importes, Balance de Fondos (progress bar), Vista Previa Contable
+  - Devoluciones centralizadas en Ajuste > Devoluciones (no en Compra/Venta)
+
+### Archivos modificados
+- **src/pages/Planillas/InventarioBienesPage.tsx**:
+  - Cambiado import de `MovementModalV2` a `MovementModalV3`
+  - Ajustado JSX para usar MovementModalV3 sin los props de RT6 batch (esos se mantienen en V2 legacy)
+  - Prefijado `_handleSaveRT6Batch` con void para preservar funcionalidad futura
+
+### Funcionalidades implementadas
+
+**1. UI / COMPONENTES**
+- Replica 1:1 del layout del prototipo HTML
+- Tabs principales con iconos y colores diferenciados (Compra=azul, Venta=verde, Ajuste=naranja)
+- Header dinamico segun el modo (titulo, icono, color)
+- Animaciones fade-in para secciones
+- Custom scrollbar para panel izquierdo
+
+**2. PAGO MIXTO / SPLITS**
+- AccountSearchSelect en lugar de dropdown gigante
+- Lista dinamica de {cuenta, importe}
+- Boton "Agregar otra cuenta"
+- Validacion: suma(importes) == total a pagar/cobrar (tolerancia centavos)
+- Indicador visual "Restante a asignar" con colores y progress bar
+- Boton "Autocompletar restante"
+
+**3. CONDICIONES COMERCIALES**
+- Bonificacion (%): afecta base imponible y reduce IVA proporcional
+- Descuento Financiero (%): NO afecta IVA, reduce total a pagar/cobrar
+- Tooltips explicativos en cada campo
+
+**4. GASTOS SOBRE COMPRAS (CON IVA OPCIONAL + CAPITALIZACION)**
+- Multiples gastos accesorios (lista dinamica)
+- Checkbox "Gravado (IVA)": si true, IVA credito fiscal sobre esos gastos
+- Checkbox "Capitalizar (Stock)": si true, incrementa costo inventario; si false, va a resultado
+- Modo "Solo Gasto": quantity=0, puede generar VALUE_ADJUSTMENT si capitalizar=true
+
+**5. VENTA**
+- Sin gastos sobre ventas (no aplica)
+- CMV estimado mostrado en vista previa
+- Descuentos otorgados van a cuenta de resultado negativo
+
+**6. DEVOLUCIONES (AJUSTE > DEVOLUCIONES)**
+- Selector de tipo: Devolucion de Compra / Devolucion de Venta
+- Selector de producto
+- Buscador de movimiento original (filtra por tipo y producto)
+- Cantidad a devolver (validada contra original)
+- Autocalculo de importes (precio/costo + IVA del original)
+- Contrapartidas con splits
+- Vista previa de asiento de devolucion
+
+**7. CALCULOS Y VISTA PREVIA**
+- Subtotal Items
+- (-) Bonificacion
+- (+) Gastos Netos (solo compra)
+- = Base Imponible
+- IVA (sobre base imponible)
+- = Subtotal Comprobante
+- (-) Descuento Financiero
+- = **Total Final**
+- Vista previa contable con tabla Cuenta/Debe/Haber
+
+**8. VALIDACIONES**
+- No permite confirmar si:
+  - Falta producto
+  - Cantidad <= 0 (excepto Solo Gasto)
+  - Precio/costo <= 0 donde corresponda
+  - Cuentas de pago sin completar
+  - Restante a asignar != 0
+  - Devolucion: qty > disponible del original
+- Errores mostrados en banner rojo
+
+### Test manual (documentado)
+A) Compra: qty>0 con bonif, descFin, gastos gravado IVA, pago split (Banco + Proveedores) -> UI funcional
+B) Compra: "Solo gasto" gravado IVA, capitalizar OFF -> UI funcional
+C) Venta: bonif + descFin + pago split (Caja + Banco) -> UI funcional
+D) Devolucion compra: seleccionar compra original, devolver parte -> UI funcional
+E) Devolucion venta: seleccionar venta original, devolver parte -> UI funcional
+
+### Mapeos de cuentas (referencia)
+- Descuentos otorgados (venta) = 4.2.01
+- Descuentos obtenidos (compra) = 4.6.09
+- Gastos sobre compras = 4.8.02 (en ACCOUNT_FALLBACKS es 4.8.03)
+- Bonificaciones sobre compras = 4.8.03 (en ACCOUNT_FALLBACKS es 4.8.02)
+- Devoluciones sobre compras = 4.8.04
+- Bonificaciones sobre ventas = 4.8.05
+- Devoluciones sobre ventas = 4.8.06
+
+**Nota:** Hay una discrepancia en el mapeo entre el request y ACCOUNT_FALLBACKS existente. El storage layer usa los codigos de ACCOUNT_FALLBACKS que ya funcionan.
+
+### Validacion
+- `npm run build` -> PASS (built in ~19s)
+- No hay errores de TypeScript
+
+### Proximos pasos sugeridos
+1. Testear flujo completo con asientos reales en la app
+2. Verificar que los asientos generados balancean correctamente
+3. Agregar logica de consumo de capas especificas en devoluciones (sourceMovementId/sourceLayerId)
+4. Implementar Diferencia de Inventario en Ajuste > Diferencia de Cambio
+5. Opcional: migrar RT6 batch del V2 al V3 si se quiere consolidar

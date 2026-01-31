@@ -33,6 +33,7 @@ import type {
     ProductValuation,
 } from '../../../core/inventario/types'
 import type { Account } from '../../../core/models'
+import AccountSearchSelect from '../../../ui/AccountSearchSelect'
 
 type MainTab = 'compra' | 'venta' | 'ajuste'
 type AjusteSubTab = 'stock' | 'rt6' | 'diferencia'
@@ -84,7 +85,7 @@ export default function MovementModalV2({
     onClose,
     initialData,
     mode = 'create',
-    accounts: _accounts,
+    accounts,
     facpceIndices,
     periodId: _periodId,
     movements,
@@ -94,6 +95,10 @@ export default function MovementModalV2({
     // Main tab state
     const [mainTab, setMainTab] = useState<MainTab>('compra')
     const [ajusteSubTab, setAjusteSubTab] = useState<AjusteSubTab>('stock')
+
+    // Mixed Payment state
+    const [isMixedPayment, setIsMixedPayment] = useState(false)
+    const [splits, setSplits] = useState<{ id: string; accountId: string; amount: number }[]>([])
 
     // Form data for Compra/Venta/Stock Adjustment
     const [formData, setFormData] = useState({
@@ -151,6 +156,20 @@ export default function MovementModalV2({
         else if (initialData.type === 'ADJUSTMENT' || initialData.type === 'VALUE_ADJUSTMENT') tab = 'ajuste'
 
         setMainTab(tab)
+        
+        // Initialize splits if present or mixed payment
+        if (initialData.paymentSplits && initialData.paymentSplits.length > 0) {
+            setIsMixedPayment(true)
+            setSplits(initialData.paymentSplits.map((s, i) => ({
+                id: `split-${i}`,
+                accountId: s.accountId,
+                amount: s.amount
+            })))
+        } else {
+            setIsMixedPayment(false)
+            setSplits([])
+        }
+
         setFormData(prev => ({
             ...prev,
             type: initialData.type || prev.type,
@@ -275,6 +294,45 @@ export default function MovementModalV2({
         }))
     }, [movements, rt6Data.productId])
 
+    // Mixed Payment Logic
+    const splitTotals = useMemo(() => {
+        const assigned = splits.reduce((sum, s) => sum + s.amount, 0)
+        const remaining = calculations.total - assigned
+        return { assigned, remaining }
+    }, [splits, calculations.total])
+
+    const handleAddSplit = () => {
+        setSplits(prev => [
+            ...prev,
+            { id: `split-${Date.now()}`, accountId: '', amount: 0 }
+        ])
+    }
+
+    const handleRemoveSplit = (id: string) => {
+        setSplits(prev => prev.filter(s => s.id !== id))
+    }
+
+    const handleSplitChange = (id: string, field: 'accountId' | 'amount', value: string | number) => {
+        setSplits(prev => prev.map(s => {
+            if (s.id !== id) return s
+            return { ...s, [field]: value }
+        }))
+    }
+
+    const handleAutoFillSplit = () => {
+        // Find if there is a split with 0 amount or create one
+        const zeroSplit = splits.find(s => s.amount === 0)
+        if (zeroSplit) {
+            handleSplitChange(zeroSplit.id, 'amount', splitTotals.remaining)
+        } else {
+             // Add new split with remaining
+             setSplits(prev => [
+                ...prev,
+                { id: `split-${Date.now()}`, accountId: '', amount: splitTotals.remaining }
+            ])
+        }
+    }
+
     const handleChange = (field: keyof typeof formData, value: string | number | boolean) => {
         setFormData(prev => ({ ...prev, [field]: value }))
         setError(null)
@@ -382,6 +440,28 @@ export default function MovementModalV2({
             return
         }
 
+        // Mixed Payment Validation
+        let finalSplits: { accountId: string; amount: number; method?: string }[] | undefined = undefined
+        let finalPaymentMethod = formData.paymentMethod
+
+        if ((mainTab === 'compra' || mainTab === 'venta') && isMixedPayment) {
+            if (Math.abs(splitTotals.remaining) > 1) { // 1 peso tolerance
+                 setError(`El total asignado no coincide con el total del movimiento. Diferencia: ${formatCurrency(splitTotals.remaining)}`)
+                 return
+            }
+            if (splits.length === 0) {
+                setError('Agrega al menos una forma de pago.')
+                return
+            }
+            const invalidSplit = splits.find(s => !s.accountId || s.amount <= 0)
+            if (invalidSplit) {
+                setError('Completa todas las filas de pago con cuenta e importe mayor a 0.')
+                return
+            }
+            finalSplits = splits.map(s => ({ accountId: s.accountId, amount: s.amount, method: 'MIXTO' }))
+            finalPaymentMethod = 'MIXTO'
+        }
+
         setIsSaving(true)
         try {
             await onSave({
@@ -401,7 +481,8 @@ export default function MovementModalV2({
                 total: calculations.total,
                 costMethod,
                 counterparty: formData.counterparty || undefined,
-                paymentMethod: formData.paymentMethod || undefined,
+                paymentMethod: finalPaymentMethod || undefined,
+                paymentSplits: finalSplits,
                 notes: formData.notes || undefined,
                 reference: formData.reference || undefined,
                 autoJournal: formData.autoJournal,
@@ -739,32 +820,116 @@ export default function MovementModalV2({
                                 )}
 
                                 {/* Counterparty & Payment */}
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                                <div className="space-y-4 border-t border-slate-100 pt-4">
+                                    <div className="flex items-center justify-between">
+                                        <label className="block text-xs font-semibold text-slate-600">
                                             {mainTab === 'compra' ? 'Proveedor' : mainTab === 'venta' ? 'Cliente' : 'Motivo'} (opcional)
                                         </label>
-                                        <input
-                                            type="text"
-                                            value={formData.counterparty}
-                                            onChange={(e) => handleChange('counterparty', e.target.value)}
-                                            placeholder={mainTab === 'compra' ? 'Nombre del proveedor' : mainTab === 'venta' ? 'Nombre del cliente' : 'Ej: Rotura / pérdida'}
-                                            className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm outline-none"
-                                        />
+                                        {(mainTab === 'compra' || mainTab === 'venta') && (
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isMixedPayment}
+                                                    onChange={(e) => {
+                                                        const checked = e.target.checked
+                                                        setIsMixedPayment(checked)
+                                                        if (checked && splits.length === 0) {
+                                                            // Initialize with one empty split or prefill
+                                                            setSplits([{ id: `split-${Date.now()}`, accountId: '', amount: calculations.total }])
+                                                        }
+                                                    }}
+                                                    className="accent-blue-600 rounded"
+                                                />
+                                                <span className="text-xs font-medium text-slate-600">Pago Mixto / Múltiple</span>
+                                            </label>
+                                        )}
                                     </div>
+                                    
+                                    <input
+                                        type="text"
+                                        value={formData.counterparty}
+                                        onChange={(e) => handleChange('counterparty', e.target.value)}
+                                        placeholder={mainTab === 'compra' ? 'Nombre del proveedor' : mainTab === 'venta' ? 'Nombre del cliente' : 'Ej: Rotura / pérdida'}
+                                        className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                                    />
 
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-600 mb-1">Forma de Pago</label>
-                                        <select
-                                            value={formData.paymentMethod}
-                                            onChange={(e) => handleChange('paymentMethod', e.target.value)}
-                                            className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm bg-white outline-none"
-                                        >
-                                            {PAYMENT_OPTIONS.map((opt) => (
-                                                <option key={opt} value={opt}>{opt}</option>
-                                            ))}
-                                        </select>
-                                    </div>
+                                    {!isMixedPayment ? (
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-600 mb-1">Forma de Pago</label>
+                                            <select
+                                                value={formData.paymentMethod}
+                                                onChange={(e) => handleChange('paymentMethod', e.target.value)}
+                                                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm bg-white outline-none focus:ring-1 focus:ring-blue-500"
+                                            >
+                                                {PAYMENT_OPTIONS.map((opt) => (
+                                                    <option key={opt} value={opt}>{opt}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                            <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-2 uppercase">
+                                                <span>Cuenta / Medio</span>
+                                                <span className="pr-12">Importe</span>
+                                            </div>
+                                            
+                                            <div className="space-y-2">
+                                                {splits.map((split) => (
+                                                    <div key={split.id} className="flex gap-2 items-center">
+                                                        <div className="flex-1">
+                                                            <AccountSearchSelect
+                                                                accounts={accounts || []}
+                                                                value={split.accountId}
+                                                                onChange={(val) => handleSplitChange(split.id, 'accountId', val)}
+                                                                placeholder="Buscar cuenta..."
+                                                                inputClassName="h-[38px] text-xs px-2 py-1.5"
+                                                            />
+                                                        </div>
+                                                        <input
+                                                            type="number"
+                                                            value={split.amount}
+                                                            onChange={(e) => handleSplitChange(split.id, 'amount', Number(e.target.value))}
+                                                            className="w-24 border border-slate-200 rounded-md px-2 py-1.5 text-xs font-mono text-right outline-none focus:ring-1 focus:ring-blue-500 h-[38px]"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveSplit(split.id)}
+                                                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                                            title="Eliminar fila"
+                                                        >
+                                                            <Trash size={14} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            <div className="flex justify-between items-end mt-3 pt-2 border-t border-slate-200">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleAddSplit}
+                                                    className="text-blue-600 text-xs font-semibold flex items-center gap-1 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
+                                                >
+                                                    <Plus weight="bold" /> Agregar medio
+                                                </button>
+                                                
+                                                <div className="text-right">
+                                                    <div className="text-[10px] uppercase font-bold text-slate-400">Restante a asignar</div>
+                                                    <div className={`font-mono font-bold text-sm ${Math.abs(splitTotals.remaining) > 1 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                                        {formatCurrency(splitTotals.remaining)}
+                                                    </div>
+                                                    {Math.abs(splitTotals.remaining) > 1 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleAutoFillSplit}
+                                                            className="text-[10px] text-blue-600 font-semibold hover:underline mt-0.5"
+                                                        >
+                                                            Autocompletar restante
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Reference */}
@@ -1120,6 +1285,22 @@ export default function MovementModalV2({
                                             <span className="font-semibold text-slate-900">Total</span>
                                             <span className="font-mono font-bold text-lg">{formatCurrency(calculations.total)}</span>
                                         </div>
+                                        
+                                        {isMixedPayment && splits.length > 0 && (
+                                            <div className="mt-3 pt-3 border-t border-dashed border-slate-200">
+                                                <div className="text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Pagos / Contrapartidas</div>
+                                                {splits.map(s => {
+                                                    const accName = accounts?.find(a => a.id === s.accountId)?.name || 'Cuenta no sel.'
+                                                    return (
+                                                        <div key={s.id} className="flex justify-between text-xs mb-1">
+                                                            <span className="text-slate-600 truncate pr-2">{accName}</span>
+                                                            <span className="font-mono text-slate-700">{formatCurrency(s.amount)}</span>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        )}
+
                                         {mainTab === 'venta' && calculations.estimatedCMV > 0 && (
                                             <div className="flex justify-between text-sm pt-2 border-t border-dashed border-slate-200 text-slate-500">
                                                 <span>CMV Estimado ({costMethod})</span>

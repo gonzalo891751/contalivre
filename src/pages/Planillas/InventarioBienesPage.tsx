@@ -79,8 +79,10 @@ import {
     type OriginCategory,
 } from '../../core/inventario/rt6-apply-plan'
 import ProductModal from './components/ProductModal'
-import MovementModalV2 from './components/MovementModalV2'
+import MovementModalV3 from './components/MovementModalV3'
 import { AccountAutocomplete } from './components/AccountAutocomplete'
+import ProductValuationCard from './components/ProductValuationCard'
+import ProductLotsDrawer from './components/ProductLotsDrawer'
 
 type TabId = 'dashboard' | 'productos' | 'movimientos' | 'conciliacion' | 'cierre'
 type ConciliationFilter = 'all' | 'compras' | 'ventas' | 'rt6'
@@ -294,6 +296,8 @@ export default function InventarioBienesPage() {
     const [facpceIndices, setFacpceIndices] = useState<IndexRow[]>([])
     // Layers drawer
     const [layersDrawerProduct, setLayersDrawerProduct] = useState<ProductEndingValuation | null>(null)
+    // New dashboard lots drawer
+    const [dashboardLotsProduct, setDashboardLotsProduct] = useState<ProductEndingValuation | null>(null)
 
     // Configuracion de cuentas Bienes de Cambio (conciliacion)
     const [accountMappingsDraft, setAccountMappingsDraft] = useState<Partial<Record<AccountMappingKey, string>>>({})
@@ -1136,6 +1140,7 @@ export default function InventarioBienesPage() {
                 await createBienesMovement({
                     date: entry.date,
                     type: 'VALUE_ADJUSTMENT',
+                    adjustmentKind: 'RT6',
                     productId: item.productId,
                     quantity: 0,
                     periodId,
@@ -1165,7 +1170,8 @@ export default function InventarioBienesPage() {
         }
     }
 
-    const handleSaveRT6Batch = async (items: RT6CartItem[], generateJournal: boolean, date: string) => {
+    // Note: RT6 batch functionality preserved for future V3 modal integration
+    const _handleSaveRT6Batch = async (items: RT6CartItem[], generateJournal: boolean, date: string) => {
         if (!settings) {
             showToast('Configura el modulo antes de registrar ajustes RT6', 'error')
             return
@@ -1180,6 +1186,7 @@ export default function InventarioBienesPage() {
                 await createBienesMovement({
                     date,
                     type: 'VALUE_ADJUSTMENT',
+                    adjustmentKind: 'RT6',
                     productId: item.productId,
                     quantity: 0,
                     periodId,
@@ -1202,6 +1209,7 @@ export default function InventarioBienesPage() {
             showToast(error instanceof Error ? error.message : 'Error al registrar ajustes RT6', 'error')
         }
     }
+    void _handleSaveRT6Batch // preserved for future RT6 modal integration
 
     const handleConfirmLinkMovement = async () => {
         if (!linkMovementTarget || !selectedLinkEntryId) {
@@ -1730,11 +1738,30 @@ export default function InventarioBienesPage() {
     }, [movements, scopedJournalEntries])
 
     const inventoryEntries = useMemo(() => {
-        return scopedJournalEntries.filter(entry => {
-            if (entry.sourceModule === 'inventory') return true
-            return getEntryInventoryMatch(entry).hasMatch
+        // Strict filter: only entries that are genuinely inventory-related.
+        // Avoids false positives like "Aporte inicial" (Banco/Capital) appearing in conciliation.
+        const coreAccountIds = new Set<string>()
+        const coreKeys: AccountMappingKey[] = [
+            'mercaderias', 'compras', 'gastosCompras', 'cmv', 'ventas',
+            'bonifCompras', 'devolCompras', 'bonifVentas', 'devolVentas',
+        ]
+        coreKeys.forEach(key => {
+            const resolved = inventoryAccountResolution.byKey.get(key)
+            if (resolved) coreAccountIds.add(resolved.account.id)
         })
-    }, [scopedJournalEntries, getEntryInventoryMatch])
+
+        return scopedJournalEntries.filter(entry => {
+            // Definitive: created by inventory module
+            if (entry.sourceModule === 'inventory') return true
+            // RT6 from cierre-valuacion
+            if (entry.sourceModule === 'cierre-valuacion' && entry.metadata?.tipo === 'RT6') return true
+            // Touches at least one CORE inventory account (not just peripherals like IVA, apertura)
+            if (coreAccountIds.size > 0) {
+                return entry.lines.some(line => coreAccountIds.has(line.accountId))
+            }
+            return false
+        })
+    }, [scopedJournalEntries, inventoryAccountResolution])
 
     const movementsWithoutEntry = useMemo(() => {
         return movements.filter(movement => (movement.linkedJournalEntryIds || []).length === 0)
@@ -2037,93 +2064,31 @@ export default function InventarioBienesPage() {
                             </div>
                         </div>
 
-                        {/* EF Homogénea Card */}
-                        {efHomogenea && efHomogenea.totalEndingQty > 0 && (
-                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-                                <div className="flex justify-between items-start mb-3">
+                        {/* Stock valuado por producto */}
+                        {efHomogenea && efHomogenea.products.length > 0 && (
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
                                     <div>
-                                        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                            Existencia Final ({settings?.costMethod})
-                                        </h3>
+                                        <h3 className="text-sm font-semibold text-slate-900">Stock Valuado por Producto</h3>
                                         <p className="text-[10px] text-slate-400 mt-0.5">
-                                            Valuacion al cierre ({getPeriodFromDate(periodEnd)})
+                                            Valuacion al cierre ({getPeriodFromDate(periodEnd)}) · Metodo: {settings?.costMethod}
                                         </p>
                                     </div>
-                                    <Scales className="text-indigo-500" size={20} weight="duotone" />
+                                    {efHomogenea.missingPeriods.length > 0 && (
+                                        <div className="text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-100">
+                                            Faltan indices: {efHomogenea.missingPeriods.join(', ')}
+                                        </div>
+                                    )}
                                 </div>
-                                <div className="grid grid-cols-3 gap-4">
-                                    <div>
-                                        <span className="text-[10px] uppercase text-slate-400 font-medium">V. Origen</span>
-                                        <div className="font-mono text-lg font-medium text-slate-900">
-                                            {formatCurrency(efHomogenea.totalEndingValueOrigen)}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <span className="text-[10px] uppercase text-slate-400 font-medium">V. Homogeneo</span>
-                                        <div className="font-mono text-lg font-medium text-indigo-700">
-                                            {efHomogenea.hasIndices
-                                                ? formatCurrency(efHomogenea.totalEndingValueHomog)
-                                                : <span className="text-amber-500 text-sm">Sin indices</span>
-                                            }
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <span className="text-[10px] uppercase text-slate-400 font-medium">Ajuste</span>
-                                        <div className={`font-mono text-lg font-medium ${efHomogenea.totalAjuste >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                            {efHomogenea.hasIndices
-                                                ? <>{formatCurrency(efHomogenea.totalAjuste)} <span className="text-xs">({efHomogenea.totalAjustePct.toFixed(1)}%)</span></>
-                                                : '—'
-                                            }
-                                        </div>
-                                    </div>
-                                </div>
-                                {efHomogenea.missingPeriods.length > 0 && (
-                                    <div className="mt-3 text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded">
-                                        Faltan indices para: {efHomogenea.missingPeriods.join(', ')}
-                                    </div>
-                                )}
-                                {efHomogenea.products.length > 0 && (
-                                    <details className="mt-3">
-                                        <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-700">
-                                            Ver detalle por producto ({efHomogenea.products.length})
-                                        </summary>
-                                        <div className="mt-2 max-h-60 overflow-y-auto">
-                                            <table className="w-full text-xs">
-                                                <thead>
-                                                    <tr className="text-slate-400 border-b border-slate-100">
-                                                        <th className="text-left py-1 pr-2">Producto</th>
-                                                        <th className="text-right py-1 px-1">Qty</th>
-                                                        <th className="text-right py-1 px-1">V.Origen</th>
-                                                        <th className="text-right py-1 px-1">V.Homog</th>
-                                                        <th className="text-right py-1 pl-1">Ajuste</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {efHomogenea.products.map(pv => (
-                                                        <tr
-                                                            key={pv.product.id}
-                                                            className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer"
-                                                            onClick={() => setLayersDrawerProduct(pv)}
-                                                        >
-                                                            <td className="py-1.5 pr-2 font-medium text-slate-700">
-                                                                {pv.product.name}
-                                                                <span className="text-slate-400 ml-1">({pv.product.sku})</span>
-                                                            </td>
-                                                            <td className="text-right py-1.5 px-1 font-mono">{pv.endingQty}</td>
-                                                            <td className="text-right py-1.5 px-1 font-mono">{formatCurrency(pv.endingValueOrigen)}</td>
-                                                            <td className="text-right py-1.5 px-1 font-mono text-indigo-700">
-                                                                {efHomogenea.hasIndices ? formatCurrency(pv.endingValueHomog) : '—'}
-                                                            </td>
-                                                            <td className={`text-right py-1.5 pl-1 font-mono ${pv.ajuste >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                                {efHomogenea.hasIndices ? formatCurrency(pv.ajuste) : '—'}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </details>
-                                )}
+                                {efHomogenea.products.map(pv => (
+                                    <ProductValuationCard
+                                        key={pv.product.id}
+                                        product={pv}
+                                        method={settings?.costMethod || 'FIFO'}
+                                        formatCurrency={formatCurrency}
+                                        onViewLots={() => setDashboardLotsProduct(pv)}
+                                    />
+                                ))}
                             </div>
                         )}
 
@@ -2342,9 +2307,23 @@ export default function InventarioBienesPage() {
                                                     SALE: { label: 'Venta', color: 'bg-blue-50 text-blue-600' },
                                                     ADJUSTMENT: { label: 'Ajuste', color: 'bg-orange-50 text-orange-700' },
                                                     COUNT: { label: 'Conteo', color: 'bg-purple-50 text-purple-600' },
-                                                    VALUE_ADJUSTMENT: { label: 'Ajuste Valuacion', color: 'bg-violet-50 text-violet-700' },
+                                                    VALUE_ADJUSTMENT: { label: 'Ajuste RT6', color: 'bg-violet-50 text-violet-700' },
                                                 }
-                                                const typeInfo = typeLabels[mov.type] || { label: mov.type, color: 'bg-slate-50 text-slate-600' }
+                                                // Distinguish sub-types by adjustmentKind and qty
+                                                let typeInfo = typeLabels[mov.type] || { label: mov.type, color: 'bg-slate-50 text-slate-600' }
+                                                // PURCHASE with qty=0 is a "solo gasto" (expense-only, no stock)
+                                                if (mov.type === 'PURCHASE' && mov.quantity === 0) {
+                                                    typeInfo = { label: 'Gasto s/compra', color: 'bg-amber-50 text-amber-700' }
+                                                }
+                                                if (mov.type === 'VALUE_ADJUSTMENT') {
+                                                    if (mov.adjustmentKind === 'CAPITALIZATION') {
+                                                        typeInfo = { label: 'Gasto Capitaliz.', color: 'bg-amber-50 text-amber-700' }
+                                                    } else if (mov.adjustmentKind === 'RT6' || mov.rt6Period || mov.rt6SourceEntryId) {
+                                                        typeInfo = { label: 'Ajuste RT6', color: 'bg-violet-50 text-violet-700' }
+                                                    } else {
+                                                        typeInfo = { label: 'Ajuste Valor', color: 'bg-slate-100 text-slate-600' }
+                                                    }
+                                                }
                                                 const isEntry = mov.type === 'PURCHASE' || (mov.type === 'ADJUSTMENT' && mov.quantity > 0)
                                                 const journalStatus = mov.journalStatus || ((mov.linkedJournalEntryIds || []).length > 0 ? 'generated' : 'none')
                                                 const hasEntries = (mov.linkedJournalEntryIds || []).length > 0
@@ -2377,7 +2356,7 @@ export default function InventarioBienesPage() {
                                                             {product?.name || 'Producto eliminado'}
                                                         </td>
                                                         <td className={`py-3 px-4 text-right font-mono ${isEntry ? 'text-green-600' : 'text-slate-900'}`}>
-                                                            {isEntry ? '+' : '-'}{Math.abs(mov.quantity)}
+                                                            {mov.quantity === 0 ? '0' : `${isEntry ? '+' : '-'}${Math.abs(mov.quantity)}`}
                                                         </td>
                                                         <td className="py-3 px-4 text-right font-mono text-slate-500">
                                                             {formatCurrency(mov.unitCost || mov.costUnitAssigned || 0)}
@@ -2631,11 +2610,11 @@ export default function InventarioBienesPage() {
                                             const hasError = mov.journalStatus === 'error'
                                             const isMissing = mov.journalStatus === 'missing'
                                             const typeLabel = mov.type === 'PURCHASE'
-                                                ? 'COMPRA'
+                                                ? (mov.quantity === 0 ? 'GASTO S/COMPRA' : 'COMPRA')
                                                 : mov.type === 'SALE'
                                                     ? 'VENTA'
                                                     : mov.type === 'VALUE_ADJUSTMENT'
-                                                        ? 'AJUSTE RT6'
+                                                        ? (mov.adjustmentKind === 'CAPITALIZATION' ? 'GASTO CAPITALIZ.' : 'AJUSTE RT6')
                                                         : 'AJUSTE'
                                             const stockDelta = mov.type === 'SALE'
                                                 ? -Math.abs(mov.quantity)
@@ -3010,19 +2989,19 @@ export default function InventarioBienesPage() {
                                             )}
                                         </div>
                                     </div>
-                                    {cierreBalances.gastosCompras > 0 && (
-                                        <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
-                                            <span className="text-xs text-slate-400">+ Gastos sobre compras</span>
-                                            <div className="text-right">
-                                                <span className="font-mono text-xs text-slate-500">{formatCurrency(cierreBalances.gastosCompras)}</span>
-                                                {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.gastosAdj !== 0 && (
-                                                    <div className="text-[10px] font-mono text-indigo-600">
-                                                        Homog: {formatCurrency(cierreBalances.gastosCompras + rt6CierreAdjustments.gastosAdj)}
-                                                    </div>
-                                                )}
-                                            </div>
+                                    <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
+                                        <span className="text-xs text-slate-400">+ Gastos sobre compras</span>
+                                        <div className="text-right">
+                                            <span className={`font-mono text-xs ${cierreBalances.gastosCompras > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                                {formatCurrency(cierreBalances.gastosCompras)}
+                                            </span>
+                                            {rt6CierreAdjustments.hasAny && rt6CierreAdjustments.gastosAdj !== 0 && (
+                                                <div className="text-[10px] font-mono text-indigo-600">
+                                                    Homog: {formatCurrency(cierreBalances.gastosCompras + rt6CierreAdjustments.gastosAdj)}
+                                                </div>
+                                            )}
                                         </div>
-                                    )}
+                                    </div>
                                     {cierreBalances.bonifCompras > 0 && (
                                         <div className="flex justify-between items-center py-1 pl-4 border-b border-slate-100">
                                             <span className="text-xs text-slate-400">− Bonificaciones s/compras</span>
@@ -3426,16 +3405,14 @@ export default function InventarioBienesPage() {
             )}
 
             {movementModalOpen && settings && (
-                <MovementModalV2
+                <MovementModalV3
                     products={products}
                     valuations={valuations}
                     costMethod={settings.costMethod}
                     onSave={handleSaveMovement}
-                    onSaveRT6Batch={handleSaveRT6Batch}
                     initialData={movementPrefill || undefined}
                     mode={editingMovement ? 'edit' : 'create'}
                     accounts={accounts}
-                    facpceIndices={facpceIndices.map(indexRow => ({ period: indexRow.period, index: indexRow.value }))}
                     periodId={periodId}
                     movements={movements}
                     onClose={() => {
@@ -4073,6 +4050,15 @@ export default function InventarioBienesPage() {
                     <span className="font-medium text-sm">{toast.message}</span>
                 </div>
             )}
+
+            {/* Dashboard Lots Drawer (new prototype-based UI) */}
+            <ProductLotsDrawer
+                product={dashboardLotsProduct}
+                method={settings?.costMethod || 'FIFO'}
+                closingPeriod={getPeriodFromDate(periodEnd)}
+                formatCurrency={formatCurrency}
+                onClose={() => setDashboardLotsProduct(null)}
+            />
 
             {/* Layers Drawer (EF Homogénea detail per product) */}
             {layersDrawerProduct && (
