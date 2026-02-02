@@ -312,7 +312,12 @@ export type CostingMethod = 'FIFO' | 'LIFO' | 'PPP'
 /**
  * Movement type for bienes de cambio (extended)
  */
-export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT' | 'VALUE_ADJUSTMENT'
+export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT' | 'VALUE_ADJUSTMENT' | 'INITIAL_STOCK' | 'PAYMENT'
+
+/**
+ * Payment direction for PAYMENT movements (cobro/pago posteriores)
+ */
+export type PaymentDirection = 'COBRO' | 'PAGO'
 
 /**
  * Sub-classification for VALUE_ADJUSTMENT movements.
@@ -465,6 +470,8 @@ export interface BienesMovement {
     rt6SourceEntryId?: string      // Journal entry ID of the RT6 asiento that originated this
     originCategory?: 'EI' | 'COMPRAS' | 'GASTOS_COMPRA' | 'BONIF_COMPRA' | 'DEVOL_COMPRA'  // RT6 origin category for cierre breakdown
     sourceMovementId?: string      // Optional: purchase movement to target cost layers (capitalization)
+    // P2: Payment (cobro/pago posterior)
+    paymentDirection?: PaymentDirection  // COBRO (cliente) or PAGO (proveedor) — only for type=PAYMENT
     // Additional info
     counterparty?: string          // Supplier name (PURCHASE) or Customer (SALE)
     paymentMethod?: string         // Efectivo, Cuenta Corriente, etc.

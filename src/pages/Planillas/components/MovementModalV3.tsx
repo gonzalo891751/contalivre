@@ -50,6 +50,7 @@ import type {
     TaxType,
     TaxCalcMode,
     TaxCalcBase,
+    PaymentDirection,
 } from '../../../core/inventario/types'
 
 /** Round to 2 decimal places, handling floating point errors */
@@ -57,9 +58,10 @@ const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 1
 import type { Account } from '../../../core/models'
 import AccountSearchSelect from '../../../ui/AccountSearchSelect'
 
-type MainTab = 'compra' | 'venta' | 'ajuste'
+type MainTab = 'compra' | 'venta' | 'ajuste' | 'pagos'
 type AjusteSubTab = 'devoluciones' | 'stock' | 'rt6' | 'bonif_desc'
 type DevolucionTipo = 'DEVOLUCION_COMPRA' | 'DEVOLUCION_VENTA'
+type PagoCobroMode = 'COBRO' | 'PAGO'
 
 interface GastoAccesorio {
     id: string
@@ -173,6 +175,10 @@ export default function MovementModalV3({
     const [devolucionSplits, setDevolucionSplits] = useState<PaymentSplit[]>([
         { id: 'dev-split-1', accountId: '', amount: 0 }
     ])
+    // Taxes de devolución (copia proporcional del original, editable)
+    const [devolucionTaxes, setDevolucionTaxes] = useState<TaxLine[]>([])
+    // Modo contrapartida: 'NOTA_CREDITO' (default seguro a Deudores/Proveedores) o 'REEMBOLSO_EFECTIVO' (Caja/Banco)
+    const [devolucionContraMode, setDevolucionContraMode] = useState<'NOTA_CREDITO' | 'REEMBOLSO_EFECTIVO'>('NOTA_CREDITO')
 
     // Ajuste - RT6 (Ajuste por Inflacion)
     const [rt6, setRt6] = useState({
@@ -194,6 +200,17 @@ export default function MovementModalV3({
     })
     const [postAdjustSplits, setPostAdjustSplits] = useState<PaymentSplit[]>([
         { id: 'post-split-1', accountId: '', amount: 0 }
+    ])
+
+    // P2: Pagos/Cobros posteriores
+    const [pagoCobroMode, setPagoCobroMode] = useState<PagoCobroMode>('COBRO')
+    const [pagoCobro, setPagoCobro] = useState({
+        tercero: '',
+        originMovementId: '',
+        amount: 0,
+    })
+    const [pagoCobroSplits, setPagoCobroSplits] = useState<PaymentSplit[]>([
+        { id: 'pc-split-1', accountId: '', amount: 0 }
     ])
 
     const [isSaving, setIsSaving] = useState(false)
@@ -356,7 +373,16 @@ export default function MovementModalV3({
                 unitCost: m.unitCost || 0,
                 unitPrice: m.unitPrice || 0,
                 ivaRate: m.ivaRate,
+                ivaAmount: m.ivaAmount || 0,
+                subtotal: m.subtotal || 0,
                 total: m.total,
+                // Campos adicionales para calcular neto efectivo
+                bonificacionPct: m.bonificacionPct || 0,
+                bonificacionAmount: m.bonificacionAmount || 0,
+                // Percepciones/impuestos adicionales del original
+                taxes: m.taxes || [],
+                // Splits de pago originales (para prorrateo opcional)
+                paymentSplits: m.paymentSplits || [],
             }))
     }, [movements, devolucion.productId, devolucion.tipo])
 
@@ -438,22 +464,163 @@ export default function MovementModalV3({
         setPostAdjustSplits(prev => prev.map((s, i) => (i === 0 ? { ...s, accountId: acc.id } : s)))
     }, [accounts, postAdjust.applyOn, postAdjustSplits])
 
-    // Return calculations
+    // Sincronizar taxes de devolución cuando cambia el movimiento original o la cantidad
+    useEffect(() => {
+        if (!selectedOriginalMovement) {
+            setDevolucionTaxes([])
+            return
+        }
+        const originTaxes = selectedOriginalMovement.taxes || []
+        if (originTaxes.length === 0) {
+            setDevolucionTaxes([])
+            return
+        }
+        const originQty = selectedOriginalMovement.quantity
+        const returnQty = devolucion.cantidadDevolver
+        const ratio = originQty > 0 ? returnQty / originQty : 0
+
+        // Calcular taxes proporcionales basados en el original
+        const isCompra = devolucion.tipo === 'DEVOLUCION_COMPRA'
+        const unitValueGross = isCompra ? selectedOriginalMovement.unitCost : selectedOriginalMovement.unitPrice
+        const bonifPct = selectedOriginalMovement.bonificacionPct || 0
+        const bonifAmount = selectedOriginalMovement.bonificacionAmount || 0
+        const grossTotal = originQty * unitValueGross
+        const netAfterBonif = grossTotal - (bonifAmount > 0 ? bonifAmount : grossTotal * (bonifPct / 100))
+        const returnNeto = round2((netAfterBonif / originQty) * returnQty)
+        const returnIva = round2(returnNeto * (selectedOriginalMovement.ivaRate / 100))
+
+        const newTaxes: TaxLine[] = originTaxes
+            .filter(t => t.kind === 'PERCEPCION' && t.amount > 0)
+            .map((t, idx) => {
+                let calculatedAmount: number
+                if (t.calcMode === 'PERCENT' && t.rate && t.base) {
+                    // Recalcular basado en la base original
+                    const base = t.base === 'NETO' ? returnNeto : returnIva
+                    calculatedAmount = round2(base * (t.rate / 100))
+                } else {
+                    // Prorratear por cantidad
+                    calculatedAmount = round2(t.amount * ratio)
+                }
+                return {
+                    ...t,
+                    id: `devtax-${idx}-${Date.now()}`,
+                    amount: calculatedAmount,
+                }
+            })
+        setDevolucionTaxes(newTaxes)
+    }, [selectedOriginalMovement?.id, devolucion.cantidadDevolver, devolucion.tipo])
+
+    // Sincronizar splits de devolución según modo contrapartida
+    useEffect(() => {
+        if (!selectedOriginalMovement || !accounts) return
+
+        const isCompra = devolucion.tipo === 'DEVOLUCION_COMPRA'
+        const originQty = selectedOriginalMovement.quantity
+        const returnQty = devolucion.cantidadDevolver
+        const ratio = originQty > 0 ? returnQty / originQty : 0
+
+        // Calcular total de devolución para contrapartida
+        const unitValueGross = isCompra ? selectedOriginalMovement.unitCost : selectedOriginalMovement.unitPrice
+        const bonifPct = selectedOriginalMovement.bonificacionPct || 0
+        const bonifAmount = selectedOriginalMovement.bonificacionAmount || 0
+        const grossTotal = originQty * unitValueGross
+        const netAfterBonif = grossTotal - (bonifAmount > 0 ? bonifAmount : grossTotal * (bonifPct / 100))
+        const returnNeto = round2((netAfterBonif / originQty) * returnQty)
+        const returnIva = round2(returnNeto * (selectedOriginalMovement.ivaRate / 100))
+        const originTaxes = selectedOriginalMovement.taxes || []
+        const taxesTotal = originTaxes
+            .filter(t => t.kind === 'PERCEPCION')
+            .reduce((sum, t) => {
+                if (t.calcMode === 'PERCENT' && t.rate && t.base) {
+                    const base = t.base === 'NETO' ? returnNeto : returnIva
+                    return sum + round2(base * (t.rate / 100))
+                }
+                return sum + round2((t.amount || 0) * ratio)
+            }, 0)
+        const totalDevolucion = round2(returnNeto + returnIva + taxesTotal)
+
+        if (devolucionContraMode === 'NOTA_CREDITO') {
+            // Modo seguro: contrapartida a Deudores (venta) o Proveedores (compra)
+            // Genera Nota de Crédito/Débito sin movimiento de efectivo
+            const targetCode = isCompra ? '2.1.01.01' : '1.1.02.01' // Proveedores / Deudores
+            const acc = accounts.find(a => a.code === targetCode)
+            if (acc) {
+                setDevolucionSplits([{ id: 'dev-split-1', accountId: acc.id, amount: totalDevolucion }])
+            }
+        } else if (devolucionContraMode === 'REEMBOLSO_EFECTIVO') {
+            // Reembolsar en Caja/Banco: permite edición manual de contrapartidas
+            // Si el original tiene splits, prorratea; sino inicializa con Caja ARS
+            const originSplits = selectedOriginalMovement.paymentSplits || []
+            if (originSplits.length > 0) {
+                const originTotal = originSplits.reduce((sum, s) => sum + s.amount, 0)
+                const newSplits: PaymentSplit[] = originSplits.map((s, idx) => {
+                    const splitRatio = originTotal > 0 ? s.amount / originTotal : 0
+                    return {
+                        id: `dev-split-${idx}`,
+                        accountId: s.accountId,
+                        amount: round2(totalDevolucion * splitRatio),
+                    }
+                })
+                // Ajustar última línea para cerrar exacto
+                const splitSum = newSplits.reduce((sum, s) => sum + s.amount, 0)
+                const diff = round2(totalDevolucion - splitSum)
+                if (Math.abs(diff) > 0 && newSplits.length > 0) {
+                    newSplits[newSplits.length - 1].amount = round2(newSplits[newSplits.length - 1].amount + diff)
+                }
+                setDevolucionSplits(newSplits)
+            } else {
+                // Sin splits originales: inicializar con Caja ARS
+                const cajaCode = '1.1.01.01' // Caja
+                const cajaAcc = accounts.find(a => a.code === cajaCode)
+                if (cajaAcc) {
+                    setDevolucionSplits([{ id: 'dev-split-1', accountId: cajaAcc.id, amount: totalDevolucion }])
+                } else {
+                    // Fallback si no hay cuenta Caja
+                    setDevolucionSplits([{ id: 'dev-split-1', accountId: '', amount: totalDevolucion }])
+                }
+            }
+        }
+    }, [selectedOriginalMovement?.id, devolucion.cantidadDevolver, devolucion.tipo, devolucionContraMode, accounts])
+
+    // Return calculations - ahora considera bonificación y taxes
     const devolucionCalculations = useMemo(() => {
         if (!selectedOriginalMovement) {
-            return { unitValue: 0, subtotal: 0, iva: 0, total: 0 }
+            return { unitValue: 0, unitValueGross: 0, subtotal: 0, iva: 0, taxesTotal: 0, total: 0, ratio: 0 }
         }
 
         const isCompra = devolucion.tipo === 'DEVOLUCION_COMPRA'
-        const unitValue = isCompra
+        const originQty = selectedOriginalMovement.quantity
+        const returnQty = devolucion.cantidadDevolver
+        const ratio = originQty > 0 ? returnQty / originQty : 0
+
+        // Precio unitario BRUTO (sin bonificación) del original
+        const unitValueGross = isCompra
             ? selectedOriginalMovement.unitCost
             : selectedOriginalMovement.unitPrice
-        const subtotal = devolucion.cantidadDevolver * unitValue
-        const iva = subtotal * (selectedOriginalMovement.ivaRate / 100)
-        const total = subtotal + iva
 
-        return { unitValue, subtotal, iva, total }
-    }, [selectedOriginalMovement, devolucion])
+        // Calcular precio unitario NETO EFECTIVO (con bonificación aplicada)
+        const bonifPct = selectedOriginalMovement.bonificacionPct || 0
+        const bonifAmount = selectedOriginalMovement.bonificacionAmount || 0
+
+        // Calcular neto efectivo: bruto - bonificación
+        const grossTotal = originQty * unitValueGross
+        const netAfterBonif = grossTotal - (bonifAmount > 0 ? bonifAmount : grossTotal * (bonifPct / 100))
+        const unitValueNet = round2(netAfterBonif / originQty)
+
+        // Subtotal de devolución = qty devolver * precio unitario neto efectivo
+        const subtotal = round2(returnQty * unitValueNet)
+
+        // IVA proporcional: recalcular usando la alícuota original sobre el neto
+        const iva = round2(subtotal * (selectedOriginalMovement.ivaRate / 100))
+
+        // Taxes proporcionales (usar devolucionTaxes editables si hay, sino calcular)
+        const taxesTotal = round2(devolucionTaxes.reduce((sum, t) => sum + (t.amount || 0), 0))
+
+        // Total devolución = subtotal + iva + taxes
+        const total = round2(subtotal + iva + taxesTotal)
+
+        return { unitValue: unitValueNet, unitValueGross, subtotal, iva, taxesTotal, total, ratio }
+    }, [selectedOriginalMovement, devolucion, devolucionTaxes])
 
     const postAdjustCalculations = useMemo(() => {
         const base = selectedPostMovement?.subtotal || 0
@@ -690,6 +857,53 @@ export default function MovementModalV3({
         e.preventDefault()
         setError(null)
 
+        // P2: Pagos/Cobros
+        if (mainTab === 'pagos') {
+            if (pagoCobro.amount <= 0) {
+                setError('El importe debe ser mayor a 0')
+                return
+            }
+            const invalidSplit = pagoCobroSplits.find(s => !s.accountId || s.amount <= 0)
+            if (invalidSplit) {
+                setError('Completa todas las cuentas con importe mayor a 0')
+                return
+            }
+            const splitsTotal = pagoCobroSplits.reduce((s, sp) => s + sp.amount, 0)
+            if (Math.abs(pagoCobro.amount - splitsTotal) > 1) {
+                setError(`El total asignado no coincide. Diferencia: ${formatCurrency(pagoCobro.amount - splitsTotal)}`)
+                return
+            }
+
+            setIsSaving(true)
+            try {
+                await onSave({
+                    type: 'PAYMENT',
+                    paymentDirection: pagoCobroMode as PaymentDirection,
+                    productId: '', // No afecta producto específico
+                    date: formData.date,
+                    quantity: 0, // No afecta stock
+                    periodId,
+                    ivaRate: 0,
+                    ivaAmount: 0,
+                    subtotal: pagoCobro.amount,
+                    total: pagoCobro.amount,
+                    costMethod,
+                    counterparty: pagoCobro.tercero || undefined,
+                    paymentMethod: 'MIXTO',
+                    paymentSplits: pagoCobroSplits.map(s => ({ accountId: s.accountId, amount: s.amount, method: pagoCobroMode })),
+                    notes: formData.notes || undefined,
+                    reference: formData.reference || undefined,
+                    autoJournal: formData.autoJournal,
+                    sourceMovementId: pagoCobro.originMovementId || undefined,
+                })
+                onClose()
+            } catch (e) {
+                setError(e instanceof Error ? e.message : 'Error al guardar')
+                setIsSaving(false)
+            }
+            return
+        }
+
         // Ajuste - Devoluciones
         if (mainTab === 'ajuste' && ajusteSubTab === 'devoluciones') {
             if (!devolucion.originalMovementId) {
@@ -731,6 +945,8 @@ export default function MovementModalV3({
                     ivaAmount: devolucionCalculations.iva,
                     subtotal: devolucionCalculations.subtotal,
                     total: devolucionCalculations.total,
+                    // Incluir taxes de devolución para reversión en asientos
+                    taxes: devolucionTaxes.length > 0 ? devolucionTaxes : undefined,
                     costMethod,
                     counterparty: formData.counterparty || undefined,
                     paymentMethod: 'MIXTO',
@@ -1018,10 +1234,11 @@ export default function MovementModalV3({
     // Tab styles based on mode
     const getTabClasses = (tab: MainTab) => {
         const isActive = mainTab === tab
-        const colors = {
+        const colors: Record<MainTab, string> = {
             compra: 'text-blue-600',
             venta: 'text-emerald-600',
             ajuste: 'text-orange-500',
+            pagos: 'text-violet-600',
         }
         return isActive
             ? `px-6 py-2 rounded-md text-sm font-semibold bg-white ${colors[tab]} shadow-sm border border-slate-200 transition-all flex items-center gap-2`
@@ -1029,7 +1246,7 @@ export default function MovementModalV3({
     }
 
     // Header config based on mode
-    const headerConfig = {
+    const headerConfig: Record<MainTab, { title: string; subtitle: string; icon: typeof ShoppingCart; iconBg: string; iconColor: string }> = {
         compra: {
             title: 'Registrar Compra',
             subtitle: 'Inventario / Bienes de Cambio',
@@ -1050,6 +1267,13 @@ export default function MovementModalV3({
             icon: ArrowsCounterClockwise,
             iconBg: 'bg-orange-50',
             iconColor: 'text-orange-500',
+        },
+        pagos: {
+            title: pagoCobroMode === 'COBRO' ? 'Registrar Cobro' : 'Registrar Pago',
+            subtitle: 'Cuentas Corrientes',
+            icon: HandCoins,
+            iconBg: 'bg-violet-50',
+            iconColor: 'text-violet-600',
         },
     }
 
@@ -1103,6 +1327,13 @@ export default function MovementModalV3({
                             className={getTabClasses('ajuste')}
                         >
                             <Sliders size={16} weight="bold" /> Ajuste
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setMainTab('pagos')}
+                            className={getTabClasses('pagos')}
+                        >
+                            <HandCoins size={16} weight="bold" /> Pagos
                         </button>
                     </div>
 
@@ -1299,7 +1530,55 @@ export default function MovementModalV3({
                                                 <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono text-right text-slate-500">
                                                     {formatCurrency(devolucionCalculations.unitValue)}
                                                 </div>
+                                                {selectedOriginalMovement.bonificacionPct > 0 && (
+                                                    <p className="text-[10px] text-slate-400 mt-1">
+                                                        (Neto efectivo - bonif. {selectedOriginalMovement.bonificacionPct}% aplicada)
+                                                    </p>
+                                                )}
                                             </div>
+                                        </div>
+                                    </section>
+                                )}
+
+                                {/* Impuestos adicionales de devolución */}
+                                {selectedOriginalMovement && devolucionTaxes.length > 0 && (
+                                    <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-3">
+                                            <Receipt size={16} weight="duotone" className="text-orange-500" /> Impuestos a Revertir
+                                        </h3>
+                                        <p className="text-xs text-slate-500 mb-3">
+                                            Percepciones del comprobante original (proporcionales a la cantidad devuelta)
+                                        </p>
+                                        <div className="space-y-2">
+                                            {devolucionTaxes.map((tax, idx) => (
+                                                <div key={tax.id} className="flex gap-2 items-center bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                                    <div className="flex-1 text-sm text-slate-600">
+                                                        <span className="font-medium">{tax.kind === 'PERCEPCION' ? 'Percepción' : tax.kind}</span>
+                                                        <span className="text-slate-400 ml-1">({tax.taxType})</span>
+                                                        {tax.calcMode === 'PERCENT' && tax.rate && (
+                                                            <span className="ml-2 text-xs text-orange-600 bg-orange-50 px-1 py-0.5 rounded">
+                                                                {tax.rate}% s/{tax.base}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        value={tax.amount}
+                                                        onChange={(e) => {
+                                                            const newAmount = Number(e.target.value)
+                                                            setDevolucionTaxes(prev => prev.map((t, i) =>
+                                                                i === idx ? { ...t, amount: round2(newAmount) } : t
+                                                            ))
+                                                        }}
+                                                        className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-right outline-none focus:ring-1 focus:ring-orange-500"
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between text-sm">
+                                            <span className="text-slate-500">Total impuestos a revertir</span>
+                                            <span className="font-mono font-semibold text-orange-600">{formatCurrency(devolucionCalculations.taxesTotal)}</span>
                                         </div>
                                     </section>
                                 )}
@@ -1307,9 +1586,60 @@ export default function MovementModalV3({
                                 {/* Contrapartida Devolucion */}
                                 {selectedOriginalMovement && (
                                     <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-3">
                                             <ArrowsLeftRight size={16} weight="duotone" className="text-orange-500" /> Contrapartida
                                         </h3>
+
+                                        {/* Selector de modo contrapartida */}
+                                        <div className="grid grid-cols-2 gap-2 mb-4">
+                                            <button
+                                                type="button"
+                                                onClick={() => setDevolucionContraMode('NOTA_CREDITO')}
+                                                className={`py-2 text-xs font-semibold rounded-lg border transition-all ${
+                                                    devolucionContraMode === 'NOTA_CREDITO'
+                                                        ? 'bg-orange-100 text-orange-700 border-orange-300'
+                                                        : 'bg-white text-slate-500 border-slate-200 hover:border-orange-300'
+                                                }`}
+                                            >
+                                                Nota de {devolucion.tipo === 'DEVOLUCION_COMPRA' ? 'Debito' : 'Credito'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setDevolucionContraMode('REEMBOLSO_EFECTIVO')}
+                                                className={`py-2 text-xs font-semibold rounded-lg border transition-all ${
+                                                    devolucionContraMode === 'REEMBOLSO_EFECTIVO'
+                                                        ? 'bg-orange-100 text-orange-700 border-orange-300'
+                                                        : 'bg-white text-slate-500 border-slate-200 hover:border-orange-300'
+                                                }`}
+                                            >
+                                                Reembolsar Caja/Banco
+                                            </button>
+                                        </div>
+
+                                        {/* Info modo seleccionado */}
+                                        {devolucionContraMode === 'NOTA_CREDITO' && (
+                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-700">
+                                                <div className="flex items-start gap-2">
+                                                    <Info size={14} className="mt-0.5 flex-shrink-0" />
+                                                    <div>
+                                                        <strong>Contrapartida: {devolucion.tipo === 'DEVOLUCION_COMPRA' ? 'Proveedores' : 'Deudores por ventas'}.</strong>{' '}
+                                                        El importe queda como saldo a favor sin movimiento de efectivo.
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {devolucionContraMode === 'REEMBOLSO_EFECTIVO' && (
+                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-700">
+                                                <div className="flex items-start gap-2">
+                                                    <Warning size={14} className="mt-0.5 flex-shrink-0" />
+                                                    <div>
+                                                        <strong>Reembolso en efectivo/banco.</strong>{' '}
+                                                        Podes agregar retenciones como lineas adicionales. Edita las contrapartidas segun corresponda.
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <div className="space-y-2">
                                             {devolucionSplits.map((split) => (
                                                 <div key={split.id} className="flex gap-2 items-center">
@@ -1828,6 +2158,181 @@ export default function MovementModalV3({
                                         placeholder="Ej: Ajuste post-factura"
                                         className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500"
                                     />
+                                </section>
+                            </div>
+                        )}
+
+                        {/* P2: PAGOS/COBROS FORM */}
+                        {mainTab === 'pagos' && (
+                            <div className="space-y-6 animate-fade-in">
+                                {/* Selector Cobro/Pago */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <HandCoins size={16} weight="duotone" className="text-violet-500" /> Tipo de Operacion
+                                    </h3>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPagoCobroMode('COBRO')}
+                                            className={`py-3 text-sm font-semibold rounded-lg border transition-all flex items-center justify-center gap-2 ${
+                                                pagoCobroMode === 'COBRO'
+                                                    ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-300'
+                                            }`}
+                                        >
+                                            <ArrowDownLeft size={18} weight="bold" /> Cobro (Cliente)
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPagoCobroMode('PAGO')}
+                                            className={`py-3 text-sm font-semibold rounded-lg border transition-all flex items-center justify-center gap-2 ${
+                                                pagoCobroMode === 'PAGO'
+                                                    ? 'bg-rose-100 text-rose-700 border-rose-300'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-rose-300'
+                                            }`}
+                                        >
+                                            <ArrowUpRight size={18} weight="bold" /> Pago (Proveedor)
+                                        </button>
+                                    </div>
+                                </section>
+
+                                {/* Fecha y Tercero */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <Receipt size={16} weight="duotone" className="text-violet-500" /> Datos del {pagoCobroMode === 'COBRO' ? 'Cobro' : 'Pago'}
+                                    </h3>
+                                    <div className="grid grid-cols-12 gap-4">
+                                        <div className="col-span-4">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                                <CalendarBlank size={12} weight="bold" className="inline mr-1" />Fecha
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={formData.date}
+                                                onChange={(e) => handleChange('date', e.target.value)}
+                                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
+                                            />
+                                        </div>
+                                        <div className="col-span-8">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                                {pagoCobroMode === 'COBRO' ? 'Cliente' : 'Proveedor'}
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={pagoCobro.tercero}
+                                                onChange={(e) => setPagoCobro(prev => ({ ...prev, tercero: e.target.value }))}
+                                                placeholder={pagoCobroMode === 'COBRO' ? 'Nombre del cliente' : 'Nombre del proveedor'}
+                                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="mt-4">
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                            Importe Total
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            value={pagoCobro.amount || ''}
+                                            onChange={(e) => setPagoCobro(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                                            placeholder="0.00"
+                                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono text-right outline-none focus:ring-1 focus:ring-violet-500"
+                                        />
+                                    </div>
+                                </section>
+
+                                {/* Formas de Cobro/Pago */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <Wallet size={16} weight="duotone" className="text-violet-500" />
+                                        {pagoCobroMode === 'COBRO' ? 'Formas de Cobro' : 'Formas de Pago'}
+                                    </h3>
+                                    <p className="text-xs text-slate-500 mb-4">
+                                        {pagoCobroMode === 'COBRO'
+                                            ? 'Agrega Caja, Banco, o retenciones sufridas (a favor)'
+                                            : 'Agrega Caja, Banco, o retenciones practicadas (a depositar)'}
+                                    </p>
+                                    <div className="space-y-2">
+                                        {pagoCobroSplits.map((split) => (
+                                            <div key={split.id} className="flex gap-2 items-center">
+                                                <div className="flex-1">
+                                                    <AccountSearchSelect
+                                                        accounts={accounts || []}
+                                                        value={split.accountId}
+                                                        onChange={(val) => {
+                                                            setPagoCobroSplits(prev => prev.map(s =>
+                                                                s.id === split.id ? { ...s, accountId: val } : s
+                                                            ))
+                                                        }}
+                                                        placeholder="Buscar cuenta..."
+                                                        inputClassName="h-[38px] text-xs px-2 py-1.5"
+                                                    />
+                                                </div>
+                                                <input
+                                                    type="number"
+                                                    value={split.amount || ''}
+                                                    onChange={(e) => {
+                                                        setPagoCobroSplits(prev => prev.map(s =>
+                                                            s.id === split.id ? { ...s, amount: Number(e.target.value) } : s
+                                                        ))
+                                                    }}
+                                                    className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-right outline-none focus:ring-1 focus:ring-violet-500 h-[38px]"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPagoCobroSplits(prev => prev.filter(s => s.id !== split.id))}
+                                                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                                >
+                                                    <Trash size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPagoCobroSplits(prev => [
+                                                ...prev,
+                                                { id: `pc-split-${Date.now()}`, accountId: '', amount: 0 }
+                                            ])}
+                                            className="text-violet-600 text-xs font-semibold flex items-center gap-1 hover:bg-violet-50 px-2 py-1 rounded transition-colors"
+                                        >
+                                            <Plus weight="bold" /> Agregar cuenta
+                                        </button>
+                                        <div className="text-right">
+                                            <div className="text-[10px] uppercase font-bold text-slate-400">Restante</div>
+                                            <div className={`font-mono font-bold text-sm ${Math.abs(pagoCobro.amount - pagoCobroSplits.reduce((s, sp) => s + sp.amount, 0)) > 1 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                                {formatCurrency(pagoCobro.amount - pagoCobroSplits.reduce((s, sp) => s + sp.amount, 0))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* Referencia / Notas */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Referencia</label>
+                                            <input
+                                                type="text"
+                                                value={formData.reference}
+                                                onChange={(e) => handleChange('reference', e.target.value)}
+                                                placeholder="Ej: Recibo #001"
+                                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Notas</label>
+                                            <input
+                                                type="text"
+                                                value={formData.notes}
+                                                onChange={(e) => handleChange('notes', e.target.value)}
+                                                placeholder="Observaciones..."
+                                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
+                                            />
+                                        </div>
+                                    </div>
                                 </section>
                             </div>
                         )}
@@ -2632,9 +3137,15 @@ export default function MovementModalV3({
                                             <span className="font-mono">{devolucion.cantidadDevolver} u</span>
                                         </div>
                                         <div className="flex justify-between text-slate-500">
-                                            <span>Valor unitario</span>
+                                            <span>Valor unitario (neto efectivo)</span>
                                             <span className="font-mono">{formatCurrency(devolucionCalculations.unitValue)}</span>
                                         </div>
+                                        {selectedOriginalMovement.bonificacionPct > 0 && (
+                                            <div className="flex justify-between text-slate-400 text-xs">
+                                                <span>Bonificacion aplicada</span>
+                                                <span className="font-mono">{selectedOriginalMovement.bonificacionPct}%</span>
+                                            </div>
+                                        )}
                                         <div className="flex justify-between text-slate-600 font-medium pt-2 border-t border-slate-200">
                                             <span>Subtotal Neto</span>
                                             <span className="font-mono">{formatCurrency(devolucionCalculations.subtotal)}</span>
@@ -2643,6 +3154,12 @@ export default function MovementModalV3({
                                             <span>IVA ({selectedOriginalMovement.ivaRate}%)</span>
                                             <span className="font-mono">{formatCurrency(devolucionCalculations.iva)}</span>
                                         </div>
+                                        {devolucionCalculations.taxesTotal > 0 && (
+                                            <div className="flex justify-between text-orange-600">
+                                                <span>Impuestos adicionales</span>
+                                                <span className="font-mono">{formatCurrency(devolucionCalculations.taxesTotal)}</span>
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="mt-4 pt-3 border-t border-slate-300 flex justify-between items-center">

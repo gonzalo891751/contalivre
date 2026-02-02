@@ -177,6 +177,20 @@ export function buildCostLayers(
                 unitCost: mov.unitCost,
                 movementId: mov.id,
             })
+        } else if (mov.type === 'INITIAL_STOCK' && mov.quantity > 0 && mov.unitCost !== undefined) {
+            // P1: Existencia Inicial — crea capa igual que una compra
+            // Reemplaza la capa ficticia de 'opening' si existe del producto
+            const existingOpeningIdx = layers.findIndex(l => l.movementId === 'opening')
+            if (existingOpeningIdx >= 0) {
+                // Remove fake opening layer since we have a real INITIAL_STOCK movement
+                layers.splice(existingOpeningIdx, 1)
+            }
+            layers.push({
+                date: mov.date,
+                quantity: mov.quantity,
+                unitCost: mov.unitCost,
+                movementId: mov.id,
+            })
         } else if (mov.type === 'VALUE_ADJUSTMENT') {
             const affectsLayers = mov.adjustmentKind === 'RT6' || mov.adjustmentKind === 'CAPITALIZATION'
             if (!affectsLayers) continue

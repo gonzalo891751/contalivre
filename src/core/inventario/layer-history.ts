@@ -39,7 +39,7 @@ export interface LotEvent {
 export interface LotHistory {
     id: string // Unique lot ID (based on source movementId)
     originDate: string // Date of initial entry (purchase/opening)
-    originType: 'OPENING' | 'PURCHASE' | 'ADJUSTMENT' | 'RETURN'
+    originType: 'OPENING' | 'PURCHASE' | 'ADJUSTMENT' | 'RETURN' | 'INITIAL_STOCK'
     initialQuantity: number // Original quantity when lot was created
     currentQuantity: number // Remaining quantity (can be 0 for exhausted lots)
     unitCostHistorico: number // Original unit cost (historical)
@@ -89,7 +89,7 @@ export function buildLayerHistory(
                     type: 'CREATION',
                     quantity: initialQty,
                     referenceId: movementId,
-                    referenceMemo: originType === 'OPENING' ? 'Existencia Inicial' : 'Compra',
+                    referenceMemo: originType === 'OPENING' || originType === 'INITIAL_STOCK' ? 'Existencia Inicial' : (originType === 'ADJUSTMENT' ? 'Ajuste' : 'Compra'),
                     balanceAfter: initialQty,
                 }],
                 isExhausted: initialQty <= 0,
@@ -253,6 +253,14 @@ export function buildLayerHistory(
         } else if (mov.type === 'ADJUSTMENT' && mov.quantity > 0 && mov.unitCost !== undefined) {
             // Positive adjustment creates a new lot
             getOrCreateLot(mov.id, mov.date, mov.quantity, mov.unitCost, 'ADJUSTMENT')
+
+        } else if (mov.type === 'INITIAL_STOCK' && mov.quantity > 0 && mov.unitCost !== undefined) {
+            // P1: Existencia Inicial creates a lot (replaces fake OPENING lot if exists)
+            const existingOpeningLot = lots.get('opening')
+            if (existingOpeningLot) {
+                lots.delete('opening')
+            }
+            getOrCreateLot(mov.id, mov.date, mov.quantity, mov.unitCost, 'INITIAL_STOCK')
 
         } else if (mov.type === 'ADJUSTMENT' && mov.quantity < 0) {
             // Negative adjustment consumes from lots

@@ -2,6 +2,174 @@
 
 ---
 
+## CHECKPOINT #P0-P1-P2-DEVOLUCIONES-EI-PAGOS-2026-02-02
+**Fecha:** 2026-02-02
+**Estado:** COMPLETADO - Build PASS, 48/48 Tests PASS
+
+### Objetivo
+Pulir devoluciones (contrapartida correcta + prefill inteligente) + normalizar existencia inicial + agregar Pagos/Cobros posteriores.
+
+### Archivos Tocados
+| Archivo | Accion | LOC aprox |
+|---|---|---|
+| src/core/inventario/types.ts | Agregar INITIAL_STOCK, PAYMENT, PaymentDirection | +8 |
+| src/storage/bienes.ts | Fix contrapartida devoluciones (hasSplits), buildJournalEntriesForMovement para INITIAL_STOCK y PAYMENT | +80 |
+| src/core/inventario/costing.ts | Handler para INITIAL_STOCK en buildCostLayers | +12 |
+| src/core/inventario/layer-history.ts | Agregar INITIAL_STOCK a originType, handler en buildLayerHistory | +15 |
+| src/pages/Planillas/components/MovementModalV3.tsx | Renombrar modo contrapartida PRORRATEO→REEMBOLSO_EFECTIVO, UI mejorada, nueva pestaña Pagos/Cobros completa | +180 |
+| src/pages/Planillas/InventarioBienesPage.tsx | Badges para INITIAL_STOCK, PAYMENT, Cobro, Pago | +15 |
+| docs/AI_HANDOFF.md | Este checkpoint | +90 |
+
+### P0 - FIX CRÍTICO: Contrapartida de devoluciones
+**Problema:** Las devoluciones usaban siempre `contraId` (Caja/Banco fallback) ignorando los paymentSplits del modal.
+
+**Solución:**
+1. **bienes.ts**: Ambos bloques de devolución (PURCHASE y SALE con isDevolucion) ahora usan `hasSplits` igual que compra/venta normal:
+   ```typescript
+   if (hasSplits) {
+       movement.paymentSplits!.forEach(split => { lines.push(...) })
+   } else {
+       lines.push({ accountId: contraId!, ... })
+   }
+   ```
+2. **MovementModalV3.tsx**: Renombrado modo `PRORRATEO` → `REEMBOLSO_EFECTIVO` con UX más clara:
+   - Botón "Nota de Crédito/Débito" (default) → usa Deudores/Proveedores
+   - Botón "Reembolsar Caja/Banco" → permite editar splits manualmente
+   - Info contextual explicando cada modo
+   - Si no hay splits originales, inicializa con Caja ARS
+
+**Validación:** Toggle OFF = Nota de Crédito a Deudores, Toggle ON = Caja/Banco editable.
+
+### P1 - NORMALIZACIÓN: Existencia Inicial como tipo propio
+**Problema:** EI se registraba como `type: 'ADJUSTMENT'` con notes='Inventario inicial', confundiendo con ajustes manuales.
+
+**Solución:**
+1. **types.ts**: Nuevo tipo `'INITIAL_STOCK'` en BienesMovementType
+2. **bienes.ts - createBienesProduct**: Cambiado `type: 'ADJUSTMENT'` → `type: 'INITIAL_STOCK'`
+3. **bienes.ts - buildJournalEntriesForMovement**: Nuevo bloque para INITIAL_STOCK genera asiento D Mercaderías / H Apertura Inventario
+4. **costing.ts - buildCostLayers**: Handler para INITIAL_STOCK crea capa igual que PURCHASE, remueve capa ficticia 'opening' si existe
+5. **layer-history.ts**: originType incluye 'INITIAL_STOCK', handler correspondiente
+6. **InventarioBienesPage.tsx**: Badge "Existencia Inicial" color cyan
+
+**Validación:** Movimiento de inventario inicial se etiqueta como "Existencia Inicial" y FIFO/PPP consume normalmente.
+
+### P2 - FEATURE MVP: Pestaña Pagos/Cobros
+**Objetivo:** Registrar pagos/cobros posteriores (T4) desde el módulo de inventario, sin afectar stock.
+
+**Implementación:**
+1. **types.ts**:
+   - Nuevo tipo `'PAYMENT'` en BienesMovementType
+   - Nuevo tipo `PaymentDirection = 'COBRO' | 'PAGO'`
+   - Campo `paymentDirection?` en BienesMovement
+
+2. **MovementModalV3.tsx**:
+   - Nueva pestaña top-level "Pagos" (junto a Compra, Venta, Ajuste)
+   - Selector Cobro (cliente) / Pago (proveedor)
+   - Formulario con fecha, tercero, importe total
+   - Splits para Caja/Banco + retenciones
+   - Validación de balance
+   - Submit genera movimiento PAYMENT con paymentDirection
+
+3. **bienes.ts - buildJournalEntriesForMovement**:
+   - COBRO: D Caja/Banco + D Retenciones sufridas / H Deudores
+   - PAGO: D Proveedores / H Caja/Banco + H Retenciones practicadas
+   - quantity=0 (no afecta stock)
+
+4. **InventarioBienesPage.tsx**: Badges "Cobro" (verde) y "Pago" (rosa)
+
+### Decisiones Técnicas
+- **Contrapartida devolución**: Usar paymentSplits existentes, no crear nuevo mecanismo
+- **Tipo EI**: Nuevo tipo `INITIAL_STOCK` para semántica clara
+- **Pagos/Cobros**: Tipo `PAYMENT` separado con paymentDirection para claridad
+- **Capa EI**: INITIAL_STOCK remueve capa ficticia 'opening' para evitar duplicación
+- **No afecta stock**: PAYMENT usa qty=0, no crea capas de costo
+
+### Validación
+- `npm run build`: PASS
+- `npm run test`: 48/48 PASS
+
+### Criterios de Aceptación
+- [x] A) Devolución venta (nota de crédito): Toggle OFF usa Deudores, no Caja/Banco
+- [x] B) EI: Movimiento etiquetado "Existencia Inicial", FIFO/PPP consume normalmente
+- [x] C) Pagos/Cobros: Pestaña funcional con asientos correctos, no afecta stock
+
+### Pendientes (nice-to-have, no críticos)
+- [ ] Selector de movimiento devengado origen en Pagos/Cobros (prefill tercero y saldo)
+- [ ] Chip con saldo del tercero y saldo de cuenta en Pagos/Cobros
+- [ ] QA manual end-to-end completo
+
+---
+
+## CHECKPOINT #DEVOLUCIONES-NETO-EFECTIVO-TAXES-2026-02-02
+**Fecha:** 2026-02-02
+**Estado:** COMPLETADO - Build PASS, 48/48 Tests PASS
+
+### Objetivo
+Pulir devoluciones (VENTA y COMPRA) para que:
+- Pre-llenen automáticamente precio neto efectivo (con bonificación aplicada) + IVA + taxes[] (percepciones) proporcionales
+- Vista previa contable incluya reversión de percepciones
+- Modo contrapartida: default "Nota de crédito" (Deudores/Proveedores) + opcional "Prorratear cobro/pago" (basado en splits originales, incluye retenciones)
+- Todo editable antes de confirmar
+
+### Archivos Tocados
+| Archivo | Accion | LOC aprox |
+|---|---|---|
+| src/pages/Planillas/components/MovementModalV3.tsx | Estado devolucionTaxes/devolucionContraMode, availableMovementsForReturn extendido, devolucionCalculations con neto efectivo, useEffect sincronización taxes/splits, UI impuestos editables + selector modo contrapartida + warning prorrateo, resumen actualizado, submit con taxes | +180 |
+| src/storage/bienes.ts | Reversión percepciones en asientos de devolución compra (CREDIT) y venta (DEBIT) | +28 |
+| docs/AI_HANDOFF.md | Este checkpoint | +65 |
+
+### Cambios Realizados
+
+**FASE 1 - Autofill inteligente desde movimiento original:**
+- `availableMovementsForReturn`: extendido con bonificacionPct, bonificacionAmount, taxes[], subtotal, paymentSplits
+- `devolucionCalculations`: calcula precio unitario NETO EFECTIVO (unitValueGross * (1 - bonifPct/100)), IVA proporcional, taxesTotal desde devolucionTaxes
+- Nuevo estado `devolucionTaxes`: copia proporcional de taxes[] del original (percepciones), editable
+- useEffect sincroniza devolucionTaxes cuando cambia el movimiento original o cantidad:
+  - Si tax.calcMode=PERCENT: recalcula sobre base (NETO/IVA) de la devolución
+  - Si no: prorratea por ratio (returnQty/originQty)
+
+**FASE 2 - Contrapartida inteligente:**
+- Nuevo estado `devolucionContraMode`: 'NOTA_CREDITO' (default) o 'PRORRATEO'
+- Modo NOTA_CREDITO: contrapartida a Deudores (venta) o Proveedores (compra)
+- Modo PRORRATEO: prorratea según paymentSplits del origin (incluye retenciones), con ajuste de última línea para cerrar exacto
+- UI: botones toggle + warning en modo prorrateo ("En la práctica fiscal, retenciones pueden requerir ajuste de certificado")
+- useEffect sincroniza devolucionSplits según modo seleccionado
+
+**FASE 3 - Reversión de percepciones en asientos:**
+- bienes.ts: devolución compra → reversión percepciones sufridas (CREDIT, porque originalmente DEBIT)
+- bienes.ts: devolución venta → reversión percepciones practicadas (DEBIT, porque originalmente CREDIT)
+- Submit pasa taxes al movimiento para que buildJournalEntries las incluya
+
+**UI actualizada:**
+- Sección "Impuestos a Revertir" con percepciones editables
+- Badge "X% s/NETO|IVA" si tax tiene calcMode=PERCENT
+- Resumen muestra bonificación aplicada + línea "Impuestos adicionales"
+- Precio unitario muestra nota "(Neto efectivo - bonif. X% aplicada)" si hay bonif
+
+### Decisiones Técnicas
+- **Neto efectivo se deriva explícitamente**: `grossTotal - bonifAmount` / `qty`, no se confía en subtotal del original (puede estar vacío en movimientos viejos)
+- **Retenciones no se incluyen en taxes de devolución**: siguen modeladas como splits. Solo percepciones (kind=PERCEPCION) se revierten automáticamente
+- **Fallback modo prorrateo**: si origin no tiene paymentSplits, cae a modo NOTA_CREDITO
+- **round2() reutilizado**: mismo helper existente para redondeo a 2 decimales
+
+### Validación
+- `npm run build`: PASS
+- `npm run test`: 48/48 PASS
+
+### Criterios de Aceptación (según contrato)
+- [x] Venta con bonif 10% + percepción IVA: devolución trae precio neto efectivo (no bruto) y revierte percepciones
+- [x] Compra con bonif + percepción: devolución trae taxes reversadas
+- [x] Modo "Nota de crédito" prellena Deudores/Proveedores
+- [x] Modo "Prorratear cobro/pago" genera contrapartidas proporcionales (editable + warning)
+- [x] Build + tests pasan
+
+### Pendientes (nice-to-have, no críticos)
+- [ ] Badge "Auto" cuando valores vienen del original
+- [ ] Botón "Restaurar valores originales"
+- [ ] QA manual end-to-end con caso completo (venta con bonif + percepción + retención en split)
+
+---
+
 ## CHECKPOINT #PERCEPCIONES-RETENCIONES-PORCENTAJE-2026-02-01
 **Fecha:** 2026-02-01
 **Estado:** COMPLETADO - Build PASS, 48/48 Tests PASS

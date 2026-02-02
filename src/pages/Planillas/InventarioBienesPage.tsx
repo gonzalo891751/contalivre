@@ -2509,6 +2509,8 @@ export default function InventarioBienesPage() {
                                                     ADJUSTMENT: { label: 'Ajuste', color: 'bg-orange-50 text-orange-700' },
                                                     COUNT: { label: 'Conteo', color: 'bg-purple-50 text-purple-600' },
                                                     VALUE_ADJUSTMENT: { label: 'Ajuste RT6', color: 'bg-violet-50 text-violet-700' },
+                                                    INITIAL_STOCK: { label: 'Existencia Inicial', color: 'bg-cyan-50 text-cyan-700' },
+                                                    PAYMENT: { label: 'Cobro/Pago', color: 'bg-violet-50 text-violet-600' },
                                                 }
                                                 // Distinguish sub-types by adjustmentKind and qty
                                                 let typeInfo = typeLabels[mov.type] || { label: mov.type, color: 'bg-slate-50 text-slate-600' }
@@ -2538,6 +2540,14 @@ export default function InventarioBienesPage() {
                                                         typeInfo = { label: 'Ajuste RT6', color: 'bg-violet-50 text-violet-700' }
                                                     } else {
                                                         typeInfo = { label: 'Ajuste Valor', color: 'bg-slate-100 text-slate-600' }
+                                                    }
+                                                }
+                                                // P2: Distinguish Cobro vs Pago
+                                                if (mov.type === 'PAYMENT') {
+                                                    if (mov.paymentDirection === 'COBRO') {
+                                                        typeInfo = { label: 'Cobro', color: 'bg-emerald-50 text-emerald-700' }
+                                                    } else if (mov.paymentDirection === 'PAGO') {
+                                                        typeInfo = { label: 'Pago', color: 'bg-rose-50 text-rose-700' }
                                                     }
                                                 }
                                                 const isEntry = (mov.type === 'PURCHASE' && !mov.isDevolucion)

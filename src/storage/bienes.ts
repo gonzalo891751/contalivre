@@ -618,12 +618,19 @@ const buildJournalEntriesForMovement = async (
     if (movement.type === 'PURCHASE') {
         if (movement.isDevolucion) {
             // DEVOLUCIÓN DE COMPRA: reverse entry
-            // Debe: Proveedores/Anticipos (total c/IVA)
+            // Debe: Proveedores/Anticipos (total c/IVA + percepciones) — usa paymentSplits si hay
             // Haber: Devoluciones s/compras (neto)
             // Haber: IVA CF (reverso)
-            const lines: EntryLine[] = [
-                { accountId: contraId!, debit: total, credit: 0, description: 'Proveedores - devolucion' },
-            ]
+            // Haber: Percepciones sufridas (reverso) — originalmente DEBIT, ahora CREDIT
+            const lines: EntryLine[] = []
+            // P0 FIX: Usar paymentSplits para contrapartida (Nota de Débito a Proveedores vs Reembolso en Caja)
+            if (hasSplits) {
+                movement.paymentSplits!.forEach(split => {
+                    lines.push({ accountId: split.accountId, debit: split.amount, credit: 0, description: 'Contrapartida devolucion' })
+                })
+            } else {
+                lines.push({ accountId: contraId!, debit: total, credit: 0, description: 'Proveedores - devolucion' })
+            }
             if (devolComprasId) {
                 lines.push({ accountId: devolComprasId, debit: 0, credit: subtotal, description: 'Devolucion s/compras' })
             } else {
@@ -632,6 +639,20 @@ const buildJournalEntriesForMovement = async (
             if (ivaAmount > 0 && ivaCFId) {
                 lines.push({ accountId: ivaCFId, debit: 0, credit: ivaAmount, description: 'IVA CF reverso' })
             }
+
+            // Reversión de percepciones sufridas (compra): CREDIT to perception asset account
+            const returnTaxes = movement.taxes || []
+            const returnPercepciones = returnTaxes.filter(t => t.kind === 'PERCEPCION' && t.amount > 0)
+            for (const tax of returnPercepciones) {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, true)
+                if (taxAccountId) {
+                    const label = `Percepcion ${tax.taxType} reverso`
+                    lines.push({ accountId: taxAccountId, debit: 0, credit: tax.amount, description: label })
+                } else {
+                    console.warn(`[bienes] No se encontro cuenta para percepcion ${tax.taxType} en devolucion compra (tax id: ${tax.id})`)
+                }
+            }
+
             pushEntry(`Devolucion compra - ${product?.name || movement.productId}`, lines, { journalRole: 'purchase_return' })
         } else {
             // COMPRA NORMAL with bonif/gastos/descuento
@@ -693,6 +714,7 @@ const buildJournalEntriesForMovement = async (
             // DEVOLUCIÓN DE VENTA
             // Debe: Devol s/ventas (neto)
             // Debe: IVA DF (reverso)
+            // Debe: Percepciones practicadas (reverso) — originalmente CREDIT, ahora DEBIT
             // Haber: Deudores/Caja (total devuelto)
             const lines: EntryLine[] = []
             if (devolVentasId) {
@@ -703,7 +725,28 @@ const buildJournalEntriesForMovement = async (
             if (ivaAmount > 0 && ivaDFId) {
                 lines.push({ accountId: ivaDFId, debit: ivaAmount, credit: 0, description: 'IVA DF reverso' })
             }
-            lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Devolucion a cliente' })
+
+            // Reversión de percepciones practicadas (venta): DEBIT to perception liability account
+            const returnTaxes = movement.taxes || []
+            const returnPercepciones = returnTaxes.filter(t => t.kind === 'PERCEPCION' && t.amount > 0)
+            for (const tax of returnPercepciones) {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, false)
+                if (taxAccountId) {
+                    const label = `Percepcion ${tax.taxType} reverso`
+                    lines.push({ accountId: taxAccountId, debit: tax.amount, credit: 0, description: label })
+                } else {
+                    console.warn(`[bienes] No se encontro cuenta para percepcion ${tax.taxType} en devolucion venta (tax id: ${tax.id})`)
+                }
+            }
+
+            // P0 FIX: Usar paymentSplits para contrapartida (Nota de Crédito a Deudores vs Reembolso en Caja)
+            if (hasSplits) {
+                movement.paymentSplits!.forEach(split => {
+                    lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: 'Contrapartida devolucion' })
+                })
+            } else {
+                lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Devolucion a cliente' })
+            }
             pushEntry(`Devolucion venta - ${product?.name || movement.productId}`, lines, { journalRole: 'sale_return' })
         } else {
             // VENTA NORMAL with bonif/descuento
@@ -794,6 +837,71 @@ const buildJournalEntriesForMovement = async (
                 { journalRole: 'adjustment_out' }
             )
         }
+    }
+
+    // P1: EXISTENCIA INICIAL - Genera asiento D Mercaderías / H Apertura Inventario
+    if (movement.type === 'INITIAL_STOCK') {
+        const amount = Math.abs(movement.subtotal || 0)
+        if (amount <= 0) {
+            return { entries: [], error: 'La existencia inicial no tiene importe para generar asiento.' }
+        }
+
+        const aperturaId = resolveMappedAccountId(accounts, settings, 'aperturaInventario', 'aperturaInventario')
+        if (!aperturaId) {
+            return { entries: [], error: 'Falta cuenta contable: Apertura Inventario' }
+        }
+
+        pushEntry(
+            `Existencia Inicial - ${product?.name || movement.productId}`,
+            [
+                { accountId: mercaderiasId!, debit: amount, credit: 0, description: 'Existencia inicial mercaderias' },
+                { accountId: aperturaId, debit: 0, credit: amount, description: 'Contrapartida apertura inventario' },
+            ],
+            { journalRole: 'initial_stock' }
+        )
+    }
+
+    // P2: PAYMENT (Cobro/Pago posterior) - No afecta stock, solo genera asiento contable
+    if (movement.type === 'PAYMENT') {
+        const paymentTotal = movement.total || 0
+        if (paymentTotal <= 0) {
+            return { entries: [], error: 'El cobro/pago no tiene importe.' }
+        }
+
+        if (!hasSplits || movement.paymentSplits!.length === 0) {
+            return { entries: [], error: 'El cobro/pago debe tener al menos una forma de cobro/pago.' }
+        }
+
+        const isCobro = movement.paymentDirection === 'COBRO'
+        const deudoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.deudores)
+        const proveedoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores)
+        const cuentaCorrienteId = isCobro ? deudoresId : proveedoresId
+
+        if (!cuentaCorrienteId) {
+            return { entries: [], error: `Falta cuenta contable: ${isCobro ? 'Deudores por ventas' : 'Proveedores'}` }
+        }
+
+        const lines: EntryLine[] = []
+
+        if (isCobro) {
+            // COBRO: D Caja/Banco + D Retenciones sufridas / H Deudores
+            movement.paymentSplits!.forEach(split => {
+                lines.push({ accountId: split.accountId, debit: split.amount, credit: 0, description: split.method || 'Cobro' })
+            })
+            lines.push({ accountId: cuentaCorrienteId, debit: 0, credit: paymentTotal, description: 'Deudores por ventas' })
+        } else {
+            // PAGO: D Proveedores / H Caja/Banco + H Retenciones practicadas
+            lines.push({ accountId: cuentaCorrienteId, debit: paymentTotal, credit: 0, description: 'Proveedores' })
+            movement.paymentSplits!.forEach(split => {
+                lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: split.method || 'Pago' })
+            })
+        }
+
+        const memo = isCobro
+            ? `Cobro${movement.counterparty ? ` - ${movement.counterparty}` : ''}`
+            : `Pago${movement.counterparty ? ` a ${movement.counterparty}` : ''}`
+
+        pushEntry(memo, lines, { journalRole: isCobro ? 'collection' : 'payment' })
     }
 
     return { entries }
@@ -953,7 +1061,7 @@ export async function createBienesProduct(
     const initialMovement: BienesMovement = {
         id: generateInventoryId('bmov'),
         date: product.openingDate,
-        type: 'ADJUSTMENT',
+        type: 'INITIAL_STOCK',
         productId: newProduct.id,
         quantity: product.openingQty,
         periodId: product.periodId,
@@ -965,7 +1073,7 @@ export async function createBienesProduct(
         costMethod: settings.costMethod,
         costUnitAssigned: 0,
         costTotalAssigned: 0,
-        notes: 'Inventario inicial',
+        notes: 'Existencia Inicial',
         autoJournal: true,
         linkedJournalEntryIds: [],
         journalStatus: 'generated',
