@@ -5,6 +5,7 @@ import { computeLedger } from '../core/ledger'
 import { computeTrialBalance } from '../core/balance'
 import { computeStatements } from '../core/statements'
 import type { Account, JournalEntry, StatementGroup, BalanceSheet } from '../core/models'
+import { usePeriodYear } from './usePeriodYear'
 
 // Chart colors consistent with ContaLivre brand
 const CHART_COLORS = {
@@ -169,8 +170,9 @@ function buildCompositionData(
  * Custom hook that provides all dashboard metrics
  */
 export function useDashboardMetrics(): DashboardMetrics {
+    const { start: periodStart, end: periodEnd } = usePeriodYear()
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
-    const entries = useLiveQuery(() => db.entries.orderBy('date').reverse().toArray())
+    const entries = useLiveQuery(() => db.entries.where('date').between(periodStart, periodEnd, true, true).reverse().toArray(), [periodStart, periodEnd])
 
     return useMemo(() => {
         // Loading state

@@ -20,17 +20,14 @@ import {
     Activity,
     AlertTriangle,
     FilePlus2,
-    RefreshCw,
     Wallet,
     UploadCloud,
     Wand2,
 } from 'lucide-react'
 
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics'
+import { usePeriodYear } from '../hooks/usePeriodYear'
 import { loadSeedDataIfNeeded } from '../storage/seed'
-import { deleteAllAccounts } from '../storage/accounts'
-import { resetExercise } from '../storage/entries'
-import { clearMapping } from '../domain/mapping/mappingStorage'
 import IndicatorsDashboard from '../components/Indicators/IndicatorsDashboard'
 import MappingWizardModal from '../components/mapping/MappingWizardModal'
 
@@ -54,19 +51,18 @@ const formatCurrency = (value: number) => {
 export default function Dashboard() {
     const navigate = useNavigate()
     const metrics = useDashboardMetrics()
+    const { year, setYear } = usePeriodYear()
 
     // Modal states
     const [showImportModal, setShowImportModal] = useState(false)
     const [showResetModal, setShowResetModal] = useState(false)
     const [showMappingWizard, setShowMappingWizard] = useState(false)
-    const [deleteConfirmText, setDeleteConfirmText] = useState('')
-    const [isResetting, setIsResetting] = useState(false)
-
+    
     // Destructure for easier access
     const { isLoading, hasCOA, unmappedCount, isSetupComplete, hasEntries, totals, kpis, charts, recentActivity } =
         metrics
 
-    const showOnboarding = !isSetupComplete
+    const showOnboarding = !hasEntries
 
     // ========================================================================
     // Handlers
@@ -89,25 +85,11 @@ export default function Dashboard() {
         navigate('/cuentas')
     }
 
-    const handleResetExercise = async () => {
-        if (deleteConfirmText !== 'NUEVO') return
-
-        setIsResetting(true)
-        try {
-            // Delete all entries first (foreign key safety)
-            await resetExercise()
-            // Then delete all accounts
-            await deleteAllAccounts()
-            // Clear mapping configuration
-            clearMapping()
-
-            setShowResetModal(false)
-            setDeleteConfirmText('')
-        } catch (error) {
-            console.error('Error resetting exercise:', error)
-        } finally {
-            setIsResetting(false)
-        }
+    const handleNewExercise = () => {
+        // Safe "New Exercise" - just switch to next year
+        const nextYear = year + 1
+        setYear(nextYear)
+        setShowResetModal(false)
     }
 
     const handleCreateEntry = () => {
@@ -175,7 +157,7 @@ export default function Dashboard() {
                             </div>
                             <div className="dashboard-period-info">
                                 <span className="dashboard-period-label">Período</span>
-                                <span className="dashboard-period-value">2026</span>
+                                <span className="dashboard-period-value">{year}</span>
                             </div>
                         </div>
                     </div>
@@ -192,7 +174,7 @@ export default function Dashboard() {
                                 Primeros pasos
                             </h3>
                             <span className="dashboard-progress-text">
-                                {hasCOA ? (unmappedCount > 0 ? '1/3' : '2/3') : '0/3'} completado
+                                {hasCOA && unmappedCount === 0 ? '1/2' : '0/2'} completado
                             </span>
                         </div>
 
@@ -257,24 +239,6 @@ export default function Dashboard() {
                                     className="btn btn-secondary dashboard-step-cta"
                                 >
                                     Nuevo Asiento
-                                </button>
-                            </div>
-
-                            {/* Step 3: Ver Reportes */}
-                            <div
-                                className={`dashboard-step-card ${!hasEntries ? 'dashboard-step-card--locked' : ''
-                                    }`}
-                            >
-                                {!hasEntries && <Lock size={20} className="dashboard-step-lock" />}
-                                <span className="dashboard-step-number">Paso 3</span>
-                                <h4 className="dashboard-step-title">Ver Reportes</h4>
-                                <p className="dashboard-step-desc">Analizá tu estado contable.</p>
-                                <button
-                                    disabled={!hasEntries}
-                                    onClick={() => navigate('/estados')}
-                                    className="btn btn-secondary dashboard-step-cta"
-                                >
-                                    Ver Estados
                                 </button>
                             </div>
                         </div>
@@ -665,49 +629,34 @@ export default function Dashboard() {
                 </div>
             )}
 
-            {/* RESET EXERCISE MODAL */}
+            {/* NEW EXERCISE MODAL */}
             {showResetModal && (
-                <div className="dashboard-modal-overlay dashboard-modal-overlay--danger">
-                    <div className="dashboard-modal dashboard-modal--danger">
-                        <div className="dashboard-modal-body dashboard-modal-body--center">
-                            <div className="dashboard-modal-danger-icon">
-                                <RefreshCw size={32} />
-                            </div>
-                            <h3 className="dashboard-modal-title">¿Iniciar Nuevo Ejercicio?</h3>
-                            <p className="dashboard-modal-warning-text">
-                                Acción destructiva. Se{' '}
-                                <strong className="text-red">borrará el Plan de Cuentas y los Asientos</strong>.
-                                Exportá tu balance antes de continuar.
-                            </p>
+                <div className="dashboard-modal-overlay">
+                    <div className="dashboard-modal">
+                        <div className="dashboard-modal-header">
+                            <h3 className="dashboard-modal-title">Nuevo Ejercicio {year + 1}</h3>
+                            <p className="dashboard-modal-subtitle">Se activará el período {year + 1}.</p>
+                        </div>
 
-                            <div className="dashboard-modal-confirm-input">
-                                <label>Escribí "NUEVO" para confirmar</label>
-                                <input
-                                    type="text"
-                                    value={deleteConfirmText}
-                                    onChange={(e) => setDeleteConfirmText(e.target.value)}
-                                    placeholder="NUEVO"
-                                    disabled={isResetting}
-                                />
-                            </div>
+                        <div className="dashboard-modal-body">
+                            <p className="text-slate-600 mb-4 text-sm">
+                                Esto creará un entorno limpio para tus operaciones del nuevo año.
+                                <br />
+                                Tus datos del ejercicio {year} <strong>se conservan intactos</strong> y podrás volver a ellos desde el selector de período.
+                            </p>
 
                             <div className="dashboard-modal-actions">
                                 <button
-                                    onClick={() => {
-                                        setShowResetModal(false)
-                                        setDeleteConfirmText('')
-                                    }}
+                                    onClick={() => setShowResetModal(false)}
                                     className="btn btn-secondary"
-                                    disabled={isResetting}
                                 >
                                     Cancelar
                                 </button>
                                 <button
-                                    disabled={deleteConfirmText !== 'NUEVO' || isResetting}
-                                    onClick={handleResetExercise}
-                                    className="btn btn-danger"
+                                    onClick={handleNewExercise}
+                                    className="btn btn-primary"
                                 >
-                                    {isResetting ? 'Reiniciando...' : 'Reiniciar'}
+                                    Iniciar {year + 1}
                                 </button>
                             </div>
                         </div>

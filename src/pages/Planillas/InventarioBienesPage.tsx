@@ -2,6 +2,9 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
     Package,
+    Notebook,
+    ArrowsLeftRight,
+    WarningCircle,
     Coins,
     ChartBar,
     Percent,
@@ -19,6 +22,7 @@ import {
     LinkSimple,
     ArrowSquareOut,
     Sparkle,
+    GearSix,
 } from '@phosphor-icons/react'
 import { usePeriodYear } from '../../hooks/usePeriodYear'
 import { DEFAULT_ACCOUNT_CODES } from '../../core/inventario/types'
@@ -30,6 +34,7 @@ import type {
     ProductValuation,
     BienesKPIs,
     AccountMappingKey,
+    InventoryMode,
 } from '../../core/inventario/types'
 import type { Account, JournalEntry } from '../../core/models'
 import {
@@ -50,6 +55,8 @@ import {
     deleteBienesMovementWithJournal,
     reconcileMovementJournalLinks,
     clearBienesPeriodData,
+    generatePeriodicClosingJournalEntries,
+    getAccountBalanceByCode,
 } from '../../storage'
 import { db } from '../../storage/db'
 import {
@@ -57,11 +64,51 @@ import {
     calculateBienesKPIs,
     canChangeCostingMethod,
 } from '../../core/inventario/costing'
+import {
+    computeEndingInventoryValuation,
+    type EndingInventoryValuation,
+    type ProductEndingValuation,
+} from '../../core/inventario/valuation-homogenea'
+import type { IndexRow } from '../../core/cierre-valuacion/types'
+import { getPeriodFromDate } from '../../core/cierre-valuacion/calc'
+import { loadCierreValuacionState } from '../../storage'
+import {
+    buildRT6InventoryApplyPlan,
+    type RT6InventoryApplyPlan,
+    type RT6ApplyPlanItem,
+    type OriginCategory,
+} from '../../core/inventario/rt6-apply-plan'
 import ProductModal from './components/ProductModal'
-import MovementModal from './components/MovementModal'
+import MovementModalV3 from './components/MovementModalV3'
 import { AccountAutocomplete } from './components/AccountAutocomplete'
+import ProductValuationCard from './components/ProductValuationCard'
+import ProductLotsDrawer from './components/ProductLotsDrawer'
+import CierreInventarioTab from './components/CierreInventarioTab'
 
 type TabId = 'dashboard' | 'productos' | 'movimientos' | 'conciliacion' | 'cierre'
+type ConciliationFilter = 'all' | 'compras' | 'ventas' | 'rt6'
+
+interface RT6CartItem {
+    id: string
+    productId: string
+    productName: string
+    concepto: string
+    originMovementId?: string
+    originMovementLabel?: string
+    valorOrigen: number
+    coeficiente: number
+    valorHomogeneo: number
+    delta: number
+}
+
+// RT6 Preview Modal types
+interface RT6PreviewData {
+    entry: JournalEntry
+    adjustmentAmount: number
+    entryPeriod: string
+    plan: RT6InventoryApplyPlan
+    isAlreadyApplied?: boolean
+}
 
 const TABS: { id: TabId; label: string; badge?: number }[] = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -71,7 +118,7 @@ const TABS: { id: TabId; label: string; badge?: number }[] = [
     { id: 'cierre', label: 'Cierre' },
 ]
 
-type InventoryAccountCategory = 'mercaderias' | 'compras' | 'cmv' | 'ventas'
+type InventoryAccountCategory = 'mercaderias' | 'compras' | 'cmv' | 'ventas' | 'rt6_adjustment'
 
 type InventoryAccountRule = {
     key: AccountMappingKey
@@ -95,14 +142,14 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         key: 'compras',
         label: 'Compras',
         category: 'compras',
-        codes: [DEFAULT_ACCOUNT_CODES.compras, '4.8.01'],
+        codes: [DEFAULT_ACCOUNT_CODES.compras, '4.8.01', '5.1.03'],
         nameAny: ['compra'],
     },
     {
         key: 'gastosCompras',
         label: 'Gastos sobre compras',
         category: 'compras',
-        codes: [DEFAULT_ACCOUNT_CODES.gastosCompras, '4.8.02'],
+        codes: [DEFAULT_ACCOUNT_CODES.gastosCompras, '4.8.02', '5.1.04'],
         nameAny: ['gasto', 'flete', 'seguro', 'compra'],
         optional: true,
     },
@@ -110,14 +157,14 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         key: 'bonifCompras',
         label: 'Bonificaciones sobre compras',
         category: 'compras',
-        codes: [DEFAULT_ACCOUNT_CODES.bonifCompras, '4.8.03'],
+        codes: [DEFAULT_ACCOUNT_CODES.bonifCompras, '4.8.03', '5.1.05'],
         nameAll: ['bonif', 'compra'],
     },
     {
         key: 'devolCompras',
         label: 'Devoluciones sobre compras',
         category: 'compras',
-        codes: [DEFAULT_ACCOUNT_CODES.devolCompras, '4.8.04'],
+        codes: [DEFAULT_ACCOUNT_CODES.devolCompras, '4.8.04', '5.1.06'],
         nameAll: ['devol', 'compra'],
     },
     {
@@ -126,6 +173,14 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         category: 'cmv',
         codes: [DEFAULT_ACCOUNT_CODES.cmv, '4.3.01'],
         nameAny: ['cmv', 'costo mercader', 'costo de mercader', 'costo mercaderia'],
+    },
+    {
+        key: 'aperturaInventario',
+        label: 'Apertura Inventario',
+        category: 'mercaderias',
+        codes: [DEFAULT_ACCOUNT_CODES.aperturaInventario, '3.2.01'],
+        nameAny: ['apertura', 'resultados acumulados'],
+        optional: true,
     },
     {
         key: 'ventas',
@@ -139,7 +194,7 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         key: 'bonifVentas',
         label: 'Bonificaciones sobre ventas',
         category: 'ventas',
-        codes: [DEFAULT_ACCOUNT_CODES.bonifVentas, '4.8.05'],
+        codes: [DEFAULT_ACCOUNT_CODES.bonifVentas, '4.8.05', '4.1.03'],
         nameAll: ['bonif', 'venta'],
         optional: true,
     },
@@ -147,8 +202,24 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         key: 'devolVentas',
         label: 'Devoluciones sobre ventas',
         category: 'ventas',
-        codes: [DEFAULT_ACCOUNT_CODES.devolVentas, '4.8.06'],
+        codes: [DEFAULT_ACCOUNT_CODES.devolVentas, '4.8.06', '4.1.04'],
         nameAll: ['devol', 'venta'],
+        optional: true,
+    },
+    {
+        key: 'descuentosObtenidos',
+        label: 'Descuentos obtenidos',
+        category: 'compras',
+        codes: [DEFAULT_ACCOUNT_CODES.descuentosObtenidos, '4.6.09'],
+        nameAny: ['descuento obtenido', 'descuentos obtenidos'],
+        optional: true,
+    },
+    {
+        key: 'descuentosOtorgados',
+        label: 'Descuentos otorgados',
+        category: 'ventas',
+        codes: [DEFAULT_ACCOUNT_CODES.descuentosOtorgados, '4.2.01'],
+        nameAny: ['descuento otorgado', 'descuentos otorgados'],
         optional: true,
     },
 ]
@@ -164,7 +235,7 @@ const OPTIONAL_BIENES_RULES = BIENES_ACCOUNT_RULES.filter(rule => rule.optional)
  */
 export default function InventarioBienesPage() {
     // State
-    const { year: periodYear } = usePeriodYear()
+    const { year: periodYear, start: periodStart, end: periodEnd } = usePeriodYear()
     const periodId = String(periodYear)
     const [activeTab, setActiveTab] = useState<TabId>('dashboard')
     const [settings, setSettings] = useState<BienesSettings | null>(null)
@@ -191,8 +262,15 @@ export default function InventarioBienesPage() {
     const [manualEditAction, setManualEditAction] = useState<'keep' | 'regenerate' | null>(null)
     const [manualDeletePrompt, setManualDeletePrompt] = useState<BienesMovement | null>(null)
 
+    // RT6 Preview Modal
+    const [rt6PreviewOpen, setRt6PreviewOpen] = useState(false)
+    const [rt6PreviewData, setRt6PreviewData] = useState<RT6PreviewData | null>(null)
+    const [rt6ApplyingId, setRt6ApplyingId] = useState<string | null>(null)
+
     // Search
     const [productSearch, setProductSearch] = useState('')
+    const [conciliationFilter, setConciliationFilter] = useState<ConciliationFilter>('all')
+    const [conciliationSearch, setConciliationSearch] = useState('')
 
     // Toast
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
@@ -203,8 +281,38 @@ export default function InventarioBienesPage() {
     }, [])
 
     // Cierre
-    const [closingPhysicalValue, setClosingPhysicalValue] = useState(0)
+    const [closingPhysicalValue, setClosingPhysicalValue] = useState<number | null>(null)
     const [closingIsSaving, setClosingIsSaving] = useState(false)
+    const [showHomogeneo, setShowHomogeneo] = useState(false)
+    const [existenciaInicialLedger, setExistenciaInicialLedger] = useState<number | null>(null)
+    // Date for opening balance calculation
+    const [openingBalanceDate, setOpeningBalanceDate] = useState<string>('')
+
+    // Sub-account balances for cierre (loaded from ledger for the period)
+    const [cierreBalances, setCierreBalances] = useState<{
+        gastosCompras: number; bonifCompras: number; devolCompras: number
+        ventas: number; bonifVentas: number; devolVentas: number
+    }>({ gastosCompras: 0, bonifCompras: 0, devolCompras: 0, ventas: 0, bonifVentas: 0, devolVentas: 0 })
+
+    // Indices FACPCE (from cierre-valuacion module)
+    const [facpceIndices, setFacpceIndices] = useState<IndexRow[]>([])
+    // Layers drawer
+    const [layersDrawerProduct, setLayersDrawerProduct] = useState<ProductEndingValuation | null>(null)
+    // New dashboard lots drawer
+    const [dashboardLotsProduct, setDashboardLotsProduct] = useState<ProductEndingValuation | null>(null)
+
+    // KPI Range Mode: default 'ejercicio', persist in localStorage
+    const [kpiRangeMode, setKpiRangeMode] = useState<'month' | 'ejercicio'>(() => {
+        try {
+            const saved = localStorage.getItem('inventario.dashboard.rangeMode')
+            if (saved === 'month' || saved === 'ejercicio') return saved
+        } catch { /* ignore */ }
+        return 'ejercicio'
+    })
+    const changeKpiRangeMode = useCallback((mode: 'month' | 'ejercicio') => {
+        setKpiRangeMode(mode)
+        try { localStorage.setItem('inventario.dashboard.rangeMode', mode) } catch { /* ignore */ }
+    }, [])
 
     // Configuracion de cuentas Bienes de Cambio (conciliacion)
     const [accountMappingsDraft, setAccountMappingsDraft] = useState<Partial<Record<AccountMappingKey, string>>>({})
@@ -242,32 +350,72 @@ export default function InventarioBienesPage() {
         loadData()
     }, [loadData])
 
+    // Load FACPCE indices from cierre-valuacion module
+    useEffect(() => {
+        loadCierreValuacionState().then(state => {
+            setFacpceIndices(state.indices || [])
+        })
+    }, [])
+
     useEffect(() => {
         if (settings) {
             setAccountMappingsDraft(settings.accountMappings || {})
+            // Initialize opening balance date from settings or default
+            if (settings.openingBalanceDate) {
+                setOpeningBalanceDate(settings.openingBalanceDate)
+            } else {
+                // Smart default logic will run in the balance effect if string is empty, 
+                // but we need to initialize it.
+                // Actually, let's leave it empty to trigger "auto" logic, OR set it once here?
+                // Better: if empty, the effect below calculates "auto" and sets it? 
+                // No, we want the effect to use it if set, or calculate if not.
+                // Let's settle on: if settings has it, use it. If not, use periodStart initially.
+                setOpeningBalanceDate(periodStart)
+            }
         }
-    }, [settings])
+    }, [settings, periodStart])
 
     // Computed values
     const yearRange = useMemo(() => {
-        const startDate = new Date(periodYear, 0, 1)
-        const endDate = new Date(periodYear, 11, 31)
-        const toISO = (date: Date) => date.toISOString().split('T')[0]
+        const [y, m, d] = periodStart.split('-').map(Number)
+        const prev = new Date(y, m - 1, d - 1)
+        const prevLabel = prev.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
         return {
-            start: toISO(startDate),
-            end: toISO(endDate),
+            start: periodStart,
+            end: periodEnd,
+            prevLabel,
         }
-    }, [periodYear])
+    }, [periodStart, periodEnd])
 
     const monthRange = useMemo(() => {
         const now = new Date()
-        const monthIndex = now.getMonth()
-        const startDate = new Date(periodYear, monthIndex, 1)
-        const endDate = new Date(periodYear, monthIndex + 1, 0)
+
+        // Parse dates safely (Local time)
+        const parseDate = (s: string) => {
+            const [y, m, d] = s.split('-').map(Number)
+            return new Date(y, m - 1, d)
+        }
+
+        const pStart = parseDate(periodStart)
+        const pEnd = parseDate(periodEnd)
+
+        // Determine target date (clamped to period)
+        let target = now
+        if (now < pStart) target = pStart
+        else if (now > pEnd) target = pEnd
+
+        const year = target.getFullYear()
+        const monthIndex = target.getMonth()
+
+        const startDate = new Date(year, monthIndex, 1)
+        const endDate = new Date(year, monthIndex + 1, 0)
+
         const prevMonthIndex = monthIndex - 1
-        const prevStartDate = prevMonthIndex >= 0 ? new Date(periodYear, prevMonthIndex, 1) : null
-        const prevEndDate = prevMonthIndex >= 0 ? new Date(periodYear, prevMonthIndex + 1, 0) : null
-        const toISO = (date: Date) => date.toISOString().split('T')[0]
+        const prevStartDate = prevMonthIndex >= 0 ? new Date(year, prevMonthIndex, 1) : null
+        const prevEndDate = prevMonthIndex >= 0 ? new Date(year, prevMonthIndex + 1, 0) : null
+
+        const toISO = (date: Date) => date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0')
+
         return {
             start: toISO(startDate),
             end: toISO(endDate),
@@ -275,12 +423,20 @@ export default function InventarioBienesPage() {
             prevEnd: prevEndDate ? toISO(prevEndDate) : null,
             label: startDate.toLocaleDateString('es-AR', { month: 'short', year: 'numeric' }),
         }
-    }, [periodYear])
+    }, [periodStart, periodEnd])
 
     const valuations = useMemo<ProductValuation[]>(() => {
         if (!settings) return []
         return calculateAllValuations(products, movements, settings.costMethod)
     }, [products, movements, settings])
+
+    // Determine KPI date range based on mode
+    const kpiDateRange = useMemo(() => {
+        if (kpiRangeMode === 'ejercicio') {
+            return { start: periodStart, end: periodEnd, label: 'Ejercicio' }
+        }
+        return { start: monthRange.start, end: monthRange.end, label: monthRange.label }
+    }, [kpiRangeMode, periodStart, periodEnd, monthRange])
 
     const kpis = useMemo<BienesKPIs>(() => {
         if (!settings) {
@@ -294,30 +450,266 @@ export default function InventarioBienesPage() {
                 lowStockAlerts: 0,
             }
         }
-        return calculateBienesKPIs(products, movements, settings.costMethod, monthRange.start, monthRange.end)
-    }, [products, movements, settings, monthRange])
+        return calculateBienesKPIs(products, movements, settings.costMethod, kpiDateRange.start, kpiDateRange.end)
+    }, [products, movements, settings, kpiDateRange])
 
-    const existenciaInicial = useMemo(() => {
+    // Homogeneous ending inventory valuation (FIFO layers reexpressed to closing month)
+    const efHomogenea = useMemo<EndingInventoryValuation | null>(() => {
+        if (!settings || products.length === 0) return null
+        const closingDate = periodEnd
+        const closingPeriod = getPeriodFromDate(closingDate)
+        return computeEndingInventoryValuation({
+            products,
+            movements,
+            method: settings.costMethod,
+            closingPeriod,
+            indices: facpceIndices,
+        })
+    }, [products, movements, settings, periodYear, facpceIndices])
+
+    // EI: saldo contable de Mercaderías al día anterior al inicio del ejercicio
+    // Fallback: sum of product openingQty * openingUnitCost (legacy)
+    const existenciaInicialFallback = useMemo(() => {
         return products.reduce((sum, p) => sum + p.openingQty * p.openingUnitCost, 0)
     }, [products])
 
-    const comprasPeriodo = useMemo(() => {
-        return movements
-            .filter(m => m.type === 'PURCHASE')
+    useEffect(() => {
+        // Resolve account code from mapping (could be an ID or a code)
+        const resolveCode = (
+            mappedValue: string | undefined,
+            defaultCodes: string | string[],
+            options?: { aliasCodes?: string[]; nameAny?: string[] }
+        ): string => {
+            const codes = Array.isArray(defaultCodes) ? defaultCodes : [defaultCodes]
+            if (mappedValue) {
+                if (mappedValue.includes('.')) return mappedValue
+                const acc = accounts?.find(a => a.id === mappedValue)
+                return acc?.code || codes[0]
+            }
+            for (const code of Array.from(new Set(codes))) {
+                const acc = accounts?.find(a => a.code === code)
+                if (acc) return acc.code
+            }
+            if (options?.aliasCodes && options.aliasCodes.length > 0) {
+                for (const code of options.aliasCodes) {
+                    const acc = accounts?.find(a => a.code === code)
+                    if (!acc) continue
+                    if (!options.nameAny || options.nameAny.length === 0) return acc.code
+                    const haystack = acc.name.toLowerCase()
+                    if (options.nameAny.some(token => haystack.includes(token.toLowerCase()))) {
+                        return acc.code
+                    }
+                }
+            }
+            return codes[0]
+        }
+
+        const loadCierreBalances = async () => {
+            const mappings = settings?.accountMappings || {}
+            const mercCode = resolveCode(mappings.mercaderias, DEFAULT_ACCOUNT_CODES.mercaderias)
+
+            // Determine EI Date and Balance (Smart Default Logic)
+            let finalEiDate = openingBalanceDate
+            let finalEiBalance = 0
+
+            // If user hasn't selected a date yet (or we are initializing), try to find best default
+            if (!finalEiDate) {
+                finalEiDate = periodStart
+            }
+
+            // Only strictly re-calculate if we are in "auto" mode? 
+            // The requirement says: "Default inteligente: a) periodStart b) dayBeforeStart ... Si usuario cambia, usar ESA".
+            // So we respect `openingBalanceDate` state. 
+            // BUT, if we want to implement the "smart default" on first load, we might need a separate effect or check.
+            // Let's do this: 
+            // 1. Calculate balance at periodStart
+            // 2. Calculate balance at dayBeforeStart
+            // 3. If settings.openingBalanceDate is defined, just use that.
+            // 4. If NOT defined, pick best one and SET it? Or just use it for display?
+            // Requirement 3 says: "Guardar la fecha elegida en BienesSettings... Al cargar... si existe... usarlo".
+
+
+
+            // Note: getAccountBalanceByCode returns sum of movements in range.
+            // For "Saldo al...", we want balance from beginning of time up to DATE.
+            // getAccountBalanceByCode(code, undefined, date) does exactly that (undefined start = beginning).
+
+            // We need to support the "Smart Check" only if we haven't manually locked a date?
+            // "Default inteligente... Si el usuario cambia la fecha manualmente, usar ESA fecha"
+            // Let's implement the smart check whenever `openingBalanceDate` matches `periodStart` or is empty?
+            // No, that might be confusing. 
+            // Let's implement the smart logic ONLY if settings.openingBalanceDate is MISSING.
+
+            if (!settings?.openingBalanceDate) {
+                // Smart logic
+                const [y, m, d] = periodStart.split('-').map(Number)
+                const dayBefore = new Date(y, m - 1, d - 1)
+                const dayBeforeISO = dayBefore.getFullYear() + '-' + String(dayBefore.getMonth() + 1).padStart(2, '0') + '-' + String(dayBefore.getDate()).padStart(2, '0')
+
+                const balStart = await getAccountBalanceByCode(mercCode, undefined, periodStart)
+                const balBefore = await getAccountBalanceByCode(mercCode, undefined, dayBeforeISO)
+
+                // c) Si balance(periodStart) != 0 usar periodStart; 
+                // si es 0 y dayBeforeStart != 0 usar dayBeforeStart; 
+                // si ambos 0 usar periodStart.
+
+                if (balStart !== 0) {
+                    finalEiDate = periodStart
+                    finalEiBalance = balStart
+                } else if (balBefore !== 0) {
+                    finalEiDate = dayBeforeISO
+                    finalEiBalance = balBefore
+                } else {
+                    finalEiDate = periodStart
+                    finalEiBalance = 0
+                }
+
+                // Update state if different (avoid loops)
+                if (openingBalanceDate !== finalEiDate) {
+                    setOpeningBalanceDate(finalEiDate)
+                }
+            } else {
+                // Use explicit date
+                finalEiDate = openingBalanceDate
+                finalEiBalance = await getAccountBalanceByCode(mercCode, undefined, finalEiDate)
+            }
+
+            setExistenciaInicialLedger(finalEiBalance)
+
+            // Sub-account balances for the period (yearRange)
+            const start = periodStart
+            const end = periodEnd
+
+            const codes = {
+                gastosCompras: resolveCode(
+                    mappings.gastosCompras,
+                    [DEFAULT_ACCOUNT_CODES.gastosCompras, '4.8.02', '5.1.04'],
+                    { aliasCodes: ['4.8.03', '5.1.05'], nameAny: ['gasto', 'flete', 'seguro'] }
+                ),
+                bonifCompras: resolveCode(
+                    mappings.bonifCompras,
+                    [DEFAULT_ACCOUNT_CODES.bonifCompras, '4.8.03', '5.1.05'],
+                    { aliasCodes: ['4.8.02', '5.1.04'], nameAny: ['bonif'] }
+                ),
+                devolCompras: resolveCode(mappings.devolCompras, [DEFAULT_ACCOUNT_CODES.devolCompras, '4.8.04', '5.1.06']),
+                ventas: resolveCode(mappings.ventas, DEFAULT_ACCOUNT_CODES.ventas),
+                bonifVentas: resolveCode(mappings.bonifVentas, [DEFAULT_ACCOUNT_CODES.bonifVentas, '4.8.05', '4.1.03']),
+                devolVentas: resolveCode(mappings.devolVentas, [DEFAULT_ACCOUNT_CODES.devolVentas, '4.8.06', '4.1.04']),
+            }
+
+            const [gastosCompras, bonifCompras, devolCompras, ventas, bonifVentas, devolVentas] = await Promise.all([
+                getAccountBalanceByCode(codes.gastosCompras, start, end),
+                getAccountBalanceByCode(codes.bonifCompras, start, end),
+                getAccountBalanceByCode(codes.devolCompras, start, end),
+                getAccountBalanceByCode(codes.ventas, start, end),
+                getAccountBalanceByCode(codes.bonifVentas, start, end),
+                getAccountBalanceByCode(codes.devolVentas, start, end),
+            ])
+
+            setCierreBalances({
+                gastosCompras: Math.abs(gastosCompras),   // Debit balance (expense)
+                bonifCompras: Math.abs(bonifCompras),     // Credit balance (contra-expense)
+                devolCompras: Math.abs(devolCompras),      // Credit balance (contra-expense)
+                ventas: Math.abs(ventas),                  // Credit balance (income)
+                bonifVentas: Math.abs(bonifVentas),        // Debit balance (contra-income)
+                devolVentas: Math.abs(devolVentas),         // Debit balance (contra-income)
+            })
+        }
+
+        loadCierreBalances()
+    }, [periodYear, settings?.accountMappings, accounts, openingBalanceDate, periodStart, periodEnd, settings?.openingBalanceDate])
+
+    const handleOpeningDateChange = async (newDate: string) => {
+        setOpeningBalanceDate(newDate)
+        if (settings) {
+            const updated: BienesSettings = {
+                ...settings,
+                openingBalanceDate: newDate,
+                lastUpdated: new Date().toISOString(),
+            }
+            await saveBienesSettings(updated)
+            setSettings(updated) // This will trigger the effect again, but it's safe
+        }
+    }
+
+
+    const existenciaInicial = existenciaInicialLedger !== null ? existenciaInicialLedger : existenciaInicialFallback
+
+    const cierreMovements = useMemo(() => {
+        const comprasMovs = movements.filter(m => m.type === 'PURCHASE' && !m.isDevolucion && m.quantity > 0)
+        const compras = comprasMovs.reduce((sum, m) => sum + m.subtotal + (m.bonificacionAmount || 0), 0)
+        const gastosComprasFromPurchases = movements.reduce(
+            (sum, m) => sum + (m.type === 'PURCHASE' && !m.isDevolucion ? (m.gastosCompra || 0) : 0),
+            0
+        )
+        const gastosComprasFromCapitalization = movements
+            .filter(m => m.type === 'VALUE_ADJUSTMENT' && m.adjustmentKind === 'CAPITALIZATION')
+            .reduce((sum, m) => sum + (m.gastosCompra ?? m.valueDelta ?? 0), 0)
+        const gastosCompras = gastosComprasFromPurchases + gastosComprasFromCapitalization
+        const devolCompras = movements
+            .filter(m => m.type === 'PURCHASE' && m.isDevolucion)
             .reduce((sum, m) => sum + m.subtotal, 0)
+        const bonifComprasInline = comprasMovs.reduce((sum, m) => sum + (m.bonificacionAmount || 0), 0)
+        const bonifCompras = movements
+            .filter(m => m.type === 'VALUE_ADJUSTMENT' && m.adjustmentKind === 'BONUS_PURCHASE')
+            .reduce((sum, m) => sum + m.subtotal, 0) + bonifComprasInline
+
+        const ventasMovs = movements.filter(m => m.type === 'SALE' && !m.isDevolucion)
+        const ventas = ventasMovs.reduce((sum, m) => sum + m.subtotal + (m.bonificacionAmount || 0), 0)
+        const devolVentas = movements
+            .filter(m => m.type === 'SALE' && m.isDevolucion)
+            .reduce((sum, m) => sum + m.subtotal, 0)
+        const bonifVentasInline = ventasMovs.reduce((sum, m) => sum + (m.bonificacionAmount || 0), 0)
+        const bonifVentas = movements
+            .filter(m => m.type === 'VALUE_ADJUSTMENT' && m.adjustmentKind === 'BONUS_SALE')
+            .reduce((sum, m) => sum + m.subtotal, 0) + bonifVentasInline
+
+        return {
+            compras,
+            gastosCompras,
+            bonifCompras,
+            devolCompras,
+            ventas,
+            bonifVentas,
+            devolVentas,
+        }
     }, [movements])
 
+    const cierreTotals = useMemo(() => ({
+        ...cierreBalances,
+        ...cierreMovements,
+    }), [cierreBalances, cierreMovements])
+
+    const comprasBrutas = cierreMovements.compras
+    const ventasBrutas = cierreMovements.ventas
+
+    // Full CMV formula: CMV = EI + (Compras + Gastos - Bonif - Devol) - EF
+    const comprasNetas = comprasBrutas + cierreTotals.gastosCompras - cierreTotals.bonifCompras - cierreTotals.devolCompras
+    const ventasNetas = ventasBrutas - cierreTotals.bonifVentas - cierreTotals.devolVentas
+
     const inventarioTeorico = kpis.stockValue
-    const diferenciaCierre = closingPhysicalValue - inventarioTeorico
-    const cmvPorDiferencia = existenciaInicial + comprasPeriodo - (closingPhysicalValue || 0)
-    const cierreAjusteMonto = Math.abs(diferenciaCierre)
-    const cierreAjusteEntrada = diferenciaCierre > 0
+    const esFisicoDefinido = closingPhysicalValue !== null
+    // CMV ALWAYS uses EF teórica (system-calculated), never physical
+    const cmvPorDiferencia = existenciaInicial + comprasNetas - inventarioTeorico
 
     const lowStockCount = useMemo(() => {
         return valuations.filter(v => v.hasAlert).length
     }, [valuations])
 
     const costMethodLocked = useMemo(() => !canChangeCostingMethod(movements), [movements])
+
+    // RT6 VALUE_ADJUSTMENT aggregation for cierre tab (histórico vs homogéneo)
+    const rt6CierreAdjustments = useMemo(() => {
+        const vaMovements = movements.filter(m => m.type === 'VALUE_ADJUSTMENT' && m.rt6SourceEntryId)
+        const eiAdj = vaMovements.filter(m => m.originCategory === 'EI').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const comprasAdj = vaMovements.filter(m => m.originCategory === 'COMPRAS').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const gastosAdj = vaMovements.filter(m => m.originCategory === 'GASTOS_COMPRA').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const bonifAdj = vaMovements.filter(m => m.originCategory === 'BONIF_COMPRA').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const devolAdj = vaMovements.filter(m => m.originCategory === 'DEVOL_COMPRA').reduce((s, m) => s + (m.valueDelta || 0), 0)
+        const hasAny = vaMovements.length > 0
+        const totalAdj = eiAdj + comprasAdj + gastosAdj + bonifAdj + devolAdj
+        return { eiAdj, comprasAdj, gastosAdj, bonifAdj, devolAdj, totalAdj, hasAny }
+    }, [movements])
 
     const filteredProducts = useMemo(() => {
         if (!productSearch) return products
@@ -327,13 +719,19 @@ export default function InventarioBienesPage() {
         )
     }, [products, productSearch])
 
-    const handleSaveProduct = async (product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const handleSaveProduct = async (
+        product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>,
+        options?: { generateOpeningJournal?: boolean }
+    ) => {
         try {
             if (editingProduct) {
                 await updateBienesProduct(editingProduct.id, { ...product, periodId: editingProduct.periodId || periodId })
                 showToast('Producto actualizado', 'success')
             } else {
-                await createBienesProduct({ ...product, periodId })
+                await createBienesProduct(
+                    { ...product, periodId },
+                    options?.generateOpeningJournal ? { generateOpeningJournal: true } : undefined,
+                )
                 showToast('Producto creado', 'success')
             }
             await loadData()
@@ -499,6 +897,28 @@ export default function InventarioBienesPage() {
         } else {
             showToast(result.error || 'Error', 'error')
         }
+    }
+
+    const handleChangeInventoryMode = async (mode: InventoryMode) => {
+        if (!settings) return
+        const updated: BienesSettings = {
+            ...settings,
+            inventoryMode: mode,
+            lastUpdated: new Date().toISOString(),
+        }
+        await saveBienesSettings(updated)
+        setSettings(updated)
+    }
+
+    const handleChangeAutoJournal = async (auto: boolean) => {
+        if (!settings) return
+        const updated: BienesSettings = {
+            ...settings,
+            autoJournalEntries: auto,
+            lastUpdated: new Date().toISOString(),
+        }
+        await saveBienesSettings(updated)
+        setSettings(updated)
     }
 
     const handleAccountMappingChange = (key: AccountMappingKey, value: { code: string }) => {
@@ -709,6 +1129,170 @@ export default function InventarioBienesPage() {
         setMovementModalOpen(true)
     }
 
+    /**
+     * buildRT6Preview: Construye un preview con desglose por origen (Paso 2 RT6)
+     * usando CierreValuacionState. Abre el modal de confirmación.
+     */
+    const handleOpenRT6Preview = async (entry: JournalEntry) => {
+        if (products.length === 0) {
+            showToast('Crea al menos un producto antes de aplicar ajustes RT6', 'error')
+            return
+        }
+
+        // Check if already applied (by looking for VALUE_ADJUSTMENT with this rt6SourceEntryId)
+        const existingAdjustments = movements.filter(m =>
+            m.type === 'VALUE_ADJUSTMENT' && m.rt6SourceEntryId === entry.id
+        )
+        const isAlreadyApplied = existingAdjustments.length > 0
+
+        // Find inventory-relevant lines in the RT6 entry (compras, bonif, devol, mercaderias accounts)
+        const inventoryLines = entry.lines.filter(line => {
+            const match = inventoryAccountResolution.byId.get(line.accountId)
+            return match && (match.category === 'mercaderias' || match.category === 'compras')
+        })
+
+        if (inventoryLines.length === 0) {
+            showToast('No se encontraron lineas de inventario en el asiento RT6', 'error')
+            return
+        }
+
+        // Calculate the net adjustment amount from all inventory lines
+        const adjustmentAmount = inventoryLines.reduce((sum, line) => sum + (line.debit || 0) - (line.credit || 0), 0)
+
+        if (Math.abs(adjustmentAmount) < 0.01) {
+            showToast('El ajuste neto es cero, no hay nada que aplicar', 'error')
+            return
+        }
+
+        const entryPeriod = entry.date.substring(0, 7)
+
+        // Build inventory account map from resolved accounts
+        const inventoryAccountMap = {
+            mercaderias: inventoryAccountResolution.byKey.get('mercaderias')?.account.id,
+            compras: inventoryAccountResolution.byKey.get('compras')?.account.id,
+            gastosCompras: inventoryAccountResolution.byKey.get('gastosCompras')?.account.id,
+            bonifCompras: inventoryAccountResolution.byKey.get('bonifCompras')?.account.id,
+            devolCompras: inventoryAccountResolution.byKey.get('devolCompras')?.account.id,
+        }
+
+        // Identify accounts affected by this specific RT6 entry to scope the plan
+        // This prevents the plan from including adjustments for accounts not present in this entry
+        const affectedAccountIds = new Set(entry.lines.map(l => l.accountId).filter(Boolean) as string[])
+
+        // Load cierre-valuacion state for Step 2 RT6 data
+        try {
+            const cierreState = await loadCierreValuacionState()
+            const plan = buildRT6InventoryApplyPlan({
+                adjustmentAmount,
+                inventoryAccountMap,
+                movements,
+                products,
+                cierreState,
+                affectedAccountIds,
+                openingDate: openingBalanceDate,
+            })
+
+            setRt6PreviewData({
+                entry,
+                adjustmentAmount,
+                entryPeriod,
+                plan,
+                isAlreadyApplied,
+            })
+            setRt6PreviewOpen(true)
+        } catch (error) {
+            console.error('Error building RT6 apply plan:', error)
+            showToast('Error al construir plan RT6: ' + (error instanceof Error ? error.message : 'desconocido'), 'error')
+        }
+    }
+
+    /**
+     * handleConfirmRT6Apply: Ejecuta la creación de movimientos VALUE_ADJUSTMENT
+     * basándose en el plan RT6 con desglose por origen.
+     */
+    const handleConfirmRT6Apply = async () => {
+        if (!rt6PreviewData || !rt6PreviewData.plan.isValid) return
+
+        const { entry, plan } = rt6PreviewData
+
+        setRt6ApplyingId(entry.id)
+
+        try {
+            for (const item of plan.items) {
+                await createBienesMovement({
+                    date: entry.date,
+                    type: 'VALUE_ADJUSTMENT',
+                    adjustmentKind: 'RT6',
+                    productId: item.productId,
+                    quantity: 0,
+                    periodId,
+                    ivaRate: 0,
+                    ivaAmount: 0,
+                    subtotal: Math.abs(item.valueDelta),
+                    total: Math.abs(item.valueDelta),
+                    costMethod: settings?.costMethod || 'PPP',
+                    valueDelta: item.valueDelta,
+                    rt6Period: item.period,
+                    rt6SourceEntryId: entry.id,
+                    originCategory: item.originCategory,
+                    notes: `${item.label}${item.targetMovementId ? ' | Mov:' + item.targetMovementId.slice(0, 8) : ''}`,
+                    reference: entry.id.slice(0, 8),
+                    autoJournal: false,
+                    linkedJournalEntryIds: [entry.id],
+                })
+            }
+            showToast(`Ajuste RT6 aplicado: ${plan.items.length} movimiento(s) creados`, 'success')
+            setRt6PreviewOpen(false)
+            setRt6PreviewData(null)
+            await loadData()
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Error al aplicar ajuste RT6', 'error')
+        } finally {
+            setRt6ApplyingId(null)
+        }
+    }
+
+    // Note: RT6 batch functionality preserved for future V3 modal integration
+    const _handleSaveRT6Batch = async (items: RT6CartItem[], generateJournal: boolean, date: string) => {
+        if (!settings) {
+            showToast('Configura el modulo antes de registrar ajustes RT6', 'error')
+            return
+        }
+        if (products.length === 0) {
+            showToast('Crea al menos un producto antes de registrar ajustes RT6', 'error')
+            return
+        }
+        const entryPeriod = date.substring(0, 7)
+        try {
+            for (const item of items) {
+                await createBienesMovement({
+                    date,
+                    type: 'VALUE_ADJUSTMENT',
+                    adjustmentKind: 'RT6',
+                    productId: item.productId,
+                    quantity: 0,
+                    periodId,
+                    ivaRate: 0,
+                    ivaAmount: 0,
+                    subtotal: Math.abs(item.delta),
+                    total: Math.abs(item.delta),
+                    costMethod: settings.costMethod,
+                    valueDelta: item.delta,
+                    rt6Period: entryPeriod,
+                    notes: `Ajuste RT6 manual - ${entryPeriod} (${item.concepto})`,
+                    reference: item.originMovementId?.slice(0, 8),
+                    autoJournal: generateJournal,
+                    linkedJournalEntryIds: [],
+                })
+            }
+            showToast(`Ajustes RT6 registrados: ${items.length}`, 'success')
+            await loadData()
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Error al registrar ajustes RT6', 'error')
+        }
+    }
+    void _handleSaveRT6Batch // preserved for future RT6 modal integration
+
     const handleConfirmLinkMovement = async () => {
         if (!linkMovementTarget || !selectedLinkEntryId) {
             showToast('Selecciona un asiento para vincular', 'error')
@@ -742,21 +1326,70 @@ export default function InventarioBienesPage() {
     }
 
     const handleGenerateClosingEntry = async () => {
+        const isPeriodic = settings?.inventoryMode === 'PERIODIC'
+
+        if (isPeriodic) {
+            // PERIODIC mode: generate closing entries (CMV + optional DifInv)
+            const efTeorica = kpis.stockValue
+            const efFisica = closingPhysicalValue
+            const cmvPreview = existenciaInicial + comprasNetas - efTeorica
+            const difInvPreview = efFisica != null ? efFisica - efTeorica : 0
+
+            let confirmMsg = `Se generaran los asientos de cierre periodico.\nEI: ${formatCurrency(existenciaInicial)}\nCompras Netas: ${formatCurrency(comprasNetas)}\nEF Teorica: ${formatCurrency(efTeorica)}\nCMV: ${formatCurrency(cmvPreview)}`
+            if (efFisica != null && Math.abs(difInvPreview) > 0.01) {
+                confirmMsg += `\nEF Fisica: ${formatCurrency(efFisica)}\nDif. Inventario: ${formatCurrency(difInvPreview)}`
+            }
+            confirmMsg += '\n\nContinuar?'
+
+            if (!confirm(confirmMsg)) {
+                return
+            }
+            setClosingIsSaving(true)
+            try {
+                const result = await generatePeriodicClosingJournalEntries({
+                    existenciaInicial,
+                    compras: comprasBrutas,
+                    gastosCompras: cierreTotals.gastosCompras,
+                    bonifCompras: cierreTotals.bonifCompras,
+                    devolCompras: cierreTotals.devolCompras,
+                    existenciaFinalTeorica: efTeorica,
+                    existenciaFinalFisica: efFisica,
+                    ventas: cierreTotals.ventas,
+                    bonifVentas: cierreTotals.bonifVentas,
+                    devolVentas: cierreTotals.devolVentas,
+                    closingDate: periodEnd,
+                    periodId,
+                    periodLabel: `${periodId}`,
+                })
+                if (result.error) {
+                    showToast(result.error, 'error')
+                } else {
+                    let msg = `Cierre generado: ${result.entryIds.length} asientos, CMV = ${formatCurrency(result.cmv)}`
+                    if (Math.abs(result.difInv) > 0.01) {
+                        msg += `, DifInv = ${formatCurrency(result.difInv)}`
+                    }
+                    showToast(msg, 'success')
+                }
+            } catch (error) {
+                showToast(error instanceof Error ? error.message : 'Error al generar asientos', 'error')
+            } finally {
+                setClosingIsSaving(false)
+            }
+            return
+        }
+
+        // PERMANENT mode: single adjustment entry for physical vs theoretical difference
         if (!mercaderiasAccountId || !diferenciaInventarioAccountId) {
             showToast('Faltan cuentas Mercaderias o Diferencia de inventario', 'error')
             return
         }
-        if (closingPhysicalValue <= 0) {
+        if (closingPhysicalValue === null || closingPhysicalValue < 0) {
             showToast('Ingresa el inventario final fisico para generar el asiento', 'error')
             return
         }
 
-        const existenciaInicial = products.reduce((sum, p) => sum + p.openingQty * p.openingUnitCost, 0)
-        const comprasPeriodo = movements
-            .filter(m => m.type === 'PURCHASE')
-            .reduce((sum, m) => sum + m.subtotal, 0)
-        const inventarioTeorico = kpis.stockValue
-        const diferencia = closingPhysicalValue - inventarioTeorico
+        const inventarioTeoricoLocal = kpis.stockValue
+        const diferencia = closingPhysicalValue - inventarioTeoricoLocal
 
         if (Math.abs(diferencia) < 0.01) {
             showToast('No hay diferencias para ajustar', 'error')
@@ -794,12 +1427,12 @@ export default function InventarioBienesPage() {
                 },
             ]
 
-        const memo = `Cierre inventario por diferencias - EI ${formatCurrency(existenciaInicial)} / Compras ${formatCurrency(comprasPeriodo)} / EF Fisico ${formatCurrency(closingPhysicalValue)}`
+        const memo = `Cierre inventario por diferencias - EI ${formatCurrency(existenciaInicial)} / Compras ${formatCurrency(comprasBrutas)} / EF Fisico ${formatCurrency(closingPhysicalValue)}`
 
         setClosingIsSaving(true)
         try {
             await createEntry({
-                date: new Date().toISOString().split('T')[0],
+                date: periodEnd,
                 memo,
                 lines,
                 sourceModule: 'inventory',
@@ -810,11 +1443,11 @@ export default function InventarioBienesPage() {
                     sourceModule: 'inventory',
                     sourceType: 'closing',
                     sourceId: closingId,
-                    inventarioTeorico,
+                    inventarioTeorico: inventarioTeoricoLocal,
                     inventarioFisico: closingPhysicalValue,
                     diferencia,
                     existenciaInicial,
-                    comprasPeriodo,
+                    comprasBrutas,
                 },
             })
             showToast('Asiento de cierre generado', 'success')
@@ -1001,20 +1634,29 @@ export default function InventarioBienesPage() {
             else if (entry.sourceType === 'adjustment') primaryCategory = 'mercaderias'
             else primaryCategory = 'mercaderias'
         }
+        // Detect RT6 inflation adjustment entries
+        const isRT6Entry = entry.memo?.toLowerCase().includes('ajuste por inflaci')
+            || (entry.sourceModule === 'cierre-valuacion' && entry.metadata?.tipo === 'RT6')
+        if (isRT6Entry && hasMatches) {
+            primaryCategory = 'rt6_adjustment'
+        }
+
         const triggerAccountId = primaryCategory
             ? entry.lines.find(line => matches.get(line.accountId)?.category === primaryCategory)?.accountId
             : undefined
 
         return {
-            hasMatch: entry.sourceModule === 'inventory' || hasMatches,
+            hasMatch: entry.sourceModule === 'inventory' || isRT6Entry || hasMatches,
             category: primaryCategory,
             triggerAccountId,
             matchedKeys,
+            isRT6: isRT6Entry,
         }
     }, [inventoryAccountResolution])
 
     const getEntryTypeLabel = useCallback((category: InventoryAccountCategory | null) => {
         if (!category) return 'Inventario'
+        if (category === 'rt6_adjustment') return 'Ajuste RT6 (Inflacion)'
         if (category === 'mercaderias') return 'Existencia/Refundicion'
         if (category === 'compras') return 'Compra/Dev/Bonif'
         if (category === 'cmv') return 'CMV'
@@ -1061,39 +1703,124 @@ export default function InventarioBienesPage() {
     const salesGoal = typeof periodGoals.salesTarget === 'number' ? periodGoals.salesTarget : null
     const marginGoal = typeof periodGoals.marginTarget === 'number' ? periodGoals.marginTarget : 40
 
-    const salesDelta = useMemo(() => {
-        const { prevStart, prevEnd } = monthRange
-        if (!prevStart || !prevEnd) return null
-        const prevSales = movements
-            .filter(m => m.type === 'SALE' && m.date >= prevStart && m.date <= prevEnd)
-            .reduce((sum, m) => sum + m.subtotal, 0)
-        if (prevSales <= 0 || kpis.salesPeriod <= 0) return null
-        return ((kpis.salesPeriod - prevSales) / prevSales) * 100
-    }, [kpis.salesPeriod, monthRange, movements])
-
-    const stockDelta = useMemo(() => {
-        if (!settings) return null
-        const { prevEnd } = monthRange
-        if (!prevEnd) return null
-        const currentCutoff = monthRange.end
-        const prevCutoff = prevEnd
-
-        const currentMovements = movements.filter(m => m.date <= currentCutoff)
-        const prevMovements = movements.filter(m => m.date <= prevCutoff)
-
-        const currentStock = calculateAllValuations(products, currentMovements, settings.costMethod)
-            .reduce((sum, v) => sum + v.totalValue, 0)
-        const prevStock = calculateAllValuations(products, prevMovements, settings.costMethod)
-            .reduce((sum, v) => sum + v.totalValue, 0)
-
-        if (prevStock <= 0 || currentStock <= 0) return null
-        return ((currentStock - prevStock) / prevStock) * 100
-    }, [monthRange, movements, products, settings])
-
     const salesProgress = useMemo(() => {
         if (!salesGoal || salesGoal <= 0) return null
         return Math.min(1, kpis.salesPeriod / salesGoal)
     }, [kpis.salesPeriod, salesGoal])
+
+    // Enhanced KPIs for dashboard (FASE 2)
+    const enhancedKPIs = useMemo(() => {
+        const rangeMovements = movements.filter(m =>
+            m.date >= kpiDateRange.start && m.date <= kpiDateRange.end
+        )
+        // Sales net: ventas - devoluciones venta - bonif ventas
+        const salesGross = rangeMovements
+            .filter(m => m.type === 'SALE' && !m.isDevolucion)
+            .reduce((s, m) => s + m.subtotal, 0)
+        const salesReturns = rangeMovements
+            .filter(m => m.type === 'SALE' && m.isDevolucion)
+            .reduce((s, m) => s + m.subtotal, 0)
+        const ventasNetas = salesGross - salesReturns
+
+        // CMV for range
+        const cmv = rangeMovements
+            .filter(m => m.type === 'SALE' || (m.type === 'ADJUSTMENT' && m.quantity < 0))
+            .reduce((s, m) => {
+                if (m.type === 'SALE' && m.isDevolucion) return s - Math.abs(m.costTotalAssigned || 0)
+                return s + (m.costTotalAssigned || 0)
+            }, 0)
+
+        const resultadoBruto = ventasNetas - cmv
+
+        // Sell-through: units sold net / units entered net
+        const unitsSoldNet = rangeMovements
+            .filter(m => m.type === 'SALE' && !m.isDevolucion)
+            .reduce((s, m) => s + m.quantity, 0)
+            - rangeMovements
+                .filter(m => m.type === 'SALE' && m.isDevolucion)
+                .reduce((s, m) => s + Math.abs(m.quantity), 0)
+        const unitsEnteredNet = rangeMovements
+            .filter(m => m.type === 'PURCHASE' && !m.isDevolucion)
+            .reduce((s, m) => s + m.quantity, 0)
+            - rangeMovements
+                .filter(m => m.type === 'PURCHASE' && m.isDevolucion)
+                .reduce((s, m) => s + Math.abs(m.quantity), 0)
+        const sellThrough = unitsEnteredNet > 0 ? (unitsSoldNet / unitsEnteredNet) * 100 : 0
+
+        // Rotation (annualized): CMV annualized / Average Stock
+        const stockValue = kpis.stockValue
+        const daysInRange = Math.max(1, Math.round(
+            (new Date(kpiDateRange.end + 'T00:00:00').getTime() - new Date(kpiDateRange.start + 'T00:00:00').getTime()) / (1000 * 60 * 60 * 24)
+        ))
+        const cmvAnnualized = (cmv / daysInRange) * 365
+        const rotation = stockValue > 0 ? cmvAnnualized / stockValue : 0
+
+        // Cost unit actual
+        const costUnitActual = kpis.totalUnits > 0 ? stockValue / kpis.totalUnits : 0
+
+        return { ventasNetas, cmv, resultadoBruto, sellThrough, rotation, costUnitActual, unitsSoldNet, unitsEnteredNet }
+    }, [movements, kpiDateRange, kpis])
+
+    // Per-product sales for ProductValuationCard
+    const perProductSales = useMemo(() => {
+        const salesByProduct = new Map<string, number>()
+        movements
+            .filter(m => m.type === 'SALE' && m.date >= kpiDateRange.start && m.date <= kpiDateRange.end)
+            .forEach(m => {
+                const current = salesByProduct.get(m.productId) || 0
+                if (m.isDevolucion) {
+                    salesByProduct.set(m.productId, current - m.subtotal)
+                } else {
+                    salesByProduct.set(m.productId, current + m.subtotal)
+                }
+            })
+        return salesByProduct
+    }, [movements, kpiDateRange])
+
+    // Mini chart data: monthly or weekly aggregation of sales
+    const miniChartData = useMemo(() => {
+        if (kpiRangeMode === 'ejercicio') {
+            // Monthly bars for the exercise year
+            const months: { label: string; value: number }[] = []
+            const pStart = new Date(periodStart + 'T00:00:00')
+            for (let i = 0; i < 12; i++) {
+                const mDate = new Date(pStart.getFullYear(), pStart.getMonth() + i, 1)
+                const mEnd = new Date(pStart.getFullYear(), pStart.getMonth() + i + 1, 0)
+                const mStartISO = mDate.getFullYear() + '-' + String(mDate.getMonth() + 1).padStart(2, '0') + '-01'
+                const mEndISO = mEnd.getFullYear() + '-' + String(mEnd.getMonth() + 1).padStart(2, '0') + '-' + String(mEnd.getDate()).padStart(2, '0')
+                const sales = movements
+                    .filter(m => m.type === 'SALE' && !m.isDevolucion && m.date >= mStartISO && m.date <= mEndISO)
+                    .reduce((s, m) => s + m.subtotal, 0)
+                months.push({
+                    label: mDate.toLocaleDateString('es-AR', { month: 'short' }),
+                    value: sales,
+                })
+            }
+            return months
+        } else {
+            // Weekly bars for current month
+            const weeks: { label: string; value: number }[] = []
+            const mStart = new Date(monthRange.start + 'T00:00:00')
+            const mEnd = new Date(monthRange.end + 'T00:00:00')
+            let weekStart = new Date(mStart)
+            let weekNum = 1
+            while (weekStart <= mEnd) {
+                const wEnd = new Date(weekStart)
+                wEnd.setDate(wEnd.getDate() + 6)
+                if (wEnd > mEnd) wEnd.setTime(mEnd.getTime())
+                const wStartISO = weekStart.getFullYear() + '-' + String(weekStart.getMonth() + 1).padStart(2, '0') + '-' + String(weekStart.getDate()).padStart(2, '0')
+                const wEndISO = wEnd.getFullYear() + '-' + String(wEnd.getMonth() + 1).padStart(2, '0') + '-' + String(wEnd.getDate()).padStart(2, '0')
+                const sales = movements
+                    .filter(m => m.type === 'SALE' && !m.isDevolucion && m.date >= wStartISO && m.date <= wEndISO)
+                    .reduce((s, m) => s + m.subtotal, 0)
+                weeks.push({ label: `S${weekNum}`, value: sales })
+                weekStart = new Date(wEnd)
+                weekStart.setDate(weekStart.getDate() + 1)
+                weekNum++
+            }
+            return weeks
+        }
+    }, [kpiRangeMode, movements, periodStart, monthRange])
 
     const getMovementAmounts = useCallback((movement: BienesMovement) => {
         if (movement.type === 'SALE') {
@@ -1190,11 +1917,30 @@ export default function InventarioBienesPage() {
     }, [movements, scopedJournalEntries])
 
     const inventoryEntries = useMemo(() => {
-        return scopedJournalEntries.filter(entry => {
-            if (entry.sourceModule === 'inventory') return true
-            return getEntryInventoryMatch(entry).hasMatch
+        // Strict filter: only entries that are genuinely inventory-related.
+        // Avoids false positives like "Aporte inicial" (Banco/Capital) appearing in conciliation.
+        const coreAccountIds = new Set<string>()
+        const coreKeys: AccountMappingKey[] = [
+            'mercaderias', 'compras', 'gastosCompras', 'cmv', 'ventas',
+            'bonifCompras', 'devolCompras', 'bonifVentas', 'devolVentas',
+        ]
+        coreKeys.forEach(key => {
+            const resolved = inventoryAccountResolution.byKey.get(key)
+            if (resolved) coreAccountIds.add(resolved.account.id)
         })
-    }, [scopedJournalEntries, getEntryInventoryMatch])
+
+        return scopedJournalEntries.filter(entry => {
+            // Definitive: created by inventory module
+            if (entry.sourceModule === 'inventory') return true
+            // RT6 from cierre-valuacion
+            if (entry.sourceModule === 'cierre-valuacion' && entry.metadata?.tipo === 'RT6') return true
+            // Touches at least one CORE inventory account (not just peripherals like IVA, apertura)
+            if (coreAccountIds.size > 0) {
+                return entry.lines.some(line => coreAccountIds.has(line.accountId))
+            }
+            return false
+        })
+    }, [scopedJournalEntries, inventoryAccountResolution])
 
     const movementsWithoutEntry = useMemo(() => {
         return movements.filter(movement => (movement.linkedJournalEntryIds || []).length === 0)
@@ -1205,6 +1951,55 @@ export default function InventarioBienesPage() {
     }, [inventoryEntries, linkedEntryIds])
 
     const conciliacionCount = movementsWithoutEntry.length + entriesWithoutMovement.length
+    const rt6PendingCount = useMemo(() => {
+        return entriesWithoutMovement.filter(entry => getEntryInventoryMatch(entry).isRT6).length
+    }, [entriesWithoutMovement, getEntryInventoryMatch])
+
+    const filteredMovementsWithoutEntry = useMemo(() => {
+        const term = conciliationSearch.trim().toLowerCase()
+        return movementsWithoutEntry.filter(movement => {
+            if (conciliationFilter === 'compras' && movement.type !== 'PURCHASE') return false
+            if (conciliationFilter === 'ventas' && movement.type !== 'SALE') return false
+            if (conciliationFilter === 'rt6') {
+                const notes = movement.notes?.toLowerCase() || ''
+                if (movement.type !== 'VALUE_ADJUSTMENT' && !notes.includes('rt6')) return false
+            }
+            if (!term) return true
+            const product = products.find(p => p.id === movement.productId)
+            const haystack = [
+                product?.name,
+                product?.sku,
+                movement.type,
+                movement.reference,
+                movement.notes,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase()
+            return haystack.includes(term) || Math.abs(movement.total).toString().includes(term)
+        })
+    }, [movementsWithoutEntry, conciliationFilter, conciliationSearch, products])
+
+    const filteredEntriesWithoutMovement = useMemo(() => {
+        const term = conciliationSearch.trim().toLowerCase()
+        return entriesWithoutMovement.filter(entry => {
+            const match = getEntryInventoryMatch(entry)
+            if (conciliationFilter === 'compras' && match.category !== 'compras') return false
+            if (conciliationFilter === 'ventas' && !(match.category === 'ventas' || match.category === 'cmv')) return false
+            if (conciliationFilter === 'rt6' && !match.isRT6) return false
+            if (!term) return true
+            const haystack = [
+                entry.memo,
+                entry.id,
+                match.category,
+                entry.sourceModule,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase()
+            return haystack.includes(term) || Math.abs(getEntryTotal(entry)).toString().includes(term)
+        })
+    }, [entriesWithoutMovement, conciliationFilter, conciliationSearch, getEntryInventoryMatch, getEntryTotal])
 
     const getEntryCandidatesForMovement = useCallback((movement: BienesMovement) => {
         return inventoryEntries
@@ -1260,12 +2055,42 @@ export default function InventarioBienesPage() {
                     <h2 className="text-lg font-display font-semibold text-slate-900">
                         Bienes de Cambio (Mercaderias)
                     </h2>
-                    <div className="hidden sm:flex items-center px-2 py-1 bg-slate-100 rounded-md border border-slate-200 text-xs font-mono text-slate-600">
+                    {/* KPI Range Toggle */}
+                    <div className="hidden sm:flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                        <button
+                            onClick={() => changeKpiRangeMode('month')}
+                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                                kpiRangeMode === 'month'
+                                    ? 'bg-white text-slate-900 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            Mes
+                        </button>
+                        <button
+                            onClick={() => changeKpiRangeMode('ejercicio')}
+                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                                kpiRangeMode === 'ejercicio'
+                                    ? 'bg-white text-slate-900 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            Ejercicio
+                        </button>
+                    </div>
+                    <div className="hidden sm:flex items-center px-2 py-1 bg-slate-50 rounded-md text-xs font-mono text-slate-500">
                         <span className="w-2 h-2 rounded-full bg-green-500 mr-2" />
-                        Periodo {monthRange.label}
+                        {kpiDateRange.label}
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
+                    {/* Inventory Mode Badge */}
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${settings?.inventoryMode === 'PERIODIC'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-blue-100 text-blue-700'
+                        }`}>
+                        {settings?.inventoryMode === 'PERIODIC' ? 'Diferencias' : 'Permanente'}
+                    </span>
                     {/* Costing Method Selector */}
                     <div className="flex items-center gap-2 text-sm">
                         <span className="text-slate-500">Metodo:</span>
@@ -1286,6 +2111,14 @@ export default function InventarioBienesPage() {
                             </span>
                         )}
                     </div>
+                    {/* Settings Gear */}
+                    <button
+                        onClick={openAccountConfigModal}
+                        className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                        title="Configuracion del modulo"
+                    >
+                        <GearSix size={20} />
+                    </button>
                 </div>
             </header>
 
@@ -1296,11 +2129,10 @@ export default function InventarioBienesPage() {
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
-                            className={`pb-3 px-1 text-sm transition-all whitespace-nowrap flex items-center gap-2 border-b-2 ${
-                                activeTab === tab.id
-                                    ? 'text-blue-600 border-blue-600 font-semibold'
-                                    : 'text-slate-500 border-transparent hover:text-slate-900 hover:border-slate-200'
-                            }`}
+                            className={`pb-3 px-1 text-sm transition-all whitespace-nowrap flex items-center gap-2 border-b-2 ${activeTab === tab.id
+                                ? 'text-blue-600 border-blue-600 font-semibold'
+                                : 'text-slate-500 border-transparent hover:text-slate-900 hover:border-slate-200'
+                                }`}
                         >
                             {tab.label}
                             {tab.id === 'conciliacion' && conciliacionCount > 0 && (
@@ -1318,123 +2150,148 @@ export default function InventarioBienesPage() {
                 {/* DASHBOARD TAB */}
                 {activeTab === 'dashboard' && (
                     <div className="space-y-6 animate-fade-in">
-                        {/* KPIs */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                        Stock Valuado
-                                    </span>
-                                    <Coins className="text-blue-600" size={20} weight="duotone" />
+                        {/* KPIs - Row 1: Primary metrics */}
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                            {/* Stock Valuado */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Stock Valuado</span>
+                                    <Coins className="text-blue-600 shrink-0" size={16} weight="duotone" />
                                 </div>
-                                <div className="font-mono text-2xl font-medium text-slate-900">
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums truncate">
                                     {formatCurrency(kpis.stockValue)}
                                 </div>
-                                {stockDelta !== null ? (
-                                    <div className={`text-xs font-medium mt-1 flex items-center gap-1 ${
-                                        stockDelta >= 0 ? 'text-emerald-600' : 'text-red-600'
-                                    }`}>
-                                        <TrendUp weight="bold" size={12} /> {stockDelta >= 0 ? '+' : ''}{stockDelta.toFixed(1)}% vs mes anterior
+                                <div className="text-[10px] text-slate-400 mt-0.5">{kpis.totalUnits.toLocaleString()} u. · {kpis.totalProducts} prod.</div>
+                            </div>
+
+                            {/* Ventas Netas */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Ventas Netas</span>
+                                    <ChartBar className="text-purple-500 shrink-0" size={16} weight="duotone" />
+                                </div>
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums truncate">
+                                    {formatCurrency(enhancedKPIs.ventasNetas)}
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">{kpiDateRange.label}</div>
+                                {salesProgress !== null && (
+                                    <div className="h-1 w-full bg-gray-100 rounded-full mt-2 overflow-hidden">
+                                        <div className="h-full bg-purple-500 rounded-full" style={{ width: `${salesProgress * 100}%` }} />
                                     </div>
-                                ) : (
-                                    <div className="text-xs text-slate-400 mt-1">Sin base previa</div>
                                 )}
                             </div>
 
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                        Unidades
-                                    </span>
-                                    <Package className="text-emerald-600" size={20} weight="duotone" />
+                            {/* CMV */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">CMV</span>
+                                    <Scales className="text-amber-500 shrink-0" size={16} weight="duotone" />
                                 </div>
-                                <div className="font-mono text-2xl font-medium text-slate-900">
-                                    {kpis.totalUnits.toLocaleString()} <span className="text-sm text-slate-500 font-sans">u.</span>
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums truncate">
+                                    {formatCurrency(enhancedKPIs.cmv)}
                                 </div>
-                                <div className="text-xs text-slate-500 mt-1">
-                                    {kpis.totalProducts} productos activos
+                                <div className="text-[10px] text-slate-400 mt-0.5">Costo merc. vendida</div>
+                            </div>
+
+                            {/* Resultado Bruto */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Resultado Bruto</span>
+                                    <TrendUp className={enhancedKPIs.resultadoBruto >= 0 ? 'text-emerald-500' : 'text-red-500'} size={16} weight="bold" />
+                                </div>
+                                <div className={`font-mono text-xl font-bold tabular-nums truncate ${enhancedKPIs.resultadoBruto >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                                    {formatCurrency(enhancedKPIs.resultadoBruto)}
+                                </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">
+                                    Margen: {kpis.grossMargin.toFixed(1)}%
+                                    <button type="button" onClick={() => openGoalModal('margin')} className="ml-1 text-slate-400 hover:text-slate-600 underline">obj {marginGoal.toFixed(0)}%</button>
                                 </div>
                             </div>
 
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                        Ventas (Periodo)
-                                    </span>
-                                    <ChartBar className="text-purple-500" size={20} weight="duotone" />
+                            {/* Sell-through */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Sell-through</span>
+                                    <ArrowsLeftRight className="text-sky-500 shrink-0" size={16} weight="duotone" />
                                 </div>
-                                <div className="font-mono text-2xl font-medium text-slate-900">
-                                    {formatCurrency(kpis.salesPeriod)}
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums">
+                                    {enhancedKPIs.sellThrough.toFixed(0)}%
                                 </div>
-                                <div className="text-xs text-slate-400 mt-1">
-                                    Mes {monthRange.label}
+                                <div className="text-[10px] text-slate-400 mt-0.5">
+                                    {enhancedKPIs.unitsSoldNet} vend / {enhancedKPIs.unitsEnteredNet} ingr
                                 </div>
-                                {salesDelta !== null ? (
-                                    <div className={`text-xs font-medium mt-1 flex items-center gap-1 ${
-                                        salesDelta >= 0 ? 'text-emerald-600' : 'text-red-600'
-                                    }`}>
-                                        <TrendUp weight="bold" size={12} /> {salesDelta >= 0 ? '+' : ''}{salesDelta.toFixed(1)}% vs mes anterior
-                                    </div>
-                                ) : (
-                                    <div className="text-xs text-slate-400 mt-1">Sin base previa</div>
-                                )}
-                                {salesProgress !== null ? (
-                                    <>
-                                        <div className="h-1 w-full bg-gray-100 rounded-full mt-3 overflow-hidden">
-                                            <div
-                                                className="h-full bg-purple-500 rounded-full"
-                                                style={{ width: `${salesProgress * 100}%` }}
-                                            />
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => openGoalModal('sales')}
-                                            className="text-xs text-slate-500 mt-2 hover:text-slate-700"
-                                        >
-                                            Obj: {formatCurrency(salesGoal ?? 0)} (editar)
-                                        </button>
-                                    </>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => openGoalModal('sales')}
-                                        className="text-xs text-slate-400 mt-2 hover:text-slate-600"
-                                    >
-                                        Sin objetivo configurado
-                                    </button>
-                                )}
                             </div>
 
-                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                        Margen Bruto
-                                    </span>
-                                    <div className="flex items-center gap-2 text-orange-500">
-                                        <Percent size={20} weight="duotone" />
-                                        <span
-                                            className="text-xs text-slate-400"
-                                            title="Margen bruto = (Ventas - CMV) / Ventas"
-                                        >
-                                            <Info size={14} />
-                                        </span>
-                                    </div>
+                            {/* Rotacion */}
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Rotacion</span>
+                                    <Percent className="text-orange-500 shrink-0" size={16} weight="duotone" />
                                 </div>
-                                <div className="font-mono text-2xl font-medium text-slate-900">
-                                    {kpis.grossMargin.toFixed(1)}%
+                                <div className="font-mono text-xl font-bold text-slate-900 tabular-nums">
+                                    {enhancedKPIs.rotation.toFixed(1)}x
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => openGoalModal('margin')}
-                                    className="text-xs text-slate-500 mt-1 hover:text-slate-700"
-                                >
-                                    Objetivo: {marginGoal.toFixed(1)}%
-                                </button>
-                                {kpis.salesPeriod <= 0 && (
-                                    <div className="text-xs text-slate-400 mt-1">- Sin ventas en el periodo</div>
-                                )}
+                                <div className="text-[10px] text-slate-400 mt-0.5">Anualizada · C/u {formatCurrency(enhancedKPIs.costUnitActual)}</div>
                             </div>
                         </div>
+
+                        {/* Mini Chart (FASE 4) */}
+                        {miniChartData.some(d => d.value > 0) && (
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                        Ventas {kpiRangeMode === 'ejercicio' ? 'por Mes' : 'por Semana'}
+                                    </h3>
+                                    <span className="text-[10px] text-slate-400">{kpiDateRange.label}</span>
+                                </div>
+                                <div className="flex items-end gap-1 h-20">
+                                    {(() => {
+                                        const maxVal = Math.max(...miniChartData.map(d => d.value), 1)
+                                        return miniChartData.map((d, i) => (
+                                            <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                                                <div
+                                                    className={`w-full rounded-t transition-all ${d.value > 0 ? 'bg-gradient-to-t from-blue-500 to-blue-400' : 'bg-slate-100'}`}
+                                                    style={{ height: `${Math.max(2, (d.value / maxVal) * 100)}%` }}
+                                                    title={`${d.label}: ${formatCurrency(d.value)}`}
+                                                />
+                                                <span className="text-[9px] text-slate-400 truncate w-full text-center">{d.label}</span>
+                                            </div>
+                                        ))
+                                    })()}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Stock valuado por producto */}
+                        {efHomogenea && efHomogenea.products.length > 0 && (
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="text-sm font-semibold text-slate-900">Stock Valuado por Producto</h3>
+                                        <p className="text-[10px] text-slate-400 mt-0.5">
+                                            Valuacion al cierre ({getPeriodFromDate(periodEnd)}) · Metodo: {settings?.costMethod}
+                                        </p>
+                                    </div>
+                                    {efHomogenea.missingPeriods.length > 0 && (
+                                        <div className="text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-100">
+                                            Faltan indices: {efHomogenea.missingPeriods.join(', ')}
+                                        </div>
+                                    )}
+                                </div>
+                                {efHomogenea.products.map(pv => (
+                                    <ProductValuationCard
+                                        key={pv.product.id}
+                                        product={pv}
+                                        method={settings?.costMethod || 'FIFO'}
+                                        formatCurrency={formatCurrency}
+                                        onViewLots={() => setDashboardLotsProduct(pv)}
+                                        bienesProduct={products.find(p => p.id === pv.product.id)}
+                                        movements={movements}
+                                        productSales={perProductSales.get(pv.product.id) || 0}
+                                    />
+                                ))}
+                            </div>
+                        )}
 
                         {/* Low Stock Alert */}
                         {lowStockCount > 0 && (
@@ -1651,9 +2508,51 @@ export default function InventarioBienesPage() {
                                                     SALE: { label: 'Venta', color: 'bg-blue-50 text-blue-600' },
                                                     ADJUSTMENT: { label: 'Ajuste', color: 'bg-orange-50 text-orange-700' },
                                                     COUNT: { label: 'Conteo', color: 'bg-purple-50 text-purple-600' },
+                                                    VALUE_ADJUSTMENT: { label: 'Ajuste RT6', color: 'bg-violet-50 text-violet-700' },
+                                                    INITIAL_STOCK: { label: 'Existencia Inicial', color: 'bg-cyan-50 text-cyan-700' },
+                                                    PAYMENT: { label: 'Cobro/Pago', color: 'bg-violet-50 text-violet-600' },
                                                 }
-                                                const typeInfo = typeLabels[mov.type] || { label: mov.type, color: 'bg-slate-50 text-slate-600' }
-                                                const isEntry = mov.type === 'PURCHASE' || (mov.type === 'ADJUSTMENT' && mov.quantity > 0)
+                                                // Distinguish sub-types by adjustmentKind and qty
+                                                let typeInfo = typeLabels[mov.type] || { label: mov.type, color: 'bg-slate-50 text-slate-600' }
+                                                if (mov.isDevolucion) {
+                                                    if (mov.type === 'PURCHASE') {
+                                                        typeInfo = { label: 'Devolucion compra', color: 'bg-rose-50 text-rose-700' }
+                                                    } else if (mov.type === 'SALE') {
+                                                        typeInfo = { label: 'Devolucion venta', color: 'bg-rose-50 text-rose-700' }
+                                                    }
+                                                }
+                                                // PURCHASE with qty=0 is a "solo gasto" (expense-only, no stock)
+                                                if (mov.type === 'PURCHASE' && mov.quantity === 0) {
+                                                    typeInfo = { label: 'Gasto s/compra', color: 'bg-amber-50 text-amber-700' }
+                                                }
+                                                if (mov.type === 'VALUE_ADJUSTMENT') {
+                                                    if (mov.adjustmentKind === 'CAPITALIZATION') {
+                                                        typeInfo = { label: 'Gasto Capitaliz.', color: 'bg-amber-50 text-amber-700' }
+                                                    } else if (mov.adjustmentKind === 'BONUS_PURCHASE') {
+                                                        typeInfo = { label: 'Bonif. compra', color: 'bg-indigo-50 text-indigo-700' }
+                                                    } else if (mov.adjustmentKind === 'BONUS_SALE') {
+                                                        typeInfo = { label: 'Bonif. venta', color: 'bg-indigo-50 text-indigo-700' }
+                                                    } else if (mov.adjustmentKind === 'DISCOUNT_PURCHASE') {
+                                                        typeInfo = { label: 'Desc. obtenido', color: 'bg-slate-100 text-slate-700' }
+                                                    } else if (mov.adjustmentKind === 'DISCOUNT_SALE') {
+                                                        typeInfo = { label: 'Desc. otorgado', color: 'bg-slate-100 text-slate-700' }
+                                                    } else if (mov.adjustmentKind === 'RT6' || mov.rt6Period || mov.rt6SourceEntryId) {
+                                                        typeInfo = { label: 'Ajuste RT6', color: 'bg-violet-50 text-violet-700' }
+                                                    } else {
+                                                        typeInfo = { label: 'Ajuste Valor', color: 'bg-slate-100 text-slate-600' }
+                                                    }
+                                                }
+                                                // P2: Distinguish Cobro vs Pago
+                                                if (mov.type === 'PAYMENT') {
+                                                    if (mov.paymentDirection === 'COBRO') {
+                                                        typeInfo = { label: 'Cobro', color: 'bg-emerald-50 text-emerald-700' }
+                                                    } else if (mov.paymentDirection === 'PAGO') {
+                                                        typeInfo = { label: 'Pago', color: 'bg-rose-50 text-rose-700' }
+                                                    }
+                                                }
+                                                const isEntry = (mov.type === 'PURCHASE' && !mov.isDevolucion)
+                                                    || (mov.type === 'SALE' && mov.isDevolucion)
+                                                    || (mov.type === 'ADJUSTMENT' && mov.quantity > 0)
                                                 const journalStatus = mov.journalStatus || ((mov.linkedJournalEntryIds || []).length > 0 ? 'generated' : 'none')
                                                 const hasEntries = (mov.linkedJournalEntryIds || []).length > 0
                                                 const statusConfig: Record<string, { label: string; className: string }> = {
@@ -1685,7 +2584,7 @@ export default function InventarioBienesPage() {
                                                             {product?.name || 'Producto eliminado'}
                                                         </td>
                                                         <td className={`py-3 px-4 text-right font-mono ${isEntry ? 'text-green-600' : 'text-slate-900'}`}>
-                                                            {isEntry ? '+' : '-'}{Math.abs(mov.quantity)}
+                                                            {mov.quantity === 0 ? '0' : `${isEntry ? '+' : '-'}${Math.abs(mov.quantity)}`}
                                                         </td>
                                                         <td className="py-3 px-4 text-right font-mono text-slate-500">
                                                             {formatCurrency(mov.unitCost || mov.costUnitAssigned || 0)}
@@ -1775,21 +2674,125 @@ export default function InventarioBienesPage() {
                 {/* CONCILIACION TAB */}
                 {activeTab === 'conciliacion' && (
                     <div className="space-y-6 animate-fade-in">
-                        <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                                <div className="bg-blue-50 p-2 rounded-full">
-                                    <Scales className="text-blue-600" size={22} weight="duotone" />
-                                </div>
-                                <div>
-                                    <h3 className="text-slate-900 font-semibold text-sm">
-                                        Conciliacion Inventario vs Contabilidad
-                                    </h3>
-                                    <p className="text-xs text-slate-500">
-                                        Detecta movimientos sin asiento y asientos sin movimiento.
-                                    </p>
+                        <div className="max-w-7xl mx-auto">
+                            <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-blue-50 p-2 rounded-full">
+                                        <Scales className="text-blue-600" size={22} weight="duotone" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-slate-900 font-semibold text-sm flex items-center gap-2">
+                                            Conciliación Inventario vs Contabilidad
+                                            <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                                                V2
+                                            </span>
+                                        </h3>
+                                        <p className="text-xs text-slate-500">
+                                            Detecta movimientos sin asiento y asientos sin movimiento.
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
-                            <div className="flex gap-2 text-xs">
+
+                            <div className="flex flex-wrap gap-4 items-center justify-between mb-6">
+                                <div className="flex flex-wrap gap-4">
+                                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-orange-50 text-orange-600">
+                                            <WarningCircle size={20} weight="duotone" />
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-slate-500 uppercase font-bold tracking-wide">Sin Asiento</div>
+                                            <div className="font-display font-bold text-xl text-slate-900">
+                                                {movementsWithoutEntry.length}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
+                                            <ArrowsLeftRight size={20} weight="duotone" />
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-slate-500 uppercase font-bold tracking-wide">Sin Movimiento</div>
+                                            <div className="font-display font-bold text-xl text-slate-900">
+                                                {entriesWithoutMovement.length}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 ring-2 ring-blue-500/10">
+                                        <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
+                                            <TrendUp size={20} weight="duotone" />
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-indigo-600 uppercase font-bold tracking-wide">RT6 Pendientes</div>
+                                            <div className="font-display font-bold text-xl text-slate-900">
+                                                {rt6PendingCount}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={openNewMovementModal}
+                                        className="px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 bg-gradient-to-r from-blue-600 to-emerald-500 text-white shadow-lg shadow-blue-500/20 hover:shadow-xl transition-all"
+                                    >
+                                        <Plus size={16} weight="bold" /> Nuevo Movimiento
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-4 text-sm">
+                                <span className="text-slate-500 font-medium px-2">Filtrar:</span>
+                                <button
+                                    onClick={() => setConciliationFilter('all')}
+                                    className={`px-3 py-1.5 rounded-full font-medium transition-colors ${conciliationFilter === 'all'
+                                        ? 'bg-slate-200 text-slate-800'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'
+                                        }`}
+                                >
+                                    Todos
+                                </button>
+                                <button
+                                    onClick={() => setConciliationFilter('compras')}
+                                    className={`px-3 py-1.5 rounded-full font-medium transition-colors ${conciliationFilter === 'compras'
+                                        ? 'bg-slate-200 text-slate-800'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'
+                                        }`}
+                                >
+                                    Compras
+                                </button>
+                                <button
+                                    onClick={() => setConciliationFilter('ventas')}
+                                    className={`px-3 py-1.5 rounded-full font-medium transition-colors ${conciliationFilter === 'ventas'
+                                        ? 'bg-slate-200 text-slate-800'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'
+                                        }`}
+                                >
+                                    Ventas
+                                </button>
+                                <button
+                                    onClick={() => setConciliationFilter('rt6')}
+                                    className={`px-3 py-1.5 rounded-full font-medium transition-colors ${conciliationFilter === 'rt6'
+                                        ? 'bg-slate-200 text-slate-800'
+                                        : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600'
+                                        }`}
+                                >
+                                    RT6 (Ajustes)
+                                </button>
+                                <div className="ml-auto flex items-center gap-2">
+                                    <div className="relative">
+                                        <MagnifyingGlass size={16} className="absolute left-3 top-2.5 text-slate-400" />
+                                        <input
+                                            type="text"
+                                            value={conciliationSearch}
+                                            onChange={(e) => setConciliationSearch(e.target.value)}
+                                            placeholder="Buscar producto o importe..."
+                                            aria-label="Buscar en conciliacion"
+                                            className="pl-9 pr-3 py-1.5 rounded-lg border border-slate-200 text-sm w-60 focus:outline-none focus:border-blue-500 transition-colors"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2 text-xs">
                                 <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 font-semibold">
                                     Movimientos sin asiento: {movementsWithoutEntry.length}
                                 </span>
@@ -1799,7 +2802,7 @@ export default function InventarioBienesPage() {
                             </div>
                         </div>
                         {inventoryAccountResolution.usedHeuristic && (
-                            <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
+                            <div className="max-w-7xl mx-auto bg-amber-50 border border-amber-100 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
                                 <Info size={16} className="mt-0.5" />
                                 <div>
                                     Detectamos cuentas de bienes de cambio por nombre o codigo. Recomendado: configurarlas en Operaciones → Inventario → Cierre.
@@ -1807,51 +2810,82 @@ export default function InventarioBienesPage() {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* Panel A */}
-                            <div className="bg-white rounded-xl border border-slate-200 p-5">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h4 className="text-sm font-semibold text-slate-900">Movimientos sin asiento</h4>
-                                    <span className="text-xs text-slate-400">Panel A</span>
-                                </div>
-
-                                {movementsWithoutEntry.length === 0 ? (
-                                    <div className="text-center text-slate-500 text-sm py-8">
-                                        Todo conciliado en inventario.
+                        <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-6 items-start h-full">
+                            {/* Panel A — En Inventario */}
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full min-h-[500px]">
+                                <header className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
+                                    <div className="flex items-center gap-2">
+                                        <Package className="text-slate-400" size={18} weight="fill" />
+                                        <h3 className="font-display font-bold text-slate-800">En Inventario</h3>
                                     </div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {movementsWithoutEntry.map((mov) => {
+                                    <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-md">
+                                        Falta asiento
+                                    </span>
+                                </header>
+
+                                <div className="p-4 flex flex-col gap-3">
+                                    {filteredMovementsWithoutEntry.length === 0 ? (
+                                        <div className="mt-auto p-6 text-center">
+                                            <p className="text-sm text-slate-400 italic">
+                                                &quot;Chequeá estos movimientos, parecen estar colgados sin su contraparte contable.&quot; — Boti
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                        {filteredMovementsWithoutEntry.map((mov) => {
                                             const product = products.find(p => p.id === mov.productId)
                                             const candidates = getEntryCandidatesForMovement(mov)
                                             const hasError = mov.journalStatus === 'error'
                                             const isMissing = mov.journalStatus === 'missing'
+                                            const typeLabel = mov.type === 'PURCHASE'
+                                                ? (mov.quantity === 0 ? 'GASTO S/COMPRA' : 'COMPRA')
+                                                : mov.type === 'SALE'
+                                                    ? 'VENTA'
+                                                    : mov.type === 'VALUE_ADJUSTMENT'
+                                                        ? (mov.adjustmentKind === 'CAPITALIZATION' ? 'GASTO CAPITALIZ.' : 'AJUSTE RT6')
+                                                        : 'AJUSTE'
+                                            const stockDelta = mov.type === 'SALE'
+                                                ? -Math.abs(mov.quantity)
+                                                : mov.quantity
+                                            const unitLabel = product?.unit || 'u.'
                                             return (
-                                                <div key={mov.id} className="border border-slate-200 rounded-lg p-3">
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <div>
-                                                        <div className="text-sm font-semibold text-slate-900">
-                                                            {product?.name || 'Producto eliminado'}
+                                                <div
+                                                    key={mov.id}
+                                                    className="bg-white border border-slate-200 rounded-xl p-3 cursor-pointer group relative overflow-hidden transition-all duration-200 hover:border-blue-200"
+                                                >
+                                                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-orange-400" />
+                                                    <div className="flex justify-between items-start mb-2 pl-2">
+                                                        <div>
+                                                            <div className="text-xs font-bold text-slate-500 mb-0.5">
+                                                                {typeLabel} • {formatDate(mov.date).toUpperCase()}
+                                                            </div>
+                                                            <div className="font-semibold text-slate-900">
+                                                                {product?.name || 'Producto eliminado'}
+                                                            </div>
+                                                            <div className="text-xs text-slate-500">
+                                                                Stock: {stockDelta >= 0 ? '+' : ''}{stockDelta.toLocaleString('es-AR')} {unitLabel}
+                                                            </div>
                                                         </div>
-                                                        <div className="text-xs text-slate-500">
-                                                            {formatDate(mov.date)} • {mov.type}
+                                                        <div className="text-right">
+                                                            <div className="font-mono font-medium text-slate-900">
+                                                                {formatCurrency(mov.total)}
+                                                            </div>
+                                                            <div className="bg-orange-50 text-orange-600 border border-orange-100 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded mt-1">
+                                                                SIN ASIENTO
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                    <div className="font-mono text-sm text-slate-700">
-                                                        {formatCurrency(mov.total)}
-                                                    </div>
-                                                </div>
 
-                                                <div className="mt-3 flex flex-wrap gap-2">
-                                                    <button
-                                                        onClick={() => handleGenerateJournal(mov.id)}
-                                                        className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100"
-                                                    >
-                                                        {hasError ? 'Reintentar' : isMissing ? 'Regenerar asiento' : 'Generar asiento'}
-                                                    </button>
+                                                    <div className="pl-2 flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button
+                                                            onClick={() => handleGenerateJournal(mov.id)}
+                                                            className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-medium hover:bg-blue-100"
+                                                        >
+                                                            {hasError ? 'Reintentar' : isMissing ? 'Regenerar asiento' : 'Generar Asiento'}
+                                                        </button>
                                                         <button
                                                             onClick={() => handleStartLinkMovement(mov)}
-                                                            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white text-slate-600 border border-slate-200"
+                                                            className="text-xs bg-slate-50 text-slate-600 px-2 py-1 rounded font-medium hover:bg-slate-100"
                                                         >
                                                             Vincular
                                                         </button>
@@ -1875,13 +2909,12 @@ export default function InventarioBienesPage() {
                                                                         {entry.memo || 'Asiento sin leyenda'}
                                                                     </span>
                                                                     <span
-                                                                        className={`px-2 py-0.5 rounded-full border text-[10px] ${
-                                                                            score === 'high'
-                                                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                                                                : score === 'medium'
-                                                                                    ? 'bg-blue-50 text-blue-700 border-blue-100'
-                                                                                    : 'bg-slate-100 text-slate-600 border-slate-200'
-                                                                        }`}
+                                                                        className={`px-2 py-0.5 rounded-full border text-[10px] ${score === 'high'
+                                                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                                                            : score === 'medium'
+                                                                                ? 'bg-blue-50 text-blue-700 border-blue-100'
+                                                                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                                                                            }`}
                                                                     >
                                                                         {score === 'high' ? 'Alto' : score === 'medium' ? 'Medio' : 'Bajo'}
                                                                     </span>
@@ -1894,22 +2927,29 @@ export default function InventarioBienesPage() {
                                         })}
                                     </div>
                                 )}
+                                </div>
                             </div>
 
-                            {/* Panel B */}
-                            <div className="bg-white rounded-xl border border-slate-200 p-5">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h4 className="text-sm font-semibold text-slate-900">Asientos sin movimiento</h4>
-                                    <span className="text-xs text-slate-400">Panel B</span>
-                                </div>
-
-                                {entriesWithoutMovement.length === 0 ? (
-                                    <div className="text-center text-slate-500 text-sm py-8">
-                                        No hay asientos pendientes de inventario.
+                            {/* Panel B — En Diario */}
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full min-h-[500px]">
+                                <header className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
+                                    <div className="flex items-center gap-2">
+                                        <Notebook className="text-slate-400" size={18} weight="fill" />
+                                        <h3 className="font-display font-bold text-slate-800">En Diario</h3>
                                     </div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {entriesWithoutMovement.map((entry) => {
+                                    <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-md">
+                                        Falta mov. stock
+                                    </span>
+                                </header>
+
+                                <div className="p-4 flex flex-col gap-4">
+                                    {filteredEntriesWithoutMovement.length === 0 ? (
+                                        <div className="text-center text-slate-500 text-sm py-8">
+                                            No hay asientos pendientes de inventario.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                        {filteredEntriesWithoutMovement.map((entry) => {
                                             const total = getEntryTotal(entry)
                                             const candidates = getMovementCandidatesForEntry(entry)
                                             const entryMatch = getEntryInventoryMatch(entry)
@@ -1917,49 +2957,116 @@ export default function InventarioBienesPage() {
                                             const triggerAccountName = entryMatch.triggerAccountId
                                                 ? getAccountName(entryMatch.triggerAccountId)
                                                 : null
+                                            const isRT6 = entryMatch.isRT6
                                             return (
-                                                <div key={entry.id} className="border border-slate-200 rounded-lg p-3">
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <div>
-                                                            <div className="text-sm font-semibold text-slate-900">
-                                                                {entry.memo || 'Asiento sin leyenda'}
-                                                            </div>
-                                                            <div className="text-xs text-slate-500">
-                                                                {formatDate(entry.date)} • {entry.id.slice(0, 8)}
-                                                            </div>
-                                                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 mt-1">
-                                                                <span className="px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-600 font-semibold">
-                                                                    {entryTypeLabel}
+                                                <div
+                                                    key={entry.id}
+                                                    className={`bg-white border ${isRT6 ? 'border-blue-200' : 'border-slate-200'} rounded-xl p-0 shadow-sm relative overflow-hidden`}
+                                                >
+                                                    <div className={`px-4 py-2 border-b ${isRT6 ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100'} flex justify-between items-center`}>
+                                                        <div className="flex items-center gap-2">
+                                                            {isRT6 && (
+                                                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700">
+                                                                    RT6 (INFLACION)
                                                                 </span>
-                                                                {triggerAccountName && (
-                                                                    <span className="text-slate-400">
+                                                            )}
+                                                            <span className="text-xs text-slate-700 font-medium">
+                                                                {entry.memo || 'Asiento sin leyenda'}
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-xs text-slate-500">
+                                                            {formatDate(entry.date).toUpperCase()}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="p-4">
+                                                        <div className="flex justify-between items-start">
+                                                            <div className="pr-4">
+                                                                <h4 className="font-semibold text-slate-900 text-sm">
+                                                                    {isRT6 ? 'Ajuste por Inflación (RECPAM)' : (entry.memo || 'Asiento sin leyenda')}
+                                                                </h4>
+                                                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                                                    {isRT6
+                                                                        ? 'Este asiento refleja la pérdida/ganancia de poder adquisitivo, pero no se aplicó al valor del stock.'
+                                                                        : entryTypeLabel
+                                                                    }
+                                                                </p>
+                                                                {!isRT6 && triggerAccountName && (
+                                                                    <p className="text-xs text-slate-400 mt-1">
                                                                         Cuenta: {triggerAccountName}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            <div className="text-right shrink-0">
+                                                                <div className="font-mono font-bold text-lg text-slate-900">
+                                                                    {formatCurrency(total)}
+                                                                </div>
+                                                                <div className="text-[10px] text-slate-400 mt-1 uppercase">
+                                                                    {isRT6 ? (total >= 0 ? 'Pérdida neta' : 'Ganancia neta') : `#${entry.id.slice(0, 8)}`}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Actions */}
+                                                        <div className="mt-4 flex flex-wrap gap-2">
+                                                            {entryMatch.category === 'rt6_adjustment' ? (<>
+                                                                <button
+                                                                    onClick={() => handleOpenRT6Preview(entry)}
+                                                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 px-3 rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5"
+                                                                >
+                                                                    <Sparkle size={14} weight="bold" /> Aplicar a Inventario
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleStartLinkEntry(entry)}
+                                                                    className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium hover:bg-slate-50 text-slate-600"
+                                                                >
+                                                                    Ver asiento
+                                                                </button>
+                                                            </>) : (<>
+                                                                <button
+                                                                    onClick={() => handleCreateMovementFromEntry(entry)}
+                                                                    className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded font-medium hover:bg-emerald-100"
+                                                                >
+                                                                    Crear movimiento
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleStartLinkEntry(entry)}
+                                                                    className="text-xs bg-slate-50 text-slate-600 px-2 py-1 rounded font-medium hover:bg-slate-100"
+                                                                >
+                                                                    Vincular
+                                                                </button>
+                                                            </>)}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Sugerencias de impacto (RT6) / Sugerencias (standard) */}
+                                                    {isRT6 ? (
+                                                        <div className="bg-slate-50 p-3 border-t border-slate-100">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <Sparkle className="text-purple-500" size={14} weight="duotone" />
+                                                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                                                                    Sugerencias de impacto
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex gap-2 overflow-x-auto">
+                                                                {(entryMatch.matchedKeys || []).map((key: string) => (
+                                                                    <span key={key} className="text-xs bg-white border border-slate-200 px-2 py-1 rounded text-slate-600 whitespace-nowrap">
+                                                                        {key === 'mercaderias' ? 'Mercaderías (Global)' :
+                                                                         key === 'compras' ? 'Compras' :
+                                                                         key === 'gastosCompras' ? 'Gastos s/Compras' :
+                                                                         key === 'bonifCompras' ? 'Bonif. s/Compras' :
+                                                                         key === 'devolCompras' ? 'Devol. s/Compras' : key}
+                                                                    </span>
+                                                                ))}
+                                                                {(entryMatch.matchedKeys || []).length === 0 && (
+                                                                    <span className="text-xs bg-white border border-slate-200 px-2 py-1 rounded text-slate-600 whitespace-nowrap">
+                                                                        Mercaderías (Global)
                                                                     </span>
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <div className="font-mono text-sm text-slate-700">
-                                                            {formatCurrency(total)}
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="mt-3 flex flex-wrap gap-2">
-                                                        <button
-                                                            onClick={() => handleCreateMovementFromEntry(entry)}
-                                                            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100"
-                                                        >
-                                                            Crear movimiento
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleStartLinkEntry(entry)}
-                                                            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white text-slate-600 border border-slate-200"
-                                                        >
-                                                            Vincular
-                                                        </button>
-                                                    </div>
-
-                                                    {candidates.length > 0 && (
-                                                        <div className="mt-3 border-t border-dashed border-slate-200 pt-2 space-y-2">
+                                                    ) : candidates.length > 0 ? (
+                                                        <div className="bg-slate-50 p-3 border-t border-slate-100 space-y-2">
                                                             <div className="text-[10px] uppercase tracking-wider text-slate-400">
                                                                 Sugerencias
                                                             </div>
@@ -1978,13 +3085,12 @@ export default function InventarioBienesPage() {
                                                                             {product?.name || 'Movimiento'} • {movement.type}
                                                                         </span>
                                                                         <span
-                                                                            className={`px-2 py-0.5 rounded-full border text-[10px] ${
-                                                                                score === 'high'
-                                                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                                                                    : score === 'medium'
-                                                                                        ? 'bg-blue-50 text-blue-700 border-blue-100'
-                                                                                        : 'bg-slate-100 text-slate-600 border-slate-200'
-                                                                            }`}
+                                                                            className={`px-2 py-0.5 rounded-full border text-[10px] ${score === 'high'
+                                                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                                                                : score === 'medium'
+                                                                                    ? 'bg-blue-50 text-blue-700 border-blue-100'
+                                                                                    : 'bg-slate-100 text-slate-600 border-slate-200'
+                                                                                }`}
                                                                         >
                                                                             {score === 'high' ? 'Alto' : score === 'medium' ? 'Medio' : 'Bajo'}
                                                                         </span>
@@ -1992,166 +3098,84 @@ export default function InventarioBienesPage() {
                                                                 )
                                                             })}
                                                         </div>
-                                                    )}
+                                                    ) : null}
                                                 </div>
                                             )
                                         })}
                                     </div>
                                 )}
+                                </div>
                             </div>
                         </div>
                     </div>
                 )}
 
                 {/* CIERRE TAB */}
-                {activeTab === 'cierre' && (
-                    <div className="space-y-6 animate-fade-in max-w-3xl mx-auto">
-                        <div className="text-center mb-6">
-                            <h3 className="text-2xl font-bold text-slate-900">Cierre de Inventario</h3>
-                            <p className="text-slate-500">Calcula el costo de ventas por metodo {settings?.costMethod}.</p>
-                        </div>
+                {activeTab === 'cierre' && (() => {
+                    const isPeriodic = settings?.inventoryMode === 'PERIODIC'
+                    const rt6HasData = rt6CierreAdjustments.hasAny
+                    const comprasNetasAdj = rt6CierreAdjustments.comprasAdj + rt6CierreAdjustments.gastosAdj + rt6CierreAdjustments.bonifAdj + rt6CierreAdjustments.devolAdj
+                    const comprasNetasHomog = comprasNetas + comprasNetasAdj
+                    const eiHomog = existenciaInicial + rt6CierreAdjustments.eiAdj
+                    const efTeoricaHomog = efHomogenea?.totalEndingValueHomog ?? inventarioTeorico
+                    const cmvHomog = eiHomog + comprasNetasHomog - efTeoricaHomog
+                    const difInvLocal = esFisicoDefinido ? (closingPhysicalValue! - inventarioTeorico) : 0
 
-                        <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                <div>
-                                    <h4 className="text-sm font-semibold text-slate-900">Cuentas Bienes de Cambio</h4>
-                                    <p className="text-xs text-slate-500">
-                                        Se usan para conciliacion contable y asientos transitorios del inventario.
-                                    </p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${
-                                        hasSavedMappings
-                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                            : 'bg-slate-50 text-slate-500 border-slate-200'
-                                    }`}>
-                                        {hasSavedMappings ? 'Configurado' : 'Sin configurar'}
-                                    </span>
-                                    <button
-                                        onClick={openAccountConfigModal}
-                                        className="px-3 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white"
-                                    >
-                                        Configurar cuentas
-                                    </button>
-                                </div>
-                            </div>
+                    // Count movements for status chip
+                    const movementsCountCierre = movements.filter(m => m.type !== 'VALUE_ADJUSTMENT').length
+                    // Count unlinked for alerts
+                    const alertsCountCierre = movements.filter(m => (m.linkedJournalEntryIds || []).length === 0 && m.type !== 'VALUE_ADJUSTMENT').length
 
-                            {accountMappingsSummary.length > 0 ? (
-                                <div className="mt-4 flex flex-wrap gap-2">
-                                    {accountMappingsSummary.map(({ key, label, account }) => (
-                                        <span
-                                            key={key}
-                                            className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100 text-xs font-semibold"
-                                        >
-                                            {label}: {account.code}
-                                        </span>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="mt-4 text-xs text-slate-400">
-                                    Todavia no hay cuentas configuradas para bienes de cambio.
-                                </div>
-                            )}
-                        </div>
+                    return (
+                        <CierreInventarioTab
+                            isPeriodic={isPeriodic}
+                            costMethod={settings?.costMethod || 'FIFO'}
+                            yearRangeStart={yearRange.start}
+                            yearRangeEnd={yearRange.end}
+                            existenciaInicial={existenciaInicial}
+                            comprasBrutas={comprasBrutas}
+                            gastosCompras={cierreTotals.gastosCompras}
+                            bonifCompras={cierreTotals.bonifCompras}
+                            devolCompras={cierreTotals.devolCompras}
+                            comprasNetas={comprasNetas}
+                            ventasBrutas={ventasBrutas}
+                            bonifVentas={cierreTotals.bonifVentas}
+                            devolVentas={cierreTotals.devolVentas}
+                            ventasNetas={ventasNetas}
+                            inventarioTeorico={inventarioTeorico}
+                            cmvPorDiferencia={cmvPorDiferencia}
+                            rt6HasData={rt6HasData}
+                            rt6Adjustments={{
+                                eiAdj: rt6CierreAdjustments.eiAdj,
+                                comprasAdj: rt6CierreAdjustments.comprasAdj,
+                                gastosAdj: rt6CierreAdjustments.gastosAdj,
+                                bonifAdj: rt6CierreAdjustments.bonifAdj,
+                                devolAdj: rt6CierreAdjustments.devolAdj,
+                            }}
+                            eiHomog={eiHomog}
+                            comprasNetasHomog={comprasNetasHomog}
+                            efTeoricaHomog={efTeoricaHomog}
+                            cmvHomog={cmvHomog}
+                            closingPhysicalValue={closingPhysicalValue}
+                            setClosingPhysicalValue={setClosingPhysicalValue}
+                            esFisicoDefinido={esFisicoDefinido}
+                            difInvLocal={difInvLocal}
+                            openingBalanceDate={openingBalanceDate || ''}
+                            handleOpeningDateChange={handleOpeningDateChange}
+                            hasSavedMappings={hasSavedMappings}
+                            accountMappingsSummary={accountMappingsSummary}
+                            openAccountConfigModal={openAccountConfigModal}
+                            handleGenerateClosingEntry={handleGenerateClosingEntry}
+                            closingIsSaving={closingIsSaving}
+                            showHomogeneo={showHomogeneo}
+                            setShowHomogeneo={setShowHomogeneo}
+                            movementsCount={movementsCountCierre}
+                            alertsCount={alertsCountCierre}
+                            formatCurrency={formatCurrency}
+                        />
+                    )
+                })()}
 
-                        <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-                            <div className="space-y-4">
-                                <div className="flex justify-between items-center py-2 border-b border-slate-200">
-                                    <span className="text-sm font-medium text-slate-500">Existencia Inicial</span>
-                                    <span className="font-mono text-lg font-medium text-slate-900">
-                                        {formatCurrency(existenciaInicial)}
-                                    </span>
-                                </div>
-
-                                <div className="flex justify-between items-center py-2 border-b border-slate-200">
-                                    <span className="text-sm font-medium text-slate-500 flex items-center gap-2">
-                                        <Plus className="text-green-500" size={16} weight="bold" /> Compras del Periodo
-                                    </span>
-                                    <span className="font-mono text-lg font-medium text-green-600">
-                                        {formatCurrency(comprasPeriodo)}
-                                    </span>
-                                </div>
-
-                                <div className="flex justify-between items-center py-4 bg-slate-50 px-3 rounded-lg border border-slate-200">
-                                    <div className="flex flex-col">
-                                        <span className="text-sm font-bold text-slate-900 mb-1">Existencia Final (Teorico)</span>
-                                        <span className="text-xs text-slate-500">Calculado por metodo {settings?.costMethod}</span>
-                                    </div>
-                                    <span className="font-mono text-xl font-bold text-slate-900">
-                                        {formatCurrency(inventarioTeorico)}
-                                    </span>
-                                </div>
-
-                                <div className="flex justify-between items-center py-3 border-b border-slate-200">
-                                    <div>
-                                        <span className="text-sm font-medium text-slate-600">Inventario Final (Fisico)</span>
-                                        <p className="text-xs text-slate-400">Ingresar valor contado</p>
-                                    </div>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        value={closingPhysicalValue || ''}
-                                        onChange={(e) => setClosingPhysicalValue(Number(e.target.value))}
-                                        className="w-40 border border-slate-200 rounded-md px-3 py-1.5 text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                        placeholder="0"
-                                    />
-                                </div>
-
-                                <div className="flex justify-between items-center py-3">
-                                    <span className="text-sm font-medium text-slate-500">Diferencia vs teorico</span>
-                                    <span className={`font-mono text-lg font-semibold ${Math.abs(diferenciaCierre) < 0.01 ? 'text-slate-500' : diferenciaCierre > 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                        {formatCurrency(diferenciaCierre)}
-                                    </span>
-                                </div>
-
-                                <div className="flex justify-between items-center pt-4 mt-4 border-t-2 border-slate-200">
-                                    <span className="text-lg font-bold text-slate-900">CMV por diferencias</span>
-                                    <span className="font-mono text-2xl font-bold text-blue-600">
-                                        {formatCurrency(cmvPorDiferencia)}
-                                    </span>
-                                </div>
-                            </div>
-
-                            {/* Preview */}
-                            <div className="mt-8 p-4 bg-slate-50 rounded-lg border border-dashed border-slate-200">
-                                <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">
-                                    Previsualizacion Asiento de Cierre
-                                </h4>
-                                <div className="font-mono text-xs space-y-2">
-                                    {cierreAjusteMonto < 0.01 ? (
-                                        <div className="text-slate-500">Sin diferencias para ajustar.</div>
-                                    ) : (
-                                        <>
-                                            <div className="flex justify-between">
-                                                <span>{cierreAjusteEntrada ? '1.1.04.01 Mercaderias' : '4.3.02 Diferencia de inventario'}</span>
-                                                <div className="flex gap-4">
-                                                    <span className="w-24 text-right font-bold">{formatCurrency(cierreAjusteMonto)}</span>
-                                                    <span className="w-24 text-right text-slate-400">-</span>
-                                                </div>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span>{cierreAjusteEntrada ? '4.3.02 Diferencia de inventario' : '1.1.04.01 Mercaderias'}</span>
-                                                <div className="flex gap-4">
-                                                    <span className="w-24 text-right text-slate-400">-</span>
-                                                    <span className="w-24 text-right font-bold">{formatCurrency(cierreAjusteMonto)}</span>
-                                                </div>
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={handleGenerateClosingEntry}
-                                disabled={closingIsSaving || closingPhysicalValue <= 0}
-                                className="w-full mt-6 py-3 rounded-lg font-semibold bg-gradient-to-r from-blue-600 to-emerald-500 text-white shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title={closingPhysicalValue <= 0 ? 'Ingresa el inventario final fisico' : undefined}
-                            >
-                                {closingIsSaving ? 'Generando...' : 'Generar Asiento de Cierre'}
-                            </button>
-                        </div>
-                    </div>
-                )}
             </div>
 
             {/* Modals */}
@@ -2163,17 +3187,21 @@ export default function InventarioBienesPage() {
                         setProductModalOpen(false)
                         setEditingProduct(null)
                     }}
+                    defaultAutoJournal={settings?.autoJournalEntries ?? true}
                 />
             )}
 
             {movementModalOpen && settings && (
-                <MovementModal
+                <MovementModalV3
                     products={products}
                     valuations={valuations}
                     costMethod={settings.costMethod}
                     onSave={handleSaveMovement}
                     initialData={movementPrefill || undefined}
                     mode={editingMovement ? 'edit' : 'create'}
+                    accounts={accounts}
+                    periodId={periodId}
+                    movements={movements}
                     onClose={() => {
                         setMovementModalOpen(false)
                         setMovementPrefill(null)
@@ -2206,6 +3234,57 @@ export default function InventarioBienesPage() {
                             </button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                            {/* Inventory Mode & Auto-Journal */}
+                            <div className="space-y-4">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-2">
+                                    Modo contable
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="inventoryMode"
+                                            value="PERMANENT"
+                                            checked={(settings?.inventoryMode || 'PERMANENT') === 'PERMANENT'}
+                                            onChange={() => handleChangeInventoryMode('PERMANENT')}
+                                            className="accent-blue-600"
+                                        />
+                                        <div>
+                                            <span className="text-sm font-medium text-slate-700">Permanente</span>
+                                            <p className="text-[11px] text-slate-400">CMV automatico en cada venta</p>
+                                        </div>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="inventoryMode"
+                                            value="PERIODIC"
+                                            checked={settings?.inventoryMode === 'PERIODIC'}
+                                            onChange={() => handleChangeInventoryMode('PERIODIC')}
+                                            className="accent-blue-600"
+                                        />
+                                        <div>
+                                            <span className="text-sm font-medium text-slate-700">Diferencias</span>
+                                            <p className="text-[11px] text-slate-400">CMV al cierre (EI + CN - EF)</p>
+                                        </div>
+                                    </label>
+                                </div>
+                                <label className="flex items-center gap-2 cursor-pointer mt-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={settings?.autoJournalEntries ?? true}
+                                        onChange={(e) => handleChangeAutoJournal(e.target.checked)}
+                                        className="accent-blue-600 rounded"
+                                    />
+                                    <span className="text-sm text-slate-700">Generar asientos automaticamente al registrar movimientos</span>
+                                </label>
+                            </div>
+
+                            <div className="border-t border-slate-100 pt-4">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-3">
+                                    Cuentas contables
+                                </div>
+                            </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {REQUIRED_BIENES_RULES.map(rule => {
                                     const selected = mappingAccounts.get(rule.key)
@@ -2632,11 +3711,10 @@ export default function InventarioBienesPage() {
                                             <button
                                                 key={entry.id}
                                                 onClick={() => setSelectedLinkEntryId(entry.id)}
-                                                className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-md border ${
-                                                    selectedLinkEntryId === entry.id
-                                                        ? 'border-blue-200 bg-blue-50 text-blue-700'
-                                                        : 'border-slate-200 bg-white text-slate-600'
-                                                }`}
+                                                className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-md border ${selectedLinkEntryId === entry.id
+                                                    ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                                    : 'border-slate-200 bg-white text-slate-600'
+                                                    }`}
                                             >
                                                 <span className="truncate">{entry.memo || 'Asiento sin leyenda'}</span>
                                                 <span className="text-[10px] uppercase">
@@ -2711,11 +3789,10 @@ export default function InventarioBienesPage() {
                                                 <button
                                                     key={movement.id}
                                                     onClick={() => setSelectedLinkMovementId(movement.id)}
-                                                    className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-md border ${
-                                                        selectedLinkMovementId === movement.id
-                                                            ? 'border-blue-200 bg-blue-50 text-blue-700'
-                                                            : 'border-slate-200 bg-white text-slate-600'
-                                                    }`}
+                                                    className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-md border ${selectedLinkMovementId === movement.id
+                                                        ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                                        : 'border-slate-200 bg-white text-slate-600'
+                                                        }`}
                                                 >
                                                     <span className="truncate">{product?.name || 'Movimiento'} • {movement.type}</span>
                                                     <span className="text-[10px] uppercase">
@@ -2749,9 +3826,8 @@ export default function InventarioBienesPage() {
             {/* Toast */}
             {toast && (
                 <div
-                    className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-slide-in ${
-                        toast.type === 'success' ? 'bg-slate-900 text-white' : 'bg-red-600 text-white'
-                    }`}
+                    className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-slide-in ${toast.type === 'success' ? 'bg-slate-900 text-white' : 'bg-red-600 text-white'
+                        }`}
                 >
                     {toast.type === 'success' ? (
                         <CheckCircle className="text-emerald-400" size={20} weight="fill" />
@@ -2759,6 +3835,328 @@ export default function InventarioBienesPage() {
                         <Warning className="text-white" size={20} weight="fill" />
                     )}
                     <span className="font-medium text-sm">{toast.message}</span>
+                </div>
+            )}
+
+            {/* Dashboard Lots Drawer (new prototype-based UI) */}
+            <ProductLotsDrawer
+                product={dashboardLotsProduct}
+                method={settings?.costMethod || 'FIFO'}
+                closingPeriod={getPeriodFromDate(periodEnd)}
+                formatCurrency={formatCurrency}
+                onClose={() => setDashboardLotsProduct(null)}
+                bienesProduct={dashboardLotsProduct?.product}
+                movements={movements}
+            />
+
+            {/* Layers Drawer (EF Homogénea detail per product) */}
+            {layersDrawerProduct && (
+                <div className="fixed inset-0 z-50 flex justify-end">
+                    <div className="absolute inset-0 bg-black/30" onClick={() => setLayersDrawerProduct(null)} />
+                    <div className="relative w-full max-w-lg bg-white shadow-xl animate-slide-in-right overflow-y-auto">
+                        <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center z-10">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-900">
+                                    Capas de Costo — {layersDrawerProduct.product.name}
+                                </h3>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    SKU: {layersDrawerProduct.product.sku} · Metodo: {layersDrawerProduct.method}
+                                </p>
+                            </div>
+                            <button onClick={() => setLayersDrawerProduct(null)} className="p-1 hover:bg-slate-100 rounded">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-6">
+                            <div className="grid grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg">
+                                <div>
+                                    <span className="text-[10px] uppercase text-slate-400">Qty Final</span>
+                                    <div className="font-mono text-lg font-bold">{layersDrawerProduct.endingQty} {layersDrawerProduct.product.unit}</div>
+                                </div>
+                                <div>
+                                    <span className="text-[10px] uppercase text-slate-400">V. Origen</span>
+                                    <div className="font-mono text-lg font-bold">{formatCurrency(layersDrawerProduct.endingValueOrigen)}</div>
+                                </div>
+                                <div>
+                                    <span className="text-[10px] uppercase text-slate-400">V. Homogeneo</span>
+                                    <div className="font-mono text-lg font-bold text-indigo-700">{formatCurrency(layersDrawerProduct.endingValueHomog)}</div>
+                                </div>
+                            </div>
+                            <div className="text-sm text-slate-600">
+                                Ajuste: <span className={`font-mono font-bold ${layersDrawerProduct.ajuste >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                    {formatCurrency(layersDrawerProduct.ajuste)}
+                                </span>
+                                <span className="text-slate-400 ml-1">({layersDrawerProduct.ajustePct.toFixed(2)}%)</span>
+                            </div>
+
+                            <div>
+                                <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Detalle de Capas</h4>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="text-slate-400 border-b border-slate-200">
+                                                <th className="text-left py-2 pr-2">Fecha Origen</th>
+                                                <th className="text-right py-2 px-1">Qty</th>
+                                                <th className="text-right py-2 px-1">$/u Origen</th>
+                                                <th className="text-right py-2 px-1">Total Origen</th>
+                                                <th className="text-right py-2 px-1">Coef</th>
+                                                <th className="text-right py-2 px-1">$/u Homog</th>
+                                                <th className="text-right py-2 pl-1">Total Homog</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {layersDrawerProduct.layers.map((layer, idx) => (
+                                                <tr key={idx} className="border-b border-slate-50">
+                                                    <td className="py-2 pr-2 font-mono">
+                                                        {layer.date === 'PPP' ? 'PPP (prom.)' : layer.date}
+                                                        {layer.indexOrigen === null && layer.date !== 'PPP' && (
+                                                            <span className="text-amber-500 ml-1" title="Sin indice para este periodo">⚠</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="text-right py-2 px-1 font-mono">{layer.quantity}</td>
+                                                    <td className="text-right py-2 px-1 font-mono">{layer.unitCostOrigen.toFixed(2)}</td>
+                                                    <td className="text-right py-2 px-1 font-mono">{formatCurrency(layer.totalOrigen)}</td>
+                                                    <td className="text-right py-2 px-1 font-mono text-indigo-600">{layer.coef.toFixed(4)}</td>
+                                                    <td className="text-right py-2 px-1 font-mono text-indigo-700">{layer.unitCostHomog.toFixed(2)}</td>
+                                                    <td className="text-right py-2 pl-1 font-mono text-indigo-700 font-bold">{formatCurrency(layer.totalHomog)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot>
+                                            <tr className="border-t-2 border-slate-200 font-bold">
+                                                <td className="py-2 pr-2">Total</td>
+                                                <td className="text-right py-2 px-1 font-mono">
+                                                    {layersDrawerProduct.layers.reduce((s, l) => s + l.quantity, 0)}
+                                                </td>
+                                                <td className="text-right py-2 px-1"></td>
+                                                <td className="text-right py-2 px-1 font-mono">{formatCurrency(layersDrawerProduct.endingValueOrigen)}</td>
+                                                <td className="text-right py-2 px-1"></td>
+                                                <td className="text-right py-2 px-1"></td>
+                                                <td className="text-right py-2 pl-1 font-mono text-indigo-700">{formatCurrency(layersDrawerProduct.endingValueHomog)}</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+
+                            {layersDrawerProduct.layers.some(l => l.indexOrigen !== null) && (
+                                <div className="text-[10px] text-slate-400 bg-slate-50 p-3 rounded">
+                                    Indices FACPCE: {layersDrawerProduct.layers
+                                        .filter(l => l.indexOrigen !== null)
+                                        .map(l => `${l.originPeriod}: ${l.indexOrigen}`)
+                                        .join(' | ')}
+                                    {layersDrawerProduct.layers[0]?.indexCierre !== null && (
+                                        <> | Cierre ({layersDrawerProduct.layers[0].closingPeriod}): {layersDrawerProduct.layers[0].indexCierre}</>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* RT6 Preview Modal */}
+            {rt6PreviewOpen && rt6PreviewData && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+                        onClick={() => {
+                            if (!rt6ApplyingId) {
+                                setRt6PreviewOpen(false)
+                                setRt6PreviewData(null)
+                            }
+                        }}
+                    />
+                    <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-fade-in">
+                        {/* Header */}
+                        <div className="bg-blue-50 border-b border-blue-100 px-6 py-4 flex justify-between items-start">
+                            <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200 bg-white text-blue-700">
+                                        RT6 (INFLACIÓN)
+                                    </span>
+                                    {rt6PreviewData.isAlreadyApplied && (
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                            YA APLICADO
+                                        </span>
+                                    )}
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-900">
+                                    Vista previa: Ajuste RT6
+                                </h3>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    Revisá los movimientos que se crearán antes de confirmar.
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    if (!rt6ApplyingId) {
+                                        setRt6PreviewOpen(false)
+                                        setRt6PreviewData(null)
+                                    }
+                                }}
+                                disabled={!!rt6ApplyingId}
+                                className="p-2 text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-50"
+                            >
+                                <X size={20} weight="bold" />
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
+                            {/* Entry Source Info */}
+                            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-2">
+                                    Asiento Origen
+                                </div>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <div className="font-semibold text-slate-900">
+                                            {rt6PreviewData.entry.memo || 'Ajuste por inflación'}
+                                        </div>
+                                        <div className="text-xs text-slate-500">
+                                            #{rt6PreviewData.entry.id.slice(0, 8)} · {formatDate(rt6PreviewData.entry.date)}
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className={`font-mono font-bold text-xl ${rt6PreviewData.adjustmentAmount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            {rt6PreviewData.adjustmentAmount >= 0 ? '+' : ''}{formatCurrency(rt6PreviewData.adjustmentAmount)}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400 uppercase">
+                                            Delta total
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Info message */}
+                            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start gap-3">
+                                <Info className="text-blue-600 mt-0.5 shrink-0" size={16} weight="fill" />
+                                <p className="text-xs text-blue-800">
+                                    <strong>Esto NO cambia cantidades.</strong> Actualiza la valuacion homogenea vinculada a RT6 Paso 2 por periodo de origen.
+                                </p>
+                            </div>
+
+                            {/* Unmatched origins warning */}
+                            {rt6PreviewData.plan.unmatchedOrigins.length > 0 && (
+                                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <WarningCircle className="text-red-600 shrink-0" size={16} weight="fill" />
+                                        <span className="text-xs font-bold text-red-800">Origenes sin match en inventario</span>
+                                    </div>
+                                    <ul className="text-xs text-red-700 space-y-1 ml-6">
+                                        {rt6PreviewData.plan.unmatchedOrigins.map((u, i) => (
+                                            <li key={i}>{u.label} ({u.accountCode}) — {formatCurrency(u.delta)}</li>
+                                        ))}
+                                    </ul>
+                                    <p className="text-[10px] text-red-500 mt-2">No se puede aplicar hasta resolver estos origenes.</p>
+                                </div>
+                            )}
+
+                            {/* Desglose por origen (Paso 2) */}
+                            <div>
+                                <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">
+                                    Desglose por origen — Paso 2 ({rt6PreviewData.plan.items.length} ajustes)
+                                </h4>
+                                <div className="space-y-4">
+                                    {(() => {
+                                        // Group items by originCategory + period
+                                        const groups = new Map<string, RT6ApplyPlanItem[]>()
+                                        for (const item of rt6PreviewData.plan.items) {
+                                            const key = `${item.originCategory}|${item.period}`
+                                            if (!groups.has(key)) groups.set(key, [])
+                                            groups.get(key)!.push(item)
+                                        }
+                                        const CATEGORY_LABELS: Record<OriginCategory, string> = {
+                                            EI: 'Existencia Inicial',
+                                            COMPRAS: 'Compras',
+                                            GASTOS_COMPRA: 'Gastos s/compra',
+                                            BONIF_COMPRA: 'Bonif s/compra',
+                                            DEVOL_COMPRA: 'Devol s/compra',
+                                        }
+                                        return Array.from(groups.entries()).map(([key, groupItems]) => {
+                                            const [cat, period] = key.split('|') as [OriginCategory, string]
+                                            const groupDelta = groupItems.reduce((s, i) => s + i.valueDelta, 0)
+                                            return (
+                                                <div key={key} className="border border-slate-200 rounded-lg overflow-hidden">
+                                                    <div className="bg-slate-50 px-3 py-2 flex justify-between items-center border-b border-slate-100">
+                                                        <span className="text-xs font-semibold text-slate-700">
+                                                            {CATEGORY_LABELS[cat]} — {period}
+                                                        </span>
+                                                        <span className={`font-mono text-xs font-bold ${groupDelta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                            {groupDelta >= 0 ? '+' : ''}{formatCurrency(groupDelta)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="divide-y divide-slate-100">
+                                                        {groupItems.map((item, idx) => {
+                                                            const prod = products.find(p => p.id === item.productId)
+                                                            return (
+                                                                <div key={idx} className="px-3 py-2 flex justify-between items-center">
+                                                                    <div>
+                                                                        <div className="text-sm text-slate-800">{prod?.name || 'Producto'}</div>
+                                                                        <div className="text-[10px] text-slate-400">
+                                                                            {item.targetMovementId ? `#${item.targetMovementId.slice(0, 8)}` : 'Apertura'} · Hist: {formatCurrency(item.historicalValue)}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className={`font-mono text-sm font-semibold ${item.valueDelta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                                        {item.valueDelta >= 0 ? '+' : ''}{formatCurrency(item.valueDelta)}
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )
+                                        })
+                                    })()}
+                                </div>
+
+                                {/* Total Control */}
+                                <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center">
+                                    <div>
+                                        <span className="text-sm font-medium text-slate-700">Total control</span>
+                                        {Math.abs(rt6PreviewData.plan.roundingDiff) > 0.01 && (
+                                            <span className="text-[10px] text-amber-500 ml-2">
+                                                Dif. redondeo: {formatCurrency(rt6PreviewData.plan.roundingDiff)}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className={`font-mono font-bold text-lg ${rt6PreviewData.plan.totalDeltaControl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {rt6PreviewData.plan.totalDeltaControl >= 0 ? '+' : ''}{formatCurrency(rt6PreviewData.plan.totalDeltaControl)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="border-t border-slate-200 px-6 py-4 flex justify-end gap-3 bg-slate-50">
+                            <button
+                                onClick={() => {
+                                    setRt6PreviewOpen(false)
+                                    setRt6PreviewData(null)
+                                }}
+                                disabled={!!rt6ApplyingId}
+                                className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-white disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleConfirmRT6Apply}
+                                disabled={!!rt6ApplyingId || rt6PreviewData.isAlreadyApplied || !rt6PreviewData.plan.isValid}
+                                className="px-6 py-2 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
+                            >
+                                {rt6ApplyingId ? (
+                                    <>Aplicando...</>
+                                ) : rt6PreviewData.isAlreadyApplied ? (
+                                    <>Ya aplicado</>
+                                ) : !rt6PreviewData.plan.isValid ? (
+                                    <>Origenes sin match</>
+                                ) : (
+                                    <><CheckCircle size={16} weight="fill" /> Confirmar y aplicar</>
+                                )}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 

@@ -47,6 +47,8 @@ interface EvolucionPNTabProps {
     /** Optional: show comparative */
     showComparative?: boolean
     comparativeYear?: number
+    periodStart?: string
+    periodEnd?: string
 }
 
 interface EditingCell {
@@ -66,6 +68,8 @@ export function EvolucionPNTab({
     empresaName,
     netIncomeFromER,
     pnFromBalance,
+    periodStart: propPeriodStart,
+    periodEnd: propPeriodEnd,
 }: EvolucionPNTabProps) {
     // State
     const [showDetail, setShowDetail] = useState(true)
@@ -77,9 +81,17 @@ export function EvolucionPNTab({
 
     const printRef = useRef<HTMLDivElement>(null)
 
-    // Compute period dates
-    const periodStart = `${fiscalYear - 1}-01-01`
-    const periodEnd = `${fiscalYear - 1}-12-31`
+    // Compute period dates (Default to PREVIOUS year if logic matches original, but better to follow passed dates)
+    // Original logic: periodStart = `${fiscalYear - 1}-01-01`
+    // If props are passed, use them.
+    const periodStart = propPeriodStart ?? `${fiscalYear - 1}-01-01`
+    const periodEnd = propPeriodEnd ?? `${fiscalYear - 1}-12-31`
+
+    // Format date for label
+    const formattedEndDate = useMemo(() => {
+        const [y, m, d] = periodEnd.split('-')
+        return `${d}/${m}/${y}`
+    }, [periodEnd])
 
     // Compute EEPN
     const eepnResult = useMemo<EEPNResult | null>(() => {
@@ -196,7 +208,7 @@ export function EvolucionPNTab({
                         <span>Comparativo</span>
                     </label>
                     <div className="eepn-divider" />
-                    <span className="eepn-period">Ejercicio {fiscalYear - 1}</span>
+                    <span className="eepn-period">Ejercicio finalizado {formattedEndDate}</span>
                 </div>
                 <div className="eepn-action-group">
                     {overrides.size > 0 && (
@@ -240,7 +252,7 @@ export function EvolucionPNTab({
             <div className="eepn-print-header" ref={printRef}>
                 <h1>Estado de Evolución del Patrimonio Neto</h1>
                 <p><strong>Razón Social:</strong> {empresaName}</p>
-                <p><strong>Ejercicio finalizado el:</strong> 31/12/{fiscalYear - 1}</p>
+                <p><strong>Ejercicio finalizado el:</strong> {formattedEndDate}</p>
                 <p><strong>Cifras expresadas en:</strong> Pesos Argentinos ($)</p>
             </div>
 

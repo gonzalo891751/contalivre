@@ -9,6 +9,14 @@ import type {
     BienesMovement,
     BienesSettings,
 } from '../core/inventario/types'
+import type {
+    FxAccount,
+    FxMovement,
+    FxDebt,
+    FxLiability,
+    FxSettings,
+    ExchangeRatesCache,
+} from '../core/monedaExtranjera/types'
 
 /**
  * Configuración de la aplicación
@@ -44,6 +52,13 @@ class ContableDatabase extends Dexie {
     bienesProducts!: EntityTable<BienesProduct, 'id'>
     bienesMovements!: EntityTable<BienesMovement, 'id'>
     bienesSettings!: EntityTable<BienesSettings, 'id'>
+    // Moneda Extranjera module
+    fxAccounts!: EntityTable<FxAccount, 'id'>
+    fxMovements!: EntityTable<FxMovement, 'id'>
+    fxDebts!: EntityTable<FxDebt, 'id'>
+    fxLiabilities!: EntityTable<FxLiability, 'id'>
+    fxSettings!: EntityTable<FxSettings, 'id'>
+    fxRatesCache!: EntityTable<ExchangeRatesCache, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -136,6 +151,49 @@ class ContableDatabase extends Dexie {
             bienesProducts: 'id, sku, category',
             bienesMovements: 'id, date, productId, type',
             bienesSettings: 'id',
+        })
+
+        // Version 7: Moneda Extranjera module
+        this.version(7).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
+        })
+
+        // Version 8: FX Debts (structured liabilities)
+        this.version(8).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxDebts: 'id, currency, creditor, createdAt, status, periodId, accountId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
         })
     }
 }

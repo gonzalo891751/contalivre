@@ -110,6 +110,134 @@ export function getSpecialAccount(accounts: Account[], type: 'RECPAM' | 'RXT' | 
 }
 
 // ============================================
+// normalSide resolution + sign helpers
+// ============================================
+
+/**
+ * Resolve the normalSide for any partida.
+ * Priority: explicit normalSide > accountKind > code prefix fallback.
+ */
+function resolveNormalSide(p: { normalSide?: string; accountKind?: string; cuentaCodigo?: string }): 'DEBIT' | 'CREDIT' {
+    if (p.normalSide === 'DEBIT' || p.normalSide === 'CREDIT') return p.normalSide;
+    if (p.accountKind === 'ASSET' || p.accountKind === 'EXPENSE') return 'DEBIT';
+    if (p.accountKind === 'LIABILITY' || p.accountKind === 'EQUITY' || p.accountKind === 'INCOME') return 'CREDIT';
+    // Fallback by code prefix
+    const code = p.cuentaCodigo || '';
+    if (code.startsWith('1.') || code.startsWith('5.')) return 'DEBIT';
+    return 'CREDIT'; // 2.x, 3.x, 4.x
+}
+
+/**
+ * Convert totalBase/totalHomog to normal-side amounts.
+ *
+ * Two conventions exist for totalBase:
+ *   - Regular accounts (no inventoryRole): totalBase is ALWAYS POSITIVE,
+ *     representing the balance on the account's normal side.
+ *     → originNormal = totalBase, homogNormal = totalHomog (already on normal side)
+ *
+ *   - Movement accounts (inventoryRole === 'periodic_movement'): totalBase
+ *     is SIGNED as (debit - credit). A CREDIT-normal movement account with
+ *     a positive balance has negative totalBase.
+ *     → originNormal = ns==='DEBIT' ? totalBase : -totalBase
+ */
+function toNormalSideAmounts(
+    totalBase: number,
+    totalHomog: number,
+    ns: 'DEBIT' | 'CREDIT',
+    isSignedMovement: boolean
+): { originNormal: number; homogNormal: number } {
+    if (isSignedMovement) {
+        return {
+            originNormal: ns === 'DEBIT' ? totalBase : -totalBase,
+            homogNormal: ns === 'DEBIT' ? totalHomog : -totalHomog,
+        };
+    }
+    // Regular: already positive on normal side
+    return { originNormal: totalBase, homogNormal: totalHomog };
+}
+
+/**
+ * Core delta calculation shared by RT6 adjustment helpers.
+ * Returns deltaNormal (positive = increase on normal side).
+ */
+function computeDeltaNormal(p: ComputedPartidaRT6): { ns: 'DEBIT' | 'CREDIT'; deltaNormal: number } {
+    const ns = resolveNormalSide(p);
+    const isSigned = p.inventoryRole === 'periodic_movement';
+    const { originNormal, homogNormal } = toNormalSideAmounts(p.totalBase, p.totalHomog, ns, isSigned);
+    const deltaNormal = round(homogNormal - originNormal);
+    return { ns, deltaNormal };
+}
+
+/**
+ * Determine which side (DEBE or HABER) the RT6 adjustment line should go to.
+ *
+ * deltaNormal > 0 → adjustment goes to NORMAL side
+ * deltaNormal < 0 → adjustment goes to OPPOSITE side
+ */
+function getAdjustmentSide(p: ComputedPartidaRT6): 'DEBE' | 'HABER' | null {
+    const { ns, deltaNormal } = computeDeltaNormal(p);
+    if (deltaNormal === 0) return null;
+    if (deltaNormal > 0) {
+        return ns === 'DEBIT' ? 'DEBE' : 'HABER';
+    }
+    return ns === 'DEBIT' ? 'HABER' : 'DEBE';
+}
+
+/**
+ * Compute the adjustment amount and side for an RT6 partida.
+ * Returns { debe, haber } for the account line.
+ */
+function computeRT6LineAmounts(p: ComputedPartidaRT6): { debe: number; haber: number } {
+    const { ns, deltaNormal } = computeDeltaNormal(p);
+    const amount = round(Math.abs(deltaNormal));
+    if (amount === 0) return { debe: 0, haber: 0 };
+
+    const goesToNormalSide = deltaNormal > 0;
+    const toDebe = (goesToNormalSide && ns === 'DEBIT') || (!goesToNormalSide && ns === 'CREDIT');
+    return {
+        debe: toDebe ? amount : 0,
+        haber: toDebe ? 0 : amount,
+    };
+}
+
+// ============================================
+// RT17 normalSide-aware sign helpers
+// ============================================
+
+/**
+ * Determine which side the RT17 adjustment line should go to.
+ * resTenencia is a signed value (valCorriente - baseReference).
+ * deltaNormal = ns==='DEBIT' ? resTenencia : -resTenencia
+ */
+function getRT17AdjustmentSide(p: ComputedPartidaRT17): 'DEBE' | 'HABER' | null {
+    const ns = resolveNormalSide(p);
+    const resTenencia = round(p.resTenencia);
+    if (resTenencia === 0) return null;
+    const deltaNormal = ns === 'DEBIT' ? resTenencia : -resTenencia;
+    if (deltaNormal > 0) {
+        return ns === 'DEBIT' ? 'DEBE' : 'HABER';
+    }
+    return ns === 'DEBIT' ? 'HABER' : 'DEBE';
+}
+
+/**
+ * Compute the adjustment amount and side for an RT17 partida.
+ */
+function computeRT17LineAmounts(p: ComputedPartidaRT17): { debe: number; haber: number } {
+    const ns = resolveNormalSide(p);
+    const resTenencia = round(p.resTenencia);
+    if (resTenencia === 0) return { debe: 0, haber: 0 };
+    const deltaNormal = ns === 'DEBIT' ? resTenencia : -resTenencia;
+    const amount = round(Math.abs(deltaNormal));
+    const goesToNormalSide = deltaNormal > 0;
+    const toDebe = (goesToNormalSide && ns === 'DEBIT') || (!goesToNormalSide && ns === 'CREDIT');
+    return {
+        debe: toDebe ? amount : 0,
+        haber: toDebe ? 0 : amount,
+    };
+}
+
+// ============================================
 // Main Generators
 // ============================================
 
@@ -126,9 +254,9 @@ export function generateCierreDrafts(
     const recpam = getSpecialAccount(allAccounts, 'RECPAM');
     const rxt = getSpecialAccount(allAccounts, 'RXT');
 
-    // 1. RT6 Positive (RECPAM credit)
+    // 1. RT6 Ganancia: lines that adjust in DEBE → RECPAM in HABER
     const rt6Pos = buildVoucher({
-        partidas: computedRT6.filter(p => round(p.totalRecpam) > 0),
+        partidas: computedRT6.filter(p => getAdjustmentSide(p) === 'DEBE'),
         type: 'RT6',
         direction: 'HABER',
         contraAcc: recpam,
@@ -136,9 +264,9 @@ export function generateCierreDrafts(
     });
     if (rt6Pos) vouchers.push({ ...rt6Pos, numero: vouchers.length + 1 });
 
-    // 2. RT6 Negative (RECPAM debit)
+    // 2. RT6 Perdida: lines that adjust in HABER → RECPAM in DEBE
     const rt6Neg = buildVoucher({
-        partidas: computedRT6.filter(p => round(p.totalRecpam) < 0),
+        partidas: computedRT6.filter(p => getAdjustmentSide(p) === 'HABER'),
         type: 'RT6',
         direction: 'DEBE',
         contraAcc: recpam,
@@ -146,9 +274,9 @@ export function generateCierreDrafts(
     });
     if (rt6Neg) vouchers.push({ ...rt6Neg, numero: vouchers.length + 1 });
 
-    // 3. RT17 Gains (RxT credit)
+    // 3. RT17 Ganancia: lines that adjust in DEBE → RxT in HABER
     const rt17Pos = buildVoucher({
-        partidas: computedRT17.filter(p => round(p.resTenencia) > 0),
+        partidas: computedRT17.filter(p => getRT17AdjustmentSide(p) === 'DEBE'),
         type: 'RT17',
         direction: 'HABER',
         contraAcc: rxt,
@@ -156,9 +284,9 @@ export function generateCierreDrafts(
     });
     if (rt17Pos) vouchers.push({ ...rt17Pos, numero: vouchers.length + 1 });
 
-    // 4. RT17 Losses (RxT debit)
+    // 4. RT17 Perdida: lines that adjust in HABER → RxT in DEBE
     const rt17Neg = buildVoucher({
-        partidas: computedRT17.filter(p => round(p.resTenencia) < 0),
+        partidas: computedRT17.filter(p => getRT17AdjustmentSide(p) === 'HABER'),
         type: 'RT17',
         direction: 'DEBE',
         contraAcc: rxt,
@@ -189,37 +317,49 @@ function buildVoucher(params: BuilderParams): AsientoBorrador | null {
     let hasCapitalRedirection = false;
 
     partidas.forEach(p => {
-        const val = type === 'RT6' ? (p as ComputedPartidaRT6).totalRecpam : (p as ComputedPartidaRT17).resTenencia;
-        const roundedVal = round(val);
-        if (roundedVal === 0) return;
-
         // Find exact account in plan
         const acc = allAccounts.find(a => a.code === p.cuentaCodigo);
 
         // Check if this is Capital Social - redirect to Ajuste de Capital
         const isCapitalSocial = isCapitalSocialAccount(p.cuentaCodigo, p.cuentaNombre);
 
+        // Compute debe/haber using normalSide-aware logic for RT6,
+        // or the original sign-based logic for RT17.
+        let debe: number;
+        let haber: number;
+
+        if (type === 'RT6') {
+            const amounts = computeRT6LineAmounts(p as ComputedPartidaRT6);
+            debe = amounts.debe;
+            haber = amounts.haber;
+        } else {
+            const amounts = computeRT17LineAmounts(p as ComputedPartidaRT17);
+            debe = amounts.debe;
+            haber = amounts.haber;
+        }
+
+        if (debe === 0 && haber === 0) return;
+
         if (isCapitalSocial) {
             hasCapitalRedirection = true;
-            // Use Ajuste de Capital account instead
             baseLines.push({
                 accountId: ajusteCapital.account.id,
                 cuentaCodigo: ajusteCapital.account.code,
                 cuentaNombre: ajusteCapital.account.name,
-                debe: roundedVal > 0 ? roundedVal : 0,
-                haber: roundedVal < 0 ? Math.abs(roundedVal) : 0,
+                debe,
+                haber,
             });
         } else {
             baseLines.push({
                 accountId: acc?.id,
                 cuentaCodigo: acc?.code || p.cuentaCodigo,
                 cuentaNombre: acc?.name || p.cuentaNombre,
-                debe: roundedVal > 0 ? roundedVal : 0,
-                haber: roundedVal < 0 ? Math.abs(roundedVal) : 0,
+                debe,
+                haber,
             });
         }
 
-        sumImpact += roundedVal;
+        sumImpact += (debe - haber);
     });
 
     if (baseLines.length === 0) return null;

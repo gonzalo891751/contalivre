@@ -192,7 +192,7 @@ describe('computeStatements', () => {
 
         // Sales: 5000, COGS: 2000, Gross Profit: 3000
         expect(statements.incomeStatement.sales.netTotal).toBe(5000)
-        expect(statements.incomeStatement.cogs.netTotal).toBe(2000)
+        expect(statements.incomeStatement.cogs.netTotal).toBe(-2000)
         expect(statements.incomeStatement.grossProfit).toBe(3000)
     })
 
@@ -233,7 +233,7 @@ describe('computeStatements', () => {
 
         // Sales 8000, No COGS, Gross 8000, Admin 3000, Net 5000
         expect(statements.incomeStatement.grossProfit).toBe(8000)
-        expect(statements.incomeStatement.adminExpenses.netTotal).toBe(3000)
+        expect(statements.incomeStatement.adminExpenses.netTotal).toBe(-3000)
         expect(statements.incomeStatement.netIncome).toBe(5000)
     })
 

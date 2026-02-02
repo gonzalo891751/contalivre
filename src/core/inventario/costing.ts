@@ -15,6 +15,24 @@ import type {
 } from './types'
 
 // ========================================
+// Inventariable Cost
+// ========================================
+
+/**
+ * Compute inventariable unit cost for a purchase movement.
+ * Includes: precio neto de bonificaciones + gastos sobre compras.
+ * Excludes: IVA, descuento financiero (goes to financial results).
+ */
+export function computeInventariableUnitCost(mov: BienesMovement): number {
+    if (mov.unitCost === undefined || mov.quantity <= 0) return 0
+    const bruto = mov.unitCost * mov.quantity
+    const bonif = mov.bonificacionAmount ?? (mov.bonificacionPct ? bruto * mov.bonificacionPct / 100 : 0)
+    const netoAfterBonif = bruto - bonif
+    const gastos = mov.gastosCompra ?? 0
+    return (netoAfterBonif + gastos) / mov.quantity
+}
+
+// ========================================
 // Cost Layer Management
 // ========================================
 
@@ -43,20 +61,114 @@ export function buildCostLayers(
         })
     }
 
+    const movementsById = new Map(sorted.map(m => [m.id, m]))
+
     // Process each movement
     for (const mov of sorted) {
-        if (mov.type === 'PURCHASE' && mov.unitCost !== undefined && mov.quantity > 0) {
-            // Add new layer for purchase
+        if (mov.type === 'PURCHASE' && !mov.isDevolucion && mov.unitCost !== undefined && mov.quantity > 0) {
+            // Inventariable cost = neto de bonificaciones + gastos s/compras (sin IVA, sin desc financiero)
+            const inventariableUnitCost = computeInventariableUnitCost(mov)
             layers.push({
                 date: mov.date,
                 quantity: mov.quantity,
-                unitCost: mov.unitCost,
+                unitCost: inventariableUnitCost,
                 movementId: mov.id,
             })
+        } else if (mov.type === 'PURCHASE' && mov.isDevolucion) {
+            // Purchase return: remove from layers (prefer original purchase)
+            const qtyToConsume = Math.abs(mov.quantity)
+            if (qtyToConsume > 0) {
+                const remaining = consumeFromTargetLayers(layers, qtyToConsume, mov.sourceMovementId)
+                if (remaining > 0) {
+                    consumeFromLayers(layers, remaining, method)
+                }
+            }
         } else if (mov.type === 'SALE' || (mov.type === 'ADJUSTMENT' && mov.quantity < 0)) {
             // Consume from layers based on method
-            const qtyToConsume = mov.type === 'SALE' ? mov.quantity : Math.abs(mov.quantity)
-            consumeFromLayers(layers, qtyToConsume, method)
+            if (mov.type === 'SALE' && mov.isDevolucion) {
+                // SALE RETURN: Restore to ORIGINAL layers (preserve FIFO date priority)
+                // DO NOT create new layers with return date - this breaks PEPS ordering
+                const qtyToReturn = Math.abs(mov.quantity)
+                if (qtyToReturn > 0) {
+                    const source = mov.sourceMovementId ? movementsById.get(mov.sourceMovementId) : undefined
+                    const sourceLayers = source?.costLayersUsed || []
+
+                    if (sourceLayers.length > 0 && source?.quantity) {
+                        // Restore proportionally to original layers used by the sale
+                        const sourceQty = Math.abs(source.quantity)
+                        const ratio = sourceQty > 0 ? qtyToReturn / sourceQty : 0
+
+                        sourceLayers.forEach(usedLayer => {
+                            const qtyToRestore = usedLayer.quantity * ratio
+                            if (qtyToRestore > 0) {
+                                // Find existing layer with same movementId to restore to
+                                const existingLayer = layers.find(l => l.movementId === usedLayer.movementId)
+
+                                if (existingLayer) {
+                                    // Layer still exists: add back the returned quantity
+                                    existingLayer.quantity += qtyToRestore
+                                } else {
+                                    // Layer was fully consumed: recreate with ORIGINAL date
+                                    // Get original purchase date from movement
+                                    const originalMov = movementsById.get(usedLayer.movementId)
+                                    const originalDate = originalMov?.date || mov.date // fallback to return date only if original not found
+
+                                    layers.push({
+                                        date: originalDate,
+                                        quantity: qtyToRestore,
+                                        unitCost: usedLayer.unitCost,
+                                        movementId: usedLayer.movementId,
+                                    })
+                                }
+                            }
+                        })
+                    } else if (mov.costUnitAssigned && qtyToReturn > 0) {
+                        // Fallback: no costLayersUsed, use sourceMovementId to find original layer
+                        const targetMovementId = mov.sourceMovementId || mov.id
+                        const existingLayer = layers.find(l => l.movementId === targetMovementId)
+
+                        if (existingLayer) {
+                            existingLayer.quantity += qtyToReturn
+                        } else {
+                            // Get original date from source movement
+                            const originalMov = mov.sourceMovementId ? movementsById.get(mov.sourceMovementId) : undefined
+                            const originalDate = originalMov?.date || mov.date
+
+                            layers.push({
+                                date: originalDate,
+                                quantity: qtyToReturn,
+                                unitCost: mov.costUnitAssigned,
+                                movementId: targetMovementId,
+                            })
+                        }
+                    } else if (qtyToReturn > 0) {
+                        // Last resort fallback: use average cost, try to find any existing layer
+                        const totalQty = layers.reduce((s, l) => s + l.quantity, 0)
+                        const avgCost = totalQty > 0
+                            ? layers.reduce((s, l) => s + l.quantity * l.unitCost, 0) / totalQty
+                            : 0
+                        if (avgCost > 0 && layers.length > 0) {
+                            // Add to oldest layer to maintain FIFO priority
+                            const oldestLayer = [...layers].sort((a, b) => a.date.localeCompare(b.date))[0]
+                            oldestLayer.quantity += qtyToReturn
+                        } else if (avgCost > 0) {
+                            // No layers exist, create one with original source date if available
+                            const originalMov = mov.sourceMovementId ? movementsById.get(mov.sourceMovementId) : undefined
+                            const originalDate = originalMov?.date || mov.date
+
+                            layers.push({
+                                date: originalDate,
+                                quantity: qtyToReturn,
+                                unitCost: avgCost,
+                                movementId: mov.sourceMovementId || mov.id,
+                            })
+                        }
+                    }
+                }
+            } else {
+                const qtyToConsume = mov.type === 'SALE' ? mov.quantity : Math.abs(mov.quantity)
+                consumeFromLayers(layers, qtyToConsume, method)
+            }
         } else if (mov.type === 'ADJUSTMENT' && mov.quantity > 0 && mov.unitCost !== undefined) {
             // Positive adjustment adds a layer
             layers.push({
@@ -65,6 +177,44 @@ export function buildCostLayers(
                 unitCost: mov.unitCost,
                 movementId: mov.id,
             })
+        } else if (mov.type === 'INITIAL_STOCK' && mov.quantity > 0 && mov.unitCost !== undefined) {
+            // P1: Existencia Inicial — crea capa igual que una compra
+            // Reemplaza la capa ficticia de 'opening' si existe del producto
+            const existingOpeningIdx = layers.findIndex(l => l.movementId === 'opening')
+            if (existingOpeningIdx >= 0) {
+                // Remove fake opening layer since we have a real INITIAL_STOCK movement
+                layers.splice(existingOpeningIdx, 1)
+            }
+            layers.push({
+                date: mov.date,
+                quantity: mov.quantity,
+                unitCost: mov.unitCost,
+                movementId: mov.id,
+            })
+        } else if (mov.type === 'VALUE_ADJUSTMENT') {
+            const affectsLayers = mov.adjustmentKind === 'RT6' || mov.adjustmentKind === 'CAPITALIZATION'
+            if (!affectsLayers) continue
+            // Value-only adjustment (RT6/capitalization): distribute across existing layers
+            const delta = mov.valueDelta ?? mov.subtotal ?? 0
+            if (delta !== 0) {
+                const bySource = mov.sourceMovementId
+                    ? layers.filter(l => l.movementId === mov.sourceMovementId && l.quantity > 0)
+                    : []
+                const targetLayers = bySource.length > 0 ? bySource : layers
+                const totalTargetQty = targetLayers.reduce((s, l) => s + l.quantity, 0)
+                if (totalTargetQty > 0) {
+                    // Distribute by remaining quantity in the targeted layers
+                    for (const layer of targetLayers) {
+                        const share = layer.quantity / totalTargetQty
+                        layer.unitCost += (delta * share) / layer.quantity
+                        // RT6 adjustments reexpress cost to closing currency
+                        // Mark layer to prevent double reexpression in valuation-homogenea
+                        if (mov.adjustmentKind === 'RT6') {
+                            layer.currencyBasis = 'CIERRE'
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -102,6 +252,23 @@ function consumeFromLayers(
     // PPP doesn't use layers for consumption - it uses average cost
 }
 
+function consumeFromTargetLayers(
+    layers: CostLayer[],
+    quantity: number,
+    movementId?: string
+): number {
+    if (!movementId) return quantity
+    let remaining = quantity
+    for (const layer of layers) {
+        if (remaining <= 0) break
+        if (layer.movementId !== movementId) continue
+        const consume = Math.min(layer.quantity, remaining)
+        layer.quantity -= consume
+        remaining -= consume
+    }
+    return remaining
+}
+
 // ========================================
 // Cost Calculation
 // ========================================
@@ -115,7 +282,7 @@ export function calculateExitCost(
     movements: BienesMovement[],
     exitQuantity: number,
     method: CostingMethod
-): { unitCost: number; totalCost: number; error?: string } {
+): { unitCost: number; totalCost: number; layersUsed?: { movementId: string; quantity: number; unitCost: number }[]; error?: string } {
     // Get current stock and valuation
     const valuation = calculateProductValuation(product, movements, method)
 
@@ -134,6 +301,7 @@ export function calculateExitCost(
         return {
             unitCost,
             totalCost: unitCost * exitQuantity,
+            layersUsed: exitQuantity > 0 ? [{ movementId: 'avg', quantity: exitQuantity, unitCost }] : [],
         }
     }
 
@@ -141,6 +309,7 @@ export function calculateExitCost(
     const layers = [...valuation.layers] // Clone to not mutate
     let remaining = exitQuantity
     let totalCost = 0
+    const layersUsed: { movementId: string; quantity: number; unitCost: number }[] = []
 
     if (method === 'FIFO') {
         // Consume from oldest first
@@ -148,6 +317,9 @@ export function calculateExitCost(
             if (remaining <= 0) break
             const consume = Math.min(layer.quantity, remaining)
             totalCost += consume * layer.unitCost
+            if (consume > 0) {
+                layersUsed.push({ movementId: layer.movementId, quantity: consume, unitCost: layer.unitCost })
+            }
             remaining -= consume
         }
     } else {
@@ -155,6 +327,9 @@ export function calculateExitCost(
         for (let i = layers.length - 1; i >= 0 && remaining > 0; i--) {
             const consume = Math.min(layers[i].quantity, remaining)
             totalCost += consume * layers[i].unitCost
+            if (consume > 0) {
+                layersUsed.push({ movementId: layers[i].movementId, quantity: consume, unitCost: layers[i].unitCost })
+            }
             remaining -= consume
         }
     }
@@ -162,6 +337,7 @@ export function calculateExitCost(
     return {
         unitCost: totalCost / exitQuantity,
         totalCost,
+        layersUsed,
     }
 }
 
@@ -180,16 +356,42 @@ export function calculateWeightedAverageCost(
         .filter(m => m.productId === product.id)
         .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
 
+    const movementsById = new Map(sorted.map(m => [m.id, m]))
+
     for (const mov of sorted) {
-        if (mov.type === 'PURCHASE' && mov.unitCost !== undefined) {
-            // Add to inventory
+        if (mov.type === 'PURCHASE' && mov.unitCost !== undefined && !mov.isDevolucion) {
+            // Add to inventory at inventariable cost (neto bonif + gastos)
+            const invUnitCost = computeInventariableUnitCost(mov)
             totalQty += mov.quantity
-            totalValue += mov.quantity * mov.unitCost
+            totalValue += mov.quantity * invUnitCost
+        } else if (mov.type === 'PURCHASE' && mov.isDevolucion) {
+            const qty = Math.abs(mov.quantity)
+            if (qty > 0 && mov.unitCost !== undefined) {
+                totalQty -= qty
+                totalValue -= qty * mov.unitCost
+            }
         } else if (mov.type === 'SALE') {
-            // Remove at current average cost
-            const avgCost = totalQty > 0 ? totalValue / totalQty : 0
-            totalQty -= mov.quantity
-            totalValue -= mov.quantity * avgCost
+            if (mov.isDevolucion) {
+                const qty = Math.abs(mov.quantity)
+                const source = mov.sourceMovementId ? movementsById.get(mov.sourceMovementId) : undefined
+                const sourceLayers = source?.costLayersUsed || []
+                const sourceQty = source?.quantity ? Math.abs(source.quantity) : 0
+                if (sourceLayers.length > 0 && sourceQty > 0) {
+                    const ratio = qty / sourceQty
+                    const returnedValue = sourceLayers.reduce((sum, layer) => sum + (layer.unitCost * layer.quantity * ratio), 0)
+                    totalQty += qty
+                    totalValue += returnedValue
+                } else {
+                    const unitCost = mov.costUnitAssigned || source?.costUnitAssigned || (totalQty > 0 ? totalValue / totalQty : 0)
+                    totalQty += qty
+                    totalValue += qty * unitCost
+                }
+            } else {
+                // Remove at current average cost
+                const avgCost = totalQty > 0 ? totalValue / totalQty : 0
+                totalQty -= mov.quantity
+                totalValue -= mov.quantity * avgCost
+            }
         } else if (mov.type === 'ADJUSTMENT') {
             if (mov.quantity > 0 && mov.unitCost !== undefined) {
                 totalQty += mov.quantity
@@ -198,6 +400,12 @@ export function calculateWeightedAverageCost(
                 const avgCost = totalQty > 0 ? totalValue / totalQty : 0
                 totalQty -= Math.abs(mov.quantity)
                 totalValue -= Math.abs(mov.quantity) * avgCost
+            }
+        } else if (mov.type === 'VALUE_ADJUSTMENT') {
+            const affectsValue = mov.adjustmentKind === 'RT6' || mov.adjustmentKind === 'CAPITALIZATION'
+            if (affectsValue) {
+                // Value-only adjustment (e.g., RT6 inflation): changes value, not quantity
+                totalValue += (mov.valueDelta ?? mov.subtotal ?? 0)
             }
         }
     }
@@ -224,11 +432,21 @@ export function calculateProductValuation(
     let currentStock = product.openingQty
     for (const mov of productMovements) {
         if (mov.type === 'PURCHASE') {
-            currentStock += mov.quantity
+            if (mov.isDevolucion) {
+                currentStock -= Math.abs(mov.quantity)
+            } else {
+                currentStock += mov.quantity
+            }
         } else if (mov.type === 'SALE') {
-            currentStock -= mov.quantity
+            if (mov.isDevolucion) {
+                currentStock += Math.abs(mov.quantity)
+            } else {
+                currentStock -= mov.quantity
+            }
         } else if (mov.type === 'ADJUSTMENT') {
             currentStock += mov.quantity // Can be negative
+        } else if (mov.type === 'VALUE_ADJUSTMENT') {
+            // No quantity change — value-only adjustment (RT6 inflation)
         } else if (mov.type === 'COUNT') {
             // Count sets the stock to the counted value
             // This is handled in closing, not here
@@ -293,7 +511,12 @@ export function calculateCMV(
         filteredMovements = filteredMovements.filter(m => m.date <= endDate)
     }
 
-    return filteredMovements.reduce((sum, m) => sum + m.costTotalAssigned, 0)
+    return filteredMovements.reduce((sum, m) => {
+        if (m.type === 'SALE' && m.isDevolucion) {
+            return sum - Math.abs(m.costTotalAssigned || 0)
+        }
+        return sum + (m.costTotalAssigned || 0)
+    }, 0)
 }
 
 /**
@@ -417,12 +640,46 @@ export function recalculateAllCosts(
 
     // Process each movement, recalculating costs for exits
     for (const mov of sorted) {
-        if (mov.type === 'SALE' || (mov.type === 'ADJUSTMENT' && mov.quantity < 0)) {
+        if (mov.type === 'SALE' && mov.isDevolucion) {
+            const product = products.find(p => p.id === mov.productId)
+            if (product) {
+                const qty = Math.abs(mov.quantity)
+                const priorMovements = result.filter(m => m.productId === mov.productId)
+                const source = mov.sourceMovementId
+                    ? priorMovements.find(m => m.id === mov.sourceMovementId)
+                    : undefined
+                let costUnitAssigned = 0
+                let costTotalAssigned = 0
+                if (source?.costLayersUsed && source.costLayersUsed.length > 0) {
+                    const sourceQty = Math.abs(source.quantity || 0)
+                    const ratio = sourceQty > 0 ? qty / sourceQty : 0
+                    costTotalAssigned = source.costLayersUsed.reduce((sum, layer) => sum + (layer.unitCost * layer.quantity * ratio), 0)
+                    costUnitAssigned = qty > 0 ? costTotalAssigned / qty : 0
+                } else if (source?.costUnitAssigned) {
+                    costUnitAssigned = source.costUnitAssigned
+                    costTotalAssigned = costUnitAssigned * qty
+                } else {
+                    const valuation = calculateProductValuation(product, priorMovements, newMethod)
+                    costUnitAssigned = valuation.averageCost
+                    costTotalAssigned = costUnitAssigned * qty
+                }
+                result.push({
+                    ...mov,
+                    costMethod: newMethod,
+                    costUnitAssigned,
+                    costTotalAssigned,
+                    costLayersUsed: undefined,
+                    updatedAt: new Date().toISOString(),
+                })
+            } else {
+                result.push(mov)
+            }
+        } else if (mov.type === 'SALE' || (mov.type === 'ADJUSTMENT' && mov.quantity < 0)) {
             const product = products.find(p => p.id === mov.productId)
             if (product) {
                 const qty = mov.type === 'SALE' ? mov.quantity : Math.abs(mov.quantity)
                 // Calculate cost based on movements processed so far
-                const { unitCost, totalCost } = calculateExitCost(
+                const { unitCost, totalCost, layersUsed } = calculateExitCost(
                     product,
                     result.filter(m => m.productId === mov.productId),
                     qty,
@@ -433,6 +690,7 @@ export function recalculateAllCosts(
                     costMethod: newMethod,
                     costUnitAssigned: unitCost,
                     costTotalAssigned: totalCost,
+                    costLayersUsed: mov.type === 'SALE' ? layersUsed : undefined,
                     updatedAt: new Date().toISOString(),
                 })
             } else {

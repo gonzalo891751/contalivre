@@ -21,9 +21,11 @@ export type TipoMovimiento = 'ENTRADA' | 'SALIDA' | 'AJUSTE'
 export type ClosingStatus = 'DRAFT' | 'POSTED' | 'REVERSED'
 
 /**
- * Inventory mode (only PERIODIC in MVP)
+ * Inventory mode
+ * PERIODIC = Diferencias de inventario (CMV al cierre)
+ * PERMANENT = Inventario permanente (CMV en cada venta)
  */
-export type InventoryMode = 'PERIODIC'
+export type InventoryMode = 'PERIODIC' | 'PERMANENT'
 
 // ========================================
 // Product & Movement Types (Tab A)
@@ -154,6 +156,15 @@ export type AccountMappingKey =
     | 'ivaCF'
     | 'ivaDF'
     | 'diferenciaInventario'
+    | 'aperturaInventario'
+    | 'descuentosObtenidos'
+    | 'descuentosOtorgados'
+    // Percepciones / Retenciones
+    | 'percepcionIVASufrida'       // Activo: percepción IVA pagada en compras (1.1.03.08)
+    | 'percepcionIVAPracticada'    // Pasivo: percepción IVA cobrada en ventas (2.1.03.06)
+    | 'percepcionIIBBSufrida'     // Activo: percepción IIBB pagada en compras (1.1.03.02 fallback)
+    | 'retencionSufrida'          // Activo: retención sufrida en ventas (1.1.03.07)
+    | 'retencionPracticada'       // Pasivo: retención practicada en compras (2.1.03.03)
 
 /**
  * Module configuration
@@ -268,16 +279,25 @@ export const DEFAULT_ACCOUNT_CODES: Record<AccountMappingKey, string> = {
     mercaderias: '1.1.04.01',
     cmv: '5.1.01',
     variacionExistencias: '5.1.99',
-    compras: '5.1.03',
-    gastosCompras: '5.1.04',
-    bonifCompras: '5.1.05',
-    devolCompras: '5.1.06',
+    compras: '4.8.01',
+    gastosCompras: '4.8.02',
+    bonifCompras: '4.8.03',
+    devolCompras: '4.8.04',
     ventas: '4.1.01',
-    bonifVentas: '4.1.03',
-    devolVentas: '4.1.04',
+    bonifVentas: '4.8.05',
+    devolVentas: '4.8.06',
     ivaCF: '1.1.03.01',
     ivaDF: '2.1.03.01',
     diferenciaInventario: '4.3.02',
+    aperturaInventario: '3.2.01',
+    descuentosObtenidos: '4.6.09',
+    descuentosOtorgados: '4.2.01',
+    // Percepciones / Retenciones
+    percepcionIVASufrida: '1.1.03.08',
+    percepcionIVAPracticada: '2.1.03.06',
+    percepcionIIBBSufrida: '1.1.03.02',
+    retencionSufrida: '1.1.03.07',
+    retencionPracticada: '2.1.03.03',
 }
 
 // ========================================
@@ -292,7 +312,25 @@ export type CostingMethod = 'FIFO' | 'LIFO' | 'PPP'
 /**
  * Movement type for bienes de cambio (extended)
  */
-export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT'
+export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT' | 'VALUE_ADJUSTMENT' | 'INITIAL_STOCK' | 'PAYMENT'
+
+/**
+ * Payment direction for PAYMENT movements (cobro/pago posteriores)
+ */
+export type PaymentDirection = 'COBRO' | 'PAGO'
+
+/**
+ * Sub-classification for VALUE_ADJUSTMENT movements.
+ * Distinguishes the origin so journal generation and UI labels are correct.
+ */
+export type AdjustmentKind =
+    | 'RT6'
+    | 'CAPITALIZATION'
+    | 'BONUS_PURCHASE'
+    | 'BONUS_SALE'
+    | 'DISCOUNT_PURCHASE'
+    | 'DISCOUNT_SALE'
+    | 'OTHER'
 
 /**
  * Journal integration status for inventory movements
@@ -303,6 +341,33 @@ export type JournalStatus = 'generated' | 'linked' | 'none' | 'error' | 'missing
  * IVA rate for Argentina
  */
 export type IVARate = 21 | 10.5 | 0
+
+/**
+ * Tax line for additional taxes (percepciones, retenciones, impuestos internos)
+ * Used in purchase/sale movements for Argentine tax regimes.
+ */
+export type TaxLineKind = 'PERCEPCION' | 'RETENCION' | 'IMPUESTO_INTERNO'
+export type TaxType = 'IVA' | 'IIBB' | 'GANANCIAS' | 'SUSS' | 'OTRO'
+
+/**
+ * Calculation mode for tax lines
+ * - AMOUNT: fixed amount entered manually
+ * - PERCENT: calculated as percentage of a base (NETO or IVA)
+ */
+export type TaxCalcMode = 'AMOUNT' | 'PERCENT'
+export type TaxCalcBase = 'NETO' | 'IVA'
+
+export interface TaxLine {
+    id: string
+    kind: TaxLineKind
+    taxType: TaxType
+    amount: number
+    accountId?: string  // Optional override: specific account for this tax line
+    // Calculation mode (optional, backward compatible - defaults to AMOUNT if missing)
+    calcMode?: TaxCalcMode
+    rate?: number       // Percentage rate (e.g., 3 for 3%)
+    base?: TaxCalcBase  // Base for percentage calculation
+}
 
 /**
  * Product category
@@ -336,6 +401,13 @@ export interface BienesProduct {
 }
 
 /**
+ * Currency basis for cost layers (RT6/RECPAM)
+ * - 'HIST': Historical cost (original purchase value)
+ * - 'CIERRE': Already reexpressed to closing currency (post RT6 adjustment)
+ */
+export type CurrencyBasis = 'HIST' | 'CIERRE'
+
+/**
  * Cost layer for FIFO/LIFO tracking
  */
 export interface CostLayer {
@@ -343,6 +415,13 @@ export interface CostLayer {
     quantity: number               // Remaining quantity in layer
     unitCost: number               // Unit cost of this layer
     movementId: string             // Reference to original purchase movement
+    /**
+     * Currency basis of the unitCost:
+     * - 'HIST' (default): Historical cost, needs reexpression for homogeneous valuation
+     * - 'CIERRE': Already reexpressed to closing currency (via RT6 VALUE_ADJUSTMENT)
+     *            When 'CIERRE', valuation-homogenea uses coef=1 to avoid double reexpression
+     */
+    currencyBasis?: CurrencyBasis
 }
 
 /**
@@ -363,14 +442,44 @@ export interface BienesMovement {
     ivaRate: IVARate
     ivaAmount: number              // Calculated IVA
     subtotal: number               // quantity * (unitCost or unitPrice)
-    total: number                  // subtotal + ivaAmount
+    total: number                  // subtotal + ivaAmount (+ taxes if present)
+    // Impuestos adicionales (percepciones, retenciones, etc.)
+    taxes?: TaxLine[]              // Optional: additional tax lines (backward compatible)
+    discriminarIVA?: boolean       // Purchase only: true (default) = IVA goes to CF; false = IVA as cost
     // Costing (calculated at save time)
     costMethod: CostingMethod      // Snapshot of method at transaction time
     costUnitAssigned: number       // Assigned cost per unit (for SALE/ADJUSTMENT)
     costTotalAssigned: number      // Total cost assigned (for CMV calculation)
+    costLayersUsed?: {             // Layers consumed (for SALE, FIFO/LIFO)
+        movementId: string
+        quantity: number
+        unitCost: number
+    }[]
+    // Bonificaciones, descuentos, gastos (optional)
+    bonificacionPct?: number       // % commercial discount (reduces base price)
+    bonificacionAmount?: number    // $ calculated bonificación
+    descuentoFinancieroPct?: number // % financial discount (goes to financial result)
+    descuentoFinancieroAmount?: number // $ calculated descuento
+    gastosCompra?: number          // $ purchase expenses (freight, insurance, etc.)
+    isDevolucion?: boolean         // True if this is a return (purchase return / sale return)
+    // VALUE_ADJUSTMENT sub-classification
+    adjustmentKind?: AdjustmentKind // 'RT6' | 'CAPITALIZATION' | 'OTHER' — required for VALUE_ADJUSTMENT
+    // RT6 inflation adjustment (VALUE_ADJUSTMENT only)
+    valueDelta?: number            // $ change in valuation (positive = increase, negative = decrease)
+    rt6Period?: string             // YYYY-MM period of the RT6 adjustment
+    rt6SourceEntryId?: string      // Journal entry ID of the RT6 asiento that originated this
+    originCategory?: 'EI' | 'COMPRAS' | 'GASTOS_COMPRA' | 'BONIF_COMPRA' | 'DEVOL_COMPRA'  // RT6 origin category for cierre breakdown
+    sourceMovementId?: string      // Optional: purchase movement to target cost layers (capitalization)
+    // P2: Payment (cobro/pago posterior)
+    paymentDirection?: PaymentDirection  // COBRO (cliente) or PAGO (proveedor) — only for type=PAYMENT
     // Additional info
     counterparty?: string          // Supplier name (PURCHASE) or Customer (SALE)
     paymentMethod?: string         // Efectivo, Cuenta Corriente, etc.
+    paymentSplits?: {              // Multiple payments/counterparties
+        accountId: string
+        amount: number
+        method?: string
+    }[]
     notes?: string
     reference?: string             // Invoice number, receipt, etc.
     // For Etapa 2: Journal integration
@@ -392,9 +501,15 @@ export interface BienesSettings {
     costMethodLocked: boolean      // True if there are exits (sales/adjustments)
     allowNegativeStock: boolean
     defaultIVARate: IVARate
+    // Inventory mode: PERMANENT (CMV on each sale) vs PERIODIC (CMV at close)
+    inventoryMode: InventoryMode
+    // Auto-generate journal entries for movements (default true)
+    autoJournalEntries: boolean
     // Account mappings (for Etapa 2)
     accountMappings: Partial<Record<AccountMappingKey, string>>
     periodGoals?: Record<string, { salesTarget?: number; marginTarget?: number }>
+    // Date for opening balance calculation (optional, defaults to auto logic)
+    openingBalanceDate?: string
     lastUpdated: string
 }
 
@@ -488,6 +603,8 @@ export function createDefaultBienesSettings(): BienesSettings {
         costMethodLocked: false,
         allowNegativeStock: false,
         defaultIVARate: 21,
+        inventoryMode: 'PERMANENT',
+        autoJournalEntries: true,
         accountMappings: {},
         periodGoals: {},
         lastUpdated: new Date().toISOString(),

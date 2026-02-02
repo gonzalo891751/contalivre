@@ -13,6 +13,7 @@ interface AccountSearchSelectProps {
     placeholder?: string
     filter?: (account: Account) => boolean
     onAccountSelected?: () => void
+    inputClassName?: string
 }
 
 export interface AccountSearchSelectRef {
@@ -26,6 +27,7 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
     placeholder = 'Buscar cuenta...',
     filter,
     onAccountSelected,
+    inputClassName = 'h-11',
 }, ref) => {
     const [isOpen, setIsOpen] = useState(false)
     const [search, setSearch] = useState('')
@@ -185,7 +187,7 @@ const AccountSearchSelect = forwardRef<AccountSearchSelectRef, AccountSearchSele
             <input
                 ref={inputRef}
                 type="text"
-                className="form-input w-full h-11 truncate placeholder:text-slate-400"
+                className={`form-input w-full truncate placeholder:text-slate-400 ${inputClassName}`}
                 placeholder={placeholder}
                 value={isOpen ? search : displayValue}
                 onChange={(e) => {

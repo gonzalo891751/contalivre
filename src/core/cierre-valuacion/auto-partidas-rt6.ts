@@ -19,6 +19,50 @@ import { getAccountMetadata } from './classification';
 import { getPeriodFromDate } from './calc';
 import { generateId } from './types';
 
+const normalizeText = (value: string) =>
+    value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+const MOVIMIENTO_BIENES_CAMBIO_CODES = ['4.8.01', '4.8.02', '4.8.03', '4.8.04'];
+
+const normalizeMovementName = (value: string) =>
+    normalizeText(value).replace(/[./\\-]/g, ' ').replace(/\s+/g, ' ').trim();
+
+export const isMovimientoBienesDeCambio = (account: Account): boolean => {
+    const code = (account.code || '').trim();
+    if (MOVIMIENTO_BIENES_CAMBIO_CODES.some(prefix => code.startsWith(prefix))) {
+        return true;
+    }
+
+    const name = normalizeMovementName(account.name || '');
+    if (!name) return false;
+
+    const hasVentas = /\bventa(s)?\b/.test(name);
+    if (hasVentas) return false;
+
+    const hasCompras = /\bcompra(s)?\b/.test(name);
+    if (!hasCompras) return false;
+
+    if (/\bcompras\b/.test(name)) return true;
+
+    const hasGastos = /\bgasto(s)?\b/.test(name);
+    const hasBonificaciones = /\bbonificacion(es)?\b/.test(name);
+    const hasDevoluciones = /\bdevolucion(es)?\b/.test(name);
+
+    return hasCompras && (hasGastos || hasBonificaciones || hasDevoluciones);
+};
+
+/**
+ * Check if a movement is an RT6 adjustment entry (RECPAM/Inflation Adjustment)
+ * Used to prevent these entries from being treated as new origins.
+ */
+function isRT6AdjustmentMovement(movement: LedgerMovement): boolean {
+    const text = normalizeText((movement.memo || '') + ' ' + (movement.description || ''));
+    // Check for standard RT6 memos
+    // "Ajuste por inflacion" (normalized) covers "Ajuste por inflación"
+    // "RECPAM"
+    return /ajuste por inflacion|recpam/.test(text);
+}
+
 /**
  * Options for auto-generation
  */
@@ -31,6 +75,8 @@ export interface AutoGenerateOptions {
     groupByMonth?: boolean;
     /** Minimum lot amount to include (filter noise) */
     minLotAmount?: number;
+    /** Account IDs that are periodic inventory movement accounts (compras, bonif, devol) */
+    periodicMovementAccountIds?: Set<string>;
 }
 
 /**
@@ -70,7 +116,7 @@ export function autoGeneratePartidasRT6(
     overrides: Record<string, AccountOverride>,
     options: AutoGenerateOptions
 ): AutoGenerateResult {
-    const { startOfPeriod, closingDate, groupByMonth = true, minLotAmount = 0 } = options;
+    const { startOfPeriod, closingDate, groupByMonth = true, minLotAmount = 0, periodicMovementAccountIds } = options;
 
     const partidas: PartidaRT6[] = [];
     const stats = {
@@ -108,12 +154,14 @@ export function autoGeneratePartidasRT6(
         stats.nonMonetaryAccounts++;
 
         // Get balance
-        const balance = ledgerBalances.get(account.id);
+        let balance = ledgerBalances.get(account.id);
 
         // Determine account grupo for special handling
         const accountGrupo = getAccountType(account);
         const isPNAccount = accountGrupo === 'PN';
         const isResultadosAccount = accountGrupo === 'RESULTADOS';
+        const isMovimientoBC =
+            (periodicMovementAccountIds?.has(account.id) ?? false) || isMovimientoBienesDeCambio(account);
 
         // Track PN and RESULTADOS counts
         if (isPNAccount) stats.pnAccounts++;
@@ -128,12 +176,9 @@ export function autoGeneratePartidasRT6(
         // Some RESULTADOS accounts end with balance 0 due to refundición/cierre,
         // but still have meaningful activity in the period.
         const normalSide = getEffectiveNormalSide(account);
-        const hasPeriodActivity = hasPeriodActivityForAccount(
-            balance.movements,
-            startOfPeriod,
-            closingDate,
-            normalSide
-        );
+        const hasPeriodActivity = isMovimientoBC
+            ? hasPeriodMovementActivity(balance.movements, startOfPeriod, closingDate)
+            : hasPeriodActivityForAccount(balance.movements, startOfPeriod, closingDate, normalSide);
 
         // For non-PN accounts, skip if balance is zero
         // For PN accounts, we include them even with zero current-period balance
@@ -145,18 +190,31 @@ export function autoGeneratePartidasRT6(
         }
 
         // Generate partida
-        const partida = generatePartidaForAccount(
-            account,
-            balance,
-            startOfPeriod,
-            closingDate,
-            overrides,
-            finalClass,
-            groupByMonth,
-            minLotAmount
-        );
+        const partida = isMovimientoBC
+            ? generateMovimientoBienesDeCambioPartida(
+                account,
+                balance,
+                startOfPeriod,
+                closingDate,
+                finalClass,
+                minLotAmount
+            )
+            : generatePartidaForAccount(
+                account,
+                balance,
+                startOfPeriod,
+                closingDate,
+                overrides,
+                finalClass,
+                groupByMonth,
+                minLotAmount
+            );
 
         if (partida && partida.items.length > 0) {
+            // Tag periodic inventory movement accounts
+            if (isMovimientoBC) {
+                partida.inventoryRole = 'periodic_movement';
+            }
             partidas.push(partida);
             stats.partidasGenerated++;
             stats.lotsGenerated += partida.items.length;
@@ -177,7 +235,8 @@ function generatePartidaForAccount(
     overrides: Record<string, AccountOverride>,
     finalClass: MonetaryClass,
     groupByMonth: boolean,
-    minLotAmount: number
+    minLotAmount: number,
+    extraLots?: LotRT6[]
 ): PartidaRT6 | null {
     const lots: LotRT6[] = [];
     const accountGrupo = getAccountType(account);
@@ -195,8 +254,10 @@ function generatePartidaForAccount(
         });
     } else {
         // Auto-generate lots from movements
+        // Filter out ALL RT6 adjustments (manual or auto) to avoid treating them as new origins
+        const filteredMovements = balance.movements.filter(m => !isRT6AdjustmentMovement(m));
         const generatedLots = generateLotsFromMovements(
-            balance.movements,
+            filteredMovements,
             startOfPeriod,
             closingDate,
             groupByMonth,
@@ -216,6 +277,10 @@ function generatePartidaForAccount(
                 notas: 'Saldo acumulado historico (PN)',
             });
         }
+    }
+
+    if (extraLots && extraLots.length > 0) {
+        lots.push(...extraLots);
     }
 
     if (lots.length === 0) {
@@ -247,6 +312,48 @@ function generatePartidaForAccount(
     };
 }
 
+function generateMovimientoBienesDeCambioPartida(
+    account: Account,
+    balance: AccountBalance,
+    startOfPeriod: string,
+    closingDate: string,
+    finalClass: MonetaryClass,
+    minLotAmount: number
+): PartidaRT6 | null {
+    const notesLabel = `${account.code} ${account.name}`.trim();
+    // Filter out ALL RT6 adjustments (manual or auto) to avoid treating them as new origins
+    const filteredMovements = balance.movements.filter(m => !isRT6AdjustmentMovement(m));
+    const lots = generateMovimientoBienesDeCambioLots(
+        filteredMovements,
+        startOfPeriod,
+        closingDate,
+        minLotAmount,
+        notesLabel
+    );
+
+    if (lots.length === 0) {
+        return null;
+    }
+
+    const rubroLabel = 'Bienes de cambio';
+    const rubro: RubroType = 'Mercaderias';
+    const profileType = resolveProfileType(account, finalClass, rubroLabel);
+
+    return {
+        id: generateId(),
+        rubro,
+        grupo: 'ACTIVO',
+        rubroLabel,
+        cuentaCodigo: account.code,
+        cuentaNombre: account.name,
+        items: lots,
+        profileType,
+        accountId: account.id,
+        normalSide: getEffectiveNormalSide(account),
+        accountKind: account.kind,
+    };
+}
+
 /**
  * Generate lots from ledger movements
  *
@@ -258,15 +365,28 @@ function generatePartidaForAccount(
  *    - Create one lot per month with sum of debits
  * 4. Use first movement date of each month as origin date
  */
+type LotGenerationOptions = {
+    sumMode?: 'increase' | 'net';
+    includeOpeningBalance?: boolean;
+    notesLabel?: string;
+};
+
 function generateLotsFromMovements(
     movements: LedgerMovement[],
     startOfPeriod: string,
     closingDate: string,
     groupByMonth: boolean,
     minLotAmount: number,
-    normalSide: 'DEBIT' | 'CREDIT'
+    normalSide: 'DEBIT' | 'CREDIT',
+    options?: LotGenerationOptions
 ): LotRT6[] {
     const lots: LotRT6[] = [];
+    const sumMode = options?.sumMode ?? 'increase';
+    const includeOpeningBalance = options?.includeOpeningBalance ?? true;
+    const notesLabel = options?.notesLabel;
+
+    const getAmount = (movement: LedgerMovement) =>
+        sumMode === 'net' ? movement.debit - movement.credit : getIncreaseAmount(movement, normalSide);
 
     // Separate opening and period movements
     const openingMovements = movements.filter(m => m.date < startOfPeriod);
@@ -275,7 +395,7 @@ function generateLotsFromMovements(
     );
 
     // 1. Opening balance (if exists)
-    if (openingMovements.length > 0) {
+    if (includeOpeningBalance && openingMovements.length > 0) {
         const lastOpeningMovement = openingMovements[openingMovements.length - 1];
         const openingBalance = Math.abs(lastOpeningMovement.balance);
 
@@ -297,34 +417,98 @@ function generateLotsFromMovements(
         for (const [month, monthMovements] of monthlyGroups) {
             // Sum "increases" according to the account's natural balance side.
             // This keeps RESULTADOS and PN coherent (credit-side accounts increase on credit).
-            const totalIncrease = monthMovements.reduce(
-                (sum, m) => sum + getIncreaseAmount(m, normalSide),
+            const totalAmount = monthMovements.reduce(
+                (sum, m) => sum + getAmount(m),
                 0
             );
+            const shouldInclude = sumMode === 'net'
+                ? Math.abs(totalAmount) >= minLotAmount && Math.abs(totalAmount) > 0
+                : totalAmount >= minLotAmount;
 
-            if (totalIncrease >= minLotAmount) {
+            if (shouldInclude) {
                 const firstDate = monthMovements[0].date;
+                const baseNote = notesLabel ? `${notesLabel} ${month}` : `Compras del mes ${month}`;
                 lots.push({
                     id: generateId(),
                     fechaOrigen: firstDate,
-                    importeBase: totalIncrease,
-                    notas: `Compras del mes ${month} (${monthMovements.length} mov.)`,
+                    importeBase: totalAmount,
+                    notas: `${baseNote} (${monthMovements.length} mov.)`,
                 });
             }
         }
     } else {
         // Individual lots for each increase movement
         for (const movement of periodMovements) {
-            const increase = getIncreaseAmount(movement, normalSide);
-            if (increase >= minLotAmount) {
+            const amount = getAmount(movement);
+            const shouldInclude = sumMode === 'net'
+                ? Math.abs(amount) >= minLotAmount && Math.abs(amount) > 0
+                : amount >= minLotAmount;
+            if (shouldInclude) {
                 lots.push({
                     id: generateId(),
                     fechaOrigen: movement.date,
-                    importeBase: increase,
-                    notas: movement.memo || movement.description,
+                    importeBase: amount,
+                    notas: notesLabel ? `${notesLabel} ${movement.date}` : (movement.memo || movement.description),
                 });
             }
         }
+    }
+
+    return lots;
+}
+
+function generateMovimientoBienesDeCambioLots(
+    movements: LedgerMovement[],
+    startOfPeriod: string,
+    closingDate: string,
+    minLotAmount: number,
+    notesLabel?: string
+): LotRT6[] {
+    const lots: LotRT6[] = [];
+    const periodMovements = movements.filter(
+        m => m.date >= startOfPeriod && m.date <= closingDate
+    );
+
+    const monthlyGroups = new Map<
+        string,
+        { debit: number; credit: number; firstDate: string; count: number }
+    >();
+
+    for (const movement of periodMovements) {
+        const month = getPeriodFromDate(movement.date);
+        if (!month) continue;
+
+        const group = monthlyGroups.get(month) ?? {
+            debit: 0,
+            credit: 0,
+            firstDate: movement.date,
+            count: 0,
+        };
+
+        group.debit += movement.debit;
+        group.credit += movement.credit;
+        group.count += 1;
+        if (movement.date < group.firstDate) {
+            group.firstDate = movement.date;
+        }
+
+        monthlyGroups.set(month, group);
+    }
+
+    const sorted = Array.from(monthlyGroups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [month, totals] of sorted) {
+        const net = totals.debit - totals.credit;
+        const hasActivity = totals.debit !== 0 || totals.credit !== 0;
+        if (!hasActivity) continue;
+        if (minLotAmount > 0 && Math.abs(net) < minLotAmount) continue;
+
+        const baseNote = notesLabel ? `${notesLabel} ${month}` : `Movimiento ${month}`;
+        lots.push({
+            id: generateId(),
+            fechaOrigen: totals.firstDate,
+            importeBase: net,
+            notas: `${baseNote} (${totals.count} mov.)`,
+        });
     }
 
     return lots;
@@ -359,6 +543,19 @@ function groupMovementsByMonth(
  */
 function getIncreaseAmount(movement: LedgerMovement, normalSide: 'DEBIT' | 'CREDIT'): number {
     return normalSide === 'DEBIT' ? movement.debit : movement.credit;
+}
+
+function hasPeriodMovementActivity(
+    movements: LedgerMovement[],
+    startOfPeriod: string,
+    closingDate: string
+): boolean {
+    return movements.some(
+        m =>
+            m.date >= startOfPeriod &&
+            m.date <= closingDate &&
+            (m.debit !== 0 || m.credit !== 0)
+    );
 }
 
 /**

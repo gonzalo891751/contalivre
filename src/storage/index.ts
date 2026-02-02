@@ -3,7 +3,7 @@ export { db, generateId, cleanupDuplicateAccounts, hasDuplicateCodes } from './d
 export type { Settings } from './db'
 
 // Seed data
-export { loadSeedDataIfNeeded, resetDatabase, getAccountsByKind, getAccountTree, getChildAccounts } from './seed'
+export { loadSeedDataIfNeeded, resetDatabase, getAccountsByKind, getAccountTree, getChildAccounts, repairDefaultFxAccounts, repairEquityAccounts } from './seed'
 
 // Accounts CRUD
 export {
@@ -109,5 +109,68 @@ export {
     // Queries
     getProductsWithLowStock,
     getAllBienesSKUs,
+    // Periodic Closing
+    hasPeriodicClosingEntries,
+    generatePeriodicClosingJournalEntries,
 } from './bienes'
+
+// Moneda Extranjera
+export {
+    // Settings
+    loadFxSettings,
+    saveFxSettings,
+    // Mapping
+    // (separado para smart mapping P0)
+    // Accounts
+    getAllFxAccounts,
+    getFxAccountsByType,
+    getFxAccountById,
+    createFxAccount,
+    updateFxAccount,
+    deleteFxAccount,
+    // Movements
+    getAllFxMovements,
+    getFxMovementsByAccount,
+    createFxMovement,
+    updateFxMovementWithJournal,
+    generateJournalForFxMovement,
+    linkFxMovementToEntries,
+    markFxMovementAsNonAccounting,
+    deleteFxMovementWithJournal,
+    // Preview
+    previewFxMovementJournal,
+    // FIFO
+    calculateFIFOCost,
+    // Reconciliation
+    reconcileFxJournalLinks,
+    findOrphanFxEntries,
+    getReconciliationData,
+    // Liabilities
+    getAllFxDebts,
+    getFxDebtById,
+    createFxDebt,
+    updateFxDebt,
+    deleteFxDebt,
+    addFxDebtDisbursement,
+    addFxDebtPayment,
+    getAllFxLiabilities,
+    createFxLiability,
+    updateFxLiability,
+    deleteFxLiability,
+    // Balance
+    calculateFxAccountBalance,
+    // Bulk
+    clearFxPeriodData,
+    clearAllFxData,
+} from './fx'
+
+// FX Mapping helpers
+export {
+    suggestLedgerAccountForFxAsset,
+    suggestLedgerAccountForFxDebt,
+    ensureLedgerAccountExists,
+} from './fxMapping'
+
+// Export types from fx
+export type { FxJournalPreview, FxReconciliationData } from './fx'
 

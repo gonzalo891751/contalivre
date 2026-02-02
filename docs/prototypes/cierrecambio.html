@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cierre de Inventario — ContaLivre</title>
+    
+    <!-- Google Fonts: Outfit (Titular), Inter (Cuerpo), JetBrains Mono (Código/Numérico) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        /* --- BRAND TOKENS (Extract from Brand Book) --- */
+        :root {
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            
+            --border-light: #E2E8F0;
+            --border-focus: #3B82F6;
+
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --info: #3B82F6;
+
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 24px;
+        }
+
+        /* --- GLOBAL RESET & UTILS --- */
+        * { box-sizing: border-box; margin: 0; padding: 0; outline: none; }
+        
+        body {
+            background-color: var(--bg-app);
+            font-family: var(--font-body);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+            padding: 2rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        /* Typography */
+        h1, h2, h3, h4 { font-family: var(--font-display); line-height: 1.1; }
+        .text-mono { font-family: var(--font-mono); font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+        .text-sm { font-size: 0.875rem; }
+        .text-xs { font-size: 0.75rem; }
+        .text-sec { color: var(--text-secondary); }
+        .font-bold { font-weight: 700; }
+        .text-right { text-align: right; }
+        
+        /* Layout Grid */
+        .layout-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+        }
+        @media (min-width: 1024px) {
+            .layout-grid {
+                grid-template-columns: 1.2fr 1fr; /* Calculation slightly wider */
+            }
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-paper);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            box-shadow: var(--shadow-sm);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- HEADER & CONTROLS --- */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            background: var(--bg-paper);
+            padding: 0.5rem;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-light);
+        }
+
+        /* Status Chips */
+        .status-row {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .status-chip {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: white;
+            padding: 0.5rem 0.75rem;
+            border-radius: 99px;
+            font-size: 0.8rem;
+            border: 1px solid var(--border-light);
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        .status-chip.ok i { color: var(--success); }
+        .status-chip.pending i { color: var(--warning); }
+        .status-chip strong { color: var(--text-main); }
+
+        /* --- TOGGLES & INPUTS --- */
+        .toggle-wrapper { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; user-select: none;}
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 22px;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: var(--border-light);
+            transition: .3s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        input:checked + .slider { background-color: var(--brand-primary); }
+        input:checked + .slider:before { transform: translateX(18px); }
+
+        .select-input {
+            padding: 0.4rem 0.8rem;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            font-family: var(--font-body);
+            background: white;
+            color: var(--text-main);
+        }
+
+        /* --- WATERFALL CALCULATION TABLE --- */
+        .calc-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        .calc-row {
+            border-bottom: 1px dashed var(--border-light);
+        }
+        .calc-row:last-child { border-bottom: none; }
+        
+        .calc-cell {
+            padding: 0.75rem 0.5rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        .calc-cell.label {
+            width: 50%;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .calc-cell.amount {
+            font-family: var(--font-mono);
+            text-align: right;
+            color: var(--text-main);
+        }
+        .calc-row.subtotal { background: #F8FAFC; font-weight: 600; }
+        .calc-row.subtotal .amount { color: var(--brand-primary); }
+        .calc-row.final { background: #F0F9FF; border-top: 2px solid var(--brand-primary); }
+        .calc-row.final .amount { font-size: 1.25rem; font-weight: 700; color: var(--text-main); }
+        
+        /* Highlight Classes for Visual Hierarchy */
+        .row-highlight {
+            background-color: #F8FAFC; /* Subtle background */
+        }
+        .row-highlight .label, .row-highlight .amount {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+        /* Override specifically for the label text to be slightly larger or distinct if needed */
+        
+        .text-loss-bold {
+            color: var(--error);
+            font-weight: 500;
+        }
+
+        /* Interactive Input inside table */
+        .input-currency {
+            font-family: var(--font-mono);
+            text-align: right;
+            width: 100%;
+            max-width: 140px;
+            padding: 0.5rem;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            font-size: 1rem;
+            color: var(--text-main);
+            transition: all 0.2s;
+        }
+        .input-currency:focus {
+            border-color: var(--brand-primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .input-currency::placeholder { color: var(--text-tertiary); }
+
+        /* RT6 Columns (Hidden by default) */
+        .col-homog {
+            display: none; /* Hidden unless toggled */
+            color: #059669; /* Teal darken */
+            background: rgba(16, 185, 129, 0.03);
+        }
+        .show-homog .col-homog { display: table-cell; }
+        .show-homog .header-homog { display: table-cell; }
+
+        /* Badge Styles */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .badge-blue { background: #EFF6FF; color: var(--brand-primary); }
+        .badge-green { background: #ECFDF5; color: var(--success); }
+        .badge-red { background: #FEF2F2; color: var(--error); }
+        .badge-outline { border: 1px solid var(--border-light); color: var(--text-tertiary); }
+
+        /* --- JOURNAL ENTRIES --- */
+        .entries-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin-top: 1rem;
+            max-height: 500px;
+            overflow-y: auto;
+            padding-right: 0.5rem;
+        }
+        .entry-card {
+            background: #F8FAFC;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            padding: 1rem;
+        }
+        .entry-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+        }
+        .journal-table {
+            width: 100%;
+            font-size: 0.85rem;
+        }
+        .journal-table td { padding: 0.25rem 0; }
+        .journal-table .acc-name { font-weight: 500; }
+        .journal-table .debe, .journal-table .haber { font-family: var(--font-mono); text-align: right; width: 80px; }
+        .journal-table .haber { padding-right: 1rem; }
+        
+        /* Indentation for Haber accounts */
+        .indent { padding-left: 1.5rem; color: var(--text-secondary); }
+
+        /* --- KPI SUMMARY --- */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-light);
+        }
+        .kpi-item label { display: block; font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; margin-bottom: 0.25rem; }
+        .kpi-item .value { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 600; }
+
+        /* --- FOOTER CTA --- */
+        .cta-container {
+            position: sticky;
+            bottom: 0;
+            background: linear-gradient(to top, var(--bg-app) 80%, transparent);
+            padding: 1rem 0;
+            margin-top: auto;
+            display: flex;
+            justify-content: flex-end;
+            z-index: 10;
+        }
+        .btn-primary {
+            background: var(--brand-gradient);
+            color: white;
+            padding: 0.85rem 2rem;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1rem;
+        }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4); }
+        .btn-primary:disabled { background: var(--text-tertiary); cursor: not-allowed; box-shadow: none; opacity: 0.7; }
+
+        /* --- EMPTY STATE --- */
+        .empty-state {
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem;
+            text-align: center;
+            height: 100%;
+        }
+        .empty-state i { font-size: 4rem; color: var(--text-tertiary); margin-bottom: 1rem; }
+
+        /* Helpers */
+        .text-loss { color: var(--error); }
+        .text-gain { color: var(--success); }
+        
+        /* Demo Control Top Right */
+        .demo-control {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            background: #1E293B;
+            color: white;
+            padding: 0.5rem;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            z-index: 9999;
+            opacity: 0.8;
+        }
+        .demo-control select { background: transparent; color: white; border: 1px solid #475569; padding: 2px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <!-- DEMO CONTROLS (Solo para prototipo) -->
+    <div class="demo-control">
+        <label>Escenario:</label>
+        <select id="scenarioSelector" onchange="toggleScenario(this.value)">
+            <option value="filled">Con Datos (Cierre 2025)</option>
+            <option value="empty">Sin Movimientos</option>
+        </select>
+    </div>
+
+    <!-- MAIN HEADER -->
+    <header class="page-header">
+        <div>
+            <h1 style="color: var(--brand-primary); font-size: 2rem; font-weight: 800; margin-bottom: 0.25rem;">Cierre de Inventario</h1>
+            <p class="text-sec">
+                Modo Diferencias: <span class="text-mono" style="font-size: 0.9em; background: #F1F5F9; padding: 2px 6px; border-radius: 4px;">CMV = EI + Compras Netas − EF</span>
+            </p>
+        </div>
+        
+        <div class="header-controls">
+            <!-- Method Selector -->
+            <div style="display: flex; align-items: center; gap: 0.5rem; padding-right: 1rem; border-right: 1px solid var(--border-light);">
+                <label class="text-xs text-sec font-bold">MÉTODO</label>
+                <select class="select-input" id="methodSelector" onchange="updateMethodLabel()">
+                    <option value="PEPS (FIFO)">PEPS (FIFO)</option>
+                    <option value="UEPS (LIFO)">UEPS (LIFO)</option>
+                    <option value="PPP">PPP</option>
+                </select>
+                <span class="badge badge-blue">DIFERENCIAS</span>
+            </div>
+
+            <!-- RT6 Toggle -->
+            <label class="toggle-wrapper" title="Activar ajuste por inflación (RT6)">
+                <div class="toggle-switch">
+                    <input type="checkbox" id="rt6Toggle" onchange="toggleRT6()">
+                    <span class="slider"></span>
+                </div>
+                <div style="line-height: 1.2;">
+                    <span class="text-sm font-bold" style="display: block;">Mostrar Homogéneo</span>
+                    <span class="text-xs text-sec">Ajuste RT6</span>
+                </div>
+            </label>
+        </div>
+    </header>
+
+    <!-- STATUS BAR -->
+    <section class="status-row">
+        <div class="status-chip ok">
+            <i class="ph-fill ph-check-circle"></i>
+            <span>Movimientos: <strong>34 reg.</strong></span>
+        </div>
+        <div class="status-chip pending">
+            <i class="ph-fill ph-warning-circle"></i>
+            <span>Conciliación: <strong>2 pend.</strong></span>
+        </div>
+        <div class="status-chip ok">
+            <i class="ph-fill ph-robot"></i>
+            <span>Valuación: <strong>PEPS OK</strong></span>
+        </div>
+        <div class="status-chip" id="rt6Status" style="opacity: 0.5;">
+            <i class="ph ph-chart-line-up"></i>
+            <span>RT6: <strong>N/A</strong></span>
+        </div>
+    </section>
+
+    <!-- CONTENT GRID -->
+    <main class="layout-grid" id="mainContent">
+        
+        <!-- LEFT COLUMN: CALCULATION -->
+        <section class="card" id="calculation-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3>Cálculo del CMV</h3>
+                <i class="ph-duotone ph-calculator" style="font-size: 1.5rem; color: var(--brand-primary);"></i>
+            </div>
+            
+            <table class="calc-table">
+                <thead>
+                    <tr>
+                        <th class="text-left text-xs text-sec">CONCEPTO</th>
+                        <th class="text-right text-xs text-sec">HISTÓRICO</th>
+                        <th class="text-right text-xs text-sec col-homog header-homog">HOMOGÉNEO</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- EI (Highlighted) -->
+                    <tr class="calc-row row-highlight">
+                        <td class="calc-cell label">
+                            <i class="ph ph-package"></i> Existencia Inicial (EI)
+                        </td>
+                        <td class="calc-cell amount" id="val_ei">0,00</td>
+                        <td class="calc-cell amount col-homog" id="homog_ei">0,00</td>
+                    </tr>
+                    
+                    <!-- Compras Brutas -->
+                    <tr class="calc-row">
+                        <td class="calc-cell label">
+                            <i class="ph ph-shopping-cart"></i> (+) Compras Brutas
+                        </td>
+                        <td class="calc-cell amount" id="val_compras">0,00</td>
+                        <td class="calc-cell amount col-homog" id="homog_compras">0,00</td>
+                    </tr>
+
+                    <!-- Gastos -->
+                    <tr class="calc-row">
+                        <td class="calc-cell label">
+                            <i class="ph ph-truck"></i> (+) Gastos s/compras
+                        </td>
+                        <td class="calc-cell amount text-sec" id="val_gastos">0,00</td>
+                        <td class="calc-cell amount col-homog text-sec" id="homog_gastos">0,00</td>
+                    </tr>
+                    
+                    <!-- Bonificaciones/Devoluciones (Red Color) -->
+                    <tr class="calc-row">
+                        <td class="calc-cell label text-loss-bold">
+                            <i class="ph ph-arrow-u-down-left"></i> (-) Devoluciones/Bonif.
+                        </td>
+                        <td class="calc-cell amount text-loss-bold" id="val_devoluciones">- 0,00</td>
+                        <td class="calc-cell amount col-homog text-loss-bold" id="homog_devoluciones">- 0,00</td>
+                    </tr>
+
+                    <!-- Subtotal Compras Netas (Highlighted) -->
+                    <tr class="calc-row subtotal row-highlight">
+                        <td class="calc-cell label">
+                            = Compras Netas
+                        </td>
+                        <td class="calc-cell amount" id="val_compras_netas">0,00</td>
+                        <td class="calc-cell amount col-homog" id="homog_compras_netas">0,00</td>
+                    </tr>
+
+                    <!-- Separator -->
+                    <tr><td colspan="3" style="height: 1rem;"></td></tr>
+
+                    <!-- EF Teórica -> Renamed to Existencia Final (Highlighted) -->
+                    <tr class="calc-row row-highlight">
+                        <td class="calc-cell label">
+                            <div style="display:flex; flex-direction:column;">
+                                <span>(-) Existencia Final</span>
+                                <span class="text-xs text-sec font-normal" id="labelMethodSubtitle">Según método PEPS</span>
+                            </div>
+                        </td>
+                        <td class="calc-cell amount" id="val_ef_teorica">0,00</td>
+                        <td class="calc-cell amount col-homog" id="homog_ef_teorica">0,00</td>
+                    </tr>
+
+                    <!-- TOTAL CMV -->
+                    <tr class="calc-row final">
+                        <td class="calc-cell label">
+                            = Costo Mercadería Vendida
+                        </td>
+                        <td class="calc-cell amount" id="val_cmv">0,00</td>
+                        <td class="calc-cell amount col-homog" id="homog_cmv">0,00</td>
+                    </tr>
+
+                    <!-- Separator for Audit Section -->
+                    <tr><td colspan="3" style="height: 1.5rem; text-align: center; color: var(--border-light); font-size: 0.8rem; letter-spacing: 2px;">— AUDITORÍA FÍSICA —</td></tr>
+
+                    <!-- EF Físico (INPUT) - MOVED DOWN -->
+                    <tr class="calc-row" style="background: #FEF9C3;"> <!-- Highlight for Input -->
+                        <td class="calc-cell label">
+                            <div style="display:flex; flex-direction:column;">
+                                <span style="color: #854D0E;">Inv. Final Físico (Recuento)</span>
+                                <span class="text-xs text-sec font-normal">Ingresá el valor real</span>
+                            </div>
+                        </td>
+                        <td class="calc-cell text-right">
+                            <input type="text" id="input_ef_fisico" class="input-currency" placeholder="0,00" value="0,00" oninput="calculateCMV()">
+                        </td>
+                        <td class="calc-cell amount col-homog" style="color: #854D0E; font-style: italic;">
+                            <span id="homog_ef_fisico_calc">Automático</span>
+                        </td>
+                    </tr>
+
+                    <!-- Diferencia de Inventario - MOVED DOWN -->
+                    <tr class="calc-row">
+                        <td class="calc-cell label">
+                            <i class="ph ph-scales"></i> Diferencia Inventario
+                        </td>
+                        <td class="calc-cell amount" id="val_diff">0,00</td>
+                        <td class="calc-cell amount col-homog" id="homog_diff">0,00</td>
+                    </tr>
+
+                </tbody>
+            </table>
+
+            <div style="margin-top: 1rem; font-size: 0.8rem; color: var(--text-tertiary); display: flex; align-items: center; gap: 0.5rem;">
+                <i class="ph-fill ph-info"></i>
+                <span>La diferencia se contabiliza como ajuste post-determinación del costo.</span>
+            </div>
+        </section>
+
+        <!-- RIGHT COLUMN: PREVIEW & KPI -->
+        <section class="card" id="entries-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3>Previsualización de Asientos</h3>
+                <div style="display: flex; gap: 0.5rem;">
+                    <span class="badge badge-outline">RESUMEN</span>
+                    <span class="badge badge-blue">DETALLE</span>
+                </div>
+            </div>
+
+            <div class="entries-container">
+                
+                <!-- Asiento 1: Refundición -->
+                <div class="entry-card">
+                    <div class="entry-title">1. Refundición de Compras</div>
+                    <table class="journal-table">
+                        <tr>
+                            <td class="acc-name">Mercaderías</td>
+                            <td class="debe" id="entry1_debe">0,00</td>
+                            <td class="haber"></td>
+                        </tr>
+                        <tr>
+                            <td class="acc-name indent">a Compras Netas</td>
+                            <td class="debe"></td>
+                            <td class="haber" id="entry1_haber">0,00</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Asiento 2: CMV -->
+                <div class="entry-card">
+                    <div class="entry-title">2. Costo de Ventas (Según Sistema)</div>
+                    <table class="journal-table">
+                        <tr>
+                            <td class="acc-name">Costo Mercadería Vendida</td>
+                            <td class="debe" id="entry2_debe">0,00</td>
+                            <td class="haber"></td>
+                        </tr>
+                        <tr>
+                            <td class="acc-name indent">a Mercaderías</td>
+                            <td class="debe"></td>
+                            <td class="haber" id="entry2_haber">0,00</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Asiento 3: Diferencia (Dynamic) -->
+                <div class="entry-card" id="entry_diff_card" style="display: none;">
+                    <div class="entry-title">3. Ajuste Diferencia Inventario</div>
+                    <table class="journal-table">
+                        <tr id="row_diff_debe">
+                            <td class="acc-name" id="acc_diff_debe">Diferencia de Inv. (Pérdida)</td>
+                            <td class="debe" id="entry3_val">0,00</td>
+                            <td class="haber"></td>
+                        </tr>
+                        <tr id="row_diff_haber">
+                            <td class="acc-name indent" id="acc_diff_haber">a Mercaderías</td>
+                            <td class="debe"></td>
+                            <td class="haber" id="entry3_val_haber">0,00</td>
+                        </tr>
+                    </table>
+                </div>
+                
+            </div>
+
+            <!-- KPI SUMMARY -->
+            <div class="kpi-grid">
+                <div class="kpi-item">
+                    <label>Ventas Netas</label>
+                    <div class="value" id="kpi_sales">$ 3.870.000,00</div>
+                </div>
+                <div class="kpi-item text-right">
+                    <label>Resultado Bruto</label>
+                    <div class="value" style="color: var(--brand-primary);" id="kpi_gross">0,00</div>
+                </div>
+                <div class="kpi-item">
+                    <label>Margen Bruto</label>
+                    <div class="value text-sec" style="font-size: 0.9rem;" id="kpi_margin">0%</div>
+                </div>
+                <div class="kpi-item text-right">
+                    <label>Estado del Cierre</label>
+                    <span class="badge badge-green">LISTO PARA GENERAR</span>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- EMPTY STATE PLACEHOLDER -->
+    <div id="emptyState" class="empty-state">
+        <i class="ph-duotone ph-ghost"></i>
+        <h2 style="margin-top: 1rem;">No hay movimientos suficientes</h2>
+        <p class="text-sec" style="max-width: 400px; margin: 1rem auto;">
+            Todavía no detectamos compras ni ventas en este período para calcular el costo.
+            Chequeá la fecha del ejercicio o cargá comprobantes en "Operaciones".
+        </p>
+        <button class="btn-primary" style="margin-top: 1rem;" onclick="toggleScenario('filled')">
+            Cargar Datos de Ejemplo
+        </button>
+    </div>
+
+    <!-- STICKY FOOTER -->
+    <div class="cta-container" id="footerCta">
+        <button class="btn-primary" id="btnGenerate">
+            <i class="ph-bold ph-check"></i>
+            Generar Asientos de Cierre
+        </button>
+    </div>
+
+    <script>
+        // --- DATA MODEL (MOCK) ---
+        const DEMO_DATA = {
+            ei: 0, // Existencia inicial (Asumimos 0 para este ej o traido de balance anterior)
+            compras: 4000000,
+            gastos: 200000,
+            devoluciones: 0,
+            bonificaciones: 0,
+            efTeorica: 1680000,
+            ventasNetas: 3870000,
+            inflationFactor: 1.45 // Mock for RT6
+        };
+
+        // --- DOM ELEMENTS ---
+        const els = {
+            compras: document.getElementById('val_compras'),
+            gastos: document.getElementById('val_gastos'),
+            devoluciones: document.getElementById('val_devoluciones'),
+            comprasNetas: document.getElementById('val_compras_netas'),
+            efTeorica: document.getElementById('val_ef_teorica'),
+            inputEf: document.getElementById('input_ef_fisico'),
+            diff: document.getElementById('val_diff'),
+            cmv: document.getElementById('val_cmv'),
+            
+            // Entries
+            e1Debe: document.getElementById('entry1_debe'),
+            e1Haber: document.getElementById('entry1_haber'),
+            e2Debe: document.getElementById('entry2_debe'),
+            e2Haber: document.getElementById('entry2_haber'),
+            eDiffCard: document.getElementById('entry_diff_card'),
+            eDiffAccDebe: document.getElementById('acc_diff_debe'),
+            eDiffAccHaber: document.getElementById('acc_diff_haber'),
+            eDiffVal: document.getElementById('entry3_val'),
+            eDiffValHaber: document.getElementById('entry3_val_haber'),
+
+            // KPIs
+            kpiGross: document.getElementById('kpi_gross'),
+            kpiMargin: document.getElementById('kpi_margin'),
+
+            // Homog Cols
+            hCompras: document.getElementById('homog_compras'),
+            hGastos: document.getElementById('homog_gastos'),
+            hDev: document.getElementById('homog_devoluciones'),
+            hNetas: document.getElementById('homog_compras_netas'),
+            hEfTeorica: document.getElementById('homog_ef_teorica'),
+            hEfFisico: document.getElementById('homog_ef_fisico_calc'),
+            hDiff: document.getElementById('homog_diff'),
+            hCmv: document.getElementById('homog_cmv'),
+        };
+
+        // --- FORMATTERS ---
+        const fmt = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const parseCurrency = (str) => {
+            if(!str) return 0;
+            // Remove dots (thousands) and replace comma with dot (decimal)
+            return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
+        }
+
+        // --- LOGIC ---
+        function init() {
+            // Render initial static values
+            els.compras.textContent = fmt.format(DEMO_DATA.compras);
+            els.gastos.textContent = fmt.format(DEMO_DATA.gastos);
+            
+            const comprasNetas = DEMO_DATA.compras + DEMO_DATA.gastos - DEMO_DATA.devoluciones;
+            els.comprasNetas.textContent = fmt.format(comprasNetas);
+            els.efTeorica.textContent = fmt.format(DEMO_DATA.efTeorica);
+
+            // Set initial input to EF Teorica to show 0 diff by default
+            els.inputEf.value = fmt.format(DEMO_DATA.efTeorica);
+            
+            updateMethodLabel();
+            calculateCMV();
+        }
+        
+        function updateMethodLabel() {
+            const method = document.getElementById('methodSelector').value;
+            document.getElementById('labelMethodSubtitle').textContent = "Según método " + method;
+        }
+
+        function calculateCMV() {
+            // 1. Get Values
+            const comprasNetas = DEMO_DATA.compras + DEMO_DATA.gastos - DEMO_DATA.devoluciones;
+            const efTeorica = DEMO_DATA.efTeorica;
+            
+            // User Input
+            let efFisicoVal = parseCurrency(els.inputEf.value);
+            
+            // 2. Logic UPDATED: 
+            // CMV Formula Base = EI + NetPurch - EF_System (Calculated Cost based on System)
+            // Difference = EF_Fisico - EF_System
+            
+            const diff = efFisicoVal - efTeorica;
+            
+            // CMV Calculation (System):
+            // Available = EI (0) + ComprasNetas
+            // CMV = Available - EF_System
+            const available = 0 + comprasNetas; 
+            const cmvSystem = available - efTeorica;
+
+            // 3. Render Calc Table
+            // Difference Render
+            els.diff.textContent = (diff > 0 ? "+ " : "") + fmt.format(diff);
+            els.diff.className = "calc-cell amount " + (diff < 0 ? "text-loss" : (diff > 0 ? "text-gain" : "text-main"));
+            
+            // CMV Render (System CMV)
+            els.cmv.textContent = fmt.format(cmvSystem);
+
+            // 4. Update Entries
+            // Entry 1: Refundición (Fixed based on Net Purch)
+            els.e1Debe.textContent = fmt.format(comprasNetas);
+            els.e1Haber.textContent = fmt.format(comprasNetas);
+
+            // Entry 2: CMV Base (using System CMV)
+            els.e2Debe.textContent = fmt.format(cmvSystem);
+            els.e2Haber.textContent = fmt.format(cmvSystem);
+
+            // Entry 3: Difference Visualization (Accounting Note)
+            if (Math.abs(diff) > 0.01) {
+                els.eDiffCard.style.display = "block";
+                els.eDiffVal.textContent = fmt.format(Math.abs(diff));
+                els.eDiffValHaber.textContent = fmt.format(Math.abs(diff));
+                
+                if (diff < 0) {
+                    // Faltante (Pérdida)
+                    // Debe: Diferencia de Inventario (Loss)
+                    // Haber: Mercaderías
+                    els.eDiffAccDebe.textContent = "Diferencia de Inv. (Pérdida)";
+                    els.eDiffAccDebe.classList.add("text-loss");
+                    els.eDiffAccHaber.textContent = "a Mercaderías";
+                    els.eDiffAccHaber.parentElement.style.display = ""; // Reset
+                } else {
+                    // Sobrante (Ganancia)
+                    // Debe: Mercaderías
+                    // Haber: Diferencia de Inv. (Gain)
+                    els.eDiffAccDebe.textContent = "Mercaderías";
+                    els.eDiffAccDebe.classList.remove("text-loss");
+                    els.eDiffAccHaber.textContent = "a Diferencia de Inv. (Ganancia)";
+                }
+            } else {
+                els.eDiffCard.style.display = "none";
+            }
+
+            // 5. Update KPIs
+            // True Gross Result for business is usually Sales - Real Cost (System Cost + Loss or - Gain)
+            // Cost Real = Available - Physical
+            const cmvReal = available - efFisicoVal;
+            const grossResult = DEMO_DATA.ventasNetas - cmvReal;
+            const margin = (grossResult / DEMO_DATA.ventasNetas) * 100;
+            
+            els.kpiGross.textContent = "$ " + fmt.format(grossResult);
+            els.kpiGross.style.color = grossResult >= 0 ? "var(--brand-primary)" : "var(--error)";
+            els.kpiMargin.textContent = fmt.format(margin) + "%";
+
+            // 6. RT6 Calculation (Mock)
+            if (document.body.classList.contains('show-homog')) {
+                updateRT6Values(comprasNetas, efTeorica, efFisicoVal, diff, cmvSystem);
+            }
+        }
+
+        function updateRT6Values(netPurch, efT, efF, diff, cmv) {
+            const f = DEMO_DATA.inflationFactor;
+            
+            els.hCompras.textContent = fmt.format(DEMO_DATA.compras * f);
+            els.hGastos.textContent = fmt.format(DEMO_DATA.gastos * f);
+            els.hNetas.textContent = fmt.format(netPurch * f);
+            els.hEfTeorica.textContent = fmt.format(efT * f);
+            
+            // EF Fisico Homog calculation (usually implies specific aging, we just mock multiply)
+            const efFHomog = efF * f;
+            els.hEfFisico.textContent = fmt.format(efFHomog);
+            
+            const diffHomog = diff * f;
+            els.hDiff.textContent = fmt.format(diffHomog);
+            els.hDiff.className = "calc-cell amount col-homog " + (diffHomog < 0 ? "text-loss" : (diffHomog > 0 ? "text-gain" : ""));
+
+            const cmvHomog = cmv * f; // Rough approx
+            els.hCmv.textContent = fmt.format(cmvHomog);
+        }
+
+        // --- EVENT HANDLERS ---
+        function toggleRT6() {
+            const body = document.body;
+            const isChecked = document.getElementById('rt6Toggle').checked;
+            
+            if (isChecked) {
+                body.classList.add('show-homog');
+                document.getElementById('rt6Status').style.opacity = '1';
+                document.getElementById('rt6Status').innerHTML = '<i class="ph-fill ph-check-circle" style="color:var(--brand-secondary)"></i> <span>RT6: <strong>Activo</strong></span>';
+                calculateCMV(); // Refresh nums
+            } else {
+                body.classList.remove('show-homog');
+                document.getElementById('rt6Status').style.opacity = '0.5';
+                document.getElementById('rt6Status').innerHTML = '<i class="ph ph-chart-line-up"></i> <span>RT6: <strong>N/A</strong></span>';
+            }
+        }
+
+        function toggleScenario(val) {
+            const main = document.getElementById('mainContent');
+            const empty = document.getElementById('emptyState');
+            const footer = document.getElementById('footerCta');
+            const chips = document.querySelector('.status-row');
+
+            if (val === 'empty') {
+                main.style.display = 'none';
+                footer.style.display = 'none';
+                chips.style.display = 'none';
+                empty.style.display = 'flex';
+                document.getElementById('input_ef_fisico').value = "";
+            } else {
+                main.style.display = 'grid'; // Restore grid
+                footer.style.display = 'flex';
+                chips.style.display = 'flex';
+                empty.style.display = 'none';
+                
+                // Reset inputs
+                document.getElementById('input_ef_fisico').value = fmt.format(DEMO_DATA.efTeorica);
+                calculateCMV();
+            }
+        }
+
+        // --- INIT ---
+        window.onload = init;
+
+        // Helper for input currency mask (simple version)
+        document.getElementById('input_ef_fisico').addEventListener('focus', function() {
+            this.select();
+        });
+    </script>
+</body>
+</html>

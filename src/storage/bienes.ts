@@ -13,6 +13,7 @@ import type {
     BienesSettings,
     CostingMethod,
     AccountMappingKey,
+    TaxLine,
 } from '../core/inventario/types'
 import {
     createDefaultBienesSettings,
@@ -20,6 +21,7 @@ import {
 } from '../core/inventario/types'
 import {
     calculateExitCost,
+    calculateProductValuation,
     canChangeCostingMethod,
 } from '../core/inventario/costing'
 import { createEntry } from './entries'
@@ -30,11 +32,35 @@ const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
     ivaDF: { code: '2.1.03.01', names: ['IVA Debito Fiscal'] },
     ventas: { code: '4.1.01', names: ['Ventas'] },
     cmv: { code: '4.3.01', names: ['Costo mercaderias vendidas'] },
+    compras: { code: '4.8.01', names: ['Compras'] },
     diferenciaInventario: { code: '4.3.02', names: ['Diferencia de inventario'] },
+    aperturaInventario: { code: '3.2.01', names: ['Apertura inventario', 'Resultados acumulados'] },
+    gastosCompras: { code: '4.8.02', names: ['Gastos sobre compras', 'Gastos s/compras'] },
+    bonifCompras: { code: '4.8.03', names: ['Bonificaciones sobre compras', 'Bonif. s/compras'] },
+    devolCompras: { code: '4.8.04', names: ['Devoluciones sobre compras', 'Devol. s/compras'] },
+    bonifVentas: { code: '4.8.05', names: ['Bonificaciones sobre ventas', 'Bonif. s/ventas'] },
+    devolVentas: { code: '4.8.06', names: ['Devoluciones sobre ventas', 'Devol. s/ventas'] },
+    descuentosObtenidos: { code: '4.6.09', names: ['Descuentos obtenidos'] },
+    descuentosOtorgados: { code: '4.2.01', names: ['Descuentos otorgados'] },
     caja: { code: '1.1.01.01', names: ['Caja'] },
     banco: { code: '1.1.01.02', names: ['Bancos cuenta corriente', 'Banco cuenta corriente', 'Bancos'] },
     proveedores: { code: '2.1.01.01', names: ['Proveedores'] },
     deudores: { code: '1.1.02.01', names: ['Deudores por ventas'] },
+    // Percepciones / Retenciones
+    percepcionIVASufrida: { code: '1.1.03.08', names: ['Percepciones IVA de terceros'] },
+    percepcionIVAPracticada: { code: '2.1.03.06', names: ['Percepciones IVA a terceros'] },
+    percepcionIIBBSufrida: { code: '1.1.03.02', names: ['Anticipos de impuestos'] },
+    retencionSufrida: { code: '1.1.03.07', names: ['Retenciones IVA de terceros'] },
+    retencionPracticada: { code: '2.1.03.03', names: ['Retenciones a depositar'] },
+}
+
+const ACCOUNT_CODE_ALIASES: Partial<Record<keyof typeof ACCOUNT_FALLBACKS, { codes: string[]; nameAny?: string[] }>> = {
+    compras: { codes: ['5.1.03'], nameAny: ['compra'] },
+    gastosCompras: { codes: ['5.1.04', '4.8.03', '5.1.05'], nameAny: ['gasto', 'flete', 'seguro'] },
+    bonifCompras: { codes: ['5.1.05', '4.8.02', '5.1.04'], nameAny: ['bonif'] },
+    devolCompras: { codes: ['5.1.06'], nameAny: ['devol'] },
+    bonifVentas: { codes: ['4.1.03'], nameAny: ['bonif'] },
+    devolVentas: { codes: ['4.1.04'], nameAny: ['devol'] },
 }
 
 const normalizeText = (value: string) => value
@@ -44,7 +70,10 @@ const normalizeText = (value: string) => value
 
 const matchesPeriod = (itemPeriodId: string | undefined, periodId?: string) => {
     if (!periodId) return true
-    return !itemPeriodId || itemPeriodId === periodId
+    // Legacy data (undefined periodId) is assumed to be 2025. 
+    // This prevents old data from appearing in new exercises (e.g. 2026).
+    const effectiveItemPeriod = itemPeriodId || '2025'
+    return effectiveItemPeriod === periodId
 }
 
 const resolveAccountByIdOrCode = (accounts: Account[], idOrCode?: string) => {
@@ -78,11 +107,26 @@ const resolveMappedAccountId = (
 ) => {
     const mappedId = settings.accountMappings?.[key] || null
     const fallback = ACCOUNT_FALLBACKS[fallbackKey]
-    return resolveAccountId(accounts, {
+    const resolved = resolveAccountId(accounts, {
         mappedId,
         code: fallback?.code,
         names: fallback?.names,
     })
+    if (resolved) return resolved
+
+    const alias = ACCOUNT_CODE_ALIASES[fallbackKey]
+    if (alias?.codes && alias.codes.length > 0) {
+        for (const code of alias.codes) {
+            const acc = accounts.find(a => a.code === code)
+            if (!acc) continue
+            if (!alias.nameAny || alias.nameAny.length === 0) return acc.id
+            const name = normalizeText(acc.name)
+            if (alias.nameAny.some(token => name.includes(normalizeText(token)))) {
+                return acc.id
+            }
+        }
+    }
+    return null
 }
 
 const resolveCounterpartyAccountId = (
@@ -95,7 +139,12 @@ const resolveCounterpartyAccountId = (
     const isCheque = method.includes('cheque')
     const isEfectivo = method.includes('efectivo')
 
-    if (movement.type === 'PURCHASE') {
+    const isPurchaseAdjust = movement.type === 'VALUE_ADJUSTMENT'
+        && (movement.adjustmentKind === 'BONUS_PURCHASE' || movement.adjustmentKind === 'DISCOUNT_PURCHASE')
+    const isSaleAdjust = movement.type === 'VALUE_ADJUSTMENT'
+        && (movement.adjustmentKind === 'BONUS_SALE' || movement.adjustmentKind === 'DISCOUNT_SALE')
+
+    if (movement.type === 'PURCHASE' || isPurchaseAdjust) {
         if (isCuenta) {
             return resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores)
         }
@@ -108,7 +157,7 @@ const resolveCounterpartyAccountId = (
         return resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores) || resolveAccountId(accounts, ACCOUNT_FALLBACKS.caja)
     }
 
-    if (movement.type === 'SALE') {
+    if (movement.type === 'SALE' || isSaleAdjust) {
         if (isCuenta) {
             return resolveAccountId(accounts, ACCOUNT_FALLBACKS.deudores)
         }
@@ -124,6 +173,58 @@ const resolveCounterpartyAccountId = (
     return null
 }
 
+/**
+ * Resolve account ID for a TaxLine based on taxType, kind, and movement direction.
+ * Priority: TaxLine.accountId (explicit) → mapped setting → fallback by code/name
+ */
+const resolveTaxLineAccountId = (
+    accounts: Account[],
+    settings: BienesSettings,
+    tax: TaxLine,
+    isPurchase: boolean
+): string | null => {
+    // 1. Explicit accountId on the tax line
+    if (tax.accountId) {
+        const direct = resolveAccountByIdOrCode(accounts, tax.accountId)
+        if (direct) return direct.id
+    }
+
+    // 2. Map by taxType + direction to AccountMappingKey
+    if (tax.taxType === 'IVA') {
+        const key: AccountMappingKey = isPurchase ? 'percepcionIVASufrida' : 'percepcionIVAPracticada'
+        return resolveMappedAccountId(accounts, settings, key, key)
+    }
+    if (tax.taxType === 'IIBB') {
+        if (isPurchase) {
+            return resolveMappedAccountId(accounts, settings, 'percepcionIIBBSufrida', 'percepcionIIBBSufrida')
+        }
+        // Venta con percepcion IIBB: use generic tax liability (same as IVA practicada fallback)
+        return resolveMappedAccountId(accounts, settings, 'percepcionIVAPracticada', 'percepcionIVAPracticada')
+    }
+
+    // 3. Generic fallback for GANANCIAS, SUSS, OTRO
+    if (isPurchase) {
+        // Activo: Anticipos de impuestos
+        return resolveMappedAccountId(accounts, settings, 'percepcionIIBBSufrida', 'percepcionIIBBSufrida')
+    }
+    // Pasivo: Retenciones/Percepciones a depositar
+    return resolveMappedAccountId(accounts, settings, 'retencionPracticada', 'retencionPracticada')
+}
+
+/**
+ * Validate that journal entries balance (sum debits == sum credits, tolerance 0.01)
+ */
+const validateEntriesBalance = (entries: Omit<JournalEntry, 'id'>[]): string | null => {
+    for (const entry of entries) {
+        const totalDebit = entry.lines.reduce((s, l) => s + (l.debit || 0), 0)
+        const totalCredit = entry.lines.reduce((s, l) => s + (l.credit || 0), 0)
+        if (Math.abs(totalDebit - totalCredit) > 0.01) {
+            return `Asiento desbalanceado: Debe=${totalDebit.toFixed(2)}, Haber=${totalCredit.toFixed(2)} (${entry.memo})`
+        }
+    }
+    return null
+}
+
 const buildEntryMetadata = (movement: BienesMovement, product?: BienesProduct) => ({
     sourceModule: 'inventory',
     sourceId: movement.id,
@@ -135,6 +236,262 @@ const buildEntryMetadata = (movement: BienesMovement, product?: BienesProduct) =
     counterparty: movement.counterparty,
 })
 
+/**
+ * Build journal entries for RT6 (inflation adjustment) VALUE_ADJUSTMENT with autoJournal ON.
+ * Debit or Credit Mercaderias based on valueDelta sign; contra = Diferencia de inventario.
+ */
+const buildRT6JournalEntries = async (
+    movement: BienesMovement,
+    product?: BienesProduct
+): Promise<{ entries: Omit<JournalEntry, 'id'>[]; error?: string }> => {
+    const accounts = await db.accounts.toArray()
+    const settings = await loadBienesSettings()
+
+    const mercaderiasId = resolveAccountId(accounts, {
+        mappedId: product?.accountMercaderias || settings.accountMappings?.mercaderias || null,
+        code: ACCOUNT_FALLBACKS.mercaderias.code,
+        names: ACCOUNT_FALLBACKS.mercaderias.names,
+    })
+    const diferenciaId = resolveMappedAccountId(accounts, settings, 'diferenciaInventario', 'diferenciaInventario')
+
+    const missing: string[] = []
+    if (!mercaderiasId) missing.push('Mercaderias')
+    if (!diferenciaId) missing.push('Diferencia de inventario')
+    if (missing.length > 0) {
+        return { entries: [], error: `Faltan cuentas contables: ${missing.join(', ')}` }
+    }
+
+    const amount = Math.abs(movement.valueDelta || 0)
+    if (amount <= 0) {
+        return { entries: [], error: 'El ajuste RT6 no tiene importe.' }
+    }
+
+    const metadata = buildEntryMetadata(movement, product)
+    const isPositive = (movement.valueDelta || 0) > 0
+    const lines: EntryLine[] = isPositive
+        ? [
+            { accountId: mercaderiasId!, debit: amount, credit: 0, description: 'Ajuste RT6 - revaluo mercaderias' },
+            { accountId: diferenciaId!, debit: 0, credit: amount, description: 'Diferencia de inventario (RT6)' },
+        ]
+        : [
+            { accountId: diferenciaId!, debit: amount, credit: 0, description: 'Diferencia de inventario (RT6)' },
+            { accountId: mercaderiasId!, debit: 0, credit: amount, description: 'Ajuste RT6 - desvalorizacion mercaderias' },
+        ]
+
+    return {
+        entries: [{
+            date: movement.date,
+            memo: `Ajuste RT6 ${movement.rt6Period || ''} - ${product?.name || movement.productId}`,
+            lines,
+            sourceModule: 'inventory',
+            sourceId: movement.id,
+            sourceType: 'value_adjustment',
+            createdAt: new Date().toISOString(),
+            metadata: { ...metadata, journalRole: 'rt6_adjustment' },
+        }],
+    }
+}
+
+/**
+ * Build journal entries for CAPITALIZATION VALUE_ADJUSTMENT (solo gasto capitalizable).
+ * Debit: Gastos s/compras (neto) + IVA CF (if applicable)
+ * Credit: payment splits or counterparty accounts
+ */
+const buildCapitalizationJournalEntries = async (
+    movement: BienesMovement,
+    product?: BienesProduct
+): Promise<{ entries: Omit<JournalEntry, 'id'>[]; error?: string }> => {
+    const accounts = await db.accounts.toArray()
+    const settings = await loadBienesSettings()
+    const ivaCFId = resolveMappedAccountId(accounts, settings, 'ivaCF', 'ivaCF')
+    const gastosComprasId = resolveMappedAccountId(accounts, settings, 'gastosCompras', 'gastosCompras')
+    const descuentosObtenidosId = resolveMappedAccountId(accounts, settings, 'descuentosObtenidos', 'descuentosObtenidos')
+    const hasSplits = movement.paymentSplits && movement.paymentSplits.length > 0
+    const contraId = resolveCounterpartyAccountId(accounts, movement)
+
+    const capitalizableNet = movement.valueDelta || 0
+    const totalGastos = movement.gastosCompra || 0
+    const effectiveGastos = totalGastos > 0 ? totalGastos : Math.abs(capitalizableNet)
+
+    if (effectiveGastos <= 0) {
+        return { entries: [], error: 'El gasto no tiene importe para generar asiento.' }
+    }
+
+    const missing: string[] = []
+    if (!gastosComprasId) missing.push('Gastos sobre compras')
+    if (!contraId && !hasSplits) missing.push('Cuenta contrapartida')
+    if (movement.ivaAmount > 0 && !ivaCFId) missing.push('IVA Credito Fiscal')
+    if (missing.length > 0) {
+        return { entries: [], error: `Faltan cuentas contables: ${missing.join(', ')}` }
+    }
+
+    const metadata = buildEntryMetadata(movement, product)
+    const lines: EntryLine[] = []
+
+    // Debit: always to Gastos s/compras (capitalization impacts only cost layers, not journal debit account)
+    lines.push({
+        accountId: gastosComprasId!,
+        debit: effectiveGastos,
+        credit: 0,
+        description: capitalizableNet > 0 ? 'Gastos sobre compras (capitalizable)' : 'Gastos sobre compras',
+    })
+
+    // Debit: IVA CF if applicable
+    if (movement.ivaAmount > 0 && ivaCFId) {
+        lines.push({ accountId: ivaCFId, debit: movement.ivaAmount, credit: 0, description: 'IVA credito fiscal' })
+    }
+
+    // Credit: financial discount if present
+    const descuentoAmt = movement.descuentoFinancieroAmount || 0
+    if (descuentoAmt > 0 && descuentosObtenidosId) {
+        lines.push({ accountId: descuentosObtenidosId, debit: 0, credit: descuentoAmt, description: 'Descuento financiero obtenido' })
+    }
+
+    // Credit: payment splits or single counterparty
+    if (hasSplits) {
+        movement.paymentSplits!.forEach(split => {
+            lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: 'Pago / Contrapartida' })
+        })
+    } else {
+        lines.push({ accountId: contraId!, debit: 0, credit: movement.total, description: 'Pago / Proveedores' })
+    }
+
+    return {
+        entries: [{
+            date: movement.date,
+            memo: `Gasto s/compra - ${product?.name || movement.productId}`,
+            lines,
+            sourceModule: 'inventory',
+            sourceId: movement.id,
+            sourceType: 'value_adjustment',
+            createdAt: new Date().toISOString(),
+            metadata: { ...metadata, journalRole: 'capitalization' },
+        }],
+    }
+}
+
+/**
+ * Build journal entries for post adjustments (bonificaciones / descuentos financieros).
+ */
+const buildPostAdjustmentJournalEntries = async (
+    movement: BienesMovement,
+    product?: BienesProduct
+): Promise<{ entries: Omit<JournalEntry, 'id'>[]; error?: string }> => {
+    const accounts = await db.accounts.toArray()
+    const settings = await loadBienesSettings()
+    const ivaCFId = resolveMappedAccountId(accounts, settings, 'ivaCF', 'ivaCF')
+    const ivaDFId = resolveMappedAccountId(accounts, settings, 'ivaDF', 'ivaDF')
+    const bonifComprasId = resolveMappedAccountId(accounts, settings, 'bonifCompras', 'bonifCompras')
+    const bonifVentasId = resolveMappedAccountId(accounts, settings, 'bonifVentas', 'bonifVentas')
+    const descuentosObtenidosId = resolveMappedAccountId(accounts, settings, 'descuentosObtenidos', 'descuentosObtenidos')
+    const descuentosOtorgadosId = resolveMappedAccountId(accounts, settings, 'descuentosOtorgados', 'descuentosOtorgados')
+    const hasSplits = movement.paymentSplits && movement.paymentSplits.length > 0
+    const contraId = resolveCounterpartyAccountId(accounts, movement)
+
+    const neto = movement.subtotal || movement.valueDelta || 0
+    const ivaAmount = movement.ivaAmount || 0
+    const total = movement.total || neto + ivaAmount
+
+    const missing: string[] = []
+    if (!hasSplits && !contraId) missing.push('Cuenta contrapartida')
+
+    switch (movement.adjustmentKind) {
+        case 'BONUS_PURCHASE':
+            if (!bonifComprasId) missing.push('Bonificaciones s/compras')
+            if (ivaAmount > 0 && !ivaCFId) missing.push('IVA Credito Fiscal')
+            break
+        case 'BONUS_SALE':
+            if (!bonifVentasId) missing.push('Bonificaciones s/ventas')
+            if (ivaAmount > 0 && !ivaDFId) missing.push('IVA Debito Fiscal')
+            break
+        case 'DISCOUNT_PURCHASE':
+            if (!descuentosObtenidosId) missing.push('Descuentos obtenidos')
+            break
+        case 'DISCOUNT_SALE':
+            if (!descuentosOtorgadosId) missing.push('Descuentos otorgados')
+            break
+        default:
+            return { entries: [], error: 'Ajuste de bonif/desc sin adjustmentKind valido.' }
+    }
+
+    if (missing.length > 0) {
+        return { entries: [], error: `Faltan cuentas contables: ${missing.join(', ')}` }
+    }
+
+    if (neto <= 0) {
+        return { entries: [], error: 'El ajuste no tiene importe para generar asiento.' }
+    }
+
+    const metadata = buildEntryMetadata(movement, product)
+    const lines: EntryLine[] = []
+
+    const pushContraDebit = () => {
+        if (hasSplits) {
+            movement.paymentSplits!.forEach(split => {
+                lines.push({ accountId: split.accountId, debit: split.amount, credit: 0, description: 'Contrapartida' })
+            })
+        } else {
+            lines.push({ accountId: contraId!, debit: total, credit: 0, description: 'Contrapartida' })
+        }
+    }
+
+    const pushContraCredit = () => {
+        if (hasSplits) {
+            movement.paymentSplits!.forEach(split => {
+                lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: 'Contrapartida' })
+            })
+        } else {
+            lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Contrapartida' })
+        }
+    }
+
+    if (movement.adjustmentKind === 'BONUS_PURCHASE') {
+        pushContraDebit()
+        lines.push({ accountId: bonifComprasId!, debit: 0, credit: neto, description: 'Bonificacion s/compras' })
+        if (ivaAmount > 0 && ivaCFId) {
+            lines.push({ accountId: ivaCFId, debit: 0, credit: ivaAmount, description: 'IVA CF reversion' })
+        }
+    }
+
+    if (movement.adjustmentKind === 'BONUS_SALE') {
+        lines.push({ accountId: bonifVentasId!, debit: neto, credit: 0, description: 'Bonificacion s/ventas' })
+        if (ivaAmount > 0 && ivaDFId) {
+            lines.push({ accountId: ivaDFId, debit: ivaAmount, credit: 0, description: 'IVA DF reversion' })
+        }
+        pushContraCredit()
+    }
+
+    if (movement.adjustmentKind === 'DISCOUNT_PURCHASE') {
+        pushContraDebit()
+        lines.push({ accountId: descuentosObtenidosId!, debit: 0, credit: total, description: 'Descuento financiero obtenido' })
+    }
+
+    if (movement.adjustmentKind === 'DISCOUNT_SALE') {
+        lines.push({ accountId: descuentosOtorgadosId!, debit: total, credit: 0, description: 'Descuento financiero otorgado' })
+        pushContraCredit()
+    }
+
+    const memoMap: Record<string, string> = {
+        BONUS_PURCHASE: 'Bonificacion post-compra',
+        BONUS_SALE: 'Bonificacion post-venta',
+        DISCOUNT_PURCHASE: 'Descuento financiero obtenido',
+        DISCOUNT_SALE: 'Descuento financiero otorgado',
+    }
+
+    return {
+        entries: [{
+            date: movement.date,
+            memo: `${memoMap[movement.adjustmentKind!] || 'Ajuste post'} - ${product?.name || movement.productId}`,
+            lines,
+            sourceModule: 'inventory',
+            sourceId: movement.id,
+            sourceType: 'value_adjustment',
+            createdAt: new Date().toISOString(),
+            metadata: { ...metadata, journalRole: 'post_adjustment' },
+        }],
+    }
+}
+
 const buildJournalEntriesForMovement = async (
     movement: BienesMovement,
     product?: BienesProduct
@@ -143,8 +500,44 @@ const buildJournalEntriesForMovement = async (
         return { entries: [], error: 'El conteo fisico no genera asiento directo.' }
     }
 
+    // VALUE_ADJUSTMENT: decide based on adjustmentKind + autoJournal + linked entries
+    if (movement.type === 'VALUE_ADJUSTMENT') {
+        // Already has linked entries — don't duplicate
+        if (movement.linkedJournalEntryIds?.length) {
+            return { entries: [] }
+        }
+        // autoJournal OFF — caller doesn't want journal generation (e.g. RT6 conciliation)
+        if (!movement.autoJournal) {
+            return { entries: [] }
+        }
+        // RT6: generate RT6 journal entries (sign-aware)
+        if (movement.adjustmentKind === 'RT6') {
+            // RT6 manual with autoJournal ON — generate the adjustment entry
+            return buildRT6JournalEntries(movement, product)
+        }
+        // CAPITALIZATION: generate purchase-like journal entry for capitalizable expense
+        if (movement.adjustmentKind === 'CAPITALIZATION') {
+            return buildCapitalizationJournalEntries(movement, product)
+        }
+        if (
+            movement.adjustmentKind === 'BONUS_PURCHASE'
+            || movement.adjustmentKind === 'BONUS_SALE'
+            || movement.adjustmentKind === 'DISCOUNT_PURCHASE'
+            || movement.adjustmentKind === 'DISCOUNT_SALE'
+        ) {
+            return buildPostAdjustmentJournalEntries(movement, product)
+        }
+        // Legacy or unknown — no adjustmentKind: safe fallback, don't generate
+        // (Retrocompat: old VALUE_ADJUSTMENT without adjustmentKind = RT6 conciliation)
+        if (movement.rt6Period || movement.rt6SourceEntryId) {
+            return { entries: [] }
+        }
+        return { entries: [], error: 'VALUE_ADJUSTMENT sin adjustmentKind: no se puede generar asiento seguro.' }
+    }
+
     const accounts = await db.accounts.toArray()
     const settings = await loadBienesSettings()
+    const isPeriodic = settings.inventoryMode === 'PERIODIC'
 
     const mercaderiasId = resolveAccountId(accounts, {
         mappedId: product?.accountMercaderias || settings.accountMappings?.mercaderias || null,
@@ -163,16 +556,25 @@ const buildJournalEntriesForMovement = async (
         code: ACCOUNT_FALLBACKS.cmv.code,
         names: ACCOUNT_FALLBACKS.cmv.names,
     })
+    const comprasId = isPeriodic
+        ? resolveMappedAccountId(accounts, settings, 'compras', 'compras')
+        : null
     const diferenciaId = resolveMappedAccountId(accounts, settings, 'diferenciaInventario', 'diferenciaInventario')
     const contraId = resolveCounterpartyAccountId(accounts, movement)
+    const hasSplits = movement.paymentSplits && movement.paymentSplits.length > 0
+
+    // Determine which account receives the purchase debit
+    const purchaseDebitAccountId = isPeriodic ? (comprasId || mercaderiasId) : mercaderiasId
 
     const missing: string[] = []
-    if (!mercaderiasId) missing.push('Mercaderias')
-    if (!contraId && (movement.type === 'PURCHASE' || movement.type === 'SALE')) missing.push('Cuenta contrapartida')
-    if (movement.type === 'PURCHASE' && !ivaCFId && movement.ivaAmount > 0) missing.push('IVA Credito Fiscal')
+    if (!purchaseDebitAccountId && movement.type === 'PURCHASE') missing.push(isPeriodic ? 'Compras' : 'Mercaderias')
+    if (!mercaderiasId && movement.type !== 'PURCHASE') missing.push('Mercaderias')
+    if (!contraId && !hasSplits && (movement.type === 'PURCHASE' || movement.type === 'SALE')) missing.push('Cuenta contrapartida')
+    const discriminarIVA = movement.discriminarIVA !== false  // default true for backward compat
+    if (movement.type === 'PURCHASE' && !ivaCFId && movement.ivaAmount > 0 && discriminarIVA) missing.push('IVA Credito Fiscal')
     if (movement.type === 'SALE' && !ivaDFId && movement.ivaAmount > 0) missing.push('IVA Debito Fiscal')
     if (movement.type === 'SALE' && !ventasId) missing.push('Ventas')
-    if (movement.type === 'SALE' && !cmvId) missing.push('CMV')
+    if (movement.type === 'SALE' && !isPeriodic && !cmvId) missing.push('CMV')
     if (movement.type === 'ADJUSTMENT' && !diferenciaId) missing.push('Diferencia de inventario')
 
     if (missing.length > 0) {
@@ -200,33 +602,211 @@ const buildJournalEntriesForMovement = async (
     const ivaAmount = movement.ivaAmount
     const total = movement.total
 
+    // Resolve optional sub-accounts for bonif/gastos/descuento
+    const gastosComprasId = resolveMappedAccountId(accounts, settings, 'gastosCompras', 'gastosCompras')
+    const bonifComprasId = resolveMappedAccountId(accounts, settings, 'bonifCompras', 'bonifCompras')
+    const devolComprasId = resolveMappedAccountId(accounts, settings, 'devolCompras', 'devolCompras')
+    const bonifVentasId = resolveMappedAccountId(accounts, settings, 'bonifVentas', 'bonifVentas')
+    const devolVentasId = resolveMappedAccountId(accounts, settings, 'devolVentas', 'devolVentas')
+    const descuentosObtenidosId = resolveMappedAccountId(accounts, settings, 'descuentosObtenidos', 'descuentosObtenidos')
+    const descuentosOtorgadosId = resolveMappedAccountId(accounts, settings, 'descuentosOtorgados', 'descuentosOtorgados')
+
+    const bonifAmt = movement.bonificacionAmount || 0
+    const descuentoAmt = movement.descuentoFinancieroAmount || 0
+    const gastosAmt = movement.gastosCompra || 0
+
     if (movement.type === 'PURCHASE') {
-        const lines: EntryLine[] = [
-            { accountId: mercaderiasId!, debit: subtotal, credit: 0, description: 'Compra de mercaderias' },
-        ]
-        if (ivaAmount > 0 && ivaCFId) {
-            lines.push({ accountId: ivaCFId, debit: ivaAmount, credit: 0, description: 'IVA credito fiscal' })
+        if (movement.isDevolucion) {
+            // DEVOLUCIÓN DE COMPRA: reverse entry
+            // Debe: Proveedores/Anticipos (total c/IVA + percepciones) — usa paymentSplits si hay
+            // Haber: Devoluciones s/compras (neto)
+            // Haber: IVA CF (reverso)
+            // Haber: Percepciones sufridas (reverso) — originalmente DEBIT, ahora CREDIT
+            const lines: EntryLine[] = []
+            // P0 FIX: Usar paymentSplits para contrapartida (Nota de Débito a Proveedores vs Reembolso en Caja)
+            if (hasSplits) {
+                movement.paymentSplits!.forEach(split => {
+                    lines.push({ accountId: split.accountId, debit: split.amount, credit: 0, description: 'Contrapartida devolucion' })
+                })
+            } else {
+                lines.push({ accountId: contraId!, debit: total, credit: 0, description: 'Proveedores - devolucion' })
+            }
+            if (devolComprasId) {
+                lines.push({ accountId: devolComprasId, debit: 0, credit: subtotal, description: 'Devolucion s/compras' })
+            } else {
+                lines.push({ accountId: purchaseDebitAccountId!, debit: 0, credit: subtotal, description: 'Devolucion compra' })
+            }
+            if (ivaAmount > 0 && ivaCFId) {
+                lines.push({ accountId: ivaCFId, debit: 0, credit: ivaAmount, description: 'IVA CF reverso' })
+            }
+
+            // Reversión de percepciones sufridas (compra): CREDIT to perception asset account
+            const returnTaxes = movement.taxes || []
+            const returnPercepciones = returnTaxes.filter(t => t.kind === 'PERCEPCION' && t.amount > 0)
+            for (const tax of returnPercepciones) {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, true)
+                if (taxAccountId) {
+                    const label = `Percepcion ${tax.taxType} reverso`
+                    lines.push({ accountId: taxAccountId, debit: 0, credit: tax.amount, description: label })
+                } else {
+                    console.warn(`[bienes] No se encontro cuenta para percepcion ${tax.taxType} en devolucion compra (tax id: ${tax.id})`)
+                }
+            }
+
+            pushEntry(`Devolucion compra - ${product?.name || movement.productId}`, lines, { journalRole: 'purchase_return' })
+        } else {
+            // COMPRA NORMAL with bonif/gastos/descuento
+            // subtotal is NET (after bonif). When bonif is shown separately, debit GROSS amount.
+            const useBonifGross = bonifAmt > 0 && !!bonifComprasId
+            let purchaseDebitAmount = useBonifGross ? subtotal + bonifAmt : subtotal
+            const purchaseDesc = isPeriodic ? 'Compra (cuenta Compras)' : 'Compra de mercaderias'
+
+            // IVA como costo: when discriminarIVA is false, IVA goes to purchase cost (not CF)
+            if (!discriminarIVA && ivaAmount > 0) {
+                purchaseDebitAmount += ivaAmount
+            }
+
+            const lines: EntryLine[] = []
+            // Skip zero-amount purchase debit (e.g. soloGasto with qty=0)
+            if (purchaseDebitAmount > 0) {
+                lines.push({ accountId: purchaseDebitAccountId!, debit: purchaseDebitAmount, credit: 0, description: purchaseDesc + (!discriminarIVA && ivaAmount > 0 ? ' (IVA como costo)' : '') })
+            }
+            if (gastosAmt > 0 && gastosComprasId) {
+                lines.push({ accountId: gastosComprasId, debit: gastosAmt, credit: 0, description: 'Gastos s/compras' })
+            }
+            // IVA CF: only when discriminarIVA is true (default)
+            if (ivaAmount > 0 && ivaCFId && discriminarIVA) {
+                lines.push({ accountId: ivaCFId, debit: ivaAmount, credit: 0, description: 'IVA credito fiscal' })
+            }
+            if (useBonifGross) {
+                lines.push({ accountId: bonifComprasId!, debit: 0, credit: bonifAmt, description: 'Bonificacion s/compras' })
+            }
+            if (descuentoAmt > 0 && descuentosObtenidosId) {
+                lines.push({ accountId: descuentosObtenidosId, debit: 0, credit: descuentoAmt, description: 'Descuento financiero obtenido' })
+            }
+
+            // Percepciones sufridas (compra): debit to perception asset account
+            const taxes = movement.taxes || []
+            const percepciones = taxes.filter(t => t.kind === 'PERCEPCION' && t.amount > 0)
+            for (const tax of percepciones) {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, true)
+                if (taxAccountId) {
+                    const label = `Percepcion ${tax.taxType} sufrida`
+                    lines.push({ accountId: taxAccountId, debit: tax.amount, credit: 0, description: label })
+                } else {
+                    console.warn(`[bienes] No se encontro cuenta para percepcion ${tax.taxType} en compra (tax id: ${tax.id})`)
+                }
+            }
+
+            if (hasSplits) {
+                movement.paymentSplits!.forEach(split => {
+                    lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: 'Pago / Contrapartida' })
+                })
+            } else {
+                lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Pago / Proveedores' })
+            }
+            pushEntry(`Compra mercaderias - ${product?.name || movement.productId}`, lines, { journalRole: 'purchase' })
         }
-        lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Pago / Proveedores' })
-        pushEntry(`Compra mercaderias - ${product?.name || movement.productId}`, lines, { journalRole: 'purchase' })
     }
 
     if (movement.type === 'SALE') {
-        const saleLines: EntryLine[] = [
-            { accountId: contraId!, debit: total, credit: 0, description: 'Cobro / Deudores' },
-            { accountId: ventasId!, debit: 0, credit: subtotal, description: 'Ventas' },
-        ]
-        if (ivaAmount > 0 && ivaDFId) {
-            saleLines.push({ accountId: ivaDFId, debit: 0, credit: ivaAmount, description: 'IVA debito fiscal' })
-        }
-        pushEntry(`Venta mercaderias - ${product?.name || movement.productId}`, saleLines, { journalRole: 'sale' })
+        if (movement.isDevolucion) {
+            // DEVOLUCIÓN DE VENTA
+            // Debe: Devol s/ventas (neto)
+            // Debe: IVA DF (reverso)
+            // Debe: Percepciones practicadas (reverso) — originalmente CREDIT, ahora DEBIT
+            // Haber: Deudores/Caja (total devuelto)
+            const lines: EntryLine[] = []
+            if (devolVentasId) {
+                lines.push({ accountId: devolVentasId, debit: subtotal, credit: 0, description: 'Devolucion s/ventas' })
+            } else {
+                lines.push({ accountId: ventasId!, debit: subtotal, credit: 0, description: 'Devolucion venta' })
+            }
+            if (ivaAmount > 0 && ivaDFId) {
+                lines.push({ accountId: ivaDFId, debit: ivaAmount, credit: 0, description: 'IVA DF reverso' })
+            }
 
-        const cmvAmount = movement.costTotalAssigned
-        const cmvLines: EntryLine[] = [
-            { accountId: cmvId!, debit: cmvAmount, credit: 0, description: 'CMV' },
-            { accountId: mercaderiasId!, debit: 0, credit: cmvAmount, description: 'Salida de mercaderias' },
-        ]
-        pushEntry(`CMV venta - ${product?.name || movement.productId}`, cmvLines, { journalRole: 'cogs' })
+            // Reversión de percepciones practicadas (venta): DEBIT to perception liability account
+            const returnTaxes = movement.taxes || []
+            const returnPercepciones = returnTaxes.filter(t => t.kind === 'PERCEPCION' && t.amount > 0)
+            for (const tax of returnPercepciones) {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, false)
+                if (taxAccountId) {
+                    const label = `Percepcion ${tax.taxType} reverso`
+                    lines.push({ accountId: taxAccountId, debit: tax.amount, credit: 0, description: label })
+                } else {
+                    console.warn(`[bienes] No se encontro cuenta para percepcion ${tax.taxType} en devolucion venta (tax id: ${tax.id})`)
+                }
+            }
+
+            // P0 FIX: Usar paymentSplits para contrapartida (Nota de Crédito a Deudores vs Reembolso en Caja)
+            if (hasSplits) {
+                movement.paymentSplits!.forEach(split => {
+                    lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: 'Contrapartida devolucion' })
+                })
+            } else {
+                lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Devolucion a cliente' })
+            }
+            pushEntry(`Devolucion venta - ${product?.name || movement.productId}`, lines, { journalRole: 'sale_return' })
+        } else {
+            // VENTA NORMAL with bonif/descuento
+            // subtotal is NET (after bonif). When bonif is shown separately, credit GROSS Ventas.
+            const useBonifGross = bonifAmt > 0 && !!bonifVentasId
+            const ventasCreditAmount = useBonifGross ? subtotal + bonifAmt : subtotal
+
+            const saleLines: EntryLine[] = []
+            if (hasSplits) {
+                movement.paymentSplits!.forEach(split => {
+                    saleLines.push({ accountId: split.accountId, debit: split.amount, credit: 0, description: 'Cobro / Contrapartida' })
+                })
+            } else {
+                saleLines.push({ accountId: contraId!, debit: total, credit: 0, description: 'Cobro / Deudores' })
+            }
+
+            if (useBonifGross) {
+                saleLines.push({ accountId: bonifVentasId!, debit: bonifAmt, credit: 0, description: 'Bonificacion s/ventas' })
+            }
+            if (descuentoAmt > 0 && descuentosOtorgadosId) {
+                saleLines.push({ accountId: descuentosOtorgadosId, debit: descuentoAmt, credit: 0, description: 'Descuento financiero otorgado' })
+            }
+            saleLines.push({ accountId: ventasId!, debit: 0, credit: ventasCreditAmount, description: 'Ventas' })
+            if (ivaAmount > 0 && ivaDFId) {
+                saleLines.push({ accountId: ivaDFId, debit: 0, credit: ivaAmount, description: 'IVA debito fiscal' })
+            }
+
+            // Percepciones practicadas (venta): credit to perception liability account
+            const saleTaxes = movement.taxes || []
+            const salePercepciones = saleTaxes.filter(t => t.kind === 'PERCEPCION' && t.amount > 0)
+            for (const tax of salePercepciones) {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, false)
+                if (taxAccountId) {
+                    const label = `Percepcion ${tax.taxType} a depositar`
+                    saleLines.push({ accountId: taxAccountId, debit: 0, credit: tax.amount, description: label })
+                } else {
+                    console.warn(`[bienes] No se encontro cuenta para percepcion ${tax.taxType} en venta (tax id: ${tax.id})`)
+                }
+            }
+
+            pushEntry(`Venta mercaderias - ${product?.name || movement.productId}`, saleLines, { journalRole: 'sale' })
+
+            // Asiento de CMV (solo en modo PERMANENT)
+            if (!isPeriodic && cmvId && mercaderiasId) {
+                const cmvAmount = Math.abs(movement.costTotalAssigned || 0)
+                if (cmvAmount > 0) {
+                    const cmvLines: EntryLine[] = movement.isDevolucion
+                        ? [
+                            { accountId: mercaderiasId, debit: cmvAmount, credit: 0, description: 'Reingreso de mercaderias' },
+                            { accountId: cmvId, debit: 0, credit: cmvAmount, description: 'Reversion CMV' },
+                        ]
+                        : [
+                            { accountId: cmvId, debit: cmvAmount, credit: 0, description: 'CMV' },
+                            { accountId: mercaderiasId, debit: 0, credit: cmvAmount, description: 'Salida de mercaderias' },
+                        ]
+                    const memoPrefix = movement.isDevolucion ? 'Reversion CMV' : 'CMV venta'
+                    pushEntry(`${memoPrefix} - ${product?.name || movement.productId}`, cmvLines, { journalRole: 'cogs' })
+                }
+            }
+        }
     }
 
     if (movement.type === 'ADJUSTMENT') {
@@ -257,6 +837,71 @@ const buildJournalEntriesForMovement = async (
                 { journalRole: 'adjustment_out' }
             )
         }
+    }
+
+    // P1: EXISTENCIA INICIAL - Genera asiento D Mercaderías / H Apertura Inventario
+    if (movement.type === 'INITIAL_STOCK') {
+        const amount = Math.abs(movement.subtotal || 0)
+        if (amount <= 0) {
+            return { entries: [], error: 'La existencia inicial no tiene importe para generar asiento.' }
+        }
+
+        const aperturaId = resolveMappedAccountId(accounts, settings, 'aperturaInventario', 'aperturaInventario')
+        if (!aperturaId) {
+            return { entries: [], error: 'Falta cuenta contable: Apertura Inventario' }
+        }
+
+        pushEntry(
+            `Existencia Inicial - ${product?.name || movement.productId}`,
+            [
+                { accountId: mercaderiasId!, debit: amount, credit: 0, description: 'Existencia inicial mercaderias' },
+                { accountId: aperturaId, debit: 0, credit: amount, description: 'Contrapartida apertura inventario' },
+            ],
+            { journalRole: 'initial_stock' }
+        )
+    }
+
+    // P2: PAYMENT (Cobro/Pago posterior) - No afecta stock, solo genera asiento contable
+    if (movement.type === 'PAYMENT') {
+        const paymentTotal = movement.total || 0
+        if (paymentTotal <= 0) {
+            return { entries: [], error: 'El cobro/pago no tiene importe.' }
+        }
+
+        if (!hasSplits || movement.paymentSplits!.length === 0) {
+            return { entries: [], error: 'El cobro/pago debe tener al menos una forma de cobro/pago.' }
+        }
+
+        const isCobro = movement.paymentDirection === 'COBRO'
+        const deudoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.deudores)
+        const proveedoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores)
+        const cuentaCorrienteId = isCobro ? deudoresId : proveedoresId
+
+        if (!cuentaCorrienteId) {
+            return { entries: [], error: `Falta cuenta contable: ${isCobro ? 'Deudores por ventas' : 'Proveedores'}` }
+        }
+
+        const lines: EntryLine[] = []
+
+        if (isCobro) {
+            // COBRO: D Caja/Banco + D Retenciones sufridas / H Deudores
+            movement.paymentSplits!.forEach(split => {
+                lines.push({ accountId: split.accountId, debit: split.amount, credit: 0, description: split.method || 'Cobro' })
+            })
+            lines.push({ accountId: cuentaCorrienteId, debit: 0, credit: paymentTotal, description: 'Deudores por ventas' })
+        } else {
+            // PAGO: D Proveedores / H Caja/Banco + H Retenciones practicadas
+            lines.push({ accountId: cuentaCorrienteId, debit: paymentTotal, credit: 0, description: 'Proveedores' })
+            movement.paymentSplits!.forEach(split => {
+                lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: split.method || 'Pago' })
+            })
+        }
+
+        const memo = isCobro
+            ? `Cobro${movement.counterparty ? ` - ${movement.counterparty}` : ''}`
+            : `Pago${movement.counterparty ? ` a ${movement.counterparty}` : ''}`
+
+        pushEntry(memo, lines, { journalRole: isCobro ? 'collection' : 'payment' })
     }
 
     return { entries }
@@ -301,7 +946,22 @@ const stripInventoryLinkFromEntry = (entry: JournalEntry, movementId: string): J
  */
 export async function loadBienesSettings(): Promise<BienesSettings> {
     const settings = await db.bienesSettings.get('bienes-settings')
-    if (settings) return settings
+    if (settings) {
+        // Backward compatibility: fill new fields if missing
+        let needsUpdate = false
+        if (!settings.inventoryMode) {
+            settings.inventoryMode = 'PERMANENT'
+            needsUpdate = true
+        }
+        if (settings.autoJournalEntries === undefined) {
+            settings.autoJournalEntries = true
+            needsUpdate = true
+        }
+        if (needsUpdate) {
+            await db.bienesSettings.put(settings)
+        }
+        return settings
+    }
 
     const defaultSettings = createDefaultBienesSettings()
     await db.bienesSettings.put(defaultSettings)
@@ -368,7 +1028,8 @@ export async function getBienesProductBySku(sku: string): Promise<BienesProduct 
  * Create new product
  */
 export async function createBienesProduct(
-    product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>
+    product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>,
+    options?: { generateOpeningJournal?: boolean }
 ): Promise<BienesProduct> {
     // Check SKU uniqueness
     const existing = await getBienesProductBySku(product.sku)
@@ -384,8 +1045,92 @@ export async function createBienesProduct(
         updatedAt: now,
     }
 
-    await db.bienesProducts.add(newProduct)
-    return newProduct
+    const hasOpening = product.openingQty > 0 && product.openingUnitCost > 0
+    const shouldGenerateJournal = hasOpening && options?.generateOpeningJournal
+
+    if (!hasOpening || !shouldGenerateJournal) {
+        // No opening movement needed, just save product as-is
+        await db.bienesProducts.add(newProduct)
+        return newProduct
+    }
+
+    // Create initial stock movement + journal entry atomically
+    const settings = await loadBienesSettings()
+    const openingAmount = product.openingQty * product.openingUnitCost
+
+    const initialMovement: BienesMovement = {
+        id: generateInventoryId('bmov'),
+        date: product.openingDate,
+        type: 'INITIAL_STOCK',
+        productId: newProduct.id,
+        quantity: product.openingQty,
+        periodId: product.periodId,
+        unitCost: product.openingUnitCost,
+        ivaRate: 0,
+        ivaAmount: 0,
+        subtotal: openingAmount,
+        total: openingAmount,
+        costMethod: settings.costMethod,
+        costUnitAssigned: 0,
+        costTotalAssigned: 0,
+        notes: 'Existencia Inicial',
+        autoJournal: true,
+        linkedJournalEntryIds: [],
+        journalStatus: 'generated',
+        createdAt: now,
+        updatedAt: now,
+    }
+
+    // Build opening journal entry: Debe Mercaderias / Haber Apertura Inventario
+    const allAccounts = await db.accounts.toArray()
+    const mercaderiasId = resolveAccountId(allAccounts, {
+        mappedId: product.accountMercaderias || settings.accountMappings?.mercaderias || null,
+        code: ACCOUNT_FALLBACKS.mercaderias.code,
+        names: ACCOUNT_FALLBACKS.mercaderias.names,
+    })
+    const aperturaId = resolveMappedAccountId(allAccounts, settings, 'aperturaInventario', 'aperturaInventario')
+
+    if (!mercaderiasId || !aperturaId) {
+        throw new Error(`Faltan cuentas contables para inventario inicial: ${!mercaderiasId ? 'Mercaderias' : ''} ${!aperturaId ? 'Apertura Inventario' : ''}`.trim())
+    }
+
+    const journalEntry: Omit<JournalEntry, 'id'> = {
+        date: product.openingDate,
+        memo: `Inventario inicial - ${product.name}`,
+        lines: [
+            { accountId: mercaderiasId, debit: openingAmount, credit: 0, description: 'Inventario inicial mercaderias' },
+            { accountId: aperturaId, debit: 0, credit: openingAmount, description: 'Contrapartida apertura inventario' },
+        ],
+        sourceModule: 'inventory',
+        sourceId: initialMovement.id,
+        sourceType: 'opening',
+        createdAt: now,
+        metadata: {
+            sourceModule: 'inventory',
+            sourceId: initialMovement.id,
+            sourceType: 'opening',
+            movementId: initialMovement.id,
+            productId: newProduct.id,
+            productName: product.name,
+            journalRole: 'opening_stock',
+        },
+    }
+
+    // Save atomically: product (with openingQty=0 to avoid double count) + movement + entry
+    const productToSave: BienesProduct = {
+        ...newProduct,
+        openingQty: 0,
+        openingUnitCost: 0,
+    }
+
+    await db.transaction('rw', db.bienesProducts, db.bienesMovements, db.entries, async () => {
+        const createdEntry = await createEntry(journalEntry)
+        initialMovement.linkedJournalEntryIds = [createdEntry.id]
+        await db.bienesProducts.add(productToSave)
+        await db.bienesMovements.add(initialMovement)
+    })
+
+    return productToSave
 }
 
 /**
@@ -478,9 +1223,88 @@ export async function createBienesMovement(
     // Calculate costs for exits
     let costUnitAssigned = 0
     let costTotalAssigned = 0
+    let costLayersUsed: BienesMovement['costLayersUsed'] | undefined
     let product: BienesProduct | undefined
 
-    if (movement.type === 'SALE' || (movement.type === 'ADJUSTMENT' && movement.quantity < 0)) {
+    if (movement.type === 'VALUE_ADJUSTMENT') {
+        // VALUE_ADJUSTMENT: no cost calculation, no stock change.
+        // Journal generation depends on adjustmentKind + autoJournal.
+        const vaMovement: BienesMovement = {
+            ...movement,
+            id: generateInventoryId('bmov'),
+            costMethod: settings.costMethod,
+            costUnitAssigned: 0,
+            costTotalAssigned: 0,
+            linkedJournalEntryIds: movement.linkedJournalEntryIds || [],
+            journalStatus: (movement.linkedJournalEntryIds || []).length > 0 ? 'linked' : 'none',
+            createdAt: now,
+            updatedAt: now,
+        }
+
+        // If autoJournal is ON and no pre-existing linked entries, generate journal
+        if (movement.autoJournal && !(movement.linkedJournalEntryIds || []).length) {
+            product = await getBienesProductById(movement.productId)
+            const { entries, error } = await buildJournalEntriesForMovement(vaMovement, product)
+            if (error) {
+                throw new Error(error)
+            }
+            // Hardening: validate journal balance
+            const balErr = validateEntriesBalance(entries)
+            if (balErr) {
+                throw new Error(balErr)
+            }
+            if (entries.length > 0) {
+                const createdEntries: JournalEntry[] = []
+                await db.transaction('rw', db.bienesMovements, db.entries, async () => {
+                    for (const entryData of entries) {
+                        const created = await createEntry(entryData)
+                        createdEntries.push(created)
+                    }
+                    await db.bienesMovements.add({
+                        ...vaMovement,
+                        linkedJournalEntryIds: createdEntries.map(e => e.id),
+                        journalStatus: 'generated',
+                    })
+                })
+                return {
+                    ...vaMovement,
+                    linkedJournalEntryIds: createdEntries.map(e => e.id),
+                    journalStatus: 'generated',
+                }
+            }
+        }
+
+        await db.bienesMovements.add(vaMovement)
+        return vaMovement
+    }
+
+    if (movement.type === 'SALE' && movement.isDevolucion) {
+        product = await getBienesProductById(movement.productId)
+        if (!product) {
+            throw new Error('Producto no encontrado')
+        }
+
+        const existingMovements = await getBienesMovementsByProduct(movement.productId, movement.periodId)
+        const source = movement.sourceMovementId
+            ? existingMovements.find(m => m.id === movement.sourceMovementId)
+            : undefined
+        const qty = Math.abs(movement.quantity)
+
+        if (source?.costLayersUsed && source.costLayersUsed.length > 0) {
+            const sourceQty = Math.abs(source.quantity || 0)
+            const ratio = sourceQty > 0 ? qty / sourceQty : 0
+            const totalCost = source.costLayersUsed.reduce((sum, layer) => sum + (layer.unitCost * layer.quantity * ratio), 0)
+            costTotalAssigned = totalCost
+            costUnitAssigned = qty > 0 ? totalCost / qty : 0
+        } else if (source?.costUnitAssigned) {
+            costUnitAssigned = source.costUnitAssigned
+            costTotalAssigned = costUnitAssigned * qty
+        } else {
+            const valuation = calculateProductValuation(product, existingMovements, settings.costMethod)
+            costUnitAssigned = valuation.averageCost
+            costTotalAssigned = costUnitAssigned * qty
+        }
+    } else if (movement.type === 'SALE' || (movement.type === 'ADJUSTMENT' && movement.quantity < 0)) {
         product = await getBienesProductById(movement.productId)
         if (!product) {
             throw new Error('Producto no encontrado')
@@ -502,6 +1326,9 @@ export async function createBienesMovement(
 
         costUnitAssigned = costResult.unitCost
         costTotalAssigned = costResult.totalCost
+        if (movement.type === 'SALE') {
+            costLayersUsed = costResult.layersUsed
+        }
     }
     if (!product) {
         product = await getBienesProductById(movement.productId)
@@ -513,6 +1340,7 @@ export async function createBienesMovement(
         costMethod: settings.costMethod,
         costUnitAssigned,
         costTotalAssigned,
+        costLayersUsed,
         linkedJournalEntryIds: movement.linkedJournalEntryIds || [],
         journalStatus: movement.autoJournal ? 'generated' : 'none',
         createdAt: now,
@@ -533,6 +1361,12 @@ export async function createBienesMovement(
     const { entries, error } = await buildJournalEntriesForMovement(newMovement, product)
     if (error) {
         throw new Error(error)
+    }
+
+    // Hardening: validate journal balance before persisting
+    const balanceError = validateEntriesBalance(entries)
+    if (balanceError) {
+        throw new Error(balanceError)
     }
 
     const createdEntries: JournalEntry[] = []
@@ -682,7 +1516,30 @@ export async function updateBienesMovementWithJournal(
     }
 
     // Recalculate costs for exits
-    if (baseMovement.type === 'SALE' || (baseMovement.type === 'ADJUSTMENT' && baseMovement.quantity < 0)) {
+    if (baseMovement.type === 'SALE' && baseMovement.isDevolucion) {
+        const existingMovements = await getBienesMovementsByProduct(baseMovement.productId, baseMovement.periodId)
+        const movementsForCost = existingMovements.filter(movement => movement.id !== id)
+        const source = baseMovement.sourceMovementId
+            ? movementsForCost.find(movement => movement.id === baseMovement.sourceMovementId)
+            : undefined
+        const qty = Math.abs(baseMovement.quantity)
+
+        if (source?.costLayersUsed && source.costLayersUsed.length > 0) {
+            const sourceQty = Math.abs(source.quantity || 0)
+            const ratio = sourceQty > 0 ? qty / sourceQty : 0
+            const totalCost = source.costLayersUsed.reduce((sum, layer) => sum + (layer.unitCost * layer.quantity * ratio), 0)
+            baseMovement.costTotalAssigned = totalCost
+            baseMovement.costUnitAssigned = qty > 0 ? totalCost / qty : 0
+        } else if (source?.costUnitAssigned) {
+            baseMovement.costUnitAssigned = source.costUnitAssigned
+            baseMovement.costTotalAssigned = baseMovement.costUnitAssigned * qty
+        } else {
+            const valuation = calculateProductValuation(product, movementsForCost, settings.costMethod)
+            baseMovement.costUnitAssigned = valuation.averageCost
+            baseMovement.costTotalAssigned = baseMovement.costUnitAssigned * qty
+        }
+        baseMovement.costLayersUsed = undefined
+    } else if (baseMovement.type === 'SALE' || (baseMovement.type === 'ADJUSTMENT' && baseMovement.quantity < 0)) {
         const existingMovements = await getBienesMovementsByProduct(baseMovement.productId, baseMovement.periodId)
         const movementsForCost = existingMovements.filter(movement => movement.id !== id)
         const qty = baseMovement.type === 'SALE' ? baseMovement.quantity : Math.abs(baseMovement.quantity)
@@ -694,9 +1551,13 @@ export async function updateBienesMovementWithJournal(
 
         baseMovement.costUnitAssigned = costResult.unitCost
         baseMovement.costTotalAssigned = costResult.totalCost
+        if (baseMovement.type === 'SALE') {
+            baseMovement.costLayersUsed = costResult.layersUsed
+        }
     } else {
         baseMovement.costUnitAssigned = 0
         baseMovement.costTotalAssigned = 0
+        baseMovement.costLayersUsed = undefined
     }
 
     const linkedIds = existing.linkedJournalEntryIds || []
@@ -1195,4 +2056,144 @@ export async function getProductsWithLowStock(): Promise<BienesProduct[]> {
 export async function getAllBienesSKUs(): Promise<string[]> {
     const products = await getAllBienesProducts()
     return products.map(p => p.sku)
+}
+
+// ========================================
+// Periodic Closing - Entry Generation
+// ========================================
+
+/**
+ * Check if periodic closing entries already exist for a given period
+ */
+export async function hasPeriodicClosingEntries(periodId: string): Promise<boolean> {
+    const entries = await db.entries.toArray()
+    return entries.some(e =>
+        e.sourceModule === 'inventory' &&
+        e.sourceType === 'periodic_closing' &&
+        e.metadata?.periodId === periodId
+    )
+}
+
+/**
+ * Generate and persist periodic closing entries (refundición + CMV + ventas netas)
+ * Idempotent: won't duplicate if already generated for this period.
+ *
+ * @returns Created entry IDs or error
+ */
+export async function generatePeriodicClosingJournalEntries(
+    data: {
+        existenciaInicial: number
+        compras: number
+        gastosCompras: number
+        bonifCompras: number
+        devolCompras: number
+        existenciaFinalTeorica: number
+        existenciaFinalFisica?: number | null
+        ventas: number
+        bonifVentas: number
+        devolVentas: number
+        closingDate: string
+        periodId: string
+        periodLabel: string
+    }
+): Promise<{ entryIds: string[]; cmv: number; difInv: number; error?: string }> {
+    // Idempotency check
+    const alreadyExists = await hasPeriodicClosingEntries(data.periodId)
+    if (alreadyExists) {
+        return { entryIds: [], cmv: 0, difInv: 0, error: 'Ya se generaron asientos de cierre para este periodo.' }
+    }
+
+    const settings = await loadBienesSettings()
+    if (settings.inventoryMode !== 'PERIODIC') {
+        return { entryIds: [], cmv: 0, difInv: 0, error: 'El modo de inventario no es Periodico (Diferencias).' }
+    }
+
+    const allAccounts = await db.accounts.toArray()
+
+    // Required accounts
+    const mercaderiasId = resolveMappedAccountId(allAccounts, settings, 'mercaderias', 'mercaderias')
+    const comprasId = resolveMappedAccountId(allAccounts, settings, 'compras', 'compras')
+    const cmvId = resolveMappedAccountId(allAccounts, settings, 'cmv', 'cmv')
+
+    const missing: string[] = []
+    if (!mercaderiasId) missing.push('Mercaderias')
+    if (!comprasId) missing.push('Compras')
+    if (!cmvId) missing.push('CMV')
+    if (missing.length > 0) {
+        return { entryIds: [], cmv: 0, difInv: 0, error: `Faltan cuentas: ${missing.join(', ')}. Configura las cuentas primero.` }
+    }
+
+    // Diferencia de inventario account (required if physical EF is provided)
+    const diferenciaInventarioId = resolveMappedAccountId(allAccounts, settings, 'diferenciaInventario', 'diferenciaInventario')
+    if (data.existenciaFinalFisica != null && !diferenciaInventarioId) {
+        return { entryIds: [], cmv: 0, difInv: 0, error: 'Falta cuenta Diferencia de inventario (4.3.02). Configura la cuenta para poder generar asientos con inventario fisico.' }
+    }
+
+    // Optional sub-accounts (for refundición)
+    const gastosComprasId = resolveMappedAccountId(allAccounts, settings, 'gastosCompras', 'gastosCompras')
+    const bonifComprasId = resolveMappedAccountId(allAccounts, settings, 'bonifCompras', 'bonifCompras')
+    const devolComprasId = resolveMappedAccountId(allAccounts, settings, 'devolCompras', 'devolCompras')
+    const ventasId = resolveMappedAccountId(allAccounts, settings, 'ventas', 'ventas')
+    const bonifVentasId = resolveMappedAccountId(allAccounts, settings, 'bonifVentas', 'bonifVentas')
+    const devolVentasId = resolveMappedAccountId(allAccounts, settings, 'devolVentas', 'devolVentas')
+
+    const { generatePeriodicClosingEntries } = await import('../core/inventario/closing')
+
+    const { entries: closingEntries, cmv, difInv } = generatePeriodicClosingEntries(
+        {
+            existenciaInicial: data.existenciaInicial,
+            compras: data.compras,
+            gastosCompras: data.gastosCompras,
+            bonifCompras: data.bonifCompras,
+            devolCompras: data.devolCompras,
+            existenciaFinalTeorica: data.existenciaFinalTeorica,
+            existenciaFinalFisica: data.existenciaFinalFisica,
+            ventas: data.ventas,
+            bonifVentas: data.bonifVentas,
+            devolVentas: data.devolVentas,
+        },
+        {
+            mercaderiasId: mercaderiasId!,
+            comprasId: comprasId!,
+            cmvId: cmvId!,
+            gastosComprasId: gastosComprasId || undefined,
+            bonifComprasId: bonifComprasId || undefined,
+            devolComprasId: devolComprasId || undefined,
+            ventasId: ventasId || undefined,
+            bonifVentasId: bonifVentasId || undefined,
+            devolVentasId: devolVentasId || undefined,
+            diferenciaInventarioId: diferenciaInventarioId || undefined,
+        },
+        data.periodLabel
+    )
+
+    if (closingEntries.length === 0) {
+        return { entryIds: [], cmv, difInv, error: 'No hay asientos de cierre que generar (valores en cero).' }
+    }
+
+    const now = new Date().toISOString()
+    const entryIds: string[] = []
+
+    await db.transaction('rw', db.entries, async () => {
+        for (const closingEntry of closingEntries) {
+            const created = await createEntry({
+                date: data.closingDate,
+                memo: closingEntry.memo,
+                lines: closingEntry.lines,
+                sourceModule: 'inventory',
+                sourceId: `periodic-closing-${data.periodId}`,
+                sourceType: 'periodic_closing',
+                createdAt: now,
+                metadata: {
+                    sourceModule: 'inventory',
+                    sourceType: 'periodic_closing',
+                    periodId: data.periodId,
+                    journalRole: 'periodic_closing',
+                },
+            })
+            entryIds.push(created.id)
+        }
+    })
+
+    return { entryIds, cmv, difInv }
 }

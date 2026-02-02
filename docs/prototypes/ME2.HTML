@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre - Moneda Extranjera</title>
+    
+    <!-- Fonts & Icons (Brand Core) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        :root {
+            /* --- BRAND TOKENS (Copied from Brand Book) --- */
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            --border-light: #E2E8F0;
+            --border-focus: #3B82F6;
+
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --info: #3B82F6;
+
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 24px;
+        }
+
+        /* --- BASE STYLES --- */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg-app);
+            font-family: var(--font-body);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* --- LAYOUT --- */
+        .app-shell { display: flex; width: 100%; height: 100%; }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: var(--bg-paper);
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            padding: 1.5rem 1rem;
+            flex-shrink: 0;
+        }
+        .logo { font-family: var(--font-display); font-weight: 800; font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 2rem; color: var(--text-main); }
+        .logo i { color: var(--brand-primary); font-size: 1.5rem; }
+        
+        .nav-item {
+            display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem;
+            color: var(--text-secondary); border-radius: var(--radius-sm);
+            cursor: pointer; font-weight: 500; font-size: 0.9rem; transition: all 0.2s;
+            text-decoration: none;
+        }
+        .nav-item:hover { background: var(--bg-app); color: var(--text-main); }
+        .nav-item.active { background: #EFF6FF; color: var(--brand-primary); }
+        .nav-group-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); font-weight: 600; margin: 1.5rem 0 0.5rem 0.75rem; }
+
+        /* Main Content */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+
+        /* Header & Ticker */
+        .top-bar { background: var(--bg-paper); border-bottom: 1px solid var(--border-light); padding: 0.75rem 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+        .ticker-bar {
+            background: #0F172A; color: white; padding: 0.4rem 1.5rem; font-size: 0.75rem; font-family: var(--font-mono);
+            display: flex; align-items: center; gap: 2rem; overflow: hidden; white-space: nowrap;
+        }
+        .ticker-item { display: flex; align-items: center; gap: 0.5rem; }
+        .ticker-val { color: var(--success); }
+        .ticker-label { color: var(--text-tertiary); }
+
+        /* Tabs Navigation (Page Level) */
+        .tabs-header {
+            padding: 1.5rem 2rem 0 2rem;
+            background: var(--bg-app);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            border-bottom: 1px solid var(--border-light);
+        }
+        .page-title h1 { font-family: var(--font-display); font-size: 1.75rem; font-weight: 700; margin-bottom: 0.5rem; }
+        .page-breadcrumbs { font-size: 0.85rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem; }
+        
+        .tabs-nav { display: flex; gap: 2rem; }
+        .tab-btn {
+            background: transparent; border: none; padding: 0.75rem 0;
+            font-size: 0.95rem; font-weight: 500; color: var(--text-secondary);
+            cursor: pointer; position: relative;
+        }
+        .tab-btn.active { color: var(--brand-primary); font-weight: 600; }
+        .tab-btn.active::after {
+            content: ''; position: absolute; bottom: -1px; left: 0; width: 100%; height: 2px; background: var(--brand-primary);
+        }
+        .tab-btn:hover:not(.active) { color: var(--text-main); }
+
+        /* Content Area */
+        .tab-content { padding: 2rem; overflow-y: auto; height: 100%; display: none; animation: fadeIn 0.3s ease; }
+        .tab-content.active { display: block; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* --- COMPONENTS --- */
+
+        /* Cards & Grid */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; }
+        
+        .card { background: var(--bg-paper); border-radius: var(--radius-md); padding: 1.5rem; border: 1px solid var(--border-light); box-shadow: var(--shadow-sm); }
+        .kpi-label { font-size: 0.85rem; color: var(--text-secondary); font-weight: 500; margin-bottom: 0.5rem; display: flex; justify-content: space-between; }
+        .kpi-value { font-family: var(--font-display); font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
+        .kpi-sub { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-tertiary); margin-top: 0.25rem; }
+        
+        .btn { display: inline-flex; align-items: center; justify-content: center; padding: 0.6rem 1.2rem; border-radius: var(--radius-sm); font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: all 0.2s; border: none; gap: 0.5rem; }
+        .btn-primary { background: var(--brand-gradient); color: white; }
+        .btn-primary:hover { box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); transform: translateY(-1px); }
+        .btn-secondary { background: white; border: 1px solid var(--border-light); color: var(--text-main); }
+        .btn-secondary:hover { background: #F8FAFC; border-color: var(--text-tertiary); }
+        .btn-ghost { background: transparent; color: var(--text-secondary); }
+        .btn-ghost:hover { background: #F1F5F9; color: var(--text-main); }
+        .btn-sm { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+
+        /* Tables */
+        .table-container { border: 1px solid var(--border-light); border-radius: var(--radius-md); background: white; overflow: hidden; display: flex; flex-direction: column; }
+        .table-scroll-wrapper { overflow-x: auto; width: 100%; } /* Horizontal Scroll for large tables */
+        .data-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; white-space: nowrap; }
+        .data-table th { background: #F8FAFC; padding: 0.75rem 1rem; text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-light); position: sticky; top: 0; z-index: 10; }
+        .data-table td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-light); color: var(--text-main); vertical-align: middle; }
+        .data-table tr:last-child td { border-bottom: none; }
+        .cell-mono { font-family: var(--font-mono); font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+        .cell-right { text-align: right; }
+        .cell-center { text-align: center; }
+
+        /* Badges */
+        .badge { padding: 0.25rem 0.6rem; border-radius: 99px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; display: inline-flex; align-items: center; gap: 0.3rem; }
+        .badge-success { background: #DCFCE7; color: #166534; }
+        .badge-warning { background: #FEF3C7; color: #92400E; }
+        .badge-neutral { background: #F1F5F9; color: #475569; }
+        .badge-info { background: #EFF6FF; color: #1E40AF; }
+
+        /* Modals */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 100; display: none; align-items: center; justify-content: center; }
+        .modal-overlay.open { display: flex; }
+        .modal-box { background: white; width: 100%; max-width: 800px; border-radius: var(--radius-lg); box-shadow: var(--shadow-md); overflow: hidden; animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); max-height: 90vh; display: flex; flex-direction: column; }
+        
+        .modal-box.large { max-width: 900px; }
+
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        .modal-header { padding: 1.5rem; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+        .modal-body { padding: 2rem; overflow-y: auto; }
+        .modal-footer { padding: 1.5rem; border-top: 1px solid var(--border-light); background: #F8FAFC; display: flex; justify-content: flex-end; gap: 1rem; flex-shrink: 0; }
+
+        /* Tabs inside Modal */
+        .modal-tabs { display: flex; gap: 0.5rem; background: #F1F5F9; padding: 0.25rem; border-radius: var(--radius-sm); margin-bottom: 1.5rem; }
+        .modal-tab-btn { flex: 1; border: none; background: transparent; padding: 0.5rem; border-radius: 4px; font-size: 0.85rem; font-weight: 500; color: var(--text-secondary); cursor: pointer; transition: all 0.2s; }
+        .modal-tab-btn.active { background: white; color: var(--brand-primary); font-weight: 600; box-shadow: var(--shadow-sm); }
+        .modal-tab-content { display: none; }
+        .modal-tab-content.active { display: block; animation: fadeIn 0.2s ease; }
+
+        /* Forms */
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+        .form-section-title { font-size: 0.9rem; font-weight: 600; color: var(--text-main); margin-bottom: 1rem; border-bottom: 1px solid var(--border-light); padding-bottom: 0.5rem; margin-top: 1.5rem; }
+        .form-group label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.4rem; color: var(--text-secondary); }
+        .input-field, .select-field { width: 100%; padding: 0.6rem; border: 1px solid var(--border-light); border-radius: var(--radius-sm); font-family: var(--font-body); font-size: 0.95rem; }
+        .input-field:focus, .select-field:focus { outline: none; border-color: var(--brand-primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+
+        /* --- FEATURE: ACCOUNTING MAPPING WIDGET --- */
+        .mapping-widget {
+            background: #EFF6FF; border: 1px dashed #BFDBFE; border-radius: var(--radius-md); padding: 1rem;
+            margin-top: 0.5rem; display: flex; gap: 1rem; align-items: flex-start;
+        }
+        .mapping-icon { color: var(--brand-primary); font-size: 1.5rem; margin-top: 0.2rem; }
+        .mapping-content h4 { font-size: 0.9rem; color: var(--text-main); margin-bottom: 0.2rem; }
+        .mapping-content p { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4; }
+        .confidence-tag { font-size: 0.7rem; background: #DBEAFE; color: #1E40AF; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: 600; margin-left: 0.5rem; }
+
+        /* --- FEATURE: ACCOUNTING PREVIEW --- */
+        .accounting-preview { background: #F8FAFC; border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 1rem; margin-top: 1.5rem; }
+        .preview-header { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; color: var(--text-tertiary); margin-bottom: 0.75rem; display: flex; justify-content: space-between; }
+        .entry-row { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px dashed var(--border-light); font-size: 0.9rem; }
+        .entry-row:last-child { border-bottom: none; }
+        .entry-account { font-weight: 500; color: var(--text-main); }
+        .entry-debit { color: var(--text-secondary); font-family: var(--font-mono); width: 100px; text-align: right; }
+        .entry-credit { color: var(--text-secondary); font-family: var(--font-mono); width: 100px; text-align: right; }
+        
+        /* Toggle Switch */
+        .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border-light); transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input:checked + .slider { background-color: var(--brand-primary); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+    </style>
+</head>
+<body>
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <div class="logo">
+            <i class="ph-duotone ph-robot"></i> ContaLivre
+        </div>
+        
+        <div class="nav-item"><i class="ph ph-squares-four"></i> Dashboard</div>
+        <div class="nav-group-label">Contabilidad</div>
+        <div class="nav-item"><i class="ph ph-notebook"></i> Libro Diario</div>
+        <div class="nav-item"><i class="ph ph-scales"></i> Balance</div>
+        
+        <div class="nav-group-label">Tesorería</div>
+        <div class="nav-item"><i class="ph ph-bank"></i> Caja y Bancos</div>
+        <div class="nav-item active"><i class="ph-fill ph-currency-dollar"></i> Moneda Extranjera</div>
+        <div class="nav-item"><i class="ph ph-credit-card"></i> Cheques</div>
+    </aside>
+
+    <!-- MAIN APP -->
+    <div class="main-content">
+        
+        <!-- TICKER BAR -->
+        <div class="ticker-bar">
+            <div class="ticker-item"><i class="ph-fill ph-globe"></i> USD OFICIAL:</div>
+            <div class="ticker-item"><span class="ticker-label">C:</span> <span class="ticker-val">$980.50</span> <span class="ticker-label">V:</span> <span class="ticker-val">$1020.00</span></div>
+            <div style="opacity: 0.3">|</div>
+            <div class="ticker-item"><i class="ph-fill ph-money"></i> USD BLUE:</div>
+            <div class="ticker-item"><span class="ticker-label">C:</span> <span class="ticker-val">$1180.00</span> <span class="ticker-label">V:</span> <span class="ticker-val">$1200.00</span></div>
+            <div style="opacity: 0.3">|</div>
+            <div class="ticker-item"><i class="ph-fill ph-trend-up"></i> USD MEP:</div>
+            <div class="ticker-item"><span class="ticker-val">$1150.40</span></div>
+        </div>
+
+        <!-- HEADER -->
+        <header class="top-bar">
+            <div class="page-breadcrumbs">
+                <i class="ph ph-house"></i> / Operaciones / Moneda Extranjera
+            </div>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <span style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">Modo Valuación:</span>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-size: 0.85rem; color: var(--text-secondary);">Contable</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" checked onchange="alert('Cambio de modo: Ahora ves valuaciones de Gestión (Blue/MEP) para toma de decisiones.')">
+                        <span class="slider"></span>
+                    </label>
+                    <span style="font-size: 0.85rem; font-weight: 600; color: var(--brand-primary);">Gestión</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- TABS HEADER -->
+        <div class="tabs-header">
+            <div class="page-title">
+                <h1>Moneda Extranjera</h1>
+            </div>
+            <div class="tabs-nav">
+                <button class="tab-btn active" onclick="switchTab('dashboard', this)">Dashboard</button>
+                <button class="tab-btn" onclick="switchTab('activos', this)">Activos</button>
+                <button class="tab-btn" onclick="switchTab('pasivos', this)">Pasivos</button>
+                <button class="tab-btn" onclick="switchTab('movimientos', this)">Movimientos</button>
+                <button class="tab-btn" onclick="switchTab('conciliacion', this)">Conciliación <span class="badge badge-warning" style="font-size: 0.6rem; margin-left: 4px;">3</span></button>
+            </div>
+        </div>
+
+        <!-- TAB: DASHBOARD -->
+        <div id="dashboard" class="tab-content active">
+            <div class="grid-4 mb-4">
+                <div class="card">
+                    <div class="kpi-label">Activos ME (Valuado) <i class="ph ph-trend-up" style="color: var(--success)"></i></div>
+                    <div class="kpi-value">$ 12.450.000</div>
+                    <div class="kpi-sub">Origen: USD 10,250.00</div>
+                </div>
+                <div class="card">
+                    <div class="kpi-label">Pasivos ME (Valuado) <i class="ph ph-trend-down" style="color: var(--error)"></i></div>
+                    <div class="kpi-value" style="color: var(--text-secondary);">$ 1.200.000</div>
+                    <div class="kpi-sub">Origen: USD 980.00</div>
+                </div>
+                <div class="card">
+                    <div class="kpi-label">Posición Neta</div>
+                    <div class="kpi-value" style="color: var(--brand-primary);">$ 11.250.000</div>
+                    <div class="kpi-sub">+12% vs mes anterior</div>
+                </div>
+                <div class="card" style="background: #ECFDF5; border-color: #A7F3D0;">
+                    <div class="kpi-label">Res. x Tenencia (Latente)</div>
+                    <div class="kpi-value" style="color: #059669;">+ $ 850.400</div>
+                    <div class="kpi-sub">Impacto por devaluación</div>
+                </div>
+            </div>
+
+            <div class="grid-3" style="margin-top: 2rem;">
+                <div class="card" style="grid-column: span 2;">
+                    <h3 style="font-family: var(--font-display); font-size: 1.1rem; margin-bottom: 1rem;">Evolución de Cotización Promedio</h3>
+                    <div style="height: 200px; background: #F1F5F9; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--text-tertiary);">
+                        [Chart Placeholder: Línea Histórica vs Actual]
+                    </div>
+                </div>
+                <div class="card">
+                    <h3 style="font-family: var(--font-display); font-size: 1.1rem; margin-bottom: 1rem;">Acciones Rápidas</h3>
+                    <div style="display: flex; flex-direction: column; gap: 1rem;">
+                        <button class="btn btn-primary" onclick="openModal('modal-movimiento')"><i class="ph-bold ph-arrows-left-right"></i> Registrar Operación</button>
+                        <button class="btn btn-secondary" onclick="switchTab('activos'); openModal('modal-activo')"><i class="ph ph-plus"></i> Nuevo Activo ME</button>
+                        <button class="btn btn-secondary" onclick="switchTab('pasivos'); openModal('modal-pasivo-nuevo')"><i class="ph ph-plus"></i> Nueva Deuda ME</button>
+                        
+                        <div style="margin-top: 1rem; padding: 1rem; background: #EFF6FF; border-radius: var(--radius-sm); font-size: 0.85rem; color: #1E40AF;">
+                            <i class="ph-fill ph-info"></i> Recordá que todo movimiento en ME genera un asiento contable automático en ARS.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: ACTIVOS -->
+        <div id="activos" class="tab-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2>Cartera de Activos</h2>
+                <button class="btn btn-primary" onclick="openModal('modal-activo')"><i class="ph-bold ph-plus"></i> Agregar Cartera</button>
+            </div>
+
+            <div class="table-container">
+                <div class="table-scroll-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Tipo</th>
+                                <th>Cartera</th>
+                                <th>Nombre</th>
+                                <th>Moneda</th>
+                                <th class="cell-right">Saldo ME</th>
+                                <th class="cell-right">TC</th>
+                                <th class="cell-right">Valuación ARS</th>
+                                <th class="cell-center">Estado</th>
+                                <th class="cell-right">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span style="font-weight: 500;">Efectivo</span></td>
+                                <td>Caja Fuerte</td>
+                                <td style="color: var(--text-secondary);">Caja Fuerte Oficina</td>
+                                <td><span class="badge badge-neutral">USD</span></td>
+                                <td class="cell-right cell-mono">5,400.00</td>
+                                <td class="cell-right cell-mono">1,200.00</td>
+                                <td class="cell-right cell-mono">$ 6.480.000</td>
+                                <td class="cell-center"><span class="badge badge-success">Conciliado</span></td>
+                                <td class="cell-right">
+                                    <button class="btn btn-ghost btn-sm"><i class="ph-bold ph-pencil-simple"></i></button>
+                                    <button class="btn btn-ghost btn-sm"><i class="ph-bold ph-eye"></i></button>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><span style="font-weight: 500;">Billetera</span></td>
+                                <td>Payoneer</td>
+                                <td style="color: var(--text-secondary);">Payoneer Balance</td>
+                                <td><span class="badge badge-neutral">USD</span></td>
+                                <td class="cell-right cell-mono">2,150.00</td>
+                                <td class="cell-right cell-mono">1,200.00</td>
+                                <td class="cell-right cell-mono">$ 2.580.000</td>
+                                <td class="cell-center"><span class="badge badge-warning">Pendiente</span></td>
+                                <td class="cell-right">
+                                    <button class="btn btn-ghost btn-sm"><i class="ph-bold ph-pencil-simple"></i></button>
+                                    <button class="btn btn-ghost btn-sm"><i class="ph-bold ph-eye"></i></button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: PASIVOS -->
+        <div id="pasivos" class="tab-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2>Pasivos en M.E.</h2>
+                <button class="btn btn-primary" onclick="openModal('modal-pasivo-nuevo')"><i class="ph-bold ph-plus"></i> Nueva Deuda</button>
+            </div>
+            
+            <div class="table-container">
+                <div class="table-scroll-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Tipo</th>
+                                <th>Acreedor</th>
+                                <th>Deuda / Nombre</th>
+                                <th>Moneda</th>
+                                <th class="cell-right">Saldo ME</th>
+                                <th class="cell-right">TC Hist.</th>
+                                <th class="cell-right">Val. ARS (Hist.)</th>
+                                <th class="cell-right">TC Actual</th>
+                                <th class="cell-right">Val. ARS (Actual)</th>
+                                <th class="cell-right">Próx. Venc.</th>
+                                <th class="cell-right">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Mutuo</td>
+                                <td>Socio Juan P.</td>
+                                <td style="color: var(--text-secondary);">Préstamo Inicial</td>
+                                <td><span class="badge badge-neutral">USD</span></td>
+                                <td class="cell-right cell-mono">10,000.00</td>
+                                <td class="cell-right cell-mono">980.00</td>
+                                <td class="cell-right cell-mono text-tertiary">$ 9.800.000</td>
+                                <td class="cell-right cell-mono">1,200.00</td>
+                                <td class="cell-right cell-mono font-bold">$ 12.000.000</td>
+                                <td class="cell-right">15 Mar 2026</td>
+                                <td class="cell-right">
+                                    <button class="btn btn-secondary btn-sm" onclick="openModal('modal-pasivo-plan')">Ver Plan</button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: MOVIMIENTOS -->
+        <div id="movimientos" class="tab-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2>Libro de Movimientos</h2>
+                <button class="btn btn-primary" onclick="openModal('modal-movimiento')"><i class="ph-bold ph-arrows-left-right"></i> Registrar Movimiento</button>
+            </div>
+
+            <!-- Filters -->
+            <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                <input type="text" class="input-field" placeholder="Buscar por detalle..." style="max-width: 300px;">
+                <select class="select-field" style="max-width: 150px;">
+                    <option>Todo el periodo</option>
+                    <option>Este mes</option>
+                </select>
+            </div>
+
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Tipo</th>
+                            <th>Cuenta ME</th>
+                            <th>Detalle</th>
+                            <th class="cell-right">Monto ME</th>
+                            <th class="cell-right">TC Op.</th>
+                            <th class="cell-right">Total ARS</th>
+                            <th class="cell-right">Asiento</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>26/01/2026</td>
+                            <td><span class="badge badge-success">COMPRA</span></td>
+                            <td>Caja Fuerte</td>
+                            <td>Compra MEP via Broker</td>
+                            <td class="cell-right cell-mono" style="color: var(--success);">+ 500.00</td>
+                            <td class="cell-right cell-mono">1,150.00</td>
+                            <td class="cell-right cell-mono">575,000.00</td>
+                            <td class="cell-right"><span class="badge badge-info" style="font-size: 0.7rem;"><i class="ph-bold ph-check"></i> #1042</span></td>
+                        </tr>
+                        <tr>
+                            <td>20/01/2026</td>
+                            <td><span class="badge badge-warning">PAGO DEUDA</span></td>
+                            <td>Payoneer</td>
+                            <td>Pago Hosting AWS</td>
+                            <td class="cell-right cell-mono" style="color: var(--error);">- 12.50</td>
+                            <td class="cell-right cell-mono">1,180.00</td>
+                            <td class="cell-right cell-mono">14,750.00</td>
+                            <td class="cell-right"><span class="badge badge-info" style="font-size: 0.7rem;"><i class="ph-bold ph-check"></i> #1030</span></td>
+                        </tr>
+                         <tr>
+                            <td>15/01/2026</td>
+                            <td><span class="badge badge-neutral">VENTA</span></td>
+                            <td>Caja Fuerte</td>
+                            <td>Venta Blue</td>
+                            <td class="cell-right cell-mono" style="color: var(--error);">- 100.00</td>
+                            <td class="cell-right cell-mono">1,190.00</td>
+                            <td class="cell-right cell-mono">119,000.00</td>
+                            <td class="cell-right"><span class="badge badge-warning" style="font-size: 0.7rem;">Pendiente</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- TAB: CONCILIACIÓN -->
+        <div id="conciliacion" class="tab-content">
+            <div style="background: white; border-bottom: 1px solid var(--border-light); padding-bottom: 1.5rem; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                    <h2>Centro de Conciliación</h2>
+                    <p style="color: var(--text-secondary); max-width: 600px; margin-top: 0.5rem;">
+                        Asegurá que tu gestión operativa (lo que pasa en la realidad) coincida con tu contabilidad (Libro Diario). 
+                    </p>
+                </div>
+                <button class="btn btn-secondary"><i class="ph-bold ph-magic-wand"></i> Conciliar automáticamente (sugerido)</button>
+            </div>
+
+            <div class="grid-3">
+                <!-- PANEL A -->
+                <div class="card" style="border-top: 4px solid var(--warning);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
+                        <h4 style="font-size: 1rem;">Movimientos s/ Asiento</h4>
+                        <span class="badge badge-warning">3 Pendientes</span>
+                    </div>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                        Operaciones en este módulo que aún no impactaron en el Diario.
+                    </p>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        <div style="background: #F8FAFC; padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-light);">
+                            <div style="font-weight: 600; font-size: 0.85rem;">Compra USD 100 (Caja)</div>
+                            <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; align-items: center;">
+                                <span style="font-family: var(--font-mono); font-size: 0.8rem;">27/01/26</span>
+                                <button class="btn btn-sm btn-primary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">Generar Asiento</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANEL B -->
+                <div class="card" style="border-top: 4px solid var(--info);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
+                        <h4 style="font-size: 1rem;">Asientos Huérfanos</h4>
+                        <span class="badge badge-neutral">1 Detectado</span>
+                    </div>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                        Asientos manuales en el Diario usando cuentas ME sin vínculo aquí.
+                    </p>
+                     <div style="background: #F8FAFC; padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-light);">
+                        <div style="font-weight: 600; font-size: 0.85rem;">Asiento #2022 - Ajuste TC</div>
+                        <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; align-items: center;">
+                            <span style="font-family: var(--font-mono); font-size: 0.8rem;">$ 1.200,00</span>
+                            <button class="btn btn-sm btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">Vincular</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANEL C -->
+                 <div class="card" style="border-top: 4px solid var(--success);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
+                        <h4 style="font-size: 1rem;">Conciliados OK</h4>
+                        <span class="badge badge-success">15 Items</span>
+                    </div>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                        Movimientos perfectamente espejados en la contabilidad.
+                    </p>
+                    <div style="text-align: center; padding: 1rem; color: var(--success);">
+                        <i class="ph-fill ph-check-circle" style="font-size: 3rem;"></i>
+                        <div style="font-weight: 600; margin-top: 0.5rem;">Todo en orden</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- MODAL: REGISTRAR MOVIMIENTO (4 Tabs) -->
+    <div id="modal-movimiento" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 style="font-family: var(--font-display);">Registrar Operación ME</h3>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-movimiento')"><i class="ph-bold ph-x"></i></button>
+            </div>
+            <div class="modal-body">
+                
+                <!-- Inner Tabs -->
+                <div class="modal-tabs">
+                    <button class="modal-tab-btn active" onclick="switchModalTab('tab-compra', this)">Compra (Activo)</button>
+                    <button class="modal-tab-btn" onclick="switchModalTab('tab-venta', this)">Venta (Activo)</button>
+                    <button class="modal-tab-btn" onclick="switchModalTab('tab-pago', this)">Pago Deuda</button>
+                    <button class="modal-tab-btn" onclick="switchModalTab('tab-refi', this)">Refinanciación</button>
+                </div>
+
+                <!-- TAB: COMPRA -->
+                <div id="tab-compra" class="modal-tab-content active">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Cuenta Destino (ME)</label>
+                            <select class="select-field">
+                                <option>Caja Fuerte (USD)</option>
+                                <option>Payoneer (USD)</option>
+                            </select>
+                            <div style="font-size: 0.75rem; color: var(--success); margin-top: 0.2rem;">Saldo actual: USD 5,400.00</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Fecha Operación</label>
+                            <input type="date" class="input-field" value="2026-01-28">
+                        </div>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Monto Compra (USD)</label>
+                            <input type="number" class="input-field" placeholder="0.00" value="100.00">
+                        </div>
+                        <div class="form-group">
+                            <label>Cotización (ARS/USD)</label>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <input type="number" class="input-field" value="1180.00">
+                                <button class="btn btn-secondary btn-sm" title="Usar Cotización Actual"><i class="ph-bold ph-arrows-clockwise"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group mb-4">
+                        <label>Origen de los Fondos (ARS)</label>
+                        <select class="select-field">
+                            <option>Banco Galicia Cta Cte ($)</option>
+                            <option>Caja Chica Efectivo ($)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- TAB: VENTA -->
+                <div id="tab-venta" class="modal-tab-content">
+                    <div class="form-grid">
+                         <div class="form-group">
+                            <label>Cuenta Origen (ME)</label>
+                            <select class="select-field"><option>Caja Fuerte (USD)</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Destino ARS</label>
+                            <select class="select-field"><option>Banco Galicia ARS</option></select>
+                        </div>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Monto Venta (USD)</label>
+                            <input type="number" class="input-field" placeholder="0.00">
+                        </div>
+                        <div class="form-group">
+                            <label>Cotización Realizada</label>
+                            <input type="number" class="input-field" placeholder="1140.00">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB: PAGO DEUDA -->
+                <div id="tab-pago" class="modal-tab-content">
+                    <div class="form-group mb-4">
+                        <label>Seleccionar Pasivo a Pagar</label>
+                        <select class="select-field">
+                            <option>Préstamo Socio Juan P. (Saldo: USD 10,000)</option>
+                        </select>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Monto a Pagar (ME)</label>
+                            <input type="number" class="input-field" placeholder="0.00">
+                        </div>
+                        <div class="form-group">
+                            <label>Origen del Pago</label>
+                            <select class="select-field">
+                                <option>Desde Activo ME: Caja Fuerte</option>
+                                <option>Desde ARS (Compra al pagar)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="background: #F1F5F9; padding: 1rem; border-radius: var(--radius-sm); margin-bottom: 1rem;">
+                        <div style="font-size: 0.85rem; font-weight: 600;">Resumen del Plan</div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">Estás cubriendo el equivalente a 1.5 cuotas. Saldo remanente estimado: USD 8,500.</div>
+                    </div>
+                </div>
+
+                 <!-- TAB: REFINANCIACIÓN -->
+                <div id="tab-refi" class="modal-tab-content">
+                    <div class="form-group mb-4">
+                        <label>Pasivo</label>
+                        <select class="select-field"><option>Préstamo Socio Juan P.</option></select>
+                    </div>
+                    <div class="form-group mb-4">
+                        <label>Tipo de Ajuste</label>
+                        <select class="select-field">
+                            <option>Interés Extra (Aumenta deuda)</option>
+                            <option>Refinanciación (Cambio de plan)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- COMMON PREVIEW SECTION -->
+                <div class="accounting-preview">
+                    <div class="preview-header">
+                        <i class="ph-fill ph-eye"></i> Vista Previa del Asiento Contable (ARS)
+                    </div>
+                    
+                    <div class="entry-row">
+                        <div class="entry-account">1.1.01.02 - Caja Moneda Extranjera</div>
+                        <div class="entry-debit">$ 118.000,00</div>
+                        <div class="entry-credit">-</div>
+                    </div>
+                    <div class="entry-row">
+                        <div class="entry-account">1.1.01.01 - Banco Galicia ARS</div>
+                        <div class="entry-debit">-</div>
+                        <div class="entry-credit">$ 118.000,00</div>
+                    </div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <input type="radio" name="asiento_opt" checked id="opt_gen"> 
+                            <label for="opt_gen" style="font-size: 0.9rem; margin:0;">Generar asiento automáticamente</label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <input type="radio" name="asiento_opt" id="opt_no"> 
+                            <label for="opt_no" style="font-size: 0.9rem; margin:0;">No generar (ya contabilizado manual)</label>
+                            <input type="text" class="input-field" placeholder="N° Asiento" style="width: 100px; padding: 0.2rem; font-size: 0.8rem;">
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modal-movimiento')">Cancelar</button>
+                <button class="btn btn-secondary" title="Editar asiento manual"><i class="ph-bold ph-pencil-simple"></i></button>
+                <button class="btn btn-primary" onclick="closeModal('modal-movimiento')">Registrar Operación</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: NUEVA DEUDA / PASIVO (COMPLETO) -->
+    <div id="modal-pasivo-nuevo" class="modal-overlay">
+        <div class="modal-box large">
+            <div class="modal-header">
+                <h3>Alta de Pasivo en Moneda Extranjera</h3>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-pasivo-nuevo')"><i class="ph-bold ph-x"></i></button>
+            </div>
+            <div class="modal-body">
+                
+                <!-- SECTION A: Identity -->
+                <div class="form-section-title" style="margin-top: 0;">A. Identidad y Contabilidad</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Nombre del Pasivo / Alias</label>
+                        <input type="text" class="input-field" placeholder="Ej: Préstamo Socio A">
+                    </div>
+                    <div class="form-group">
+                        <label>Tipo</label>
+                        <select class="select-field">
+                            <option>Mutuo / Préstamo</option>
+                            <option>Deuda Comercial (Proveedor)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Acreedor</label>
+                        <input type="text" class="input-field" placeholder="Nombre persona o entidad">
+                    </div>
+                    <div class="form-group">
+                        <label>Moneda</label>
+                        <select class="select-field"><option>USD</option></select>
+                    </div>
+                </div>
+                 <!-- SMART MAPPING WIDGET -->
+                 <div class="mapping-widget">
+                    <i class="ph-fill ph-magic-wand mapping-icon"></i>
+                    <div class="mapping-content">
+                        <h4>Sugerencia Contable</h4>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
+                            <select class="select-field" style="font-size: 0.85rem; padding: 0.4rem;">
+                                <option>2.1.04.01 - Deudas Socios ME</option>
+                                <option>Crear nueva subcuenta...</option>
+                            </select>
+                            <span class="confidence-tag">Media</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION B: Desembolso -->
+                <div class="form-section-title">B. Alta Inicial (Desembolso)</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Monto Original (ME)</label>
+                        <input type="number" class="input-field" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>TC Histórico (ARS/ME)</label>
+                        <input type="number" class="input-field" placeholder="0.00">
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Fecha de Alta</label>
+                        <input type="date" class="input-field">
+                    </div>
+                    <div class="form-group">
+                         <label>Comisiones / Gastos (ARS)</label>
+                         <input type="number" class="input-field" placeholder="0.00">
+                    </div>
+                </div>
+
+                <!-- SECTION C: Plan -->
+                <div class="form-section-title">C. Condiciones Financieras (Plan Estimado)</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Cantidad Cuotas</label>
+                        <input type="number" class="input-field" placeholder="12">
+                    </div>
+                    <div class="form-group">
+                        <label>Tasa Interés (TNA %)</label>
+                        <input type="number" class="input-field" placeholder="0.00">
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Primer Vencimiento</label>
+                        <input type="date" class="input-field">
+                    </div>
+                    <div class="form-group">
+                        <label>Sistema</label>
+                        <select class="select-field"><option>Francés</option><option>Alemán</option></select>
+                    </div>
+                </div>
+
+                <!-- SECTION D: Impact -->
+                <div class="form-section-title">D. Destino de Fondos (Impacto en Activo)</div>
+                <div class="form-group">
+                    <label>¿A dónde ingresó el dinero?</label>
+                    <select class="select-field">
+                        <option value="activo">Acreditar en Activo ME: Caja Fuerte Oficina</option>
+                        <option value="ars">Se liquidó a Pesos (ARS)</option>
+                        <option value="none">No generar movimiento de fondos (Solo pasivo)</option>
+                    </select>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.3rem;">
+                        <i class="ph-bold ph-arrow-bend-down-right"></i> Se creará un débito en la cuenta de Activo seleccionada por el monto total.
+                    </div>
+                </div>
+
+                <!-- SECTION E: Preview -->
+                <div class="accounting-preview">
+                    <div class="preview-header">E. Vista Previa Asiento de Alta</div>
+                    <div class="entry-row">
+                        <div class="entry-account">1.1.01.02 - Caja Moneda Extranjera</div>
+                        <div class="entry-debit">$ 9.800.000,00</div>
+                        <div class="entry-credit">-</div>
+                    </div>
+                    <div class="entry-row">
+                        <div class="entry-account">2.1.04.01 - Deudas Socios ME</div>
+                        <div class="entry-debit">-</div>
+                        <div class="entry-credit">$ 9.800.000,00</div>
+                    </div>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modal-pasivo-nuevo')">Cancelar</button>
+                <button class="btn btn-primary">Crear Deuda y Asentar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: VER PLAN DEUDA -->
+    <div id="modal-pasivo-plan" class="modal-overlay">
+        <div class="modal-box large">
+            <div class="modal-header">
+                <div>
+                    <h3 style="font-family: var(--font-display); line-height: 1;">Préstamo Socio Juan P.</h3>
+                    <span style="font-size: 0.85rem; color: var(--text-secondary);">Mutuo USD | TNA 5%</span>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-pasivo-plan')"><i class="ph-bold ph-x"></i></button>
+            </div>
+            <div class="modal-body">
+                <!-- KPIs Deuda -->
+                <div class="grid-4 mb-4">
+                    <div style="padding: 1rem; background: #F8FAFC; border-radius: 8px;">
+                        <div style="font-size: 0.75rem; color: var(--text-secondary);">Saldo Capital</div>
+                        <div style="font-family: var(--font-mono); font-weight: 600; font-size: 1.1rem;">USD 10,000.00</div>
+                    </div>
+                    <div style="padding: 1rem; background: #F8FAFC; border-radius: 8px;">
+                         <div style="font-size: 0.75rem; color: var(--text-secondary);">Valuación Hoy</div>
+                         <div style="font-family: var(--font-mono); font-weight: 600; font-size: 1.1rem;">$ 12.000.000</div>
+                    </div>
+                    <div style="padding: 1rem; background: #FFF7ED; border-radius: 8px; border: 1px solid #FFEDD5;">
+                         <div style="font-size: 0.75rem; color: #9A3412;">Próximo Venc.</div>
+                         <div style="font-family: var(--font-mono); font-weight: 600; font-size: 1.1rem; color: #9A3412;">15 Mar 2026</div>
+                    </div>
+                    <div style="padding: 1rem; background: #F8FAFC; border-radius: 8px;">
+                         <div style="font-size: 0.75rem; color: var(--text-secondary);">Cuotas Rest.</div>
+                         <div style="font-family: var(--font-mono); font-weight: 600; font-size: 1.1rem;">12 / 12</div>
+                    </div>
+                </div>
+
+                <!-- Tabla Plan -->
+                <h4 class="form-section-title" style="margin-top: 0;">Cuadro de Amortización Teórico</h4>
+                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Vencimiento</th>
+                                <th class="cell-right">Capital</th>
+                                <th class="cell-right">Interés</th>
+                                <th class="cell-right">Cuota Total</th>
+                                <th class="cell-right">Saldo Rest.</th>
+                                <th class="cell-center">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>1</td>
+                                <td>15/03/2026</td>
+                                <td class="cell-right cell-mono">833.33</td>
+                                <td class="cell-right cell-mono">41.66</td>
+                                <td class="cell-right cell-mono">874.99</td>
+                                <td class="cell-right cell-mono">9,166.67</td>
+                                <td class="cell-center"><span class="badge badge-warning">Pendiente</span></td>
+                            </tr>
+                            <tr>
+                                <td>2</td>
+                                <td>15/04/2026</td>
+                                <td class="cell-right cell-mono">833.33</td>
+                                <td class="cell-right cell-mono">38.19</td>
+                                <td class="cell-right cell-mono">871.52</td>
+                                <td class="cell-right cell-mono">8,333.34</td>
+                                <td class="cell-center"><span class="badge badge-neutral">Futuro</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary"><i class="ph-bold ph-pencil-simple"></i> Ajustar Deuda</button>
+                <button class="btn btn-primary" onclick="closeModal('modal-pasivo-plan'); openModal('modal-movimiento');"><i class="ph-bold ph-money"></i> Registrar Pago</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: NUEVO ACTIVO (SMART MAPPING DEMO) -->
+    <div id="modal-activo" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Nuevo Activo en Moneda Extranjera</h3>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-activo')"><i class="ph-bold ph-x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group" style="margin-bottom: 1.5rem;">
+                    <label>Nombre de la Cartera / Lugar</label>
+                    <input type="text" class="input-field" placeholder="Ej: Caja de Ahorro USD" value="Caja de Ahorro USD Galicia">
+                    
+                    <!-- SMART MAPPING WIDGET -->
+                    <div class="mapping-widget">
+                        <i class="ph-fill ph-magic-wand mapping-icon"></i>
+                        <div class="mapping-content">
+                            <h4>Sugerencia de Contabilidad</h4>
+                            <p>Hemos detectado que esto parece una cuenta bancaria. Te sugerimos vincularla a:</p>
+                            <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <select class="select-field" style="font-size: 0.85rem; padding: 0.4rem;">
+                                    <option>1.1.02.04 - Banco Galicia Cta ME</option>
+                                    <option>Crear nueva subcuenta...</option>
+                                </select>
+                                <span class="confidence-tag">Alta Confianza</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Tipo</label>
+                        <select class="select-field"><option>Banco</option><option>Efectivo</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Moneda</label>
+                        <select class="select-field"><option>USD - Dólar Estadounidense</option></select>
+                    </div>
+                </div>
+                
+                <div style="border-top: 1px solid var(--border-light); padding-top: 1rem; margin-top: 1rem;">
+                    <div class="form-group">
+                        <label>¿Tiene saldo inicial?</label>
+                        <div style="display: flex; gap: 1rem; align-items: center;">
+                            <input type="number" class="input-field" style="width: 150px;" placeholder="0.00">
+                            <span style="font-size: 0.85rem; color: var(--text-secondary);">Si ingresás saldo, se generará asiento de apertura.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modal-activo')">Cancelar</button>
+                <button class="btn btn-primary">Crear Cartera</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JS LOGIC -->
+    <script>
+        // Page Tabs
+        function switchTab(tabId, btnElement) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            if(btnElement) {
+                document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+                btnElement.classList.add('active');
+            }
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        // Modal Tabs
+        function switchModalTab(tabId, btnElement) {
+            // Find parent modal to scope selection
+            const modalBox = btnElement.closest('.modal-box');
+            modalBox.querySelectorAll('.modal-tab-content').forEach(el => el.classList.remove('active'));
+            modalBox.querySelectorAll('.modal-tab-btn').forEach(el => el.classList.remove('active'));
+            
+            btnElement.classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        // Modal Logic
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.add('open');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('open');
+        }
+
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal-overlay')) {
+                event.target.classList.remove('open');
+            }
+        }
+
+        function updatePreview() {
+            console.log("Calculando asiento preliminar...");
+        }
+    </script>
+</body>
+</html>

@@ -130,10 +130,32 @@ function finalizeSection(section: StatementSectionResult) {
 /**
  * Check if account name matches a pattern (case-insensitive, accent-normalized)
  */
-function nameMatches(name: string, patterns: string[]): boolean {
-    const normalized = name.toLowerCase()
+function normalizeName(name: string): string {
+    return name.toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+function nameMatches(name: string, patterns: string[]): boolean {
+    const normalized = normalizeName(name)
     return patterns.some(p => normalized.includes(p))
+}
+
+function isDescuentosObtenidos(name: string): boolean {
+    const normalized = normalizeName(name)
+    return normalized.includes('descuent') && normalized.includes('obtenid')
+}
+
+function isDescuentoOtorgado(name: string): boolean {
+    const normalized = normalizeName(name)
+    return normalized.includes('descuent') && normalized.includes('otorgad')
+}
+
+function isDevolucionVentas(name: string): boolean {
+    return nameMatches(name, ['devolucion', 'devoluciones']) && nameMatches(name, ['venta'])
+}
+
+function isBonificacionVentas(name: string): boolean {
+    return nameMatches(name, ['bonificacion', 'bonificaciones']) && nameMatches(name, ['venta'])
 }
 
 // ============================================
@@ -292,10 +314,20 @@ function processTrialBalance(
         const signedAmount = getSignedAmount(row)
         const code = row.account.code
         const group = row.account.statementGroup
+        const name = row.account.name
+        const isSalesDeduction = isDevolucionVentas(name) || isBonificacionVentas(name)
+        const isFinancialByCode = code.startsWith('4.6')
+        const isDiscountByName = isDescuentosObtenidos(name) || isDescuentoOtorgado(name)
 
         // Check for tax account
-        if (nameMatches(row.account.name, ['impuesto a las ganancias', 'impuesto ganancias', 'imp ganancias'])) {
+        if (nameMatches(name, ['impuesto a las ganancias', 'impuesto ganancias', 'imp ganancias'])) {
             impuestoGanancias += Math.abs(signedAmount)
+            continue
+        }
+
+        // Override: financial accounts and descuentos always go to financial results
+        if (isFinancialByCode || isDiscountByName) {
+            addToSection(resultadosFinancieros, row, signedAmount)
             continue
         }
 
@@ -303,8 +335,7 @@ function processTrialBalance(
 
         // SALES / Operating Income (4.1.*)
         if (group === 'SALES' || group === 'OTHER_OPERATING_INCOME') {
-            // Check if it's a deduction (devolución, bonificación, descuento)
-            if (nameMatches(row.account.name, ['devolucion', 'bonificacion', 'descuento', 'deduccion'])) {
+            if (isSalesDeduction) {
                 addToSection(devolucionesYBonificaciones, row, signedAmount, true)
             } else {
                 addToSection(ventasBrutas, row, signedAmount)
@@ -344,7 +375,7 @@ function processTrialBalance(
 
         // Fallback: classify by code prefix
         if (code.startsWith('4.1') || code.startsWith('4.2')) {
-            if (nameMatches(row.account.name, ['devolucion', 'bonificacion', 'descuento'])) {
+            if (isSalesDeduction) {
                 addToSection(devolucionesYBonificaciones, row, signedAmount, true)
             } else {
                 addToSection(ventasBrutas, row, signedAmount)

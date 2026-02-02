@@ -11,8 +11,10 @@ import { getAllBienesSKUs } from '../../../storage'
 
 interface ProductModalProps {
     product: BienesProduct | null // null = new product
-    onSave: (product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
+    onSave: (product: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'>, options?: { generateOpeningJournal?: boolean }) => Promise<void>
     onClose: () => void
+    /** Default value for "generate opening journal" toggle (from global settings) */
+    defaultAutoJournal?: boolean
 }
 
 const UNIT_OPTIONS: { value: UnidadMedida; label: string }[] = [
@@ -34,7 +36,7 @@ const IVA_OPTIONS: { value: IVARate; label: string }[] = [
     { value: 0, label: 'Exento' },
 ]
 
-export default function ProductModal({ product, onSave, onClose }: ProductModalProps) {
+export default function ProductModal({ product, onSave, onClose, defaultAutoJournal = true }: ProductModalProps) {
     const isEditing = !!product
 
     const [formData, setFormData] = useState({
@@ -49,6 +51,7 @@ export default function ProductModal({ product, onSave, onClose }: ProductModalP
         openingUnitCost: 0,
         openingDate: new Date().toISOString().split('T')[0],
     })
+    const [generateOpeningJournal, setGenerateOpeningJournal] = useState(defaultAutoJournal)
 
     const [existingSKUs, setExistingSKUs] = useState<string[]>([])
     const [isSaving, setIsSaving] = useState(false)
@@ -106,10 +109,14 @@ export default function ProductModal({ product, onSave, onClose }: ProductModalP
 
         setIsSaving(true)
         try {
-            await onSave({
-                ...formData,
-                description: formData.description || undefined,
-            })
+            const hasOpening = !isEditing && formData.openingQty > 0 && formData.openingUnitCost > 0
+            await onSave(
+                {
+                    ...formData,
+                    description: formData.description || undefined,
+                },
+                hasOpening ? { generateOpeningJournal } : undefined
+            )
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Error al guardar')
         } finally {
@@ -317,6 +324,20 @@ export default function ProductModal({ product, onSave, onClose }: ProductModalP
                                     />
                                 </div>
                             </div>
+
+                            {formData.openingQty > 0 && formData.openingUnitCost > 0 && (
+                                <label className="flex items-center gap-2 cursor-pointer mt-3">
+                                    <input
+                                        type="checkbox"
+                                        checked={generateOpeningJournal}
+                                        onChange={(e) => setGenerateOpeningJournal(e.target.checked)}
+                                        className="accent-blue-600 rounded"
+                                    />
+                                    <span className="text-xs text-slate-600">
+                                        Generar asiento por inventario inicial (Mercaderias a Apertura Inventario)
+                                    </span>
+                                </label>
+                            )}
                         </div>
                     )}
                 </form>

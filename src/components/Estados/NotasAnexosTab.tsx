@@ -58,6 +58,7 @@ interface NotasAnexosTabProps {
     empresaName: string
     empresaId: string
     comparativeData?: Map<string, number>
+    periodEnd?: string
 }
 
 // ============================================
@@ -71,6 +72,7 @@ export function NotasAnexosTab({
     empresaName,
     empresaId,
     comparativeData,
+    periodEnd,
 }: NotasAnexosTabProps) {
     // State
     const [activeSubTab, setActiveSubTab] = useState<SubTab>('notas')
@@ -82,6 +84,15 @@ export function NotasAnexosTab({
 
     const printRef = useRef<HTMLDivElement>(null)
     const periodKey = getPeriodKey(fiscalYear)
+
+    // Date formatting
+    const formattedDate = useMemo(() => {
+        if (periodEnd) {
+            const [y, m, d] = periodEnd.split('-')
+            return `${d}/${m}/${y}`
+        }
+        return `31/12/${fiscalYear}`
+    }, [periodEnd, fiscalYear])
 
     // Load state from storage on mount
     useEffect(() => {
@@ -217,7 +228,7 @@ export function NotasAnexosTab({
             {/* Print Header (hidden on screen) */}
             <div className="na-print-header" ref={printRef}>
                 <div className="na-print-company">{empresaName.toUpperCase()}</div>
-                <div className="na-print-date">ESTADOS CONTABLES AL 31/12/{fiscalYear}</div>
+                <div className="na-print-date">ESTADOS CONTABLES AL {formattedDate}</div>
                 <div className="na-print-title">{printTitle}</div>
                 <div className="na-print-currency">Cifras expresadas en Pesos argentinos ($)</div>
                 {showComparative && (
@@ -235,6 +246,7 @@ export function NotasAnexosTab({
                     onSelectNote={setSelectedNoteIdx}
                     onNarrativeChange={handleNarrativeChange}
                     fiscalYear={fiscalYear}
+                    formattedDate={formattedDate}
                 />
             )}
 
@@ -256,6 +268,7 @@ export function NotasAnexosTab({
                     fiscalYear={fiscalYear}
                     empresaCurrency="$"
                     onOverrideChange={handleCostOverrideChange}
+                    formattedDate={formattedDate}
                 />
             )}
 
@@ -286,6 +299,7 @@ interface NotasSectionProps {
     onSelectNote: (idx: number) => void
     onNarrativeChange: (noteNumber: number, text: string) => void
     fiscalYear: number
+    formattedDate: string
 }
 
 function NotasSection({
@@ -296,6 +310,7 @@ function NotasSection({
     onSelectNote,
     onNarrativeChange,
     fiscalYear,
+    formattedDate,
 }: NotasSectionProps) {
     return (
         <div className="na-notas-layout">
@@ -325,6 +340,7 @@ function NotasSection({
                         showComparative={showComparative}
                         showDetail={showDetail}
                         fiscalYear={fiscalYear}
+                        formattedDate={formattedDate}
                         onNarrativeChange={onNarrativeChange}
                     />
                 ))}
@@ -338,10 +354,11 @@ interface NoteCardProps {
     showComparative: boolean
     showDetail: boolean
     fiscalYear: number
+    formattedDate: string
     onNarrativeChange: (noteNumber: number, text: string) => void
 }
 
-function NoteCard({ note, showComparative, showDetail, fiscalYear, onNarrativeChange }: NoteCardProps) {
+function NoteCard({ note, showComparative, showDetail, fiscalYear, formattedDate, onNarrativeChange }: NoteCardProps) {
     const [localNarrative, setLocalNarrative] = useState(note.narrative)
 
     useEffect(() => {
@@ -365,7 +382,7 @@ function NoteCard({ note, showComparative, showDetail, fiscalYear, onNarrativeCh
                 <div className="na-note-title">
                     NOTA {note.definition.number} - {note.definition.title.toUpperCase()}
                 </div>
-                <div className="na-note-date">Al 31/12/{fiscalYear}</div>
+                <div className="na-note-date">Al {formattedDate}</div>
             </div>
 
             {note.hasDiscrepancy && (
@@ -379,7 +396,7 @@ function NoteCard({ note, showComparative, showDetail, fiscalYear, onNarrativeCh
                 <thead>
                     <tr>
                         <th>Cuenta</th>
-                        <th className="na-num">31/12/{fiscalYear}</th>
+                        <th className="na-num">{formattedDate}</th>
                         {showComparative && <th className="na-num">31/12/{fiscalYear - 1}</th>}
                     </tr>
                 </thead>
@@ -513,9 +530,10 @@ interface CostosSectionProps {
     fiscalYear: number
     empresaCurrency: string
     onOverrideChange: (componentId: string, value: number) => void
+    formattedDate: string
 }
 
-function CostosSection({ annex, fiscalYear, empresaCurrency, onOverrideChange }: CostosSectionProps) {
+function CostosSection({ annex, empresaCurrency, onOverrideChange, formattedDate }: CostosSectionProps) {
     return (
         <div className="na-costos-section">
             <div className="na-card" style={{ maxWidth: 800, margin: '0 auto' }}>
@@ -551,7 +569,7 @@ function CostosSection({ annex, fiscalYear, empresaCurrency, onOverrideChange }:
             <div className="na-cmv-highlight">
                 <div>
                     <h4>Total CMV Determinado</h4>
-                    <p>Correspondiente al ejercicio finalizado el 31/12/{fiscalYear}</p>
+                    <p>Correspondiente al ejercicio finalizado el {formattedDate}</p>
                 </div>
                 <div className="na-cmv-amount">{empresaCurrency} {formatNumber(annex.cmv)}</div>
             </div>

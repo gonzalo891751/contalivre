@@ -10,7 +10,17 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git mv:*)",
-      "Bash(timeout 15 npm run dev:*)"
+      "Bash(timeout 15 npm run dev:*)",
+      "Bash(find:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vite build:*)",
+      "Bash(dir:*)",
+      "Bash(test:*)",
+      "Bash(python3:*)",
+      "Bash(/c/Python313/python:*)",
+      "Bash(del \"D:\\\\Git\\\\ContaLivre\\\\src\\\\pages\\\\Planillas\\\\_cierre_replacement.tsx\")",
+      "Bash(npm run test:*)",
+      "Bash(npm test)"
     ]
   }
 }
