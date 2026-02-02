@@ -13,6 +13,7 @@ import type {
     BienesSettings,
     CostingMethod,
     AccountMappingKey,
+    TaxLine,
 } from '../core/inventario/types'
 import {
     createDefaultBienesSettings,
@@ -45,6 +46,12 @@ const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
     banco: { code: '1.1.01.02', names: ['Bancos cuenta corriente', 'Banco cuenta corriente', 'Bancos'] },
     proveedores: { code: '2.1.01.01', names: ['Proveedores'] },
     deudores: { code: '1.1.02.01', names: ['Deudores por ventas'] },
+    // Percepciones / Retenciones
+    percepcionIVASufrida: { code: '1.1.03.08', names: ['Percepciones IVA de terceros'] },
+    percepcionIVAPracticada: { code: '2.1.03.06', names: ['Percepciones IVA a terceros'] },
+    percepcionIIBBSufrida: { code: '1.1.03.02', names: ['Anticipos de impuestos'] },
+    retencionSufrida: { code: '1.1.03.07', names: ['Retenciones IVA de terceros'] },
+    retencionPracticada: { code: '2.1.03.03', names: ['Retenciones a depositar'] },
 }
 
 const ACCOUNT_CODE_ALIASES: Partial<Record<keyof typeof ACCOUNT_FALLBACKS, { codes: string[]; nameAny?: string[] }>> = {
@@ -164,6 +171,44 @@ const resolveCounterpartyAccountId = (
     }
 
     return null
+}
+
+/**
+ * Resolve account ID for a TaxLine based on taxType, kind, and movement direction.
+ * Priority: TaxLine.accountId (explicit) → mapped setting → fallback by code/name
+ */
+const resolveTaxLineAccountId = (
+    accounts: Account[],
+    settings: BienesSettings,
+    tax: TaxLine,
+    isPurchase: boolean
+): string | null => {
+    // 1. Explicit accountId on the tax line
+    if (tax.accountId) {
+        const direct = resolveAccountByIdOrCode(accounts, tax.accountId)
+        if (direct) return direct.id
+    }
+
+    // 2. Map by taxType + direction to AccountMappingKey
+    if (tax.taxType === 'IVA') {
+        const key: AccountMappingKey = isPurchase ? 'percepcionIVASufrida' : 'percepcionIVAPracticada'
+        return resolveMappedAccountId(accounts, settings, key, key)
+    }
+    if (tax.taxType === 'IIBB') {
+        if (isPurchase) {
+            return resolveMappedAccountId(accounts, settings, 'percepcionIIBBSufrida', 'percepcionIIBBSufrida')
+        }
+        // Venta con percepcion IIBB: use generic tax liability (same as IVA practicada fallback)
+        return resolveMappedAccountId(accounts, settings, 'percepcionIVAPracticada', 'percepcionIVAPracticada')
+    }
+
+    // 3. Generic fallback for GANANCIAS, SUSS, OTRO
+    if (isPurchase) {
+        // Activo: Anticipos de impuestos
+        return resolveMappedAccountId(accounts, settings, 'percepcionIIBBSufrida', 'percepcionIIBBSufrida')
+    }
+    // Pasivo: Retenciones/Percepciones a depositar
+    return resolveMappedAccountId(accounts, settings, 'retencionPracticada', 'retencionPracticada')
 }
 
 /**
@@ -525,7 +570,8 @@ const buildJournalEntriesForMovement = async (
     if (!purchaseDebitAccountId && movement.type === 'PURCHASE') missing.push(isPeriodic ? 'Compras' : 'Mercaderias')
     if (!mercaderiasId && movement.type !== 'PURCHASE') missing.push('Mercaderias')
     if (!contraId && !hasSplits && (movement.type === 'PURCHASE' || movement.type === 'SALE')) missing.push('Cuenta contrapartida')
-    if (movement.type === 'PURCHASE' && !ivaCFId && movement.ivaAmount > 0) missing.push('IVA Credito Fiscal')
+    const discriminarIVA = movement.discriminarIVA !== false  // default true for backward compat
+    if (movement.type === 'PURCHASE' && !ivaCFId && movement.ivaAmount > 0 && discriminarIVA) missing.push('IVA Credito Fiscal')
     if (movement.type === 'SALE' && !ivaDFId && movement.ivaAmount > 0) missing.push('IVA Debito Fiscal')
     if (movement.type === 'SALE' && !ventasId) missing.push('Ventas')
     if (movement.type === 'SALE' && !isPeriodic && !cmvId) missing.push('CMV')
@@ -591,17 +637,24 @@ const buildJournalEntriesForMovement = async (
             // COMPRA NORMAL with bonif/gastos/descuento
             // subtotal is NET (after bonif). When bonif is shown separately, debit GROSS amount.
             const useBonifGross = bonifAmt > 0 && !!bonifComprasId
-            const purchaseDebitAmount = useBonifGross ? subtotal + bonifAmt : subtotal
+            let purchaseDebitAmount = useBonifGross ? subtotal + bonifAmt : subtotal
             const purchaseDesc = isPeriodic ? 'Compra (cuenta Compras)' : 'Compra de mercaderias'
+
+            // IVA como costo: when discriminarIVA is false, IVA goes to purchase cost (not CF)
+            if (!discriminarIVA && ivaAmount > 0) {
+                purchaseDebitAmount += ivaAmount
+            }
+
             const lines: EntryLine[] = []
             // Skip zero-amount purchase debit (e.g. soloGasto with qty=0)
             if (purchaseDebitAmount > 0) {
-                lines.push({ accountId: purchaseDebitAccountId!, debit: purchaseDebitAmount, credit: 0, description: purchaseDesc })
+                lines.push({ accountId: purchaseDebitAccountId!, debit: purchaseDebitAmount, credit: 0, description: purchaseDesc + (!discriminarIVA && ivaAmount > 0 ? ' (IVA como costo)' : '') })
             }
             if (gastosAmt > 0 && gastosComprasId) {
                 lines.push({ accountId: gastosComprasId, debit: gastosAmt, credit: 0, description: 'Gastos s/compras' })
             }
-            if (ivaAmount > 0 && ivaCFId) {
+            // IVA CF: only when discriminarIVA is true (default)
+            if (ivaAmount > 0 && ivaCFId && discriminarIVA) {
                 lines.push({ accountId: ivaCFId, debit: ivaAmount, credit: 0, description: 'IVA credito fiscal' })
             }
             if (useBonifGross) {
@@ -610,6 +663,20 @@ const buildJournalEntriesForMovement = async (
             if (descuentoAmt > 0 && descuentosObtenidosId) {
                 lines.push({ accountId: descuentosObtenidosId, debit: 0, credit: descuentoAmt, description: 'Descuento financiero obtenido' })
             }
+
+            // Percepciones sufridas (compra): debit to perception asset account
+            const taxes = movement.taxes || []
+            const percepciones = taxes.filter(t => t.kind === 'PERCEPCION' && t.amount > 0)
+            for (const tax of percepciones) {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, true)
+                if (taxAccountId) {
+                    const label = `Percepcion ${tax.taxType} sufrida`
+                    lines.push({ accountId: taxAccountId, debit: tax.amount, credit: 0, description: label })
+                } else {
+                    console.warn(`[bienes] No se encontro cuenta para percepcion ${tax.taxType} en compra (tax id: ${tax.id})`)
+                }
+            }
+
             if (hasSplits) {
                 movement.paymentSplits!.forEach(split => {
                     lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: 'Pago / Contrapartida' })
@@ -663,6 +730,20 @@ const buildJournalEntriesForMovement = async (
             if (ivaAmount > 0 && ivaDFId) {
                 saleLines.push({ accountId: ivaDFId, debit: 0, credit: ivaAmount, description: 'IVA debito fiscal' })
             }
+
+            // Percepciones practicadas (venta): credit to perception liability account
+            const saleTaxes = movement.taxes || []
+            const salePercepciones = saleTaxes.filter(t => t.kind === 'PERCEPCION' && t.amount > 0)
+            for (const tax of salePercepciones) {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, false)
+                if (taxAccountId) {
+                    const label = `Percepcion ${tax.taxType} a depositar`
+                    saleLines.push({ accountId: taxAccountId, debit: 0, credit: tax.amount, description: label })
+                } else {
+                    console.warn(`[bienes] No se encontro cuenta para percepcion ${tax.taxType} en venta (tax id: ${tax.id})`)
+                }
+            }
+
             pushEntry(`Venta mercaderias - ${product?.name || movement.productId}`, saleLines, { journalRole: 'sale' })
 
             // Asiento de CMV (solo en modo PERMANENT)

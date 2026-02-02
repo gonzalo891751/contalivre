@@ -2,6 +2,141 @@
 
 ---
 
+## CHECKPOINT #PERCEPCIONES-RETENCIONES-PORCENTAJE-2026-02-01
+**Fecha:** 2026-02-01
+**Estado:** COMPLETADO - Build PASS, 48/48 Tests PASS
+
+### Objetivo
+Mejorar el soporte de percepciones y retenciones para permitir cálculo automático por porcentaje:
+- Percepciones: toggle MONTO / % con cálculo sobre NETO o IVA
+- Retenciones: quick-add panel con toggle MONTO / % (default 100% sobre IVA)
+
+### Archivos Tocados
+| Archivo | Accion | LOC aprox |
+|---|---|---|
+| src/core/inventario/types.ts | TaxCalcMode, TaxCalcBase types + calcMode/rate/base en TaxLine | +12 |
+| src/pages/Planillas/components/MovementModalV3.tsx | UI percepciones con toggle monto/%, panel quick-add retención con toggle monto/%, round2 helper, estado retencionForm, cálculo dinámico en useMemo | +200 |
+| docs/AI_HANDOFF.md | Este checkpoint | +55 |
+
+### Cambios Realizados
+
+**FASE 1 - Percepciones toggle MONTO/%:**
+- types.ts: `TaxCalcMode = 'AMOUNT' | 'PERCENT'`, `TaxCalcBase = 'NETO' | 'IVA'`
+- TaxLine extendido con `calcMode?`, `rate?`, `base?` (todos opcionales, retro-compatible)
+- UI percepciones: toggle [Monto | %] por línea
+- Si %: input rate + selector base (NETO/IVA) + muestra monto calculado
+- `handleAddTax()` ahora crea con defaults: `calcMode='PERCENT', rate=3, base='NETO'`
+- `calculations` useMemo calcula `taxesWithAmounts` con `calculatedAmount` dinámico
+- Submit guarda `amount` final calculado + `calcMode/rate/base` para re-edición
+
+**FASE 2 - Retenciones quick-add panel:**
+- Nuevo estado: `showRetencionPanel`, `retencionForm` (calcMode, rate, base, amount, taxType)
+- `handleOpenRetencionPanel()`: abre panel con defaults (PERCENT, 100%, IVA)
+- `handleApplyRetencion()`: calcula monto final y crea split con cuenta default
+- `retencionCalculatedAmount`: useMemo para display en tiempo real
+- UI: panel inline con tipo, modo [Monto | %], rate/base o amount, botón "Aplicar"
+- Muestra cálculo: "100% sobre IVA ($2100) = $2100"
+
+**Helpers:**
+- `round2(n)`: redondeo a 2 decimales con manejo de floating point
+
+### Decisiones Técnicas
+- **Base TOTAL no implementada**: Para evitar recursión (total incluye taxesTotal), solo se permite NETO e IVA como base. TOTAL queda diferido.
+- **Persistencia en retenciones**: No se guarda metadata de % en splits (solo amount). Los splits son "forma de pago" y no necesitan recálculo al re-editar.
+- **Percepciones guardan metadata**: `calcMode/rate/base` se persisten para que al re-editar un movimiento, la percepción mantenga su modo % y recalcule si cambian valores.
+- **Default percepciones**: 3% sobre NETO (típico IIBB).
+- **Default retenciones**: 100% sobre IVA (típico retención total del IVA).
+
+### Validación
+- `npm run build`: PASS
+- `npm run test`: 48/48 PASS
+- `git diff --stat`: 3 archivos (types.ts +12, MovementModalV3.tsx +200, AI_HANDOFF.md +55)
+
+### Pendientes
+- [ ] Base TOTAL: evaluar si vale la pena (requiere excluir la misma línea del cálculo)
+- [ ] Tooltip de ayuda en UI: "% se calcula sobre NETO/IVA"
+- [ ] Persistir metadata de retención en splits (si el modelo admite metadata sin romper storage)
+- [ ] QA manual end-to-end en app corriendo
+
+---
+
+## CHECKPOINT #IMPUESTOS-PERCEPCIONES-MVP-2026-01-31
+**Fecha:** 2026-01-31
+**Estado:** COMPLETADO - Build PASS, 48/48 Tests PASS
+
+### Objetivo
+Implementar soporte fiscal argentino en el módulo de Inventario (Bienes de Cambio):
+- Percepciones (IVA/IIBB/etc.) como líneas adicionales del comprobante
+- Toggle "Discriminar IVA" (IVA como costo para monotributo/exento)
+- Quick-add retenciones sobre payment splits
+
+### Archivos Tocados
+| Archivo | Accion | LOC aprox |
+|---|---|---|
+| src/core/inventario/types.ts | TaxLine interface, taxes? y discriminarIVA? en BienesMovement, AccountMappingKey extendido, DEFAULT_ACCOUNT_CODES | +32 |
+| src/pages/Planillas/components/MovementModalV3.tsx | UI percepciones repeater, toggle discriminarIVA, impuestos en resumen, quick-add retención split, handlers | +183 |
+| src/storage/bienes.ts | ACCOUNT_FALLBACKS percepciones, resolveTaxLineAccountId(), lógica IVA como costo, percepciones en asientos compra/venta | +89 |
+| docs/AI_HANDOFF.md | Este checkpoint | +50 |
+
+### Cambios Realizados
+
+**FASE 1A - Modelo (types.ts):**
+- Nuevo: `TaxLine` interface (`id, kind, taxType, amount, accountId?`)
+- Nuevo: `TaxLineKind = 'PERCEPCION' | 'RETENCION' | 'IMPUESTO_INTERNO'`
+- Nuevo: `TaxType = 'IVA' | 'IIBB' | 'GANANCIAS' | 'SUSS' | 'OTRO'`
+- BienesMovement: `taxes?: TaxLine[]` + `discriminarIVA?: boolean` (opcionales, retrocompatible)
+- AccountMappingKey: 5 nuevas keys para percepciones/retenciones
+- DEFAULT_ACCOUNT_CODES: 5 nuevas entradas
+
+**FASE 1B - UI (MovementModalV3.tsx):**
+- Estado: `taxes` (TaxLine[]) + `discriminarIVA` (boolean, default true)
+- Sección "Discriminar IVA": toggle solo en compra, muestra explicación contextual (RI vs Monotributo)
+- Sección "Impuestos / Percepciones": repeater con selector tipo (Percepción IVA/IIBB/Ganancias/SUSS/Otro) + monto + eliminar
+- Cálculos: `taxesTotal` sumado al totalFinal (percepciones NO afectan base ni IVA)
+- Resumen: línea "Impuestos adicionales" + IVA muestra rate dinámico + "(como costo)" cuando aplica
+- Submit: pasa `taxes` y `discriminarIVA` al onSave
+- Inicialización desde initialData para edición de movimientos existentes
+
+**FASE 1C - Motor Contable (bienes.ts):**
+- Nuevo: `resolveTaxLineAccountId()` — resuelve cuenta por TaxLine.accountId → mapping por taxType+dirección → fallback genérico
+- ACCOUNT_FALLBACKS extendido con 5 entradas de percepciones/retenciones
+- COMPRA: si `discriminarIVA === false`, IVA se suma al débito de Mercaderías/Compras (no genera línea IVA CF)
+- COMPRA: percepciones sufridas generan D Cuenta Percepción (Activo) en el asiento
+- VENTA: percepciones practicadas generan H Cuenta Percepción (Pasivo) en el asiento
+- Validación: IVA CF no requerido cuando discriminarIVA=false
+
+**FASE 2 - Retenciones Quick-Add:**
+- Botón "Agregar retención" en sección Pago/Cobro
+- Compra: pre-llena con 2.1.03.03 (Retenciones a depositar - Pasivo)
+- Venta: pre-llena con 1.1.03.07 (Retenciones IVA de terceros - Activo)
+- El split se comporta como cualquier otro (editable, validación restante=0)
+
+### Decisiones Técnicas
+- **Percepciones en `taxes[]`, retenciones por splits:** Las percepciones son líneas del comprobante (afectan total); las retenciones son formas de pago (el cliente paga con retención en vez de efectivo). Modelo diferente = implementación diferente.
+- **Account resolution chain:** TaxLine.accountId explícito → mapped setting → fallback por código seed. Siempre resuelve sin romper (console.warn si no encuentra).
+- **IVA como costo:** No cambia el total a pagar (el comprobante es el mismo). Solo cambia la imputación contable: el IVA va a Mercaderías en vez de IVA CF.
+- **No hay cuentas IIBB específicas en seed:** Se usa `1.1.03.02 Anticipos de impuestos` como fallback para percepciones IIBB. El usuario puede override con `TaxLine.accountId`.
+- **IVA hardcoded "21%" en resumen:** Corregido a usar `formData.ivaRate` dinámico.
+
+### SUPUESTOS
+- Percepciones de tipo RETENCION en `taxes[]` no generan asiento (future-proof, se resuelven por splits)
+- Movimientos viejos sin `taxes` ni `discriminarIVA` funcionan idéntico al comportamiento previo (campos opcionales)
+- El plan de cuentas del usuario tiene las cuentas seed; si no, el sistema intenta fallback por nombre/código
+
+### Validación
+- `npm run build`: PASS
+- `npm run test`: 48/48 PASS
+- `git diff --stat`: 4 archivos (types.ts, MovementModalV3.tsx, bienes.ts, AI_HANDOFF.md)
+
+### Pendientes
+- [ ] QA manual end-to-end (T01-T06) en la app corriendo
+- [ ] Mini calculadora opcional para percepciones (% sobre neto/IVA) — nice-to-have diferido
+- [ ] Tooltip en línea "Impuestos adicionales" del resumen — nice-to-have diferido
+- [ ] Percepción IIBB: agregar cuentas IIBB específicas al seed si el usuario las necesita (hoy usa Anticipos de impuestos como fallback)
+- [ ] Preview contable en panel derecho: no incluye aún las líneas de percepciones (solo el resumen de importes las muestra)
+
+---
+
 ## CHECKPOINT #INVENTARIO-DASHBOARD-PREMIUM
 **Fecha:** 2026-01-31
 **Estado:** COMPLETADO - Build PASS, 48/48 Tests PASS
@@ -3350,6 +3485,22 @@ npm run lint   # FAIL (errores preexistentes fuera de scope)
 - [ ] QA manual: RT6 (PERIODIC, Compras no en resultados, CMV sí)
 - [ ] Bonificaciones/devoluciones: estructura prepared (AccountMappingKey tiene gastos/bonif/devol), pero sin UI de captura
 - [ ] Breakdown compras por mes como orígenes RT6: diferido
+
+## CHECKPOINT #AUDIT-IMPUESTOS-2026-01-31
+**Objetivo:** Auditoría integral del módulo de Inventario/Operaciones para preparar la implementación de Impuestos (IVA, Percepciones, Retenciones).
+
+**Entregables:**
+- Reporte detallado: `docs/AI_AUDIT_IMPUESTOS_IVA.md`
+- Diagnóstico: El sistema maneja IVA básico correctamente pero carece de estructura para Percepciones (GAP Crítico) y tratamiento de IVA como Costo.
+- Estrategia MVP:
+  1. Extender modelo `BienesMovement` con `taxes[]`.
+  2. UI: Sección "Impuestos" en Modal V3 y Toggle "IVA como Costo".
+  3. Storage: Lógica de asientos dinámica para debitar cuentas de Percepciones.
+
+**Próximos Pasos:**
+- Implementar modelo de datos `TaxLine` en `types.ts`.
+- Actualizar `MovementModalV3` para soportar carga de percepciones.
+- Actualizar `bienes.ts` para generar asientos con líneas de impuestos adicionales.
 - [ ] Reversal de cierre periódico: función `generateReversalEntryLines` existe pero no hay UI para usarla
 
 ---

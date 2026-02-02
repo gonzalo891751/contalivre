@@ -159,6 +159,12 @@ export type AccountMappingKey =
     | 'aperturaInventario'
     | 'descuentosObtenidos'
     | 'descuentosOtorgados'
+    // Percepciones / Retenciones
+    | 'percepcionIVASufrida'       // Activo: percepción IVA pagada en compras (1.1.03.08)
+    | 'percepcionIVAPracticada'    // Pasivo: percepción IVA cobrada en ventas (2.1.03.06)
+    | 'percepcionIIBBSufrida'     // Activo: percepción IIBB pagada en compras (1.1.03.02 fallback)
+    | 'retencionSufrida'          // Activo: retención sufrida en ventas (1.1.03.07)
+    | 'retencionPracticada'       // Pasivo: retención practicada en compras (2.1.03.03)
 
 /**
  * Module configuration
@@ -286,6 +292,12 @@ export const DEFAULT_ACCOUNT_CODES: Record<AccountMappingKey, string> = {
     aperturaInventario: '3.2.01',
     descuentosObtenidos: '4.6.09',
     descuentosOtorgados: '4.2.01',
+    // Percepciones / Retenciones
+    percepcionIVASufrida: '1.1.03.08',
+    percepcionIVAPracticada: '2.1.03.06',
+    percepcionIIBBSufrida: '1.1.03.02',
+    retencionSufrida: '1.1.03.07',
+    retencionPracticada: '2.1.03.03',
 }
 
 // ========================================
@@ -324,6 +336,33 @@ export type JournalStatus = 'generated' | 'linked' | 'none' | 'error' | 'missing
  * IVA rate for Argentina
  */
 export type IVARate = 21 | 10.5 | 0
+
+/**
+ * Tax line for additional taxes (percepciones, retenciones, impuestos internos)
+ * Used in purchase/sale movements for Argentine tax regimes.
+ */
+export type TaxLineKind = 'PERCEPCION' | 'RETENCION' | 'IMPUESTO_INTERNO'
+export type TaxType = 'IVA' | 'IIBB' | 'GANANCIAS' | 'SUSS' | 'OTRO'
+
+/**
+ * Calculation mode for tax lines
+ * - AMOUNT: fixed amount entered manually
+ * - PERCENT: calculated as percentage of a base (NETO or IVA)
+ */
+export type TaxCalcMode = 'AMOUNT' | 'PERCENT'
+export type TaxCalcBase = 'NETO' | 'IVA'
+
+export interface TaxLine {
+    id: string
+    kind: TaxLineKind
+    taxType: TaxType
+    amount: number
+    accountId?: string  // Optional override: specific account for this tax line
+    // Calculation mode (optional, backward compatible - defaults to AMOUNT if missing)
+    calcMode?: TaxCalcMode
+    rate?: number       // Percentage rate (e.g., 3 for 3%)
+    base?: TaxCalcBase  // Base for percentage calculation
+}
 
 /**
  * Product category
@@ -398,7 +437,10 @@ export interface BienesMovement {
     ivaRate: IVARate
     ivaAmount: number              // Calculated IVA
     subtotal: number               // quantity * (unitCost or unitPrice)
-    total: number                  // subtotal + ivaAmount
+    total: number                  // subtotal + ivaAmount (+ taxes if present)
+    // Impuestos adicionales (percepciones, retenciones, etc.)
+    taxes?: TaxLine[]              // Optional: additional tax lines (backward compatible)
+    discriminarIVA?: boolean       // Purchase only: true (default) = IVA goes to CF; false = IVA as cost
     // Costing (calculated at save time)
     costMethod: CostingMethod      // Snapshot of method at transaction time
     costUnitAssigned: number       // Assigned cost per unit (for SALE/ADJUSTMENT)

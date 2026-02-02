@@ -45,7 +45,15 @@ import type {
     CostingMethod,
     IVARate,
     ProductValuation,
+    TaxLine,
+    TaxLineKind,
+    TaxType,
+    TaxCalcMode,
+    TaxCalcBase,
 } from '../../../core/inventario/types'
+
+/** Round to 2 decimal places, handling floating point errors */
+const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
 import type { Account } from '../../../core/models'
 import AccountSearchSelect from '../../../ui/AccountSearchSelect'
 
@@ -131,6 +139,20 @@ export default function MovementModalV3({
         { id: 'split-1', accountId: '', amount: 0 }
     ])
 
+    // Percepciones / Impuestos adicionales
+    const [taxes, setTaxes] = useState<TaxLine[]>([])
+    const [discriminarIVA, setDiscriminarIVA] = useState(true)
+
+    // Quick-add retención panel state
+    const [showRetencionPanel, setShowRetencionPanel] = useState(false)
+    const [retencionForm, setRetencionForm] = useState({
+        calcMode: 'PERCENT' as TaxCalcMode,
+        rate: 100,
+        base: 'IVA' as TaxCalcBase,
+        amount: 0,
+        taxType: 'IVA' as TaxType,
+    })
+
     // Ajuste - Stock Fisico
     const [stockAjuste, setStockAjuste] = useState({
         productId: products[0]?.id || '',
@@ -193,6 +215,14 @@ export default function MovementModalV3({
                 accountId: s.accountId,
                 amount: s.amount
             })))
+        }
+
+        // Initialize taxes and discriminarIVA from existing movement
+        if (initialData.taxes && initialData.taxes.length > 0) {
+            setTaxes(initialData.taxes)
+        }
+        if (typeof initialData.discriminarIVA === 'boolean') {
+            setDiscriminarIVA(initialData.discriminarIVA)
         }
 
         setFormData(prev => ({
@@ -261,8 +291,19 @@ export default function MovementModalV3({
         // Descuento financiero (no afecta IVA, reduce total a pagar)
         const descuentoFinAmount = subtotalComprobante * (formData.descuentoFinancieroPct / 100)
 
-        // Total final
-        const totalFinal = subtotalComprobante - descuentoFinAmount
+        // Percepciones / impuestos adicionales (no afectan base ni IVA, solo suman al total)
+        // Calculate each tax amount based on its calcMode (PERCENT uses baseImponible or ivaTotal)
+        const taxesWithAmounts = taxes.map(t => {
+            if (t.calcMode === 'PERCENT' && t.rate !== undefined) {
+                const baseValue = t.base === 'IVA' ? ivaTotal : baseImponible
+                return { ...t, calculatedAmount: round2(baseValue * (t.rate / 100)) }
+            }
+            return { ...t, calculatedAmount: t.amount || 0 }
+        })
+        const taxesTotal = taxesWithAmounts.reduce((sum, t) => sum + t.calculatedAmount, 0)
+
+        // Total final = subtotal comprobante - descuento + percepciones
+        const totalFinal = subtotalComprobante - descuentoFinAmount + taxesTotal
 
         // CMV estimado (para venta)
         const estimatedCost = selectedValuation?.averageCost || 0
@@ -279,11 +320,13 @@ export default function MovementModalV3({
             ivaTotal,
             subtotalComprobante,
             descuentoFinAmount,
+            taxesTotal,
+            taxesWithAmounts,  // Include calculated amounts for each tax
             totalFinal,
             estimatedCost,
             estimatedCMV,
         }
-    }, [formData, mainTab, gastos, selectedValuation])
+    }, [formData, mainTab, gastos, selectedValuation, taxes])
 
     // Payment validation
     const splitTotals = useMemo(() => {
@@ -500,6 +543,82 @@ export default function MovementModalV3({
             ])
         }
     }
+
+    // Tax/Perception handlers
+    const handleAddTax = () => {
+        setTaxes(prev => [
+            ...prev,
+            {
+                id: `tax-${Date.now()}`,
+                kind: 'PERCEPCION' as TaxLineKind,
+                taxType: 'IIBB' as TaxType,
+                amount: 0,
+                calcMode: 'PERCENT' as TaxCalcMode,
+                rate: 3,
+                base: 'NETO' as TaxCalcBase,
+            }
+        ])
+    }
+
+    const handleRemoveTax = (id: string) => {
+        setTaxes(prev => prev.filter(t => t.id !== id))
+    }
+
+    const handleTaxChange = (id: string, field: keyof TaxLine, value: string | number) => {
+        setTaxes(prev => prev.map(t => {
+            if (t.id !== id) return t
+            return { ...t, [field]: value }
+        }))
+    }
+
+    // Quick-add retención panel handlers
+    const handleOpenRetencionPanel = () => {
+        // Reset form with defaults
+        setRetencionForm({
+            calcMode: 'PERCENT',
+            rate: 100,
+            base: 'IVA',
+            amount: 0,
+            taxType: 'IVA',
+        })
+        setShowRetencionPanel(true)
+    }
+
+    const handleApplyRetencion = () => {
+        // Calculate amount based on mode
+        let finalAmount: number
+        if (retencionForm.calcMode === 'PERCENT') {
+            const baseValue = retencionForm.base === 'IVA' ? calculations.ivaTotal : calculations.baseImponible
+            finalAmount = round2(baseValue * (retencionForm.rate / 100))
+        } else {
+            finalAmount = retencionForm.amount
+        }
+
+        if (finalAmount <= 0) {
+            setShowRetencionPanel(false)
+            return
+        }
+
+        // Compra: retención practicada → Pasivo (2.1.03.03 Retenciones a depositar)
+        // Venta: retención sufrida → Activo (1.1.03.07 Retenciones IVA de terceros)
+        const targetCode = mainTab === 'compra' ? '2.1.03.03' : '1.1.03.07'
+        const acc = accounts?.find(a => a.code === targetCode)
+
+        const newSplit: PaymentSplit = {
+            id: `split-ret-${Date.now()}`,
+            accountId: acc?.id || '',
+            amount: finalAmount,
+        }
+        setSplits(prev => [...prev, newSplit])
+        setShowRetencionPanel(false)
+    }
+
+    // Calculated retention amount for display
+    const retencionCalculatedAmount = useMemo(() => {
+        if (retencionForm.calcMode !== 'PERCENT') return retencionForm.amount
+        const baseValue = retencionForm.base === 'IVA' ? calculations.ivaTotal : calculations.baseImponible
+        return round2(baseValue * (retencionForm.rate / 100))
+    }, [retencionForm, calculations.ivaTotal, calculations.baseImponible])
 
     // Devolucion handlers
     const handleAddDevolucionSplit = () => {
@@ -840,6 +959,20 @@ export default function MovementModalV3({
                     ? 'PURCHASE'
                     : (mainTab === 'compra' ? 'PURCHASE' : 'SALE')
 
+            // Build taxes with final calculated amounts (for PERCENT mode, amount is computed; for AMOUNT mode, use raw)
+            const finalTaxes: TaxLine[] = calculations.taxesWithAmounts
+                .filter(t => t.calculatedAmount > 0)
+                .map(t => ({
+                    id: t.id,
+                    kind: t.kind,
+                    taxType: t.taxType,
+                    amount: t.calculatedAmount,  // Always store the final calculated amount
+                    accountId: t.accountId,
+                    calcMode: t.calcMode,
+                    rate: t.rate,
+                    base: t.base,
+                }))
+
             await onSave({
                 type: movementType,
                 productId: formData.productId,
@@ -864,6 +997,9 @@ export default function MovementModalV3({
                 descuentoFinancieroPct: formData.descuentoFinancieroPct || undefined,
                 descuentoFinancieroAmount: calculations.descuentoFinAmount || undefined,
                 gastosCompra: calculations.gastosNetos || undefined,
+                // Percepciones / IVA como costo - taxes include calcMode/rate/base for re-editing
+                taxes: finalTaxes.length > 0 ? finalTaxes : undefined,
+                discriminarIVA: mainTab === 'compra' ? discriminarIVA : undefined,
                 // For VALUE_ADJUSTMENT (solo gasto capitalizado)
                 valueDelta: isSoloGastoCap ? gastosCapitalizables : undefined,
                 adjustmentKind: isSoloGastoCap ? 'CAPITALIZATION' : undefined,
@@ -1960,6 +2096,167 @@ export default function MovementModalV3({
                                     </section>
                                 )}
 
+                                {/* SECTION: DISCRIMINAR IVA (solo compra) */}
+                                {mainTab === 'compra' && (
+                                    <section className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm animate-fade-in">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <span className="text-sm font-bold text-slate-800">Discriminar IVA</span>
+                                                <p className="text-xs text-slate-500 mt-0.5">
+                                                    {discriminarIVA
+                                                        ? 'IVA se imputa a Credito Fiscal (Responsable Inscripto)'
+                                                        : 'IVA se suma al costo de mercaderias (Monotributo / Exento)'}
+                                                </p>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={discriminarIVA}
+                                                    onChange={(e) => setDiscriminarIVA(e.target.checked)}
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500" />
+                                            </label>
+                                        </div>
+                                    </section>
+                                )}
+
+                                {/* SECTION: PERCEPCIONES / IMPUESTOS ADICIONALES */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm animate-fade-in">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <Receipt size={16} weight="duotone" className="text-amber-600" /> Impuestos / Percepciones
+                                    </h3>
+
+                                    {taxes.length === 0 ? (
+                                        <p className="text-xs text-slate-400 italic mb-2">Sin percepciones adicionales en este comprobante.</p>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {taxes.map((tax) => {
+                                                const taxCalc = calculations.taxesWithAmounts.find(t => t.id === tax.id)
+                                                const calculatedAmount = taxCalc?.calculatedAmount || 0
+                                                const isPercent = tax.calcMode === 'PERCENT'
+                                                return (
+                                                    <div key={tax.id} className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                                        <div className="grid grid-cols-12 gap-2 items-end">
+                                                            {/* Tipo selector */}
+                                                            <div className="col-span-4">
+                                                                <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Tipo</label>
+                                                                <select
+                                                                    value={`${tax.kind}:${tax.taxType}`}
+                                                                    onChange={(e) => {
+                                                                        const [kind, taxType] = e.target.value.split(':') as [TaxLineKind, TaxType]
+                                                                        handleTaxChange(tax.id, 'kind', kind)
+                                                                        handleTaxChange(tax.id, 'taxType', taxType)
+                                                                    }}
+                                                                    className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:border-amber-500 outline-none bg-white"
+                                                                >
+                                                                    <option value="PERCEPCION:IVA">Percepcion IVA</option>
+                                                                    <option value="PERCEPCION:IIBB">Percepcion IIBB</option>
+                                                                    <option value="PERCEPCION:GANANCIAS">Percepcion Ganancias</option>
+                                                                    <option value="PERCEPCION:SUSS">Percepcion SUSS</option>
+                                                                    <option value="PERCEPCION:OTRO">Percepcion Otro</option>
+                                                                </select>
+                                                            </div>
+                                                            {/* Mode toggle: Monto / % */}
+                                                            <div className="col-span-3">
+                                                                <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Modo</label>
+                                                                <div className="flex bg-slate-200 rounded p-0.5">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleTaxChange(tax.id, 'calcMode', 'AMOUNT')}
+                                                                        className={`flex-1 px-2 py-1 text-xs font-semibold rounded transition-colors ${!isPercent ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500'}`}
+                                                                    >
+                                                                        Monto
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleTaxChange(tax.id, 'calcMode', 'PERCENT')}
+                                                                        className={`flex-1 px-2 py-1 text-xs font-semibold rounded transition-colors ${isPercent ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500'}`}
+                                                                    >
+                                                                        %
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            {/* Amount or Rate input */}
+                                                            <div className="col-span-4">
+                                                                {isPercent ? (
+                                                                    <div className="flex gap-1">
+                                                                        <div className="flex-1">
+                                                                            <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Tasa %</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                min="0"
+                                                                                max="100"
+                                                                                step="0.01"
+                                                                                value={tax.rate ?? ''}
+                                                                                onChange={(e) => handleTaxChange(tax.id, 'rate', Number(e.target.value))}
+                                                                                className="w-full px-2 py-1.5 text-sm font-mono text-right border border-slate-300 rounded focus:border-amber-500 outline-none"
+                                                                                placeholder="3"
+                                                                            />
+                                                                        </div>
+                                                                        <div className="w-16">
+                                                                            <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Base</label>
+                                                                            <select
+                                                                                value={tax.base || 'NETO'}
+                                                                                onChange={(e) => handleTaxChange(tax.id, 'base', e.target.value)}
+                                                                                className="w-full px-1 py-1.5 text-xs border border-slate-300 rounded focus:border-amber-500 outline-none bg-white"
+                                                                            >
+                                                                                <option value="NETO">Neto</option>
+                                                                                <option value="IVA">IVA</option>
+                                                                            </select>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Monto</label>
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            step="0.01"
+                                                                            value={tax.amount || ''}
+                                                                            onChange={(e) => handleTaxChange(tax.id, 'amount', Number(e.target.value))}
+                                                                            className="w-full px-2 py-1.5 text-sm font-mono text-right border border-slate-300 rounded focus:border-amber-500 outline-none"
+                                                                            placeholder="0,00"
+                                                                        />
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                            {/* Delete button */}
+                                                            <div className="col-span-1 flex justify-center">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleRemoveTax(tax.id)}
+                                                                    className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                                                                    title="Eliminar percepcion"
+                                                                >
+                                                                    <Trash size={16} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        {/* Calculated amount display for % mode */}
+                                                        {isPercent && (
+                                                            <div className="mt-2 pt-2 border-t border-slate-200 flex justify-between items-center text-xs">
+                                                                <span className="text-slate-500">
+                                                                    {tax.rate || 0}% sobre {tax.base === 'IVA' ? 'IVA' : 'Neto'} ({formatCurrency(tax.base === 'IVA' ? calculations.ivaTotal : calculations.baseImponible)})
+                                                                </span>
+                                                                <span className="font-mono font-semibold text-amber-600">= {formatCurrency(calculatedAmount)}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+
+                                    <button
+                                        type="button"
+                                        onClick={handleAddTax}
+                                        className="mt-3 text-amber-600 text-xs font-semibold flex items-center gap-1 hover:bg-amber-50 px-2 py-1 rounded transition-colors"
+                                    >
+                                        <Plus weight="bold" /> Agregar percepcion
+                                    </button>
+                                </section>
+
                                 {/* SECTION: PAGO / COBRO */}
                                 <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm relative overflow-visible z-10 animate-fade-in">
                                     <div className="absolute top-0 right-0 p-3 opacity-10 pointer-events-none">
@@ -2010,15 +2307,139 @@ export default function MovementModalV3({
                                         ))}
                                     </div>
 
-                                    <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center">
-                                        <span className="text-xs text-slate-500 italic">Podes combinar multiples medios.</span>
-                                        <button
-                                            type="button"
-                                            onClick={handleAddSplit}
-                                            className="text-xs font-semibold text-blue-600 cursor-pointer hover:underline flex items-center gap-1"
-                                        >
-                                            <Plus weight="bold" /> Agregar otra cuenta
-                                        </button>
+                                    <div className="mt-4 pt-3 border-t border-slate-100 flex flex-col gap-2">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs text-slate-500 italic">Podes combinar multiples medios.</span>
+                                            <button
+                                                type="button"
+                                                onClick={handleAddSplit}
+                                                className="text-xs font-semibold text-blue-600 cursor-pointer hover:underline flex items-center gap-1"
+                                            >
+                                                <Plus weight="bold" /> Agregar otra cuenta
+                                            </button>
+                                        </div>
+                                        {!showRetencionPanel ? (
+                                            <button
+                                                type="button"
+                                                onClick={handleOpenRetencionPanel}
+                                                className="text-xs font-semibold text-amber-600 hover:bg-amber-50 px-2 py-1 rounded transition-colors flex items-center gap-1 self-start"
+                                            >
+                                                <Plus weight="bold" /> {mainTab === 'compra' ? 'Agregar retencion (a depositar)' : 'Agregar retencion sufrida (a favor)'}
+                                            </button>
+                                        ) : (
+                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-2">
+                                                <div className="flex justify-between items-center mb-3">
+                                                    <span className="text-xs font-bold text-amber-700 uppercase">
+                                                        {mainTab === 'compra' ? 'Retencion a depositar' : 'Retencion sufrida'}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowRetencionPanel(false)}
+                                                        className="text-slate-400 hover:text-slate-600"
+                                                    >
+                                                        <X size={14} />
+                                                    </button>
+                                                </div>
+                                                <div className="grid grid-cols-12 gap-2 items-end">
+                                                    {/* Tipo selector */}
+                                                    <div className="col-span-3">
+                                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Tipo</label>
+                                                        <select
+                                                            value={retencionForm.taxType}
+                                                            onChange={(e) => setRetencionForm(prev => ({ ...prev, taxType: e.target.value as TaxType }))}
+                                                            className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-amber-500 outline-none bg-white"
+                                                        >
+                                                            <option value="IVA">IVA</option>
+                                                            <option value="IIBB">IIBB</option>
+                                                            <option value="GANANCIAS">Ganancias</option>
+                                                            <option value="OTRO">Otro</option>
+                                                        </select>
+                                                    </div>
+                                                    {/* Mode toggle */}
+                                                    <div className="col-span-3">
+                                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Modo</label>
+                                                        <div className="flex bg-slate-200 rounded p-0.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setRetencionForm(prev => ({ ...prev, calcMode: 'AMOUNT' }))}
+                                                                className={`flex-1 px-2 py-1 text-xs font-semibold rounded transition-colors ${retencionForm.calcMode === 'AMOUNT' ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500'}`}
+                                                            >
+                                                                Monto
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setRetencionForm(prev => ({ ...prev, calcMode: 'PERCENT' }))}
+                                                                className={`flex-1 px-2 py-1 text-xs font-semibold rounded transition-colors ${retencionForm.calcMode === 'PERCENT' ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500'}`}
+                                                            >
+                                                                %
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    {/* Amount or Rate input */}
+                                                    <div className="col-span-4">
+                                                        {retencionForm.calcMode === 'PERCENT' ? (
+                                                            <div className="flex gap-1">
+                                                                <div className="flex-1">
+                                                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Tasa %</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        max="100"
+                                                                        step="0.01"
+                                                                        value={retencionForm.rate}
+                                                                        onChange={(e) => setRetencionForm(prev => ({ ...prev, rate: Number(e.target.value) }))}
+                                                                        className="w-full px-2 py-1.5 text-sm font-mono text-right border border-slate-300 rounded focus:border-amber-500 outline-none"
+                                                                    />
+                                                                </div>
+                                                                <div className="w-14">
+                                                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Base</label>
+                                                                    <select
+                                                                        value={retencionForm.base}
+                                                                        onChange={(e) => setRetencionForm(prev => ({ ...prev, base: e.target.value as TaxCalcBase }))}
+                                                                        className="w-full px-1 py-1.5 text-xs border border-slate-300 rounded focus:border-amber-500 outline-none bg-white"
+                                                                    >
+                                                                        <option value="IVA">IVA</option>
+                                                                        <option value="NETO">Neto</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Monto</label>
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    step="0.01"
+                                                                    value={retencionForm.amount || ''}
+                                                                    onChange={(e) => setRetencionForm(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                                                                    className="w-full px-2 py-1.5 text-sm font-mono text-right border border-slate-300 rounded focus:border-amber-500 outline-none"
+                                                                    placeholder="0,00"
+                                                                />
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                    {/* Apply button */}
+                                                    <div className="col-span-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleApplyRetencion}
+                                                            className="w-full px-2 py-1.5 bg-amber-500 text-white text-xs font-semibold rounded hover:bg-amber-600 transition-colors"
+                                                        >
+                                                            Aplicar
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {/* Calculated amount display for % mode */}
+                                                {retencionForm.calcMode === 'PERCENT' && (
+                                                    <div className="mt-2 pt-2 border-t border-amber-200 flex justify-between items-center text-xs">
+                                                        <span className="text-amber-700">
+                                                            {retencionForm.rate}% sobre {retencionForm.base === 'IVA' ? 'IVA' : 'Neto'} ({formatCurrency(retencionForm.base === 'IVA' ? calculations.ivaTotal : calculations.baseImponible)})
+                                                        </span>
+                                                        <span className="font-mono font-semibold text-amber-700">= {formatCurrency(retencionCalculatedAmount)}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 </section>
 
@@ -2109,7 +2530,7 @@ export default function MovementModalV3({
                                             </div>
 
                                             <div className="flex justify-between text-slate-500">
-                                                <span>IVA (21%)</span>
+                                                <span>IVA ({formData.ivaRate}%){mainTab === 'compra' && !discriminarIVA ? ' (como costo)' : ''}</span>
                                                 <span className="font-mono">{formatCurrency(calculations.ivaTotal)}</span>
                                             </div>
 
@@ -2122,6 +2543,13 @@ export default function MovementModalV3({
                                                 <div className="flex justify-between text-emerald-600">
                                                     <span>(-) Desc. Financiero</span>
                                                     <span className="font-mono">- {formatCurrency(calculations.descuentoFinAmount)}</span>
+                                                </div>
+                                            )}
+
+                                            {calculations.taxesTotal > 0 && (
+                                                <div className="flex justify-between text-amber-600">
+                                                    <span>(+) Impuestos adicionales</span>
+                                                    <span className="font-mono">+ {formatCurrency(calculations.taxesTotal)}</span>
                                                 </div>
                                             )}
                                         </div>
