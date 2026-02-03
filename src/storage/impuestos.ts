@@ -163,7 +163,7 @@ const resolveTaxCreditAccountId = async (
     taxType: TaxType,
     accounts: Account[],
     overrideId?: string | null
-): Promise<{ accountId: string | null; label: string }> => {
+): Promise<{ accountId: string | null; label: string; missingAccountCode?: string; missingMappingKey?: string }> => {
     const label = TAX_CREDIT_LABELS[taxType] || 'Cuenta de credito fiscal'
     if (overrideId) {
         const direct = accounts.find(acc => acc.id === overrideId && !acc.isHeader)

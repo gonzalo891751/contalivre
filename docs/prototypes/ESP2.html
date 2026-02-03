@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Estado de Situación Patrimonial</title>
+    
+    <!-- FUENTES: Brand Book -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- ICONOS: Phosphor -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- TAILWIND (CDN para prototipo) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',
+                            secondary: '#10B981',
+                            dark: '#0F172A'
+                        },
+                        ui: {
+                            bg: '#F8FAFC',
+                            paper: '#FFFFFF',
+                            border: '#E2E8F0',
+                            text: '#0F172A',
+                            sub: '#64748B'
+                        }
+                    },
+                    fontFamily: {
+                        display: ['Outfit', 'sans-serif'],
+                        body: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    backgroundImage: {
+                        'brand-gradient': 'linear-gradient(135deg, #2563EB 0%, #10B981 100%)',
+                        'brand-gradient-hover': 'linear-gradient(135deg, #1D4ED8 0%, #059669 100%)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* ESTILOS BASE & UTILS */
+        body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; color: #0F172A; }
+        h1, h2, h3, h4 { font-family: 'Outfit', sans-serif; }
+        .font-mono-nums { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; letter-spacing: -0.05em; }
+        
+        /* TRANSICIONES UI */
+        .drawer-backdrop { transition: opacity 0.3s ease; }
+        .drawer-panel { transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .toggle-dot { transition: transform 0.2s cubic-bezier(0.4, 0.0, 0.2, 1); }
+        .toggle-bg { transition: background-color 0.2s ease; }
+        
+        /* ANIMACIONES */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+
+        /* SCROLLBARS */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+        /* IMPRESIÓN (ESTILO RT9 FORMAL) */
+        @media print {
+            @page { size: A4; margin: 15mm; }
+            body { background: white; -webkit-print-color-adjust: exact; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            
+            /* Reset de estilos modernos para impresión */
+            .page-container { max-width: 100%; margin: 0; padding: 0; box-shadow: none; }
+            table { width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Inter', sans-serif; }
+            th { border-bottom: 2px solid #000; text-align: left; padding: 4px; font-weight: 700; text-transform: uppercase; }
+            td { border-bottom: 1px dotted #ccc; padding: 4px; }
+            .total-row td { border-top: 1px solid #000; border-bottom: 2px solid #000; font-weight: 700; }
+            .section-header { font-weight: 700; font-size: 12pt; margin-top: 10mm; border-bottom: 1px solid #000; display: block; width: 100%; }
+            
+            /* Print Column Management */
+            .col-prev { display: none; }
+            body[data-print-comparative="true"] .col-prev { display: table-cell; }
+        }
+        
+        .print-only { display: none; }
+    </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col">
+
+    <!-- TOP NAVIGATION -->
+    <nav class="h-16 bg-white border-b border-ui-border px-6 flex items-center justify-between no-print sticky top-0 z-30 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-brand-gradient flex items-center justify-center text-white text-lg">
+                <i class="ph-bold ph-robot"></i>
+            </div>
+            <span class="font-display font-bold text-lg tracking-tight">ContaLivre</span>
+            <div class="h-4 w-px bg-ui-border mx-2"></div>
+            <span class="text-ui-sub text-sm font-medium">Contabilidad</span>
+        </div>
+        <div class="flex items-center gap-4">
+            <!-- Chips de Período (Dinamicos) -->
+            <div class="hidden md:flex items-center gap-2" id="period-chips">
+                <!-- Inyectado por JS -->
+            </div>
+            
+            <div class="h-8 w-px bg-ui-border mx-2 hidden md:block"></div>
+
+            <div class="w-8 h-8 rounded-full bg-slate-200 overflow-hidden flex items-center justify-center text-ui-sub border border-ui-border hover:ring-2 hover:ring-brand-primary/20 transition-all cursor-pointer">
+                <i class="ph-fill ph-user"></i>
+            </div>
+        </div>
+    </nav>
+
+    <!-- INTEGRITY BANNER (Crítico) -->
+    <div id="integrity-banner" class="hidden bg-orange-50 border-b border-orange-200 px-6 py-3 no-print">
+        <div class="max-w-7xl mx-auto flex items-start gap-3">
+            <i class="ph-fill ph-warning text-orange-500 text-xl mt-0.5"></i>
+            <div class="flex-1">
+                <h4 class="text-orange-900 font-semibold text-sm">Hay cuentas sin asignar a rubros</h4>
+                <p class="text-orange-700 text-sm mt-0.5">
+                    Chequeá esto: encontramos <span id="unmapped-count" class="font-bold">0</span> cuentas con saldo que no pertenecen a ningún rubro del balance. Esto afecta los totales.
+                </p>
+            </div>
+            <button class="text-xs font-semibold bg-white border border-orange-200 text-orange-700 px-3 py-1.5 rounded hover:bg-orange-50 transition-colors shadow-sm">
+                Asignar ahora
+            </button>
+        </div>
+    </div>
+
+    <!-- MAIN APP CONTENT -->
+    <main class="flex-1 p-6 md:p-8 max-w-[1600px] mx-auto w-full no-print">
+        
+        <!-- HEADER DE PÁGINA -->
+        <header class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
+            <div>
+                <h1 class="text-3xl md:text-4xl font-extrabold text-transparent bg-clip-text bg-brand-gradient mb-2">
+                    Estado de Situación Patrimonial
+                </h1>
+                <p class="text-ui-sub max-w-2xl text-lg">
+                    Balance general al cierre del ejercicio.
+                </p>
+            </div>
+
+            <!-- ACTIONS TOOLBAR -->
+            <div class="flex flex-wrap items-center gap-3">
+                <!-- Toggle Comparativo Mejorado -->
+                <label class="cursor-pointer flex items-center gap-3 bg-white pl-4 pr-5 py-2.5 rounded-lg border border-ui-border shadow-sm hover:border-brand-primary/50 transition-colors select-none group relative overflow-hidden">
+                    <div class="relative inline-flex items-center h-5 rounded-full w-9 transition-colors focus:outline-none bg-slate-200 toggle-bg group-hover:bg-slate-300" id="toggle-bg">
+                        <span id="toggle-dot" class="translate-x-1 inline-block w-3.5 h-3.5 transform bg-white rounded-full shadow-sm toggle-dot"></span>
+                    </div>
+                    <span class="text-sm font-medium text-ui-text group-hover:text-brand-primary transition-colors">Comparar períodos</span>
+                    <input type="checkbox" id="check-comparative" class="hidden">
+                </label>
+
+                <!-- Dropdown Export -->
+                <div class="relative group">
+                    <button class="flex items-center gap-2 bg-white text-ui-text border border-ui-border px-4 py-2.5 rounded-lg font-medium shadow-sm hover:bg-slate-50 transition-all active:scale-95">
+                        <i class="ph ph-export"></i> Exportar
+                        <i class="ph-bold ph-caret-down text-xs ml-1"></i>
+                    </button>
+                    <!-- Dropdown Content -->
+                    <div class="absolute right-0 top-full mt-2 w-48 bg-white border border-ui-border rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20 overflow-hidden transform origin-top-right">
+                        <div class="p-1">
+                            <button onclick="window.print()" class="w-full text-left px-3 py-2 text-sm text-ui-text hover:bg-slate-50 hover:text-brand-primary rounded-lg flex items-center gap-2">
+                                <i class="ph ph-printer"></i> Imprimir / PDF
+                            </button>
+                            <button onclick="exportCSV()" class="w-full text-left px-3 py-2 text-sm text-ui-text hover:bg-slate-50 hover:text-brand-primary rounded-lg flex items-center gap-2">
+                                <i class="ph ph-file-csv"></i> Descargar CSV
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Botón Reporte Oficial Inteligente -->
+                <button onclick="handleOfficialReport()" class="bg-brand-dark text-white px-5 py-2.5 rounded-lg font-semibold shadow-md shadow-slate-500/20 hover:shadow-lg hover:bg-slate-800 active:scale-95 transition-all flex items-center gap-2">
+                    <i class="ph-bold ph-file-text"></i>
+                    Reporte Oficial
+                </button>
+            </div>
+        </header>
+
+        <!-- DASHBOARD GRID -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+            
+            <!-- COLUMNA IZQUIERDA: ACTIVO -->
+            <section class="flex flex-col gap-6">
+                <!-- Card Container -->
+                <div class="bg-white rounded-2xl shadow-sm border border-ui-border overflow-hidden relative">
+                    <div class="p-5 border-b border-ui-border flex justify-between items-center bg-slate-50/80 backdrop-blur-sm sticky top-0 z-20">
+                        <h2 class="text-xl font-bold font-display text-brand-dark flex items-center gap-2">
+                            <i class="ph-duotone ph-arrow-fat-lines-up text-brand-secondary"></i>
+                            Activo
+                        </h2>
+                        <span id="total-activo-header" class="font-mono-nums font-bold text-lg text-brand-dark">--</span>
+                    </div>
+
+                    <!-- ACTIVO CORRIENTE -->
+                    <div class="p-2">
+                        <div class="px-3 py-2 text-xs font-bold tracking-wider text-ui-sub uppercase">Activo Corriente</div>
+                        <div id="list-activo-corriente" class="flex flex-col gap-1">
+                            <!-- Items inyectados por JS -->
+                        </div>
+                        <div class="mt-2 px-3 py-3 bg-slate-50 rounded-lg flex justify-between items-center border border-dashed border-slate-200">
+                            <span class="text-sm font-semibold text-ui-sub">Total Activo Corriente</span>
+                            <span id="total-activo-corriente" class="font-mono-nums font-bold text-ui-text">--</span>
+                        </div>
+                    </div>
+
+                    <hr class="border-ui-border my-2">
+
+                    <!-- ACTIVO NO CORRIENTE -->
+                    <div class="p-2">
+                        <div class="px-3 py-2 text-xs font-bold tracking-wider text-ui-sub uppercase">Activo No Corriente</div>
+                        <div id="list-activo-nocorriente" class="flex flex-col gap-1">
+                            <!-- Items inyectados por JS -->
+                        </div>
+                        <div class="mt-2 px-3 py-3 bg-slate-50 rounded-lg flex justify-between items-center border border-dashed border-slate-200">
+                            <span class="text-sm font-semibold text-ui-sub">Total Activo No Corriente</span>
+                            <span id="total-activo-nocorriente" class="font-mono-nums font-bold text-ui-text">--</span>
+                        </div>
+                    </div>
+
+                    <!-- TOTAL FINAL ACTIVO -->
+                    <div class="bg-brand-dark p-5 mt-4 flex justify-between items-center text-white">
+                        <span class="font-display font-bold text-lg">Total del Activo</span>
+                        <span id="total-activo-footer" class="font-mono-nums font-bold text-xl tracking-tight">--</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- COLUMNA DERECHA: PASIVO + PN -->
+            <section class="flex flex-col gap-6">
+                <!-- Card Container -->
+                <div class="bg-white rounded-2xl shadow-sm border border-ui-border overflow-hidden relative">
+                    <div class="p-5 border-b border-ui-border flex justify-between items-center bg-slate-50/80 backdrop-blur-sm sticky top-0 z-20">
+                        <h2 class="text-xl font-bold font-display text-brand-dark flex items-center gap-2">
+                            <i class="ph-duotone ph-arrow-fat-lines-down text-red-500"></i>
+                            Pasivo
+                        </h2>
+                        <span id="total-pasivo-header" class="font-mono-nums font-bold text-lg text-brand-dark">--</span>
+                    </div>
+
+                    <!-- PASIVO CORRIENTE -->
+                    <div class="p-2">
+                        <div class="px-3 py-2 text-xs font-bold tracking-wider text-ui-sub uppercase">Pasivo Corriente</div>
+                        <div id="list-pasivo-corriente" class="flex flex-col gap-1"></div>
+                        <div class="mt-2 px-3 py-3 bg-slate-50 rounded-lg flex justify-between items-center border border-dashed border-slate-200">
+                            <span class="text-sm font-semibold text-ui-sub">Total Pasivo Corriente</span>
+                            <span id="total-pasivo-corriente" class="font-mono-nums font-bold text-ui-text">--</span>
+                        </div>
+                    </div>
+
+                    <!-- PASIVO NO CORRIENTE -->
+                    <div class="p-2">
+                        <div class="px-3 py-2 text-xs font-bold tracking-wider text-ui-sub uppercase">Pasivo No Corriente</div>
+                        <div id="list-pasivo-nocorriente" class="flex flex-col gap-1"></div>
+                        <div class="mt-2 px-3 py-3 bg-slate-50 rounded-lg flex justify-between items-center border border-dashed border-slate-200">
+                            <span class="text-sm font-semibold text-ui-sub">Total Pasivo No Corriente</span>
+                            <span id="total-pasivo-nocorriente" class="font-mono-nums font-bold text-ui-text">--</span>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-slate-100 p-4 flex justify-between items-center border-t border-ui-border">
+                        <span class="font-display font-semibold text-ui-text">Total Pasivo</span>
+                        <span id="total-pasivo-footer" class="font-mono-nums font-bold text-lg">--</span>
+                    </div>
+                </div>
+
+                <!-- PATRIMONIO NETO -->
+                <div class="bg-white rounded-2xl shadow-sm border border-ui-border overflow-hidden relative">
+                    <div class="p-5 border-b border-ui-border flex justify-between items-center bg-slate-50/80 backdrop-blur-sm sticky top-0 z-20">
+                        <h2 class="text-xl font-bold font-display text-brand-dark flex items-center gap-2">
+                            <i class="ph-duotone ph-scales text-brand-primary"></i>
+                            Patrimonio Neto
+                        </h2>
+                        <span id="total-pn-header" class="font-mono-nums font-bold text-lg text-brand-dark">--</span>
+                    </div>
+                    <div class="p-2">
+                        <div id="list-pn" class="flex flex-col gap-1"></div>
+                    </div>
+                    
+                     <!-- TOTAL PASIVO + PN -->
+                    <div class="bg-brand-dark p-5 mt-4 text-white">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="font-display font-bold text-lg">Total Pasivo + PN</span>
+                            <span id="total-pasivo-pn-footer" class="font-mono-nums font-bold text-xl tracking-tight">--</span>
+                        </div>
+                        <!-- Check de integridad -->
+                        <div id="integrity-check" class="flex items-center gap-2 text-sm opacity-80 mt-1">
+                             <!-- JS injertará el estado aquí -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+    </main>
+
+    <!-- DRAWER: DETALLE DE CUENTAS (Off-canvas) -->
+    <div id="account-drawer" class="fixed inset-0 z-50 invisible no-print">
+        <!-- Backdrop -->
+        <div id="drawer-backdrop" class="absolute inset-0 bg-slate-900/20 backdrop-blur-sm opacity-0 drawer-backdrop" onclick="closeDrawer()"></div>
+        
+        <!-- Panel -->
+        <div id="drawer-panel" class="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-2xl transform translate-x-full drawer-panel flex flex-col">
+            
+            <!-- Drawer Header -->
+            <div class="p-6 border-b border-ui-border flex justify-between items-start bg-slate-50">
+                <div>
+                    <span class="text-xs font-bold uppercase tracking-wider text-ui-sub mb-1 block">Detalle de Rubro</span>
+                    <h3 id="drawer-title" class="text-2xl font-display font-bold text-brand-dark">Caja y Bancos</h3>
+                </div>
+                <button onclick="closeDrawer()" class="text-ui-sub hover:text-brand-dark hover:bg-slate-200 p-2 rounded-full transition-colors">
+                    <i class="ph-bold ph-x text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Drawer Content -->
+            <div class="flex-1 overflow-y-auto p-6">
+                <div id="drawer-list" class="flex flex-col gap-3">
+                    <!-- Lista de cuentas inyectada por JS -->
+                </div>
+            </div>
+
+            <!-- Drawer Footer -->
+            <div class="p-6 border-t border-ui-border bg-slate-50">
+                <div class="flex justify-between items-center text-lg font-bold">
+                    <span>Total Rubro</span>
+                    <span id="drawer-total" class="font-mono-nums text-brand-primary">--</span>
+                </div>
+                <button class="mt-4 w-full py-3 rounded-lg border border-ui-border font-medium text-ui-sub hover:text-brand-primary hover:border-brand-primary transition-colors text-sm flex items-center justify-center gap-2">
+                    <i class="ph ph-pencil-simple"></i>
+                    Editar Asignación de Cuentas
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ÁREA DE IMPRESIÓN (RT9 FORMAL) -->
+    <div id="print-area" class="print-only">
+        <h1 style="text-align: center; font-size: 18pt; font-weight: 800; margin-bottom: 5mm;">EMPRESA EJEMPLO S.A.</h1>
+        <h2 style="text-align: center; font-size: 14pt; margin-bottom: 2mm;">ESTADO DE SITUACIÓN PATRIMONIAL</h2>
+        <p style="text-align: center; font-size: 10pt; margin-bottom: 10mm;">Correspondiente al ejercicio finalizado el 31/12/<span class="print-year-current"></span></p>
+
+        <div style="display: flex; gap: 10mm;">
+            <!-- Izquierda Print -->
+            <div style="flex: 1;">
+                <div class="section-header">ACTIVO</div>
+                
+                <div style="margin-top: 5mm; font-weight: 700; text-decoration: underline;">ACTIVO CORRIENTE</div>
+                <div id="print-activo-corriente"></div>
+                <div class="total-row" style="margin-top: 2mm;">
+                    <table width="100%"><tr><td>Total Activo Corriente</td><td align="right" id="print-total-ac"></td><td class="col-prev"></td></tr></table>
+                </div>
+
+                <div style="margin-top: 5mm; font-weight: 700; text-decoration: underline;">ACTIVO NO CORRIENTE</div>
+                <div id="print-activo-nocorriente"></div>
+                <div class="total-row" style="margin-top: 2mm;">
+                    <table width="100%"><tr><td>Total Activo No Corriente</td><td align="right" id="print-total-anc"></td><td class="col-prev"></td></tr></table>
+                </div>
+
+                <div class="total-row" style="margin-top: 10mm; font-size: 12pt;">
+                    <table width="100%"><tr><td>TOTAL DEL ACTIVO</td><td align="right" id="print-total-activo"></td><td class="col-prev"></td></tr></table>
+                </div>
+            </div>
+
+            <!-- Derecha Print -->
+            <div style="flex: 1;">
+                <div class="section-header">PASIVO</div>
+                
+                <div style="margin-top: 5mm; font-weight: 700; text-decoration: underline;">PASIVO CORRIENTE</div>
+                <div id="print-pasivo-corriente"></div>
+                <div class="total-row" style="margin-top: 2mm;">
+                    <table width="100%"><tr><td>Total Pasivo Corriente</td><td align="right" id="print-total-pc"></td><td class="col-prev"></td></tr></table>
+                </div>
+
+                <div style="margin-top: 5mm; font-weight: 700; text-decoration: underline;">PASIVO NO CORRIENTE</div>
+                <div id="print-pasivo-nocorriente"></div>
+                <div class="total-row" style="margin-top: 2mm;">
+                    <table width="100%"><tr><td>Total Pasivo No Corriente</td><td align="right" id="print-total-pnc"></td><td class="col-prev"></td></tr></table>
+                </div>
+
+                <div class="total-row" style="margin-top: 5mm;">
+                    <table width="100%"><tr><td>Total del Pasivo</td><td align="right" id="print-total-pasivo"></td><td class="col-prev"></td></tr></table>
+                </div>
+
+                <div class="section-header" style="margin-top: 10mm;">PATRIMONIO NETO</div>
+                <div id="print-pn" style="margin-top: 5mm;"></div>
+                <div class="total-row" style="margin-top: 5mm;">
+                    <table width="100%"><tr><td>Total del Patrimonio Neto</td><td align="right" id="print-total-pn"></td><td class="col-prev"></td></tr></table>
+                </div>
+
+                <div class="total-row" style="margin-top: 10mm; font-size: 12pt;">
+                    <table width="100%"><tr><td>TOTAL PASIVO + P.N.</td><td align="right" id="print-total-pasivo-pn"></td><td class="col-prev"></td></tr></table>
+                </div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 20mm; border-top: 1px solid #000; padding-top: 2mm; font-size: 8pt;">
+            Las notas adjuntas son parte integrante de este estado. | Generado por ContaLivre.
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // --- 1. MOCK DATA (Actualizada al 2026) ---
+        const mockData = {
+            meta: { empresa: "Empresa Demo SA", ejercicio: 2026 },
+            integrity: { unmappedAccountsCount: 3 }, // Activará el banner
+            activo: {
+                corriente: [
+                    { id: 'ac1', nombre: 'Caja y Bancos', nota: 3, actual: 1540200.50, anterior: 980000.00, cuentas: [
+                        {cod: '1.1.01.01', nombre: 'Caja Administración', saldo: 40200.50},
+                        {cod: '1.1.01.02', nombre: 'Banco Galicia CC', saldo: 1500000.00}
+                    ]},
+                    { id: 'ac2', nombre: 'Inversiones', nota: 4, actual: 500000.00, anterior: 0, cuentas: [
+                        {cod: '1.1.02.01', nombre: 'Fondo Común de Inversión', saldo: 500000.00}
+                    ]},
+                    { id: 'ac3', nombre: 'Créditos por Ventas', nota: 5, actual: 2350100.00, anterior: 1800500.20, cuentas: [
+                        {cod: '1.1.03.01', nombre: 'Deudores por Ventas', saldo: 2400100.00},
+                        {cod: '1.1.03.99', nombre: 'Previsión Deudores Incobrables', saldo: -50000.00, isContra: true}
+                    ]},
+                    { id: 'ac4', nombre: 'Otros Créditos', actual: 0, anterior: 15000.00, cuentas: [] },
+                    { id: 'ac5', nombre: 'Bienes de Cambio', actual: 0, anterior: 0, cuentas: [] } // Todo 0, se oculta
+                ],
+                noCorriente: [
+                    { id: 'anc1', nombre: 'Bienes de Uso', nota: 6, actual: 4500000.00, anterior: 4800000.00, cuentas: [
+                        {cod: '1.2.01.01', nombre: 'Rodados', saldo: 6000000.00},
+                        {cod: '1.2.01.99', nombre: 'Amort. Acum. Rodados', saldo: -1500000.00, isContra: true}
+                    ]}
+                ]
+            },
+            pasivo: {
+                corriente: [
+                    { id: 'pc1', nombre: 'Deudas Comerciales', actual: 1200500.00, anterior: 850000.00, cuentas: [
+                        {cod: '2.1.01.01', nombre: 'Proveedores Locales', saldo: 1200500.00}
+                    ]},
+                    { id: 'pc2', nombre: 'Deudas Fiscales', actual: 450200.10, anterior: 320000.50, cuentas: [
+                        {cod: '2.1.02.01', nombre: 'IVA a Pagar', saldo: 450200.10}
+                    ]},
+                    { id: 'pc3', nombre: 'Préstamos', actual: 0, anterior: 0, cuentas: [] }
+                ],
+                noCorriente: [
+                    { id: 'pnc1', nombre: 'Préstamos Bancarios', nota: 8, actual: 2000000.00, anterior: 0, cuentas: [
+                        {cod: '2.2.01.01', nombre: 'Préstamo Santander Largo Plazo', saldo: 2000000.00}
+                    ]}
+                ]
+            },
+            patrimonioNeto: [
+                { id: 'pn1', nombre: 'Capital Social', actual: 100000.00, anterior: 100000.00, cuentas: [{cod:'3.1.01', nombre:'Acciones en Circulación', saldo: 100000}]},
+                { id: 'pn2', nombre: 'Ajuste de Capital', actual: 4500000.00, anterior: 4500000.00, cuentas: [{cod:'3.1.02', nombre:'Ajuste Integral', saldo: 4500000}]},
+                { id: 'pn3', nombre: 'Resultados Acumulados', actual: 639600.40, anterior: 1825500.00, cuentas: [{cod:'3.2.01', nombre:'Resultado del Ejercicio', saldo: 639600.40}]}
+            ]
+        };
+
+        // --- 2. STATE & UTILS ---
+        let showComparative = false;
+
+        const formatCurrency = (val) => {
+            if (val === undefined || val === null) return '-';
+            return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val);
+        };
+
+        const formatPercent = (current, previous) => {
+            if (!previous || previous === 0) return '';
+            const diff = ((current - previous) / previous) * 100;
+            const sign = diff > 0 ? '+' : '';
+            return `${sign}${diff.toFixed(1)}%`;
+        };
+
+        // --- 3. RENDER LOGIC ---
+
+        function init() {
+            // Checkers
+            const integrity = mockData.integrity;
+            if (integrity.unmappedAccountsCount > 0) {
+                document.getElementById('integrity-banner').classList.remove('hidden');
+                document.getElementById('unmapped-count').textContent = integrity.unmappedAccountsCount;
+            }
+
+            // Init Header Chips
+            renderPeriodChips();
+            
+            // Init Print Year
+            document.querySelectorAll('.print-year-current').forEach(el => el.textContent = mockData.meta.ejercicio);
+
+            // Render Loops
+            renderAll();
+
+            // Event Listeners
+            document.getElementById('check-comparative').addEventListener('change', (e) => {
+                showComparative = e.target.checked;
+                updateToggleUI();
+                renderAll();
+            });
+        }
+
+        function renderPeriodChips() {
+            const container = document.getElementById('period-chips');
+            const currentYear = mockData.meta.ejercicio;
+            const prevYear = currentYear - 1;
+
+            container.innerHTML = `
+                <div class="text-xs bg-slate-50 border border-ui-border text-ui-sub px-2.5 py-1 rounded-md font-medium">
+                    Actual: <strong class="text-ui-text">${currentYear}</strong>
+                </div>
+                <div class="text-xs bg-slate-50 border border-ui-border text-ui-sub px-2.5 py-1 rounded-md font-medium">
+                    Anterior: <strong class="text-ui-text">${prevYear}</strong>
+                </div>
+            `;
+        }
+
+        function updateToggleUI() {
+            const bg = document.getElementById('toggle-bg');
+            const dot = document.getElementById('toggle-dot');
+            if (showComparative) {
+                bg.classList.replace('bg-slate-200', 'bg-brand-secondary');
+                dot.classList.add('translate-x-full');
+                dot.classList.remove('translate-x-1');
+            } else {
+                bg.classList.replace('bg-brand-secondary', 'bg-slate-200');
+                dot.classList.remove('translate-x-full');
+                dot.classList.add('translate-x-1');
+            }
+        }
+
+        function renderAll() {
+            // Configurar modo impresión
+            document.body.setAttribute('data-print-comparative', showComparative);
+
+            // Totales
+            let tAC = 0, tANC = 0, tPC = 0, tPNC = 0, tPN = 0;
+            let tAC_prev = 0, tANC_prev = 0, tPC_prev = 0, tPNC_prev = 0, tPN_prev = 0;
+
+            // Render Sections
+            const rAC = renderSection('list-activo-corriente', 'print-activo-corriente', mockData.activo.corriente);
+            const rANC = renderSection('list-activo-nocorriente', 'print-activo-nocorriente', mockData.activo.noCorriente);
+            const rPC = renderSection('list-pasivo-corriente', 'print-pasivo-corriente', mockData.pasivo.corriente);
+            const rPNC = renderSection('list-pasivo-nocorriente', 'print-pasivo-nocorriente', mockData.pasivo.noCorriente);
+            const rPN = renderSection('list-pn', 'print-pn', mockData.patrimonioNeto);
+
+            tAC = rAC.total; tAC_prev = rAC.totalPrev;
+            tANC = rANC.total; tANC_prev = rANC.totalPrev;
+            tPC = rPC.total; tPC_prev = rPC.totalPrev;
+            tPNC = rPNC.total; tPNC_prev = rPNC.totalPrev;
+            tPN = rPN.total; tPN_prev = rPN.totalPrev;
+
+            // Update Totals DOM (Current / Print Current / Previous if print needed)
+            updateTotal('total-activo-corriente', 'print-total-ac', tAC, tAC_prev);
+            updateTotal('total-activo-nocorriente', 'print-total-anc', tANC, tANC_prev);
+            updateTotal('total-activo-header', null, tAC + tANC);
+            updateTotal('total-activo-footer', 'print-total-activo', tAC + tANC, tAC_prev + tANC_prev);
+
+            updateTotal('total-pasivo-corriente', 'print-total-pc', tPC, tPC_prev);
+            updateTotal('total-pasivo-nocorriente', 'print-total-pnc', tPNC, tPNC_prev);
+            updateTotal('total-pasivo-header', null, tPC + tPNC);
+            updateTotal('total-pasivo-footer', 'print-total-pasivo', tPC + tPNC, tPC_prev + tPNC_prev);
+            
+            updateTotal('total-pn-header', 'print-total-pn', tPN, tPN_prev);
+            updateTotal('total-pasivo-pn-footer', 'print-total-pasivo-pn', tPC + tPNC + tPN, tPC_prev + tPNC_prev + tPN_prev);
+
+            // Integrity Check Visual
+            const totalActivo = tAC + tANC;
+            const totalPasivoPN = tPC + tPNC + tPN;
+            const diff = Math.abs(totalActivo - totalPasivoPN);
+            const checkContainer = document.getElementById('integrity-check');
+            
+            if (diff < 0.01) { 
+                checkContainer.innerHTML = `<i class="ph-fill ph-check-circle text-brand-secondary text-lg"></i> Balanceado correctamente`;
+            } else {
+                checkContainer.innerHTML = `<i class="ph-fill ph-warning-circle text-red-400 text-lg"></i> Diferencia: ${formatCurrency(totalActivo - totalPasivoPN)}`;
+            }
+        }
+
+        function renderSection(domId, printId, items) {
+            const container = document.getElementById(domId);
+            const printContainer = document.getElementById(printId);
+            container.innerHTML = '';
+            printContainer.innerHTML = '';
+            
+            let sectionTotal = 0;
+            let sectionTotalPrev = 0;
+
+            const currentYear = mockData.meta.ejercicio;
+            const prevYear = currentYear - 1;
+
+            // --- 1. Header de Columna (Solo UI Moderna + Comparativo) ---
+            if (showComparative) {
+                const headerRow = document.createElement('div');
+                headerRow.className = "hidden lg:grid grid-cols-[1fr_140px_140px_90px] gap-4 px-3 py-1.5 border-b border-dashed border-ui-border mb-1 animate-fade-in";
+                headerRow.innerHTML = `
+                    <div class="text-[10px] font-bold text-ui-sub uppercase tracking-wider">Rubro</div>
+                    <div class="text-[10px] font-bold text-ui-sub uppercase tracking-wider text-right">${currentYear}</div>
+                    <div class="text-[10px] font-bold text-ui-sub uppercase tracking-wider text-right">${prevYear}</div>
+                    <div class="text-[10px] font-bold text-ui-sub uppercase tracking-wider text-center">Δ</div>
+                `;
+                container.appendChild(headerRow);
+            }
+
+            // Table for Print
+            const printTable = document.createElement('table');
+            printTable.style.width = '100%';
+            
+            items.forEach(item => {
+                // FILTER: Hide if zero everywhere
+                if (Math.abs(item.actual) < 0.01 && Math.abs(item.anterior || 0) < 0.01) return;
+                
+                sectionTotal += item.actual;
+                sectionTotalPrev += (item.anterior || 0);
+
+                // --- MODERN UI ROW (GRID SYSTEM) ---
+                const row = document.createElement('div');
+                row.onclick = () => openDrawer(item);
+                
+                // Clases dinámicas según modo
+                const baseClasses = "group rounded-lg hover:bg-slate-50 cursor-pointer transition-colors border border-transparent hover:border-slate-100 p-3 mb-1";
+                const layoutClasses = showComparative 
+                    ? "flex flex-col gap-2 lg:grid lg:grid-cols-[1fr_140px_140px_90px] lg:items-center lg:gap-4" // Mobile Stacked / Desktop Grid
+                    : "flex justify-between items-center"; // Flex simple
+
+                row.className = `${baseClasses} ${layoutClasses}`;
+
+                // CONTENT
+                let contentHTML = '';
+
+                // 1. Nombre y Nota
+                contentHTML += `
+                    <div class="flex items-center gap-2 lg:gap-3 min-w-0">
+                        <i class="ph-bold ph-caret-right text-brand-primary opacity-0 group-hover:opacity-100 transition-opacity text-sm hidden lg:block"></i>
+                        <span class="font-medium text-ui-text group-hover:text-brand-primary transition-colors truncate">${item.nombre}</span>
+                        ${item.notaNumero ? `<span class="text-[10px] font-bold bg-slate-100 text-ui-sub px-1.5 py-0.5 rounded border border-slate-200 shrink-0">Nota ${item.notaNumero}</span>` : ''}
+                    </div>
+                `;
+
+                // 2. Valores
+                if (showComparative) {
+                    const diffVal = (item.actual - (item.anterior || 0));
+                    const diffPercent = formatPercent(item.actual, item.anterior);
+                    const isPositive = diffVal >= 0;
+                    const colorClass = isPositive ? 'text-brand-secondary bg-green-50 border-green-100' : 'text-red-500 bg-red-50 border-red-100';
+                    const icon = isPositive ? 'ph-trend-up' : 'ph-trend-down';
+                    
+                    // Mobile wrapper for values
+                    contentHTML += `
+                        <div class="flex items-center justify-between lg:contents text-sm">
+                            <div class="flex flex-col lg:block text-right">
+                                <span class="lg:hidden text-[10px] text-ui-sub uppercase font-bold text-left mb-0.5">${currentYear}</span>
+                                <span class="font-mono-nums font-semibold text-ui-text text-base lg:text-base">${formatCurrency(item.actual)}</span>
+                            </div>
+                            
+                            <div class="flex flex-col lg:block text-right">
+                                <span class="lg:hidden text-[10px] text-ui-sub uppercase font-bold text-left mb-0.5">${prevYear}</span>
+                                <span class="font-mono-nums text-ui-sub text-sm lg:text-sm">${formatCurrency(item.anterior || 0)}</span>
+                            </div>
+
+                            <div class="flex justify-end lg:justify-center">
+                                ${diffPercent ? `
+                                    <div class="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${colorClass}">
+                                        ${diffPercent} <i class="ph-bold ${icon}"></i>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Modo Simple (Solo Actual)
+                    contentHTML += `
+                        <div class="font-mono-nums font-semibold text-ui-text text-base">
+                            ${formatCurrency(item.actual)}
+                        </div>
+                    `;
+                }
+
+                row.innerHTML = contentHTML;
+                container.appendChild(row);
+
+                // --- PRINT UI ROW (Table) ---
+                const tr = document.createElement('tr');
+                let printHTML = `<td>${item.nombre} ${item.notaNumero ? '(Nota '+item.notaNumero+')' : ''}</td>`;
+                printHTML += `<td align="right" class="font-mono-nums">${formatCurrency(item.actual)}</td>`;
+                // Columna Anterior (oculta por CSS si no es comparativo)
+                printHTML += `<td align="right" class="font-mono-nums col-prev text-gray-500" style="color:#666">${formatCurrency(item.anterior || 0)}</td>`;
+                
+                tr.innerHTML = printHTML;
+                printTable.appendChild(tr);
+            });
+            
+            printContainer.appendChild(printTable);
+            return { total: sectionTotal, totalPrev: sectionTotalPrev };
+        }
+
+        function updateTotal(domId, printId, value, valuePrev) {
+            if(domId) document.getElementById(domId).textContent = formatCurrency(value);
+            
+            if(printId) {
+                const cell = document.getElementById(printId);
+                // Si el elemento es un TD, manejamos sus hermanos para la columna previa
+                if(cell) {
+                    cell.textContent = formatCurrency(value);
+                    // Buscar el siguiente TD para poner el total anterior
+                    const nextTd = cell.nextElementSibling;
+                    if(nextTd && nextTd.classList.contains('col-prev')) {
+                        nextTd.textContent = formatCurrency(valuePrev);
+                    }
+                }
+            }
+        }
+
+        // --- 4. ACTIONS LOGIC ---
+        function handleOfficialReport() {
+            const wasComparative = showComparative;
+            
+            // 1. Forzar Comparativo
+            if (!wasComparative) {
+                showComparative = true;
+                document.getElementById('check-comparative').checked = true;
+                updateToggleUI();
+                renderAll();
+            }
+
+            // 2. Imprimir (con delay leve para render)
+            setTimeout(() => {
+                // Hook para restaurar estado DESPUÉS de imprimir
+                if (!wasComparative) {
+                    window.addEventListener('afterprint', function restoreState() {
+                        showComparative = false;
+                        document.getElementById('check-comparative').checked = false;
+                        updateToggleUI();
+                        renderAll();
+                        window.removeEventListener('afterprint', restoreState);
+                    }, { once: true });
+                }
+                
+                window.print();
+            }, 300);
+        }
+
+        // --- 5. DRAWER LOGIC ---
+        const drawer = document.getElementById('account-drawer');
+        const backdrop = document.getElementById('drawer-backdrop');
+        const panel = document.getElementById('drawer-panel');
+
+        function openDrawer(item) {
+            document.getElementById('drawer-title').textContent = item.nombre;
+            document.getElementById('drawer-total').textContent = formatCurrency(item.actual);
+            
+            const list = document.getElementById('drawer-list');
+            list.innerHTML = '';
+
+            if (item.cuentas && item.cuentas.length > 0) {
+                item.cuentas.forEach(acc => {
+                    const div = document.createElement('div');
+                    div.className = "flex justify-between items-center py-2 border-b border-dashed border-ui-border last:border-0";
+                    
+                    const isNeg = acc.saldo < 0;
+                    const colorClass = isNeg ? 'text-red-500' : 'text-ui-text';
+
+                    div.innerHTML = `
+                        <div>
+                            <div class="text-xs text-ui-sub font-mono mb-0.5">${acc.cod}</div>
+                            <div class="text-sm font-medium text-ui-text flex items-center gap-2">
+                                ${acc.nombre}
+                                ${acc.isContra ? '<span class="text-[10px] bg-red-50 text-red-600 px-1 rounded uppercase tracking-wider">Regularizadora</span>' : ''}
+                            </div>
+                        </div>
+                        <div class="font-mono-nums font-medium ${colorClass}">
+                            ${formatCurrency(acc.saldo)}
+                        </div>
+                    `;
+                    list.appendChild(div);
+                });
+            } else {
+                list.innerHTML = `<div class="text-center py-8 text-ui-sub italic">No hay cuentas imputadas directamente a este rubro.</div>`;
+            }
+
+            // Show
+            drawer.classList.remove('invisible');
+            setTimeout(() => {
+                backdrop.classList.remove('opacity-0');
+                panel.classList.remove('translate-x-full');
+            }, 10);
+        }
+
+        function closeDrawer() {
+            backdrop.classList.add('opacity-0');
+            panel.classList.add('translate-x-full');
+            setTimeout(() => {
+                drawer.classList.add('invisible');
+            }, 300); 
+        }
+
+        function exportCSV() {
+            let csvContent = "data:text/csv;charset=utf-8,Rubro,Seccion,Saldo Actual,Saldo Anterior\n";
+            
+            const process = (items, section) => {
+                items.forEach(i => {
+                    if (i.actual !== 0) {
+                        csvContent += `"${i.nombre}","${section}",${i.actual},${i.anterior || 0}\n`;
+                    }
+                });
+            };
+
+            process(mockData.activo.corriente, "Activo Corriente");
+            process(mockData.activo.noCorriente, "Activo No Corriente");
+            process(mockData.pasivo.corriente, "Pasivo Corriente");
+            process(mockData.pasivo.noCorriente, "Pasivo No Corriente");
+            process(mockData.patrimonioNeto, "Patrimonio Neto");
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "ESP_2026_ContaLivre.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // --- INIT ---
+        window.addEventListener('DOMContentLoaded', init);
+
+    </script>
+</body>
+</html>

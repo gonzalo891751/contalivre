@@ -5067,3 +5067,154 @@ El hook `useTaxClosure` usaba `useLiveQuery` para obtener el cierre fiscal. Dent
 #BIENES-USO-AUDIT (Auditor�a completada)
 - Reporte generado en docs/audits/AUDIT_BIENES_DE_USO.md
 - Diagn�stico de arquitectura listo para implementaci�n.
+
+---
+
+## CHECKPOINT #ESP-V2-UI-IMPLEMENTACION-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Implementar nueva UI de Estado de Situación Patrimonial (ESP) V2, basada pixel-perfect en el prototipo docs/prototypes/ESP2.html.
+
+### Descripción
+Se implementó una nueva versión del componente de Estado de Situación Patrimonial con diseño moderno tipo dashboard, que incluye:
+- Layout de 2 columnas (Activo vs Pasivo+PN), responsive a 1 columna en móvil
+- Toolbar con toggle comparativo, chips de período, dropdown de exportación
+- Drawer lateral para ver detalle de cuentas por rubro
+- Banner de integridad P0 para cuentas sin statementGroup asignado
+- Exportación CSV y vista de impresión formal estilo RT9
+- Feature flag para alternar entre V1 (Gemini) y V2
+
+### Archivos Creados
+
+**src/pages/estados/adapters/balanceSheetViewModel.ts** (~350 LOC)
+- Adapter que transforma BalanceSheet del core a ViewModel para la UI V2
+- Función `adaptBalanceSheetToViewModel()` crea estructura con:
+  - meta: empresa, ejercicio actual/anterior, fechaCorte
+  - integrity: isBalanced, diff, unmappedAccounts (P0)
+  - sections: activo.corriente/noCorriente, pasivo.corriente/noCorriente, patrimonioNeto
+  - totals y comparativeTotals
+- Función `detectUnmappedAccounts()` identifica cuentas con saldo sin statementGroup (P0)
+- Función `filterVisibleRubros()` oculta rubros con saldo 0 en ambos períodos
+- Función `exportBalanceSheetToCSV()` genera y descarga archivo CSV
+
+**src/pages/estados/components/EstadoSituacionPatrimonialV2.tsx** (~800 LOC)
+- Componente principal pixel-perfect basado en ESP2.html
+- Subcomponentes: RubroRow, SectionCard, PNCard
+- Toggle comparativo con animación
+- Dropdown de exportación (CSV, Print/PDF)
+- Botón "Reporte Oficial" que fuerza comparativo ON antes de imprimir
+- Banner de integridad con botones "Ver cuentas" y "Ir a Plan de Cuentas"
+- Estilos Tailwind inline (~500 líneas CSS)
+
+**src/pages/estados/components/BalanceSheetDrawer.tsx** (~200 LOC)
+- Panel off-canvas que muestra detalle de cuentas de un rubro
+- Lista de cuentas con código, nombre, importe y badge "Regularizadora"
+- Total del rubro en el footer
+- Cierre con Escape o click en backdrop
+
+**src/pages/estados/components/BalanceSheetPrintView.tsx** (~250 LOC)
+- Componente oculto que se muestra solo en @media print
+- Formato formal tipo RT9 con dos columnas (Activo / Pasivo+PN)
+- Soporte para modo comparativo (columna año anterior)
+- Estilos monocromo optimizados para impresión A4
+
+### Archivos Modificados
+
+**src/pages/Estados.tsx** (~30 líneas añadidas)
+- Import de componentes ESP V2 y adapter
+- Feature flag `USE_ESP_V2 = true`
+- Cálculo de `espViewModel` usando `adaptBalanceSheetToViewModel()`
+- Condicional para renderizar V2 o fallback a Gemini (V1)
+- Integración con sistema de comparativo existente
+
+**src/storage/impuestos.ts** (1 línea)
+- Corregido tipo de retorno de `resolveTaxCreditAccountId` para incluir propiedades opcionales
+
+**tests/repro_pagos.test.ts** (1 línea)
+- Corregido parámetro no usado
+
+### Funcionalidades Implementadas
+
+**1. UI Pixel-Perfect desde Prototipo**
+- Layout 2 columnas responsive
+- Cards con headers sticky, subtotales, totales
+- Iconos Phosphor (ph-duotone, ph-bold)
+- Tipografía: Outfit (display), Inter (body), JetBrains Mono (números)
+- Paleta de colores del brand
+
+**2. Detección P0: Cuentas sin Rubro**
+- Detecta cuentas ASSET/LIABILITY/EQUITY con saldo pero sin statementGroup
+- Banner naranja siempre visible con contador
+- Botón "Ver cuentas" abre drawer con listado
+- Botón "Ir a Plan de Cuentas" navega a /cuentas
+
+**3. Modo Comparativo**
+- Toggle con estado persistente
+- Columnas: Rubro | Año actual | Año anterior | Delta %
+- Delta con pills coloreadas (verde +, rojo -, neutro —)
+- Totales comparativos por sección
+
+**4. Exportaciones**
+- CSV: descarga archivo con columnas Sección, Rubro, Saldos, Variación
+- Print/PDF: window.print() con estilos @media print
+- Reporte Oficial: fuerza comparativo ON, imprime, restaura estado
+
+**5. Drawer de Detalle**
+- Click en rubro abre panel lateral
+- Muestra código, nombre e importe de cada cuenta
+- Badge "Regularizadora" para cuentas contra
+- Total del rubro al pie
+
+### Cómo Probar
+
+1. **Navegación básica:**
+   ```
+   npm run dev
+   # Ir a /estados -> Tab "Situación Patrimonial"
+   # Debería verse la nueva UI V2
+   ```
+
+2. **Con 0 asientos:**
+   - Empty state amigable
+
+3. **Con asientos:**
+   - Totales calculados correctamente
+   - Ecuación patrimonial verificada (chip verde/rojo)
+
+4. **Cuenta sin rubro:**
+   - Modificar una cuenta quitándole el statementGroup
+   - Debe aparecer banner naranja
+
+5. **Comparativo:**
+   - Toggle ON sin datos -> Overlay "Importar comparativo"
+   - Importar archivo -> Columnas año anterior visibles
+   - Delta pills con colores correctos
+
+6. **Exportaciones:**
+   - Dropdown "Exportar" -> CSV descarga archivo
+   - Dropdown "Exportar" -> Imprimir abre diálogo de impresión
+   - Botón "Reporte Oficial" activa comparativo y abre print
+
+### Pendientes (P1/P2 para futuro)
+
+- [ ] Agregar StatementGroups faltantes: OTHER_ASSETS, PROVISIONS (P1)
+- [ ] Modal de notas al click en pill "Nota X" (placeholder listo)
+- [ ] Botón "Editar Asignación" en drawer (disabled, placeholder)
+- [ ] Persistir selección de año comparativo por empresa
+
+### Validación
+- `npm run build`: PASS (built in ~37s)
+- No hay errores de TypeScript
+- Feature flag permite rollback instantáneo a V1 si se necesita
+
+### Criterios de Aceptación Cumplidos
+- [x] UI V2 pixel-perfect respecto a ESP2.html
+- [x] Layout 2 columnas, responsive a 1
+- [x] Toggle comparativo funcional
+- [x] Drawer de detalle de rubro
+- [x] Banner P0 de integridad (cuentas sin rubro)
+- [x] Export CSV funcional
+- [x] Print/PDF con estilos RT9
+- [x] Reporte Oficial fuerza comparativo ON
+- [x] npm run build PASS
+

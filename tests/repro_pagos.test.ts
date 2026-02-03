@@ -22,7 +22,7 @@ type RegisterTaxPaymentInput = {
 // Mock of the problematic function logic (simplified from src/storage/impuestos.ts)
 async function buildTaxSettlementEntryPreviewMock(
     obligation: TaxSettlementObligation,
-    input: RegisterTaxPaymentInput,
+    _input: RegisterTaxPaymentInput,
     accounts: Account[]
 ) {
     // Logic from resolveTaxLiabilityAccountId -> resolveMappedAccountId
