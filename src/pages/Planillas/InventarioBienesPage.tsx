@@ -3202,6 +3202,7 @@ export default function InventarioBienesPage() {
                     accounts={accounts}
                     periodId={periodId}
                     movements={movements}
+                    entries={scopedJournalEntries}
                     onClose={() => {
                         setMovementModalOpen(false)
                         setMovementPrefill(null)

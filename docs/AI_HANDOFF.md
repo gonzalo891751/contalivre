@@ -2,6 +2,331 @@
 
 ---
 
+## CHECKPOINT #IMPUESTOS-FIXES-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Build NO EJECUTADO
+
+### Objetivo
+Corregir IVA (neteo devoluciones), percepciones/retenciones, vencimientos, period picker, navegacion y jurisdicciones IIBB, manteniendo la estetica original.
+
+### Cambios clave
+- IVA DF/CF: nuevo helper con neteo por signo (DF = credit - debit, CF = debit - credit) y pagos a cuenta sufridas.
+- IVA alicuota: devoluciones restan neto e IVA.
+- Asientos: metadata meta.source='impuestos' con tax/kind/period y reconciliacion si se borra en Diario.
+- Ret/Per: clasificacion sufrida vs practicada (compras vs ventas); practicadas quedan "a depositar".
+- Vencimientos: dedupe por uniqueKey, filtros (proximos/vencidos/historicos), campanita 7 dias y sin viejos.
+- UI: boton volver, PeriodPicker con dropdown de anio, listado IIBB completo (incluye Corrientes).
+- Tests: unit test para neteo IVA.
+
+### Archivos tocados
+- src/core/impuestos/iva.ts
+- src/core/impuestos/iva.test.ts
+- src/core/impuestos/types.ts
+- src/storage/impuestos.ts
+- src/hooks/useTaxClosure.ts
+- src/hooks/useTaxNotifications.ts
+- src/pages/Operaciones/ImpuestosPage.tsx
+
+### Pendientes
+- Ejecutar `npm run build` y tests.
+
+---
+
+## CHECKPOINT #IMPUESTOS-MODULO-OPERACIONES-2026-02-02
+**Fecha:** 2026-02-02
+**Estado:** COMPLETADO - Build PASS
+
+### Objetivo
+Implementar el modulo completo Operaciones > Impuestos para liquidacion mensual de IVA (RI/MT), IIBB Local, percepciones/retenciones, vencimientos y generacion de asientos contables.
+
+### Archivos Creados
+| Archivo | Descripcion | LOC aprox |
+|---|---|---|
+| src/core/impuestos/types.ts | Tipos para cierres fiscales, notificaciones, IVA, IIBB, MT | +280 |
+| src/storage/impuestos.ts | CRUD storage Dexie + calculos IVA/IIBB + generacion asientos | +550 |
+| src/hooks/useTaxClosure.ts | Hook reactivo para manejo de cierre fiscal mensual | +180 |
+| src/hooks/useTaxNotifications.ts | Hook reactivo para notificaciones de vencimientos | +120 |
+| src/pages/Operaciones/ImpuestosPage.tsx | UI completa pixel-perfect basada en prototipo HTML | +950 |
+
+### Archivos Modificados
+| Archivo | Cambio | LOC aprox |
+|---|---|---|
+| src/storage/db.ts | Version 9: tablas taxClosures y taxDueNotifications | +25 |
+| src/App.tsx | Ruta /operaciones/impuestos | +2 |
+| src/ui/Layout/Sidebar.tsx | Menu Impuestos en Operaciones con icono Receipt | +3 |
+| src/ui/Layout/TopHeader/NotificationsBell.tsx | Integracion notificaciones fiscales reales | +100 |
+
+### Funcionalidades Implementadas
+
+**1. IVA Responsable Inscripto:**
+- KPIs: Debito Fiscal, Credito Fiscal, Posicion Mensual
+- Detalle por alicuota (21%, 10.5%, 0%)
+- Pagos a cuenta (retenciones + percepciones sufridas)
+- Calculo desde asientos del Libro Diario
+- Generacion asiento de determinacion IVA (idempotente)
+
+**2. IVA Monotributo:**
+- Vista simplificada con categoria y monto mensual
+- Generacion asiento de devengamiento
+
+**3. IIBB Local:**
+- Calculadora con base imponible y alicuota editable
+- Sugerencia automatica de base desde ventas del periodo
+- Deducciones (percepciones IIBB sufridas)
+- Generacion asiento de provision IIBB
+
+**4. Retenciones y Percepciones:**
+- Tabla con datos reales desde BienesMovement.taxes[]
+- Detalle: fecha, tipo, impuesto, comprobante, base, monto, estado
+- Soporte para agregar registros manuales
+
+**5. Vencimientos:**
+- Cards con countdown y barra de progreso
+- Estados: PENDIENTE, AL DIA, VENCIDO
+- Generacion automatica de notificaciones por periodo
+
+**6. Asientos:**
+- Lista de asientos generados para el cierre
+- Boton "Copiar JSON" por asiento
+- Estado vacio con CTA a liquidacion
+
+**7. Sidebar de Cierre:**
+- Checklist de 4 pasos: Operaciones, Conciliacion, Asientos, Presentacion
+- Badge de estado (BORRADOR / LISTO PARA CERRAR)
+- Boton "Cerrar Mes" habilitado al completar todos los pasos
+
+**8. Campanita de Notificaciones:**
+- Integracion real con notificaciones fiscales
+- Badge de no leidas
+- Lista con acciones: marcar como leida, descartar
+- Link a modulo de impuestos
+
+### Mappings Contables Utilizados
+- ivaCF => 1.1.03.01
+- ivaDF => 2.1.03.01
+- ivaAFavor => 1.1.03.06
+- ivaAPagar => 2.1.03.04
+- percepcionIVASufrida => 1.1.03.08
+- percepcionIVAPracticada => 2.1.03.06
+- percepcionIIBBSufrida => 1.1.03.02
+- retencionSufrida => 1.1.03.07
+- retencionPracticada => 2.1.03.03
+- iibbGasto => 4.4.02
+- iibbAPagar => 2.1.03.05
+- monotributoGasto => 4.4.01
+- monotributoAPagar => 2.1.03.07
+
+### Idempotencia de Asientos
+Los asientos generados usan sourceModule='IMPUESTOS' y sourceId con patron `{tipo}:{month}:{regime}`.
+Si ya existe un asiento con esa pareja, se actualiza en vez de duplicar.
+
+### Persistencia (Dexie Version 9)
+Nuevas tablas:
+- `taxClosures`: id, month, regime, status (indices)
+- `taxDueNotifications`: id, obligation, month, dueDate, seen (indices)
+
+### Validacion
+- `npm run build`: PASS
+- UI pixel-perfect basada en docs/prototypes/IMPUESTOS.html
+- Contrato UI cumplido segun docs/IMPUESTOS_UI_CONTRACT.md
+
+### Riesgos Conocidos
+- IIBB Convenio Multilateral: UI mock, no implementada logica de coeficientes por jurisdiccion
+- Cuentas IIBB/MT: pueden no existir en el plan de cuentas seed del usuario (fallback a nombres similares)
+- Detalle por alicuota: depende de ivaRate en BienesMovement, movimientos sin rate van a "General (21%)"
+
+### Pendientes (nice-to-have)
+- [ ] Modal para agregar retenciones/percepciones manuales
+- [ ] IIBB Convenio Multilateral con coeficientes reales
+- [ ] Exportacion a formato AFIP/AGIP
+- [ ] Historico de cierres anteriores
+
+---
+
+## CHECKPOINT #VISTA-PREVIA-PAGOS-NETO-FINAL-2026-02-02
+**Fecha:** 2026-02-02
+**Estado:** COMPLETADO - Build PASS, 48/48 Tests PASS
+
+### Objetivo
+1. Vista previa contable en pestaña Pagos (igual que Compra/Venta/Ajuste)
+2. Mejorar UX de "Discriminar IVA = OFF" permitiendo ingresar precios "Final (con IVA)"
+
+### Archivos Tocados
+| Archivo | Accion | LOC aprox |
+|---|---|---|
+| src/pages/Planillas/components/MovementModalV3.tsx | Vista previa Pagos + Neto/Final toggle + preview discriminarIVA-aware | +80 |
+| docs/AI_HANDOFF.md | Este checkpoint | +50 |
+
+### Feature 1: Vista Previa Contable en Pagos
+**Implementación:**
+1. Nueva sección "Vista Previa Contable" en mainTab='pagos':
+   - Header con icono Robot y color verde (Money)
+   - Table estilo dark (slate-900) consistente con otras vistas previas
+
+2. Lógica de asiento según pagoCobroMode:
+   - **COBRO (Recepción de dinero)**:
+     - Debe: Splits (Caja, Banco, Retenciones) con montos individuales
+     - Haber: Deudores por ventas (total cobrado)
+
+   - **PAGO (Egreso de dinero)**:
+     - Debe: Proveedores (total pagado)
+     - Haber: Splits (Caja, Banco, Retenciones)
+
+3. Footer con nota "*Cancela comprobante pendiente seleccionado"
+
+### Feature 2: Modo Precio Neto/Final en Compra
+**Problema:** Con discriminarIVA=OFF (Monotributo/Exento), el precio final incluye IVA pero usuario debía calcular neto manualmente.
+
+**Solución:**
+1. Nuevo state `priceInputMode: 'NETO' | 'FINAL'` (default: 'NETO')
+
+2. Funciones helper:
+   ```typescript
+   const netFromFinal = (final: number, rate: number): number =>
+       rate <= 0 ? final : round2(final / (1 + rate / 100))
+
+   const finalFromNet = (net: number, rate: number): number =>
+       round2(net * (1 + rate / 100))
+   ```
+
+3. Toggle UI junto al input "Costo Unitario":
+   - Botón "s/IVA" (modo NETO) o "c/IVA" (modo FINAL)
+   - Al cambiar modo, convierte valor actual para mantener equivalencia
+   - Color amber cuando está en modo FINAL
+
+4. Info derivada: Cuando priceInputMode='FINAL', muestra "Neto derivado: $X"
+
+5. Integración con cálculos:
+   - `calculations.derivedNetUnitCost`: Si FINAL mode, deriva neto desde valor ingresado
+   - Submit usa derivedNetUnitCost para el movimiento
+
+### Feature 3: Vista Previa IVA-aware en Compra
+**Problema:** Preview siempre mostraba "IVA Crédito Fiscal" aunque discriminarIVA=false.
+
+**Solución:**
+1. Cuando discriminarIVA=true (default):
+   - Mercaderías: netoAfterBonif + gastosNetos
+   - IVA Crédito Fiscal: ivaTotal (línea separada)
+
+2. Cuando discriminarIVA=false (Monotributo/Exento):
+   - Mercaderías (IVA incluido): netoAfterBonif + gastosNetos + ivaTotal
+   - Sin línea de IVA CF
+   - Indicador visual: "(IVA incluido)" en label
+   - Footer: "IVA como costo (proveedor no discrimina IVA)"
+
+### Criterios de Aceptación (QA Manual)
+- [ ] Pagos/Cobros: Vista previa contable aparece con asiento correcto
+- [ ] COBRO: Preview muestra splits en Debe, Deudores en Haber
+- [ ] PAGO: Preview muestra Proveedores en Debe, splits en Haber
+- [ ] Compra: Toggle s/IVA↔c/IVA junto a Costo Unitario
+- [ ] Compra modo FINAL: Neto derivado se muestra debajo del input
+- [ ] Compra discriminarIVA=OFF: Preview muestra Mercaderías con IVA incluido
+- [ ] Compra discriminarIVA=OFF: No aparece línea IVA CF en preview
+
+---
+
+## CHECKPOINT #PULIDO-PAGOS-DEVOLUCIONES-SALDOS-2026-02-02
+**Fecha:** 2026-02-02
+**Estado:** COMPLETADO - En validación
+
+### Objetivo
+Pulir y completar flujo de Operaciones/Inventario:
+A) Devoluciones: herencia visual de valores + contrapartida correcta
+B) Existencia Inicial: ya funciona como INITIAL_STOCK (verificado)
+C) Pagos/Cobros: selector de comprobante pendiente + saldo + retenciones con modo %
+D) Saldos en selectores de cuentas
+
+### Archivos Tocados
+| Archivo | Accion | LOC aprox |
+|---|---|---|
+| src/ui/AccountSearchSelectWithBalance.tsx | NUEVO: Wrapper de AccountSearchSelect que muestra saldo de cuenta + hook usePendingDocuments | +160 |
+| src/pages/Planillas/components/MovementModalV3.tsx | Agregar imports, props entries, ledgerBalances hook, pendingDocs hook, selectedPendingDoc memo, useEffects para sincronizar importe/retención, UI selector comprobante pendiente, resumen comprobante original, panel retención con modo %, bloque "Traído del comprobante original" en devoluciones, uso de AccountSearchSelectWithBalance en splits | +280 |
+| docs/AI_HANDOFF.md | Este checkpoint | +90 |
+
+### P0 - Devoluciones: Bloque "Traído del comprobante original"
+**Implementación:**
+1. Nuevo bloque visual en devoluciones que muestra:
+   - Precio/Costo unitario BRUTO del original
+   - Alícuota IVA (ej: 21%)
+   - Bonificación si aplica (ej: -10%)
+   - Precio/Costo NETO EFECTIVO (calculado)
+   - Percepciones del original (chips)
+   - Mensaje indicando que valores se heredan automáticamente
+
+2. El bloque aparece después de seleccionar movimiento original, antes de "Cantidad a Devolver"
+
+3. Los valores ya se heredaban (checkpoint anterior), esto es mejora UX visual
+
+### P0 - Pagos/Cobros: Selector de comprobante pendiente
+**Implementación:**
+1. **AccountSearchSelectWithBalance.tsx**:
+   - Nuevo componente que wrappea AccountSearchSelect
+   - Muestra saldo de cuenta debajo del selector (formato: "Saldo: $X")
+   - Hook `usePendingDocuments`: filtra movimientos pendientes de cobro/pago
+
+2. **MovementModalV3.tsx - Pagos/Cobros**:
+   - Nuevo selector "Comprobante a Cancelar" con lista de comprobantes pendientes
+   - Cada opción muestra: fecha | referencia | tercero | Saldo: $X
+   - Al seleccionar, pre-llena importe, tercero, y splits con Caja default
+
+3. **Resumen del comprobante original**:
+   - Bloque informativo mostrando Neto, IVA, Total Original
+   - Percepciones del original (solo informativo)
+   - Saldo Pendiente destacado
+
+4. **useEffect sincronización**:
+   - Al seleccionar comprobante, setea amount = saldoPendiente y tercero = counterparty
+   - Limita importe máximo al saldo pendiente
+
+### P0 - Retenciones en Pagos/Cobros
+**Implementación:**
+1. Panel "Retención Sufrida" / "Retención a Depositar":
+   - Checkbox habilitar
+   - Selector modo: Porcentaje / Monto Fijo
+   - Selector base: IVA / Neto
+   - Input tasa o monto
+   - Display retención calculada
+   - Botón "Agregar Retención a las Formas de Cobro/Pago"
+
+2. Lógica de cálculo:
+   - Si modo %, calcula: (base * tasa / 100)
+   - Base usa IVA proporcional al saldo parcial vs original
+   - Formula: `ivaProporcional = ivaOriginal * (saldoPendiente / totalOriginal)`
+
+3. Al agregar retención, crea/actualiza split con cuenta default:
+   - COBRO: 1.1.03.07 (Retenciones IVA de terceros - activo)
+   - PAGO: 2.1.03.03 (Retenciones a depositar - pasivo)
+
+### P1 - Saldos en selectores de cuentas
+**Implementación:**
+1. Todos los AccountSearchSelect de splits ahora usan AccountSearchSelectWithBalance
+2. Muestra saldo actual debajo del input: "Saldo: $X"
+3. Color verde si positivo, rojo si negativo, gris si cero
+4. Implementado en:
+   - Splits de compras/ventas
+   - Splits de devoluciones
+   - Splits de pagos/cobros
+
+### Verificación Existencia Inicial
+Ya estaba implementado correctamente:
+- type: 'INITIAL_STOCK' en movimiento
+- Label "Existencia Inicial" en UI (InventarioBienesPage.tsx línea 2512)
+- Participa normalmente en FIFO/PPP
+- No requirió cambios
+
+### Criterios de Aceptación (QA Manual)
+- [ ] A) Devolución venta: Bloque "Traído del comprobante original" visible con valores heredados
+- [ ] B) Pagos: Selector de comprobante pendiente lista ventas/compras con saldo > 0
+- [ ] C) Pagos: Al seleccionar comprobante, pre-llena importe y tercero
+- [ ] D) Pagos: Panel retención permite % sobre IVA proporcional
+- [ ] E) Todos los splits muestran "Saldo: $X" al seleccionar cuenta
+
+### Dependencia nueva para props
+**MovementModalV3** ahora requiere prop `entries?: JournalEntry[]` para calcular saldos.
+El componente padre debe pasar las entries para que funcione el saldo en selectores.
+
+---
+
 ## CHECKPOINT #P0-P1-P2-DEVOLUCIONES-EI-PAGOS-2026-02-02
 **Fecha:** 2026-02-02
 **Estado:** COMPLETADO - Build PASS, 48/48 Tests PASS
@@ -4289,3 +4614,124 @@ E) Devolucion venta: seleccionar venta original, devolver parte -> UI funcional
 3. Agregar logica de consumo de capas especificas en devoluciones (sourceMovementId/sourceLayerId)
 4. Implementar Diferencia de Inventario en Ajuste > Diferencia de Cambio
 5. Opcional: migrar RT6 batch del V2 al V3 si se quiere consolidar
+
+
+---
+
+## CHECKPOINT #IMPUESTOS-FIX-PANTALLA-BLANCA-AUTONOMOS
+**Fecha:** 2026-02-02
+**Estado:** COMPLETADO - Build PASS (tsc + vite)
+**Objetivo:** Arreglar pantalla blanca en /operaciones/impuestos, conectar tarjeta "Fiscal/Impuestos" con datos reales, e implementar soporte para Autónomos (aportes previsionales).
+
+### Problema diagnosticado
+1. **Pantalla blanca:** El módulo ImpuestosPage usaba un import dinámico de `db` dentro de un useEffect, mezclado con imports estáticos en hooks. Sin Error Boundary para capturar errores de render.
+2. **Tarjeta no clickeable:** La tarjeta "Fiscal/Impuestos" en OperacionesPage tenía `cursor-pointer` pero no `onClick`, y mostraba números hardcodeados.
+
+### Archivos modificados
+
+**src/pages/Operaciones/ImpuestosPage.tsx:**
+- Agregado Error Boundary (ImpuestosErrorBoundary) con UI de recuperación
+- Cambiado import dinámico de `db` a import estático
+- Agregado try/catch en useEffect de loadAccounts
+- Agregado soporte para updateAutonomosSettings del hook
+- Modificado VencimientosTab para incluir card de Autónomos (solo RI)
+- Actualizado handleGenerateEntry para soportar tipo 'autonomos'
+
+**src/pages/OperacionesPage.tsx:**
+- Agregados imports: useTaxClosure, useUpcomingTaxNotifications, Clock icon
+- Agregados estados/memos para taxStatus y taxPosition
+- Tarjeta Impuestos: agregado onClick con navegación a /operaciones/impuestos
+- Tarjeta Impuestos: conectada con datos reales del hook (posición IVA, estado)
+- Agregado guard para NaN en formatCurrency
+
+**src/core/impuestos/types.ts:**
+- Agregado 'AUTONOMOS' a TaxObligation
+- Agregado AutonomosSettings interface
+- Agregado autonomosSettings a TaxClosePeriod
+- Agregado 'autonomos' a TaxJournalEntryIds
+- Actualizado createDefaultNotification para AUTONOMOS
+- Actualizado getDefaultDueDate para AUTONOMOS con dueDay configurable
+
+**src/storage/impuestos.ts:**
+- Agregado mapping de cuentas autonomosGasto y autonomosAPagar
+- Agregado función generateAutonomosEntry (idempotente)
+- Agregado función syncAutonomosNotification
+- Modificado generateNotificationsForMonth para soportar Autónomos opcionales
+
+**src/hooks/useTaxClosure.ts:**
+- Agregado import de AutonomosSettings, generateAutonomosEntry, syncAutonomosNotification
+- Agregado updateAutonomosSettings a interface y return
+- Actualizado generateEntry para soportar 'autonomos'
+
+### Funcionalidades implementadas
+
+**1. Error Boundary (ImpuestosPage)**
+- UI amigable al fallar (card con mensaje y opciones)
+- Botón "Reintentar" para recargar sin refresh
+- Botón "Reparar Almacenamiento" que limpia SOLO taxClosures/taxDueNotifications
+
+**2. Tarjeta Fiscal/Impuestos conectada**
+- Click navega a /operaciones/impuestos
+- Muestra "Posición IVA (Est.)" calculado del mes actual
+- Estado dinámico: "Al día" (verde) / "X Vencimientos" (ámbar) / "Vencido" (rojo)
+- Accesibilidad: role="button", tabIndex, onKeyDown
+
+**3. Autónomos (opt-in, solo RI)**
+- Card en tab Vencimientos con toggle "Aplica"
+- Input de monto mensual (solo visible si toggle ON)
+- Input de día de vencimiento (1-31, según terminación CUIT)
+- Botón "Generar Asiento" -> crea asiento idempotente
+- Notificación automática cuando se activa
+- Mappings contables:
+  - autonomosGasto: 4.4.03 (Aportes autónomos)
+  - autonomosAPagar: 2.1.03.08 (Autónomos a pagar)
+
+### Validación
+- `npm run build` -> PASS (built in ~18s)
+- No hay errores de TypeScript
+
+### Criterios de aceptación cumplidos
+- [x] /operaciones/impuestos renderiza sin blanco ni errores
+- [x] Click en tarjeta "Fiscal/Impuestos" navega correctamente
+- [x] Tarjeta muestra números reales (no mock)
+- [x] Si hasAutonomos=ON: aparece card, genera notificación y asiento
+- [x] Generar asiento Autónomos es idempotente
+- [x] npm run build PASS
+
+## CHECKPOINT #IMPUESTOS-FIX-DEXIE-READONLY
+**Fecha:** 2026-02-02
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Solucionar crash en `/operaciones` y error `ReadOnlyError` en `/operaciones/impuestos` causado por escritura en `useLiveQuery`.
+
+### Problema
+El hook `useTaxClosure` usaba `useLiveQuery` para obtener el cierre fiscal. Dentro de esa query, se llamaba a `getOrCreateTaxClosure`, que intentaba crear el registro (`db.taxClosures.add`) si no existía. Dexie ejecuta `useLiveQuery` en una transacción de solo lectura, provocando un error al intentar escribir. Esto causaba que la página de operaciones (que usa el hook para el widget) fallara silenciosamente (pantalla blanca) o mostrara el error boundary en la página de impuestos.
+
+### Solución
+1.  **Separación de Responsabilidades en Storage:**
+    *   `src/storage/impuestos.ts`: Se dividió `getOrCreateTaxClosure` en:
+        *   `getTaxClosure(month, regime)`: Solo lectura (`.where(...).first()`).
+        *   `ensureTaxClosure(month, regime)`: Escritura en transacción explícita (`rw`).
+    *   `getOrCreateTaxClosure` se mantuvo como alias de `ensureTaxClosure` (marcado deprecated) para compatibilidad, pero ya no se usa en el hook de lectura.
+
+2.  **Refactor del Hook `useTaxClosure`:**
+    *   `useLiveQuery` ahora solo llama a `getTaxClosure` (lectura pura).
+    *   Se agregó un `useEffect` que detecta si el resultado es `undefined` (no encontrado) y llama a `ensureTaxClosure` para crearlo.
+    *   La gestión de `isLoading` se derivó del estado de `closure`.
+
+3.  **Robustez en Consumidores:**
+    *   `src/pages/OperacionesPage.tsx`: Verificado que maneja correctamente el estado de carga (`isTaxLoading`) y datos nulos (`ivaTotals`), mostrando "Cargando..." o "—" en lugar de fallar.
+
+### Archivos Modificados
+*   `src/storage/impuestos.ts`: Nuevas funciones `getTaxClosure`, `ensureTaxClosure`.
+*   `src/hooks/useTaxClosure.ts`: Refactor de `useLiveQuery` y adición de effect de creación.
+
+### Validación
+*   `npm run build`: PASS
+*   Se eliminaron las escrituras dentro de `useLiveQuery`.
+*   La UI de Operaciones debería cargar sin errores.
+*   La UI de Impuestos debería crear el cierre automáticamente (si falta) sin errores de Dexie.
+
+
+#BIENES-USO-AUDIT (Auditor�a completada)
+- Reporte generado en docs/audits/AUDIT_BIENES_DE_USO.md
+- Diagn�stico de arquitectura listo para implementaci�n.

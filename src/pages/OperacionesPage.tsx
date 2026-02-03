@@ -16,11 +16,15 @@ import {
     CheckCircle,
     LockKey,
     Info,
+    Clock,
 } from '@phosphor-icons/react'
 import { db } from '../storage/db'
 import { calculateAllValuations } from '../core/inventario/costing'
 import { useIndicatorsMetrics } from '../hooks/useIndicatorsMetrics'
 import { usePeriodYear } from '../hooks/usePeriodYear'
+import { useTaxClosure } from '../hooks/useTaxClosure'
+import { useUpcomingTaxNotifications } from '../hooks/useTaxNotifications'
+import type { TaxRegime } from '../core/impuestos/types'
 
 /**
  * Hub de Operaciones
@@ -45,6 +49,52 @@ export default function OperacionesPage() {
     const entries = useLiveQuery(() => db.entries.toArray(), [])
     const accounts = useLiveQuery(() => db.accounts.toArray(), [])
     const indicators = useIndicatorsMetrics()
+
+    // Tax data for Fiscal/Impuestos card
+    const currentMonth = useMemo(() => {
+        const now = new Date()
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    }, [])
+
+    // Default to RI (Responsable Inscripto) for the card - user can change in Impuestos page
+    const taxRegime: TaxRegime = 'RI'
+    const { ivaTotals, isLoading: isTaxLoading } = useTaxClosure(currentMonth, taxRegime)
+    const { notifications, unreadCount } = useUpcomingTaxNotifications()
+
+    // Determine tax status based on notifications and closure status
+    const taxStatus = useMemo(() => {
+        if (isTaxLoading) return { label: 'Cargando...', isAlert: false }
+
+        // Check for overdue or pending notifications
+        const hasOverdue = notifications.some(n => {
+            const dueDate = new Date(n.dueDate)
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+            dueDate.setHours(0, 0, 0, 0)
+            return dueDate < today && n.status !== 'PAID' && n.status !== 'SUBMITTED'
+        })
+
+        if (hasOverdue) return { label: 'Vencido', isAlert: true }
+
+        const hasPending = notifications.some(n => {
+            const dueDate = new Date(n.dueDate)
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+            dueDate.setHours(0, 0, 0, 0)
+            const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+            return daysUntilDue <= 5 && daysUntilDue >= 0 && n.status !== 'PAID' && n.status !== 'SUBMITTED'
+        })
+
+        if (hasPending) return { label: `${unreadCount} Vencimientos`, isAlert: true }
+
+        return { label: 'Al dia', isAlert: false }
+    }, [notifications, unreadCount, isTaxLoading])
+
+    // Get IVA position for display
+    const taxPosition = useMemo(() => {
+        if (isTaxLoading || !ivaTotals) return null
+        return ivaTotals.saldo
+    }, [ivaTotals, isTaxLoading])
 
     const period = useMemo(() => {
         const now = new Date()
@@ -193,7 +243,7 @@ export default function OperacionesPage() {
     const hasCashData = indicators && indicators.entriesCount > 0 && cashAvailable !== null
 
     const formatCurrency = (value?: number | null) => {
-        if (value === null || value === undefined) {
+        if (value === null || value === undefined || Number.isNaN(value)) {
             return '—'
         }
         if (value >= 1000000) {
@@ -494,24 +544,52 @@ export default function OperacionesPage() {
                     </div>
 
                     {/* Impuestos */}
-                    <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-slate-400 transition-all group cursor-pointer">
+                    <div
+                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-blue-400 transition-all group cursor-pointer"
+                        onClick={() => navigate('/operaciones/impuestos')}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/impuestos')}
+                        aria-label="Ir a modulo de Impuestos"
+                    >
                         <div className="flex justify-between items-start mb-3">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-slate-50 text-slate-500 flex items-center justify-center text-xl group-hover:bg-slate-100 transition-colors">
+                                <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl group-hover:bg-blue-100 transition-colors">
                                     <Receipt weight="duotone" size={24} />
                                 </div>
                                 <span className="font-semibold text-slate-900">Fiscal / Impuestos</span>
                             </div>
-                            <span className="bg-emerald-50 text-emerald-600 text-xs px-2 py-1 rounded-full font-bold border border-emerald-100">
-                                Al dia
-                            </span>
+                            {taxStatus.isAlert ? (
+                                <span className="bg-amber-50 text-amber-600 text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 border border-amber-100">
+                                    <Clock weight="fill" size={10} /> {taxStatus.label}
+                                </span>
+                            ) : (
+                                <span className="bg-emerald-50 text-emerald-600 text-xs px-2 py-1 rounded-full font-bold border border-emerald-100">
+                                    {taxStatus.label}
+                                </span>
+                            )}
                         </div>
                         <div className="flex justify-between items-end">
                             <div>
-                                <div className="text-xs text-slate-500">Posicion IVA (Est.)</div>
-                                <div className="font-mono text-lg font-bold text-slate-900">$ 12.500</div>
+                                <div className="text-xs text-slate-500">
+                                    {taxRegime === 'RI' ? 'Posicion IVA (Est.)' : 'Monotributo (Est.)'}
+                                </div>
+                                <div className="font-mono text-lg font-bold text-slate-900">
+                                    {isTaxLoading ? (
+                                        <span className="text-slate-400">Cargando...</span>
+                                    ) : taxPosition !== null ? (
+                                        formatCurrency(Math.abs(taxPosition))
+                                    ) : (
+                                        '$ 0'
+                                    )}
+                                </div>
+                                {taxPosition !== null && taxPosition !== 0 && !isTaxLoading && (
+                                    <div className="text-xs text-slate-400 mt-0.5">
+                                        {taxPosition >= 0 ? 'A pagar' : 'A favor'}
+                                    </div>
+                                )}
                             </div>
-                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-slate-800 group-hover:text-white transition-all">
+                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all">
                                 <CaretRight weight="bold" size={16} />
                             </div>
                         </div>
@@ -521,7 +599,7 @@ export default function OperacionesPage() {
 
             {/* Footer Note */}
             <div className="pt-8 pb-4 text-center">
-                <p className="text-xs text-slate-400">ContaLivre v2.0. Datos mostrados son ilustrativos.</p>
+                <p className="text-xs text-slate-400">ContaLivre v2.0</p>
             </div>
         </div>
     )

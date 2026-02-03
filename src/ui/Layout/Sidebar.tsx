@@ -12,6 +12,7 @@ import {
     Package,
     CaretRight,
     CaretLeft,
+    Receipt,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
 
@@ -48,6 +49,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                     icon: RocketLaunch,
                     children: [
                         { path: '/operaciones/inventario', label: 'Inventario', icon: Package },
+                        { path: '/operaciones/impuestos', label: 'Impuestos', icon: Receipt },
                     ],
                 },
             ]

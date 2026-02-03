@@ -55,8 +55,22 @@ import type {
 
 /** Round to 2 decimal places, handling floating point errors */
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
-import type { Account } from '../../../core/models'
+
+/** Convert final price (with IVA) to net price. If rate=0, final==net */
+const netFromFinal = (final: number, rate: number): number => {
+    if (rate <= 0) return final
+    return round2(final / (1 + rate / 100))
+}
+
+/** Convert net price to final price (with IVA) */
+const finalFromNet = (net: number, rate: number): number => {
+    return round2(net * (1 + rate / 100))
+}
+
+import type { Account, JournalEntry } from '../../../core/models'
 import AccountSearchSelect from '../../../ui/AccountSearchSelect'
+import AccountSearchSelectWithBalance, { usePendingDocuments, type PendingDocument } from '../../../ui/AccountSearchSelectWithBalance'
+import { useLedgerBalances } from '../../../hooks/useLedgerBalances'
 
 type MainTab = 'compra' | 'venta' | 'ajuste' | 'pagos'
 type AjusteSubTab = 'devoluciones' | 'stock' | 'rt6' | 'bonif_desc'
@@ -88,6 +102,8 @@ interface MovementModalV3Props {
     accounts?: Account[]
     periodId: string
     movements?: BienesMovement[]
+    /** Journal entries for balance calculation */
+    entries?: JournalEntry[]
 }
 
 const TAX_RATE = 0.21
@@ -103,8 +119,12 @@ export default function MovementModalV3({
     accounts,
     periodId,
     movements,
+    entries,
 }: MovementModalV3Props) {
     const isEditing = mode === 'edit'
+
+    // Compute ledger balances for account selectors
+    const { byAccount: ledgerBalances } = useLedgerBalances(entries, accounts)
 
     // Main tab state
     const [mainTab, setMainTab] = useState<MainTab>('compra')
@@ -144,6 +164,9 @@ export default function MovementModalV3({
     // Percepciones / Impuestos adicionales
     const [taxes, setTaxes] = useState<TaxLine[]>([])
     const [discriminarIVA, setDiscriminarIVA] = useState(true)
+    // Modo de ingreso de precio: NETO (sin IVA) o FINAL (con IVA incluido)
+    // Útil cuando discriminarIVA=false (Monotributo/Exento) para evitar calcular neto a mano
+    const [priceInputMode, setPriceInputMode] = useState<'NETO' | 'FINAL'>('NETO')
 
     // Quick-add retención panel state
     const [showRetencionPanel, setShowRetencionPanel] = useState(false)
@@ -212,9 +235,64 @@ export default function MovementModalV3({
     const [pagoCobroSplits, setPagoCobroSplits] = useState<PaymentSplit[]>([
         { id: 'pc-split-1', accountId: '', amount: 0 }
     ])
+    // Retención en pagos/cobros
+    const [pagoCobroRetencion, setPagoCobroRetencion] = useState({
+        enabled: false,
+        calcMode: 'PERCENT' as TaxCalcMode,
+        rate: 100, // 100% = retención total del IVA
+        base: 'IVA' as TaxCalcBase,
+        taxType: 'IVA' as TaxType,
+        amount: 0,
+    })
+
+    // Pending documents for payment/collection selection
+    const pendingDocs = usePendingDocuments(movements, movements, pagoCobroMode)
+
+    // Selected pending document for payment/collection
+    const selectedPendingDoc = useMemo<PendingDocument | null>(() => {
+        if (!pagoCobro.originMovementId) return null
+        return pendingDocs.find(d => d.movementId === pagoCobro.originMovementId) || null
+    }, [pendingDocs, pagoCobro.originMovementId])
 
     const [isSaving, setIsSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
+
+    // Sync pagoCobro amount when selecting a pending document
+    useEffect(() => {
+        if (!selectedPendingDoc) return
+        setPagoCobro(prev => ({
+            ...prev,
+            amount: selectedPendingDoc.saldoPendiente,
+            tercero: selectedPendingDoc.counterparty,
+        }))
+        // Pre-fill splits with default account (Caja)
+        if (accounts && pagoCobroSplits.length === 1 && !pagoCobroSplits[0].accountId) {
+            const cajaCode = '1.1.01.01'
+            const cajaAcc = accounts.find(a => a.code === cajaCode)
+            if (cajaAcc) {
+                setPagoCobroSplits([{
+                    id: 'pc-split-1',
+                    accountId: cajaAcc.id,
+                    amount: selectedPendingDoc.saldoPendiente,
+                }])
+            }
+        }
+    }, [selectedPendingDoc?.movementId])
+
+    // Calculate retention amount for pagoCobro
+    useEffect(() => {
+        if (!pagoCobroRetencion.enabled || !selectedPendingDoc) return
+        const ivaOriginal = selectedPendingDoc.ivaAmount || 0
+        const saldoRatio = selectedPendingDoc.originalTotal > 0
+            ? selectedPendingDoc.saldoPendiente / selectedPendingDoc.originalTotal
+            : 1
+        const ivaProporcional = ivaOriginal * saldoRatio
+        const baseValue = pagoCobroRetencion.base === 'IVA' ? ivaProporcional : selectedPendingDoc.subtotal * saldoRatio
+        const calculated = pagoCobroRetencion.calcMode === 'PERCENT'
+            ? round2(baseValue * (pagoCobroRetencion.rate / 100))
+            : pagoCobroRetencion.amount
+        setPagoCobroRetencion(prev => ({ ...prev, amount: calculated }))
+    }, [pagoCobroRetencion.enabled, pagoCobroRetencion.calcMode, pagoCobroRetencion.rate, pagoCobroRetencion.base, selectedPendingDoc?.movementId])
 
     // Initialize from initialData
     useEffect(() => {
@@ -273,7 +351,17 @@ export default function MovementModalV3({
 
     // Calculations for Compra/Venta
     const calculations = useMemo(() => {
-        const baseAmount = mainTab === 'venta' ? formData.unitPrice : formData.unitCost
+        // Determinar el precio base según modo de entrada (NETO o FINAL)
+        // Si priceInputMode=FINAL y es compra, el valor ingresado es precio final (con IVA)
+        // y debemos calcular el neto para la base imponible
+        let baseAmount = mainTab === 'venta' ? formData.unitPrice : formData.unitCost
+
+        // Si modo FINAL en compras: el usuario ingresó precio final, derivamos el neto
+        const usingFinalMode = mainTab === 'compra' && priceInputMode === 'FINAL'
+        if (usingFinalMode && baseAmount > 0) {
+            baseAmount = netFromFinal(baseAmount, formData.ivaRate)
+        }
+
         const qty = formData.isSoloGasto ? 0 : formData.quantity
         const subtotalItems = qty * baseAmount
 
@@ -342,8 +430,10 @@ export default function MovementModalV3({
             totalFinal,
             estimatedCost,
             estimatedCMV,
+            // Costo unitario neto derivado (útil cuando modo=FINAL)
+            derivedNetUnitCost: baseAmount,
         }
-    }, [formData, mainTab, gastos, selectedValuation, taxes])
+    }, [formData, mainTab, gastos, selectedValuation, taxes, priceInputMode])
 
     // Payment validation
     const splitTotals = useMemo(() => {
@@ -1189,13 +1279,18 @@ export default function MovementModalV3({
                     base: t.base,
                 }))
 
+            // Usar costo neto derivado si estamos en modo FINAL
+            const effectiveUnitCost = mainTab === 'compra'
+                ? (priceInputMode === 'FINAL' ? calculations.derivedNetUnitCost : formData.unitCost)
+                : undefined
+
             await onSave({
                 type: movementType,
                 productId: formData.productId,
                 date: formData.date,
                 quantity: formData.isSoloGasto ? 0 : formData.quantity,
                 periodId,
-                unitCost: mainTab === 'compra' ? formData.unitCost : undefined,
+                unitCost: effectiveUnitCost,
                 unitPrice: mainTab === 'venta' ? formData.unitPrice : undefined,
                 ivaRate: formData.ivaRate,
                 ivaAmount: calculations.ivaTotal,
@@ -1505,6 +1600,54 @@ export default function MovementModalV3({
                                     )}
                                 </section>
 
+                                {/* Bloque: Traído del comprobante original */}
+                                {selectedOriginalMovement && (
+                                    <section className="bg-orange-50 border border-orange-200 p-4 rounded-xl">
+                                        <h4 className="text-xs font-bold text-orange-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                            <Info size={14} /> Traído del Comprobante Original
+                                        </h4>
+                                        <div className="grid grid-cols-2 gap-3 text-xs">
+                                            <div>
+                                                <span className="text-slate-500 block">
+                                                    {devolucion.tipo === 'DEVOLUCION_COMPRA' ? 'Costo Unit. Bruto' : 'Precio Unit. Bruto'}
+                                                </span>
+                                                <span className="font-mono font-semibold text-slate-700">{formatCurrency(devolucionCalculations.unitValueGross)}</span>
+                                            </div>
+                                            <div>
+                                                <span className="text-slate-500 block">Alícuota IVA</span>
+                                                <span className="font-mono font-semibold text-slate-700">{selectedOriginalMovement.ivaRate}%</span>
+                                            </div>
+                                            {selectedOriginalMovement.bonificacionPct > 0 && (
+                                                <div>
+                                                    <span className="text-slate-500 block">Bonificación</span>
+                                                    <span className="font-mono font-semibold text-orange-600">-{selectedOriginalMovement.bonificacionPct}%</span>
+                                                </div>
+                                            )}
+                                            <div>
+                                                <span className="text-slate-500 block">
+                                                    {devolucion.tipo === 'DEVOLUCION_COMPRA' ? 'Costo Neto Efectivo' : 'Precio Neto Efectivo'}
+                                                </span>
+                                                <span className="font-mono font-bold text-orange-700">{formatCurrency(devolucionCalculations.unitValue)}</span>
+                                            </div>
+                                        </div>
+                                        {selectedOriginalMovement.taxes && selectedOriginalMovement.taxes.length > 0 && (
+                                            <div className="mt-2 pt-2 border-t border-orange-200">
+                                                <span className="text-slate-500 text-[10px] uppercase">Percepciones del original:</span>
+                                                <div className="flex flex-wrap gap-2 mt-1">
+                                                    {selectedOriginalMovement.taxes.map((t, i) => (
+                                                        <span key={i} className="bg-orange-100 text-orange-700 text-[10px] px-2 py-0.5 rounded">
+                                                            {t.taxType}: {formatCurrency(t.amount)}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        <p className="text-[10px] text-orange-600 mt-2 italic">
+                                            Los valores se heredan automáticamente. Puedes ajustar la cantidad y percepciones a revertir abajo.
+                                        </p>
+                                    </section>
+                                )}
+
                                 {/* Cantidad a devolver */}
                                 {selectedOriginalMovement && (
                                     <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
@@ -1525,14 +1668,14 @@ export default function MovementModalV3({
                                             </div>
                                             <div>
                                                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                                    {devolucion.tipo === 'DEVOLUCION_COMPRA' ? 'Costo Unitario' : 'Precio Unitario'}
+                                                    {devolucion.tipo === 'DEVOLUCION_COMPRA' ? 'Costo Unitario Neto' : 'Precio Unitario Neto'}
                                                 </label>
                                                 <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono text-right text-slate-500">
                                                     {formatCurrency(devolucionCalculations.unitValue)}
                                                 </div>
                                                 {selectedOriginalMovement.bonificacionPct > 0 && (
                                                     <p className="text-[10px] text-slate-400 mt-1">
-                                                        (Neto efectivo - bonif. {selectedOriginalMovement.bonificacionPct}% aplicada)
+                                                        (Con bonif. {selectedOriginalMovement.bonificacionPct}% ya aplicada)
                                                     </p>
                                                 )}
                                             </div>
@@ -1644,12 +1787,14 @@ export default function MovementModalV3({
                                             {devolucionSplits.map((split) => (
                                                 <div key={split.id} className="flex gap-2 items-center">
                                                     <div className="flex-1">
-                                                        <AccountSearchSelect
+                                                        <AccountSearchSelectWithBalance
                                                             accounts={accounts || []}
                                                             value={split.accountId}
                                                             onChange={(val) => handleDevolucionSplitChange(split.id, 'accountId', val)}
                                                             placeholder="Buscar cuenta..."
                                                             inputClassName="h-[38px] text-xs px-2 py-1.5"
+                                                            balances={ledgerBalances}
+                                                            showBalance={true}
                                                         />
                                                     </div>
                                                     <input
@@ -2196,6 +2341,77 @@ export default function MovementModalV3({
                                     </div>
                                 </section>
 
+                                {/* Selector de Comprobante Pendiente */}
+                                <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                        <Files size={16} weight="duotone" className="text-violet-500" />
+                                        Comprobante a Cancelar
+                                    </h3>
+                                    <p className="text-xs text-slate-500 mb-3">
+                                        Selecciona el comprobante pendiente de {pagoCobroMode === 'COBRO' ? 'cobro' : 'pago'}, o deja vacío para registrar sin vincular.
+                                    </p>
+                                    <select
+                                        value={pagoCobro.originMovementId}
+                                        onChange={(e) => {
+                                            setPagoCobro(prev => ({ ...prev, originMovementId: e.target.value }))
+                                            // Reset retention when changing document
+                                            setPagoCobroRetencion(prev => ({ ...prev, enabled: false, amount: 0 }))
+                                        }}
+                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
+                                    >
+                                        <option value="">— Sin vincular comprobante —</option>
+                                        {pendingDocs.map(doc => (
+                                            <option key={doc.movementId} value={doc.movementId}>
+                                                {doc.date} | {doc.reference} | {doc.counterparty} | Saldo: {formatCurrency(doc.saldoPendiente)}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {pendingDocs.length === 0 && (
+                                        <p className="text-xs text-slate-400 mt-2 italic">
+                                            No hay comprobantes pendientes de {pagoCobroMode === 'COBRO' ? 'cobro' : 'pago'}.
+                                        </p>
+                                    )}
+                                </section>
+
+                                {/* Resumen del Comprobante Original */}
+                                {selectedPendingDoc && (
+                                    <section className="bg-violet-50 border border-violet-200 p-4 rounded-xl">
+                                        <h4 className="text-xs font-bold text-violet-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                            <Info size={14} /> Datos del Comprobante Original
+                                        </h4>
+                                        <div className="grid grid-cols-3 gap-3 text-xs">
+                                            <div>
+                                                <span className="text-slate-500 block">Neto</span>
+                                                <span className="font-mono font-semibold text-slate-700">{formatCurrency(selectedPendingDoc.subtotal)}</span>
+                                            </div>
+                                            <div>
+                                                <span className="text-slate-500 block">IVA</span>
+                                                <span className="font-mono font-semibold text-slate-700">{formatCurrency(selectedPendingDoc.ivaAmount)}</span>
+                                            </div>
+                                            <div>
+                                                <span className="text-slate-500 block">Total Original</span>
+                                                <span className="font-mono font-semibold text-slate-700">{formatCurrency(selectedPendingDoc.originalTotal)}</span>
+                                            </div>
+                                        </div>
+                                        {selectedPendingDoc.taxes && selectedPendingDoc.taxes.length > 0 && (
+                                            <div className="mt-2 pt-2 border-t border-violet-200">
+                                                <span className="text-slate-500 text-[10px] uppercase">Percepciones del original:</span>
+                                                <div className="flex flex-wrap gap-2 mt-1">
+                                                    {selectedPendingDoc.taxes.map((t, i) => (
+                                                        <span key={i} className="bg-violet-100 text-violet-700 text-[10px] px-2 py-0.5 rounded">
+                                                            {t.taxType}: {formatCurrency(t.amount)}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div className="mt-3 pt-2 border-t border-violet-200 flex justify-between items-center">
+                                            <span className="text-violet-700 font-semibold text-sm">Saldo Pendiente</span>
+                                            <span className="font-mono font-bold text-violet-800 text-lg">{formatCurrency(selectedPendingDoc.saldoPendiente)}</span>
+                                        </div>
+                                    </section>
+                                )}
+
                                 {/* Fecha y Tercero */}
                                 <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                     <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
@@ -2228,19 +2444,133 @@ export default function MovementModalV3({
                                     </div>
                                     <div className="mt-4">
                                         <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                            Importe Total
+                                            Importe a {pagoCobroMode === 'COBRO' ? 'Cobrar' : 'Pagar'}
+                                            {selectedPendingDoc && (
+                                                <span className="text-slate-400 font-normal ml-2">(máx: {formatCurrency(selectedPendingDoc.saldoPendiente)})</span>
+                                            )}
                                         </label>
                                         <input
                                             type="number"
                                             min="0"
+                                            max={selectedPendingDoc?.saldoPendiente || undefined}
                                             step="0.01"
                                             value={pagoCobro.amount || ''}
-                                            onChange={(e) => setPagoCobro(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                                            onChange={(e) => {
+                                                const val = Number(e.target.value)
+                                                const max = selectedPendingDoc?.saldoPendiente
+                                                setPagoCobro(prev => ({ ...prev, amount: max && val > max ? max : val }))
+                                            }}
                                             placeholder="0.00"
                                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono text-right outline-none focus:ring-1 focus:ring-violet-500"
                                         />
                                     </div>
                                 </section>
+
+                                {/* Panel de Retención */}
+                                {selectedPendingDoc && (
+                                    <section className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h4 className="text-xs font-bold text-amber-700 uppercase tracking-wider flex items-center gap-2">
+                                                <Percent size={14} />
+                                                {pagoCobroMode === 'COBRO' ? 'Retención Sufrida' : 'Retención a Depositar'}
+                                            </h4>
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <span className="text-xs text-amber-700">Aplicar</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={pagoCobroRetencion.enabled}
+                                                    onChange={(e) => setPagoCobroRetencion(prev => ({ ...prev, enabled: e.target.checked }))}
+                                                    className="w-4 h-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                                                />
+                                            </label>
+                                        </div>
+                                        {pagoCobroRetencion.enabled && (
+                                            <div className="space-y-3">
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    <div>
+                                                        <label className="text-[10px] text-amber-600 uppercase font-semibold block mb-1">Modo</label>
+                                                        <select
+                                                            value={pagoCobroRetencion.calcMode}
+                                                            onChange={(e) => setPagoCobroRetencion(prev => ({ ...prev, calcMode: e.target.value as TaxCalcMode }))}
+                                                            className="w-full border border-amber-300 rounded px-2 py-1 text-xs bg-white"
+                                                        >
+                                                            <option value="PERCENT">Porcentaje</option>
+                                                            <option value="AMOUNT">Monto Fijo</option>
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] text-amber-600 uppercase font-semibold block mb-1">Base</label>
+                                                        <select
+                                                            value={pagoCobroRetencion.base}
+                                                            onChange={(e) => setPagoCobroRetencion(prev => ({ ...prev, base: e.target.value as TaxCalcBase }))}
+                                                            className="w-full border border-amber-300 rounded px-2 py-1 text-xs bg-white"
+                                                            disabled={pagoCobroRetencion.calcMode === 'AMOUNT'}
+                                                        >
+                                                            <option value="IVA">IVA</option>
+                                                            <option value="NETO">Neto</option>
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] text-amber-600 uppercase font-semibold block mb-1">
+                                                            {pagoCobroRetencion.calcMode === 'PERCENT' ? 'Tasa %' : 'Monto'}
+                                                        </label>
+                                                        {pagoCobroRetencion.calcMode === 'PERCENT' ? (
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                max="100"
+                                                                step="0.1"
+                                                                value={pagoCobroRetencion.rate}
+                                                                onChange={(e) => setPagoCobroRetencion(prev => ({ ...prev, rate: Number(e.target.value) }))}
+                                                                className="w-full border border-amber-300 rounded px-2 py-1 text-xs font-mono text-right bg-white"
+                                                            />
+                                                        ) : (
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                step="0.01"
+                                                                value={pagoCobroRetencion.amount}
+                                                                onChange={(e) => setPagoCobroRetencion(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                                                                className="w-full border border-amber-300 rounded px-2 py-1 text-xs font-mono text-right bg-white"
+                                                            />
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="flex justify-between items-center pt-2 border-t border-amber-200">
+                                                    <span className="text-xs text-amber-700">Retención calculada:</span>
+                                                    <span className="font-mono font-bold text-amber-800">{formatCurrency(pagoCobroRetencion.amount)}</span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        // Add retention as a split
+                                                        const retencionAccountCode = pagoCobroMode === 'COBRO' ? '1.1.03.07' : '2.1.03.03'
+                                                        const retencionAcc = accounts?.find(a => a.code === retencionAccountCode)
+                                                        if (retencionAcc && pagoCobroRetencion.amount > 0) {
+                                                            const existingRetIdx = pagoCobroSplits.findIndex(s => s.accountId === retencionAcc.id)
+                                                            if (existingRetIdx >= 0) {
+                                                                // Update existing
+                                                                setPagoCobroSplits(prev => prev.map((s, i) =>
+                                                                    i === existingRetIdx ? { ...s, amount: pagoCobroRetencion.amount } : s
+                                                                ))
+                                                            } else {
+                                                                // Add new
+                                                                setPagoCobroSplits(prev => [...prev, {
+                                                                    id: `pc-split-ret-${Date.now()}`,
+                                                                    accountId: retencionAcc.id,
+                                                                    amount: pagoCobroRetencion.amount,
+                                                                }])
+                                                            }
+                                                        }
+                                                    }}
+                                                    className="w-full bg-amber-600 text-white text-xs font-semibold py-2 rounded-lg hover:bg-amber-700 transition-colors"
+                                                >
+                                                    Agregar Retención a las Formas de {pagoCobroMode === 'COBRO' ? 'Cobro' : 'Pago'}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </section>
+                                )}
 
                                 {/* Formas de Cobro/Pago */}
                                 <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
@@ -2257,7 +2587,7 @@ export default function MovementModalV3({
                                         {pagoCobroSplits.map((split) => (
                                             <div key={split.id} className="flex gap-2 items-center">
                                                 <div className="flex-1">
-                                                    <AccountSearchSelect
+                                                    <AccountSearchSelectWithBalance
                                                         accounts={accounts || []}
                                                         value={split.accountId}
                                                         onChange={(val) => {
@@ -2267,6 +2597,8 @@ export default function MovementModalV3({
                                                         }}
                                                         placeholder="Buscar cuenta..."
                                                         inputClassName="h-[38px] text-xs px-2 py-1.5"
+                                                        balances={ledgerBalances}
+                                                        showBalance={true}
                                                     />
                                                 </div>
                                                 <input
@@ -2441,9 +2773,42 @@ export default function MovementModalV3({
                                                 </div>
 
                                                 <div className="col-span-4">
-                                                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                                        {mainTab === 'venta' ? 'Precio Venta (Neto)' : 'Costo Unitario (Neto)'}
-                                                    </label>
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <label className="text-xs font-semibold text-slate-700">
+                                                            {mainTab === 'venta'
+                                                                ? 'Precio Venta (Neto)'
+                                                                : (priceInputMode === 'FINAL' ? 'Costo c/IVA (Final)' : 'Costo Unitario (Neto)')
+                                                            }
+                                                        </label>
+                                                        {/* Toggle Neto/Final - solo en Compra */}
+                                                        {mainTab === 'compra' && (
+                                                            <div className="flex items-center gap-1">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        if (priceInputMode === 'NETO' && formData.unitCost > 0) {
+                                                                            // Convertir neto a final para mantener equivalencia
+                                                                            const finalVal = finalFromNet(formData.unitCost, formData.ivaRate)
+                                                                            handleChange('unitCost', finalVal)
+                                                                        } else if (priceInputMode === 'FINAL' && formData.unitCost > 0) {
+                                                                            // Convertir final a neto
+                                                                            const netoVal = netFromFinal(formData.unitCost, formData.ivaRate)
+                                                                            handleChange('unitCost', netoVal)
+                                                                        }
+                                                                        setPriceInputMode(prev => prev === 'NETO' ? 'FINAL' : 'NETO')
+                                                                    }}
+                                                                    className={`text-[10px] px-2 py-0.5 rounded-full font-semibold transition-colors ${
+                                                                        priceInputMode === 'FINAL'
+                                                                            ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                                                            : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                                                    }`}
+                                                                    title="Alternar entre Precio Neto (sin IVA) y Precio Final (con IVA)"
+                                                                >
+                                                                    {priceInputMode === 'FINAL' ? 'c/IVA' : 's/IVA'}
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                     <div className="relative">
                                                         <span className="absolute left-3 top-2 text-slate-400 text-sm">$</span>
                                                         <input
@@ -2455,6 +2820,12 @@ export default function MovementModalV3({
                                                             className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none"
                                                         />
                                                     </div>
+                                                    {/* Mostrar neto derivado cuando estamos en modo FINAL */}
+                                                    {mainTab === 'compra' && priceInputMode === 'FINAL' && formData.unitCost > 0 && (
+                                                        <p className="text-[10px] text-amber-600 mt-1">
+                                                            Neto derivado: {formatCurrency(calculations.derivedNetUnitCost)}
+                                                        </p>
+                                                    )}
                                                 </div>
 
                                                 <div className="col-span-4">
@@ -2782,12 +3153,14 @@ export default function MovementModalV3({
                                             <div key={split.id} className="flex items-center gap-3 relative">
                                                 <div className="flex-1 relative">
                                                     <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1 z-10">CUENTA</label>
-                                                    <AccountSearchSelect
+                                                    <AccountSearchSelectWithBalance
                                                         accounts={accounts || []}
                                                         value={split.accountId}
                                                         onChange={(val) => handleSplitChange(split.id, 'accountId', val)}
                                                         placeholder="Buscar cuenta..."
                                                         inputClassName="h-[52px] pt-4 text-sm"
+                                                        balances={ledgerBalances}
+                                                        showBalance={true}
                                                     />
                                                 </div>
                                                 <div className="w-1/3 relative">
@@ -3440,11 +3813,23 @@ export default function MovementModalV3({
                                                 {mainTab === 'compra' && (
                                                     <>
                                                         <tr>
-                                                            <td className="py-1.5 text-white">Mercaderias (Activo)</td>
-                                                            <td className="py-1.5 text-right text-emerald-400">{(calculations.netoAfterBonif + calculations.gastosNetos).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                            <td className="py-1.5 text-white">
+                                                                Mercaderias (Activo)
+                                                                {!discriminarIVA && calculations.ivaTotal > 0 && (
+                                                                    <span className="text-[10px] text-amber-400 ml-1">(IVA incluido)</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="py-1.5 text-right text-emerald-400">
+                                                                {/* When discriminarIVA=false, include IVA in Mercaderias */}
+                                                                {discriminarIVA
+                                                                    ? (calculations.netoAfterBonif + calculations.gastosNetos).toLocaleString('es-AR', { minimumFractionDigits: 2 })
+                                                                    : (calculations.netoAfterBonif + calculations.gastosNetos + calculations.ivaTotal).toLocaleString('es-AR', { minimumFractionDigits: 2 })
+                                                                }
+                                                            </td>
                                                             <td className="py-1.5 text-right">-</td>
                                                         </tr>
-                                                        {calculations.ivaTotal > 0 && (
+                                                        {/* IVA CF line only shows when discriminarIVA=true */}
+                                                        {discriminarIVA && calculations.ivaTotal > 0 && (
                                                             <tr>
                                                                 <td className="py-1.5 text-white">IVA Credito Fiscal</td>
                                                                 <td className="py-1.5 text-right text-emerald-400">{calculations.ivaTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
@@ -3512,6 +3897,11 @@ export default function MovementModalV3({
                                     </div>
                                     <p className="text-[10px] text-slate-400 mt-2 text-center">
                                         *Calculo automatico segun imputaciones.
+                                        {mainTab === 'compra' && !discriminarIVA && calculations.ivaTotal > 0 && (
+                                            <span className="block text-amber-400 mt-1">
+                                                IVA como costo (proveedor no discrimina IVA)
+                                            </span>
+                                        )}
                                     </p>
                                 </div>
                             )}
@@ -3576,6 +3966,91 @@ export default function MovementModalV3({
                                             </tbody>
                                         </table>
                                     </div>
+                                </div>
+                            )}
+
+                            {/* PREVIEW ASIENTO - Pagos/Cobros */}
+                            {mainTab === 'pagos' && pagoCobro.amount > 0 && pagoCobroSplits.some(s => s.accountId && s.amount > 0) && (
+                                <div>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-6 h-6 rounded bg-violet-600 text-white flex items-center justify-center text-xs">
+                                            <Robot size={14} weight="fill" />
+                                        </div>
+                                        <span className="text-xs font-bold text-violet-600 uppercase">Vista Previa Contable</span>
+                                    </div>
+
+                                    <div className="bg-slate-900 rounded-lg p-4 font-mono text-xs text-slate-300 shadow-inner">
+                                        <table className="w-full">
+                                            <thead>
+                                                <tr className="text-slate-500 border-b border-slate-700">
+                                                    <th className="text-left pb-2 font-normal">Cuenta</th>
+                                                    <th className="text-right pb-2 font-normal">Debe</th>
+                                                    <th className="text-right pb-2 font-normal">Haber</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-700/50">
+                                                {pagoCobroMode === 'COBRO' ? (
+                                                    <>
+                                                        {/* COBRO: Debe splits (Caja/Banco/Ret), Haber Deudores */}
+                                                        {pagoCobroSplits.filter(s => s.accountId && s.amount > 0).map((split) => {
+                                                            const acc = accounts?.find(a => a.id === split.accountId)
+                                                            return (
+                                                                <tr key={split.id}>
+                                                                    <td className="py-1.5 text-white">{acc?.name || 'Cuenta'}</td>
+                                                                    <td className="py-1.5 text-right text-emerald-400">{split.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                                    <td className="py-1.5 text-right">-</td>
+                                                                </tr>
+                                                            )
+                                                        })}
+                                                        <tr>
+                                                            <td className="py-1.5 pl-4 text-slate-400">a Deudores por ventas</td>
+                                                            <td className="py-1.5 text-right">-</td>
+                                                            <td className="py-1.5 text-right text-white">{pagoCobro.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                        </tr>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        {/* PAGO: Debe Proveedores, Haber splits (Caja/Banco/Ret) */}
+                                                        <tr>
+                                                            <td className="py-1.5 text-white">Proveedores</td>
+                                                            <td className="py-1.5 text-right text-emerald-400">{pagoCobro.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                            <td className="py-1.5 text-right">-</td>
+                                                        </tr>
+                                                        {pagoCobroSplits.filter(s => s.accountId && s.amount > 0).map((split) => {
+                                                            const acc = accounts?.find(a => a.id === split.accountId)
+                                                            return (
+                                                                <tr key={split.id}>
+                                                                    <td className="py-1.5 pl-4 text-slate-400">a {acc?.name || 'Cuenta'}</td>
+                                                                    <td className="py-1.5 text-right">-</td>
+                                                                    <td className="py-1.5 text-right text-white">{split.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                                </tr>
+                                                            )
+                                                        })}
+                                                    </>
+                                                )}
+                                            </tbody>
+                                            <tfoot>
+                                                <tr className="border-t border-slate-600">
+                                                    <td className="py-2 text-slate-400 font-semibold">Total</td>
+                                                    <td className="py-2 text-right text-emerald-400 font-semibold">
+                                                        {pagoCobroSplits.reduce((sum, s) => sum + (s.accountId ? s.amount : 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td className="py-2 text-right text-white font-semibold">
+                                                        {pagoCobroSplits.reduce((sum, s) => sum + (s.accountId ? s.amount : 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                                    </td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                        {/* Balance check */}
+                                        {Math.abs(pagoCobro.amount - pagoCobroSplits.reduce((sum, s) => sum + s.amount, 0)) > 0.01 && (
+                                            <div className="mt-2 p-2 bg-red-900/50 rounded text-red-300 text-[10px] flex items-center gap-1">
+                                                <Warning size={12} /> Asiento desbalanceado: revisar totales
+                                            </div>
+                                        )}
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 mt-2 text-center">
+                                        *{pagoCobroMode === 'COBRO' ? 'Cobro de cliente' : 'Pago a proveedor'} — Deudores/Proveedores vs Caja/Bancos.
+                                    </p>
                                 </div>
                             )}
 

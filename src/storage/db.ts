@@ -17,6 +17,10 @@ import type {
     FxSettings,
     ExchangeRatesCache,
 } from '../core/monedaExtranjera/types'
+import type {
+    TaxClosePeriod,
+    TaxDueNotification,
+} from '../core/impuestos/types'
 
 /**
  * Configuración de la aplicación
@@ -59,6 +63,9 @@ class ContableDatabase extends Dexie {
     fxLiabilities!: EntityTable<FxLiability, 'id'>
     fxSettings!: EntityTable<FxSettings, 'id'>
     fxRatesCache!: EntityTable<ExchangeRatesCache, 'id'>
+    // Impuestos module
+    taxClosures!: EntityTable<TaxClosePeriod, 'id'>
+    taxDueNotifications!: EntityTable<TaxDueNotification, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -194,6 +201,30 @@ class ContableDatabase extends Dexie {
             fxLiabilities: 'id, accountId, periodId',
             fxSettings: 'id',
             fxRatesCache: 'id',
+        })
+
+        // Version 9: Impuestos module (tax closures and notifications)
+        this.version(9).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo, sourceModule, sourceId',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxDebts: 'id, currency, creditor, createdAt, status, periodId, accountId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
+            taxClosures: 'id, month, regime, status',
+            taxDueNotifications: 'id, obligation, month, dueDate, seen',
         })
     }
 }
