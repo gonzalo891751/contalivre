@@ -87,7 +87,14 @@ export interface UseTaxClosureReturn {
     registerTaxSettlement: (
         obligation: TaxSettlementObligation,
         payload: RegisterTaxPaymentInput
-    ) => Promise<{ success: boolean; error?: string; missingAccountLabel?: string; entryId?: string }>
+    ) => Promise<{
+        success: boolean
+        error?: string
+        missingAccountLabel?: string
+        missingAccountCode?: string
+        missingMappingKey?: string
+        entryId?: string
+    }>
     closePeriod: () => Promise<void>
     unlockPeriod: () => Promise<void>
 }
@@ -125,6 +132,38 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
         const end = `${year}-${String(monthNum).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
         return { start, end }
     }
+
+    const getPreviousMonthKey = (value: string): string | null => {
+        const [year, monthNum] = value.split('-').map(Number)
+        if (!year || !monthNum) return null
+        const prevMonth = monthNum - 1
+        if (prevMonth >= 1) {
+            return `${year}-${String(prevMonth).padStart(2, '0')}`
+        }
+        return `${year - 1}-12`
+    }
+
+    const resolveIvaCarryInfo = useCallback(async (periodKey: string) => {
+        const prevMonth = getPreviousMonthKey(periodKey)
+        if (!prevMonth) {
+            return { carryIvaFavor: 0, carryAvailable: false }
+        }
+        const prevClosure = await getTaxClosure(prevMonth, regime)
+        if (!prevClosure || prevClosure.status !== 'CLOSED') {
+            return { carryIvaFavor: 0, carryAvailable: false }
+        }
+        const totals = prevClosure.snapshot?.ivaTotals || prevClosure.ivaTotals
+        if (!totals) {
+            return { carryIvaFavor: 0, carryAvailable: true }
+        }
+        if (typeof totals.ivaAFavorFinal === 'number') {
+            return { carryIvaFavor: totals.ivaAFavorFinal, carryAvailable: true }
+        }
+        if ((totals.saldo || 0) < 0) {
+            return { carryIvaFavor: Math.abs(totals.saldo || 0), carryAvailable: true }
+        }
+        return { carryIvaFavor: 0, carryAvailable: true }
+    }, [regime])
 
     const resolveSourceEntryId = (
         taxType: TaxType,
@@ -362,8 +401,9 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
 
         setIsCalculating(true)
         try {
+            const carryInfo = await resolveIvaCarryInfo(month)
             const [ivaComputed, byAlicuota, retPerc, suggestedBase, entries] = await Promise.all([
-                calculateIVAFromEntries(month),
+                calculateIVAFromEntries(month, carryInfo),
                 calculateIVAByAlicuota(month),
                 getRetencionesPercepciones(month),
                 calculateIIBBSuggestedBase(month),
@@ -432,7 +472,7 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
         } finally {
             setIsCalculating(false)
         }
-    }, [month, regime, closure?.id])
+    }, [month, regime, closure?.id, resolveIvaCarryInfo])
 
     // Initial calculation
     useEffect(() => {
@@ -636,9 +676,10 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
     }, [closure, month, regime])
 
     const getObligationsByPeriod = useCallback(async (taxPeriod: string) => {
+        const carryInfo = await resolveIvaCarryInfo(taxPeriod)
         const [payables, computedIva, closureDoc, generated, payments] = await Promise.all([
             listTaxObligationsWithPayments(taxPeriod),
-            calculateIVAFromEntries(taxPeriod),
+            calculateIVAFromEntries(taxPeriod, carryInfo),
             getTaxClosure(taxPeriod, regime),
             getGeneratedEntriesForClosure(taxPeriod, regime),
             db.taxPayments.toArray(),
@@ -656,7 +697,7 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
             generated,
             payments
         )
-    }, [buildSettlementObligations, regime])
+    }, [buildSettlementObligations, regime, resolveIvaCarryInfo])
 
     const getPaymentsByObligation = useCallback(async (obligation: TaxSettlementObligation) => {
         return listTaxPaymentsForSettlement(obligation)
@@ -672,10 +713,23 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
     const registerSettlement = useCallback(async (
         obligation: TaxSettlementObligation,
         payload: RegisterTaxPaymentInput
-    ): Promise<{ success: boolean; error?: string; missingAccountLabel?: string; entryId?: string }> => {
+    ): Promise<{
+        success: boolean
+        error?: string
+        missingAccountLabel?: string
+        missingAccountCode?: string
+        missingMappingKey?: string
+        entryId?: string
+    }> => {
         const result = await registerTaxSettlement(obligation, payload)
         if (result.error) {
-            return { success: false, error: result.error, missingAccountLabel: result.missingAccountLabel }
+            return {
+                success: false,
+                error: result.error,
+                missingAccountLabel: result.missingAccountLabel,
+                missingAccountCode: result.missingAccountCode,
+                missingMappingKey: result.missingMappingKey,
+            }
         }
         return { success: true, entryId: result.entryId }
     }, [])

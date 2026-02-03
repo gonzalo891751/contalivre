@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeIVATotalsFromEntries } from './iva'
+import { computeIVATotalsFromEntries, applyIVACarry } from './iva'
 import type { JournalEntry } from '../models'
 
 describe('computeIVATotalsFromEntries', () => {
@@ -77,5 +77,54 @@ describe('computeIVATotalsFromEntries', () => {
         })
 
         expect(totals.debitoFiscal).toBe(28350)
+    })
+})
+
+describe('applyIVACarry', () => {
+    it('applies carry to a payable position', () => {
+        const base = {
+            debitoFiscal: 2000,
+            creditoFiscal: 1500,
+            pagosACuenta: 0,
+            saldo: 500,
+        }
+
+        const totals = applyIVACarry(base, { carryIvaFavor: 200, carryAvailable: true })
+
+        expect(totals.ivaFavorAnterior).toBe(200)
+        expect(totals.ivaFavorAnteriorAplicado).toBe(200)
+        expect(totals.ivaAPagar).toBe(300)
+        expect(totals.saldo).toBe(300)
+    })
+
+    it('keeps saldo a favor when carry exceeds payable', () => {
+        const base = {
+            debitoFiscal: 2000,
+            creditoFiscal: 1500,
+            pagosACuenta: 0,
+            saldo: 500,
+        }
+
+        const totals = applyIVACarry(base, { carryIvaFavor: 700, carryAvailable: true })
+
+        expect(totals.ivaFavorAnteriorAplicado).toBe(500)
+        expect(totals.ivaAPagar).toBe(0)
+        expect(totals.ivaAFavorFinal).toBe(200)
+        expect(totals.saldo).toBe(-200)
+    })
+
+    it('combines carry with new saldo a favor', () => {
+        const base = {
+            debitoFiscal: 1000,
+            creditoFiscal: 1500,
+            pagosACuenta: 0,
+            saldo: -500,
+        }
+
+        const totals = applyIVACarry(base, { carryIvaFavor: 200, carryAvailable: true })
+
+        expect(totals.ivaAFavorDelMes).toBe(500)
+        expect(totals.ivaAFavorFinal).toBe(700)
+        expect(totals.saldo).toBe(-700)
     })
 })

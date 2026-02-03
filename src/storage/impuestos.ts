@@ -21,7 +21,7 @@ import type {
     TaxPaymentMethod,
     TaxSettlementObligation,
 } from '../core/impuestos/types'
-import { computeIVATotalsFromEntries } from '../core/impuestos/iva'
+import { computeIVATotalsFromEntries, applyIVACarry } from '../core/impuestos/iva'
 import { buildTaxSettlementEntryLines, computeTaxSettlementRemaining } from '../core/impuestos/settlements'
 import {
     createDefaultTaxClosure,
@@ -48,6 +48,8 @@ const TAX_ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> =
     monotributoAPagar: { code: '2.1.03.07', names: ['Monotributo a pagar'] },
     autonomosGasto: { code: '4.4.03', names: ['Aportes autonomos', 'Cargas sociales', 'Seguridad social', 'Aportes previsionales'] },
     autonomosAPagar: { code: '2.1.03.08', names: ['Autonomos a pagar', 'Aportes a pagar', 'Cargas sociales a pagar'] },
+    retencionPracticada: { code: '2.1.03.03', names: ['Retenciones a depositar', 'Retenciones IVA a depositar'] },
+    percepcionIVAPracticada: { code: '2.1.03.06', names: ['Percepciones IVA a terceros', 'Percepciones a depositar'] },
 }
 
 const TAX_LIABILITY_LABELS: Record<TaxType, string> = {
@@ -102,6 +104,8 @@ export interface TaxPaymentPreviewResult {
     entry?: Omit<JournalEntry, 'id'>
     error?: string
     missingAccountLabel?: string
+    missingAccountCode?: string
+    missingMappingKey?: string
     resolvedLiabilityAccountId?: string
     resolvedObligationAccountId?: string
 }
@@ -110,7 +114,7 @@ const resolveTaxLiabilityAccountId = async (
     taxType: TaxType,
     accounts: Account[],
     overrideId?: string | null
-): Promise<{ accountId: string | null; label: string }> => {
+): Promise<{ accountId: string | null; label: string; missingAccountCode?: string; missingMappingKey?: string }> => {
     const label = TAX_LIABILITY_LABELS[taxType] || 'Cuenta de impuesto'
     if (overrideId) {
         const direct = accounts.find(acc => acc.id === overrideId && !acc.isHeader)
@@ -130,16 +134,26 @@ const resolveTaxLiabilityAccountId = async (
             return { accountId: resolveTaxAccountId(accounts, 'monotributoAPagar'), label }
         case 'AUTONOMOS':
             return { accountId: resolveTaxAccountId(accounts, 'autonomosAPagar'), label }
-        case 'RET_DEPOSITAR':
-            return {
-                accountId: resolveMappedAccountId(accounts, settings, 'retencionPracticada', 'retencionPracticada'),
-                label,
+        case 'RET_DEPOSITAR': {
+            const mappingKey = 'retencionPracticada'
+            const fallbackCode = TAX_ACCOUNT_FALLBACKS.retencionPracticada?.code
+            const mapped = resolveMappedAccountId(accounts, settings, mappingKey, mappingKey)
+            const fallback = mapped ? null : resolveTaxAccountId(accounts, 'retencionPracticada')
+            if (mapped || fallback) {
+                return { accountId: mapped || fallback, label }
             }
-        case 'PER_DEPOSITAR':
-            return {
-                accountId: resolveMappedAccountId(accounts, settings, 'percepcionIVAPracticada', 'percepcionIVAPracticada'),
-                label,
+            return { accountId: null, label, missingAccountCode: fallbackCode, missingMappingKey: mappingKey }
+        }
+        case 'PER_DEPOSITAR': {
+            const mappingKey = 'percepcionIVAPracticada'
+            const fallbackCode = TAX_ACCOUNT_FALLBACKS.percepcionIVAPracticada?.code
+            const mapped = resolveMappedAccountId(accounts, settings, mappingKey, mappingKey)
+            const fallback = mapped ? null : resolveTaxAccountId(accounts, 'percepcionIVAPracticada')
+            if (mapped || fallback) {
+                return { accountId: mapped || fallback, label }
             }
+            return { accountId: null, label, missingAccountCode: fallbackCode, missingMappingKey: mappingKey }
+        }
         default:
             return { accountId: null, label }
     }
@@ -483,6 +497,33 @@ function getMonthDateRange(month: string): { start: string; end: string } {
     return { start, end }
 }
 
+function getPreviousMonthKey(month: string): string | null {
+    const [year, monthNum] = month.split('-').map(Number)
+    if (!year || !monthNum) return null
+    const prevMonth = monthNum - 1
+    if (prevMonth >= 1) {
+        return `${year}-${String(prevMonth).padStart(2, '0')}`
+    }
+    return `${year - 1}-12`
+}
+
+function resolveIvaCarryFromClosure(closure?: TaxClosePeriod | null): { carry: number; available: boolean } {
+    if (!closure || closure.status !== 'CLOSED') {
+        return { carry: 0, available: false }
+    }
+    const totals = closure.snapshot?.ivaTotals || closure.ivaTotals
+    if (!totals) {
+        return { carry: 0, available: true }
+    }
+    if (typeof totals.ivaAFavorFinal === 'number') {
+        return { carry: totals.ivaAFavorFinal, available: true }
+    }
+    if ((totals.saldo || 0) < 0) {
+        return { carry: Math.abs(totals.saldo || 0), available: true }
+    }
+    return { carry: 0, available: true }
+}
+
 function getTaxEntryPeriod(entry: JournalEntry): string | null {
     const meta = entry.metadata || {}
     const period = (meta.taxPeriod || meta.period || meta.meta?.period) as string | undefined
@@ -520,7 +561,10 @@ function matchesTaxRegime(entry: JournalEntry, regime: TaxRegime): boolean {
 /**
  * Calculate IVA DF/CF from journal entries for a month
  */
-export async function calculateIVAFromEntries(month: string): Promise<IVATotals> {
+export async function calculateIVAFromEntries(
+    month: string,
+    options?: { carryIvaFavor?: number; carryAvailable?: boolean }
+): Promise<IVATotals> {
     const accounts = await db.accounts.toArray()
     const settings = await loadBienesSettings()
     const { start, end } = getMonthDateRange(month)
@@ -539,12 +583,14 @@ export async function calculateIVAFromEntries(month: string): Promise<IVATotals>
 
     const filteredEntries = entries.filter(entry => !isTaxGeneratedEntry(entry, month))
 
-    return computeIVATotalsFromEntries(filteredEntries, {
+    const baseTotals = computeIVATotalsFromEntries(filteredEntries, {
         ivaDFId,
         ivaCFId,
         retencionSufridaId,
         percepcionIVASufridaId,
     })
+
+    return applyIVACarry(baseTotals, options)
 }
 
 /**
@@ -1021,13 +1067,22 @@ async function buildTaxSettlementEntry(
     const accountResult = obligation.direction === 'RECEIVABLE'
         ? await resolveTaxCreditAccountId(obligation.tax, accounts, overrideAccountId)
         : await resolveTaxLiabilityAccountId(obligation.tax, accounts, overrideAccountId)
-    const { accountId: obligationAccountId, label } = accountResult
+    const {
+        accountId: obligationAccountId,
+        label,
+        missingAccountCode,
+        missingMappingKey,
+    } = accountResult
 
     if (!obligationAccountId) {
         const labelPrefix = obligation.direction === 'RECEIVABLE' ? 'credito' : 'pasivo'
+        const codeHint = missingAccountCode ? ` Codigo esperado ${missingAccountCode}.` : ''
+        const mappingHint = missingMappingKey ? ` Mapping ${missingMappingKey}.` : ''
         return {
-            error: `Falta cuenta del ${labelPrefix} (${label}).`,
+            error: `Falta cuenta del ${labelPrefix} (${label}).${codeHint}${mappingHint}`,
             missingAccountLabel: label,
+            missingAccountCode,
+            missingMappingKey,
         }
     }
 
@@ -1142,7 +1197,14 @@ export async function buildTaxSettlementEntryPreview(
 export async function registerTaxPayment(
     obligationId: string,
     input: RegisterTaxPaymentInput
-): Promise<{ entryId?: string; paymentId?: string; error?: string; missingAccountLabel?: string }> {
+): Promise<{
+    entryId?: string
+    paymentId?: string
+    error?: string
+    missingAccountLabel?: string
+    missingAccountCode?: string
+    missingMappingKey?: string
+}> {
     const obligation = await getTaxObligationById(obligationId)
     if (!obligation) return { error: 'Obligacion no encontrada.' }
 
@@ -1159,7 +1221,12 @@ export async function registerTaxPayment(
     const accounts = await db.accounts.toArray()
     const preview = await buildTaxPaymentEntry(obligation, input, accounts)
     if (preview.error || !preview.entry) {
-        return { error: preview.error, missingAccountLabel: preview.missingAccountLabel }
+        return {
+            error: preview.error,
+            missingAccountLabel: preview.missingAccountLabel,
+            missingAccountCode: preview.missingAccountCode,
+            missingMappingKey: preview.missingMappingKey,
+        }
     }
 
     try {
@@ -1238,7 +1305,14 @@ export async function listTaxPaymentsForSettlement(
 export async function registerTaxSettlement(
     obligation: TaxSettlementObligation,
     input: RegisterTaxPaymentInput
-): Promise<{ entryId?: string; paymentId?: string; error?: string; missingAccountLabel?: string }> {
+): Promise<{
+    entryId?: string
+    paymentId?: string
+    error?: string
+    missingAccountLabel?: string
+    missingAccountCode?: string
+    missingMappingKey?: string
+}> {
     if (input.amount <= 0) {
         return { error: 'El importe debe ser mayor a cero.' }
     }
@@ -1257,7 +1331,12 @@ export async function registerTaxSettlement(
     const accounts = await db.accounts.toArray()
     const preview = await buildTaxSettlementEntry(obligation, input, accounts)
     if (preview.error || !preview.entry) {
-        return { error: preview.error, missingAccountLabel: preview.missingAccountLabel }
+        return {
+            error: preview.error,
+            missingAccountLabel: preview.missingAccountLabel,
+            missingAccountCode: preview.missingAccountCode,
+            missingMappingKey: preview.missingMappingKey,
+        }
     }
 
     try {
@@ -1431,13 +1510,22 @@ async function buildIVAEntryData(
 ): Promise<{ entry?: Omit<JournalEntry, 'id'>; error?: string }> {
     const accounts = await db.accounts.toArray()
     const settings = await loadBienesSettings()
-    const computedTotals = await calculateIVAFromEntries(closure.month)
+    const prevMonthKey = getPreviousMonthKey(closure.month)
+    const prevClosure = prevMonthKey ? await getTaxClosure(prevMonthKey, closure.regime) : undefined
+    const carryInfo = resolveIvaCarryFromClosure(prevClosure)
+    const computedTotals = await calculateIVAFromEntries(closure.month, {
+        carryIvaFavor: carryInfo.carry,
+        carryAvailable: carryInfo.available,
+    })
     const {
         debitoFiscal,
         creditoFiscal,
         saldo,
         retencionesSufridas,
         percepcionesSufridas,
+        ivaFavorAnteriorAplicado,
+        ivaAFavorDelMes,
+        ivaAPagar,
     } = computedTotals
 
     // Resolve accounts
@@ -1451,8 +1539,9 @@ async function buildIVAEntryData(
     const missing: string[] = []
     if (!ivaDFId) missing.push('IVA Debito Fiscal')
     if (creditoFiscal > 0 && !ivaCFId) missing.push('IVA Credito Fiscal')
-    if (saldo > 0 && !ivaAPagarId) missing.push('IVA a pagar')
-    if (saldo < 0 && !ivaAFavorId) missing.push('IVA a favor')
+    if ((ivaAPagar || 0) > 0 && !ivaAPagarId) missing.push('IVA a pagar')
+    const ivaAFavorRequired = (ivaFavorAnteriorAplicado || 0) > 0 || (ivaAFavorDelMes || 0) > 0 || saldo < 0
+    if (ivaAFavorRequired && !ivaAFavorId) missing.push('IVA a favor')
     if ((retencionesSufridas || 0) > 0 && !retencionSufridaId) missing.push('Retenciones IVA sufridas')
     if ((percepcionesSufridas || 0) > 0 && !percepcionIVASufridaId) missing.push('Percepciones IVA sufridas')
 
@@ -1500,20 +1589,30 @@ async function buildIVAEntryData(
         })
     }
 
+    // Haber: IVA a favor anterior aplicado (reduce activo)
+    if ((ivaFavorAnteriorAplicado || 0) > 0 && ivaAFavorId) {
+        lines.push({
+            accountId: ivaAFavorId,
+            debit: 0,
+            credit: ivaFavorAnteriorAplicado || 0,
+            description: 'Aplicacion IVA a favor anterior',
+        })
+    }
+
     // Saldo final
-    if (saldo > 0 && ivaAPagarId) {
+    if ((ivaAPagar || 0) > 0 && ivaAPagarId) {
         // A pagar (pasivo)
         lines.push({
             accountId: ivaAPagarId,
             debit: 0,
-            credit: saldo,
+            credit: ivaAPagar || 0,
             description: 'IVA a pagar del periodo',
         })
-    } else if (saldo < 0 && ivaAFavorId) {
+    } else if ((ivaAFavorDelMes || 0) > 0 && ivaAFavorId) {
         // A favor (activo)
         lines.push({
             accountId: ivaAFavorId,
-            debit: Math.abs(saldo),
+            debit: ivaAFavorDelMes || 0,
             credit: 0,
             description: 'IVA saldo a favor',
         })

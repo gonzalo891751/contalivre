@@ -32,6 +32,7 @@ import {
 import { useTaxClosure } from '../../hooks/useTaxClosure'
 import { useTaxNotifications } from '../../hooks/useTaxNotifications'
 import { db } from '../../storage/db'
+import { repairTaxAccounts } from '../../storage'
 import { listAllTaxClosures, getTaxClosure } from '../../storage/impuestos'
 import { getLocalDateISO } from '../../storage/entries'
 import type {
@@ -528,6 +529,10 @@ interface IVATabRIProps {
     cf: number
     pagosACuenta: number
     saldo: number
+    ivaFavorAnterior?: number
+    ivaFavorAnteriorDisponible?: boolean
+    posicionMesSinArrastre?: number
+    posicionMesConArrastre?: number
     alicuotas: IVAAlicuotaDetail[]
     onGenerateEntry: () => void
     isGenerating: boolean
@@ -535,8 +540,27 @@ interface IVATabRIProps {
     onPayNow?: (card: DueDateCard) => void
 }
 
-function IVATabRI({ df, cf, pagosACuenta, saldo, alicuotas, onGenerateEntry, isGenerating, isLocked }: IVATabRIProps) {
+function IVATabRI({
+    df,
+    cf,
+    pagosACuenta,
+    saldo,
+    ivaFavorAnterior,
+    ivaFavorAnteriorDisponible,
+    posicionMesSinArrastre,
+    posicionMesConArrastre,
+    alicuotas,
+    onGenerateEntry,
+    isGenerating,
+    isLocked,
+}: IVATabRIProps) {
     const dfChange = df > 0 ? '+12%' : ''
+    const hasCarryInfo = ivaFavorAnteriorDisponible !== undefined
+    const isCarryAvailable = ivaFavorAnteriorDisponible === true
+    const carryValue = isCarryAvailable ? (ivaFavorAnterior || 0) : 0
+    const rawPosition = posicionMesSinArrastre ?? saldo
+    const finalPosition = posicionMesConArrastre ?? saldo
+    const saldoTecnicoTotal = rawPosition + pagosACuenta
 
     return (
         <div className="space-y-6">
@@ -572,14 +596,14 @@ function IVATabRI({ df, cf, pagosACuenta, saldo, alicuotas, onGenerateEntry, isG
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 relative overflow-hidden group">
                     <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-emerald-500 opacity-5 group-hover:opacity-10 transition-opacity" />
                     <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-2">
-                        Posicion Mensual
+                        Posicion Mensual (con arrastre)
                     </p>
                     <div className="flex flex-col">
-                        <span className={`text-2xl font-bold font-mono ${saldo >= 0 ? 'text-blue-600' : 'text-emerald-600'}`}>
-                            {formatCurrency(Math.abs(saldo))}
+                        <span className={`text-2xl font-bold font-mono ${finalPosition >= 0 ? 'text-blue-600' : 'text-emerald-600'}`}>
+                            {formatCurrency(Math.abs(finalPosition))}
                         </span>
                         <span className="text-xs text-slate-500 font-medium">
-                            {saldo >= 0 ? 'A Pagar' : 'A Favor'}
+                            {finalPosition >= 0 ? 'A Pagar' : 'A Favor'}
                         </span>
                     </div>
                     <button
@@ -591,6 +615,39 @@ function IVATabRI({ df, cf, pagosACuenta, saldo, alicuotas, onGenerateEntry, isG
                         <MagicWand size={16} weight="bold" />
                         Generar asiento
                     </button>
+                </div>
+            </div>
+
+            {/* Arrastre */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Saldo a favor anterior (arrastre)
+                    </p>
+                    <div className="flex items-baseline gap-2">
+                        <span className="text-lg font-bold text-slate-900 font-mono">
+                            {isCarryAvailable ? formatCurrency(carryValue) : '—'}
+                        </span>
+                        {!isCarryAvailable && hasCarryInfo && (
+                            <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full font-medium">
+                                Mes anterior no cerrado
+                            </span>
+                        )}
+                    </div>
+                </div>
+
+                <div className="bg-white border border-slate-100 rounded-xl p-4">
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Posicion del mes (sin arrastre)
+                    </p>
+                    <div className="flex flex-col">
+                        <span className={`text-lg font-bold font-mono ${rawPosition >= 0 ? 'text-slate-900' : 'text-emerald-600'}`}>
+                            {formatCurrency(Math.abs(rawPosition))}
+                        </span>
+                        <span className="text-xs text-slate-500 font-medium">
+                            {rawPosition >= 0 ? 'A Pagar' : 'A Favor'}
+                        </span>
+                    </div>
                 </div>
             </div>
 
@@ -656,7 +713,7 @@ function IVATabRI({ df, cf, pagosACuenta, saldo, alicuotas, onGenerateEntry, isG
                                     <td className="px-6 py-3 text-right">-</td>
                                     <td className="px-6 py-3 text-right text-blue-600">{formatCurrency(df)}</td>
                                     <td className="px-6 py-3 text-right text-emerald-600">{formatCurrency(cf)}</td>
-                                    <td className="px-6 py-3 text-right text-slate-900">{formatCurrency(saldo + pagosACuenta)}</td>
+                                    <td className="px-6 py-3 text-right text-slate-900">{formatCurrency(saldoTecnicoTotal)}</td>
                                 </tr>
                             </tfoot>
                         )}
@@ -1896,7 +1953,16 @@ interface TaxSettlementModalProps {
     registerSettlement: (
         obligation: TaxSettlementObligation,
         payload: RegisterTaxPaymentInput
-    ) => Promise<{ success: boolean; error?: string; missingAccountLabel?: string; entryId?: string }>
+    ) => Promise<{
+        success: boolean
+        error?: string
+        missingAccountLabel?: string
+        missingAccountCode?: string
+        missingMappingKey?: string
+        entryId?: string
+    }>
+    onAccountsReload: () => Promise<void>
+    onGoToAccounts: () => void
 }
 
 function TaxSettlementModal({
@@ -1911,6 +1977,8 @@ function TaxSettlementModal({
     onSaved,
     buildPreview,
     registerSettlement,
+    onAccountsReload,
+    onGoToAccounts,
 }: TaxSettlementModalProps) {
     const postableAccounts = accounts.filter(acc => !acc.isHeader)
     const defaultPaymentAccountId = useMemo(() => {
@@ -1930,8 +1998,12 @@ function TaxSettlementModal({
     const [previewEntry, setPreviewEntry] = useState<Omit<JournalEntry, 'id'> | null>(null)
     const [previewError, setPreviewError] = useState<string | null>(null)
     const [missingAccountLabel, setMissingAccountLabel] = useState<string | null>(null)
+    const [missingAccountCode, setMissingAccountCode] = useState<string | null>(null)
+    const [missingMappingKey, setMissingMappingKey] = useState<string | null>(null)
     const [isSaving, setIsSaving] = useState(false)
+    const [isRepairingAccounts, setIsRepairingAccounts] = useState(false)
     const [dateLock, setDateLock] = useState<{ locked: boolean; periodKey: string | null }>({ locked: false, periodKey: null })
+    const [previewNonce, setPreviewNonce] = useState(0)
 
     const selectedObligation = useMemo(() => {
         return obligations.find(o => o.id === obligationId) || null
@@ -1977,6 +2049,9 @@ function TaxSettlementModal({
         setPreviewEntry(null)
         setPreviewError(null)
         setMissingAccountLabel(null)
+        setMissingAccountCode(null)
+        setMissingMappingKey(null)
+        setPreviewNonce(0)
     }, [open, selectedObligationId, obligations, defaultPaymentAccountId])
 
     useEffect(() => {
@@ -2019,10 +2094,12 @@ function TaxSettlementModal({
             setPreviewEntry(result.entry || null)
             setPreviewError(result.error || null)
             setMissingAccountLabel(result.missingAccountLabel || null)
+            setMissingAccountCode(result.missingAccountCode || null)
+            setMissingMappingKey(result.missingMappingKey || null)
         })
 
         return () => { active = false }
-    }, [open, selectedObligation, paidAt, method, reference, amount, splits, obligationAccountId, buildPreview])
+    }, [open, selectedObligation, paidAt, method, reference, amount, splits, obligationAccountId, buildPreview, previewNonce])
 
     useEffect(() => {
         if (splits.length === 1) {
@@ -2086,6 +2163,21 @@ function TaxSettlementModal({
         } else {
             setPreviewError(result.error || 'No se pudo registrar el movimiento.')
             setMissingAccountLabel(result.missingAccountLabel || null)
+            setMissingAccountCode(result.missingAccountCode || null)
+            setMissingMappingKey(result.missingMappingKey || null)
+        }
+    }
+
+    const handleRepairAccounts = async () => {
+        setIsRepairingAccounts(true)
+        try {
+            await repairTaxAccounts()
+            await onAccountsReload()
+            setPreviewNonce(prev => prev + 1)
+        } catch (error) {
+            console.error('Error repairing tax accounts:', error)
+        } finally {
+            setIsRepairingAccounts(false)
         }
     }
 
@@ -2210,8 +2302,31 @@ function TaxSettlementModal({
                         )}
 
                         {missingAccountLabel && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
-                                No se encontro la cuenta "{missingAccountLabel}". Seleccionala manualmente para continuar.
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700 space-y-2">
+                                <p>
+                                    No se encontro la cuenta "{missingAccountLabel}".
+                                    {missingAccountCode ? ` Codigo esperado ${missingAccountCode}.` : ''}
+                                    {missingMappingKey ? ` Mapping ${missingMappingKey}.` : ''}
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleRepairAccounts}
+                                        disabled={isRepairingAccounts}
+                                        className="px-3 py-1.5 rounded border border-amber-200 text-amber-700 bg-white text-xs font-semibold hover:bg-amber-50 disabled:opacity-50 flex items-center gap-1.5"
+                                    >
+                                        <ArrowClockwise size={14} />
+                                        {isRepairingAccounts ? 'Reparando...' : 'Reparar cuentas fiscales'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={onGoToAccounts}
+                                        className="px-3 py-1.5 rounded border border-slate-200 text-slate-600 bg-white text-xs font-semibold hover:bg-slate-50 flex items-center gap-1.5"
+                                    >
+                                        <ArrowLeft size={14} />
+                                        Ir a Plan de Cuentas
+                                    </button>
+                                </div>
                             </div>
                         )}
 
@@ -2507,20 +2622,21 @@ function ImpuestosPageContent() {
     const [paymentHistoryRows, setPaymentHistoryRows] = useState<Array<{ payment: TaxPaymentLink; entry?: JournalEntry | null }>>([])
     const [pendingPreselectId, setPendingPreselectId] = useState<string | null>(null)
 
-    useEffect(() => {
-        async function loadAccounts() {
-            try {
-                const accounts = await db.accounts.toArray()
-                const map = new Map<string, string>()
-                accounts.forEach((a: { id: string; name: string }) => map.set(a.id, a.name))
-                setAccounts(accounts)
-                setAccountsMap(map)
-            } catch (error) {
-                console.error('Error loading accounts for ImpuestosPage:', error)
-            }
+    const reloadAccounts = useCallback(async () => {
+        try {
+            const accounts = await db.accounts.toArray()
+            const map = new Map<string, string>()
+            accounts.forEach((a: { id: string; name: string }) => map.set(a.id, a.name))
+            setAccounts(accounts)
+            setAccountsMap(map)
+        } catch (error) {
+            console.error('Error loading accounts for ImpuestosPage:', error)
         }
-        loadAccounts()
     }, [])
+
+    useEffect(() => {
+        reloadAccounts()
+    }, [reloadAccounts])
 
     useEffect(() => {
         let active = true
@@ -3012,6 +3128,10 @@ function ImpuestosPageContent() {
                                     cf={ivaTotals?.creditoFiscal || 0}
                                     pagosACuenta={ivaTotals?.pagosACuenta || 0}
                                     saldo={ivaTotals?.saldo || 0}
+                                    ivaFavorAnterior={ivaTotals?.ivaFavorAnterior}
+                                    ivaFavorAnteriorDisponible={ivaTotals?.ivaFavorAnteriorDisponible}
+                                    posicionMesSinArrastre={ivaTotals?.posicionMesSinArrastre}
+                                    posicionMesConArrastre={ivaTotals?.posicionMesConArrastre}
                                     alicuotas={ivaByAlicuota}
                                     onGenerateEntry={() => handleGenerateEntry('iva')}
                                     isGenerating={isGenerating}
@@ -3135,6 +3255,8 @@ function ImpuestosPageContent() {
                 onSaved={handlePaymentSaved}
                 buildPreview={buildSettlementPreview}
                 registerSettlement={registerTaxSettlement}
+                onAccountsReload={reloadAccounts}
+                onGoToAccounts={() => navigate('/cuentas')}
             />
 
             <PaymentHistoryModal

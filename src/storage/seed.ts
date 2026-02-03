@@ -491,6 +491,58 @@ export async function repairDefaultFxAccounts(): Promise<void> {
 }
 
 /**
+ * Asegura que existan cuentas fiscales basicas (IVA/Ret/Per).
+ * Idempotente y seguro (no borra datos).
+ */
+export async function repairTaxAccounts(): Promise<void> {
+    const accounts = await db.accounts.toArray()
+
+    const findByCode = (code: string) => accounts.find(a => a.code === code)
+    const findByExactName = (name: string) => accounts.find(a => a.name === name)
+
+    const requiredCodes = [
+        '2.1.03.03', // Retenciones a depositar
+        '2.1.03.04', // IVA a pagar
+        '2.1.03.06', // Percepciones IVA a terceros
+        '1.1.03.06', // IVA a favor
+        '1.1.03.07', // Retenciones IVA de terceros
+        '1.1.03.08', // Percepciones IVA de terceros
+        '2.1.03.01', // IVA Debito Fiscal
+        '1.1.03.01', // IVA Credito Fiscal
+    ]
+
+    const seedByCode = new Map(SEED_ACCOUNTS.map(seed => [seed.code, seed]))
+    const codeToId = new Map(accounts.map(account => [account.code, account.id]))
+    const newAccounts: Account[] = []
+
+    const ensureAccount = (code: string) => {
+        if (codeToId.has(code)) return
+        const seed = seedByCode.get(code)
+        if (!seed) return
+
+        const existing = findByCode(seed.code) || findByExactName(seed.name)
+        if (existing) {
+            codeToId.set(seed.code, existing.id)
+            return
+        }
+
+        if (seed.parentCode) {
+            ensureAccount(seed.parentCode)
+        }
+
+        const account = seedToAccount(seed, codeToId)
+        codeToId.set(seed.code, account.id)
+        newAccounts.push(account)
+    }
+
+    requiredCodes.forEach(ensureAccount)
+
+    if (newAccounts.length > 0) {
+        await db.accounts.bulkAdd(newAccounts)
+    }
+}
+
+/**
  * Repara cuentas de Patrimonio Neto (3.3.04.01) para que sean isContra: true.
  * Esto corrige el problema donde los retiros suman al PN en lugar de restar.
  */

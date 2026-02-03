@@ -49,3 +49,42 @@ export function computeIVATotalsFromEntries(
         percepcionesSufridas,
     }
 }
+
+export function applyIVACarry(
+    baseTotals: IVATotals,
+    options?: { carryIvaFavor?: number; carryAvailable?: boolean }
+): IVATotals {
+    const carryAvailable = options?.carryAvailable ?? false
+    const rawCarry = options?.carryIvaFavor ?? 0
+    const carry = carryAvailable ? Math.max(0, rawCarry) : 0
+
+    const posicionMesSinArrastre = baseTotals.saldo
+    const raw = posicionMesSinArrastre
+
+    let ivaAPagar = 0
+    let ivaAFavorDelMes = 0
+    let ivaFavorAnteriorAplicado = 0
+
+    if (raw >= 0) {
+        ivaFavorAnteriorAplicado = Math.min(carry, raw)
+        ivaAPagar = raw - ivaFavorAnteriorAplicado
+    } else {
+        ivaAFavorDelMes = Math.abs(raw)
+    }
+
+    const ivaAFavorFinal = (carry - ivaFavorAnteriorAplicado) + ivaAFavorDelMes
+    const posicionMesConArrastre = ivaAPagar > 0 ? ivaAPagar : -ivaAFavorFinal
+
+    return {
+        ...baseTotals,
+        saldo: posicionMesConArrastre,
+        ivaFavorAnterior: carry,
+        ivaFavorAnteriorAplicado,
+        ivaFavorAnteriorDisponible: carryAvailable,
+        posicionMesSinArrastre,
+        posicionMesConArrastre,
+        ivaAFavorDelMes,
+        ivaAFavorFinal,
+        ivaAPagar,
+    }
+}

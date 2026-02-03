@@ -138,6 +138,14 @@ export interface IVATotals {
     saldo: number             // DF - CF - pagos a cuenta (positive = a pagar)
     retencionesSufridas?: number
     percepcionesSufridas?: number
+    ivaFavorAnterior?: number
+    ivaFavorAnteriorAplicado?: number
+    ivaFavorAnteriorDisponible?: boolean
+    posicionMesSinArrastre?: number
+    posicionMesConArrastre?: number
+    ivaAFavorDelMes?: number
+    ivaAFavorFinal?: number
+    ivaAPagar?: number
 }
 
 /**

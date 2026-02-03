@@ -2,6 +2,76 @@
 
 ---
 
+## CHECKPOINT #IMPUESTOS-ARRASTRE-IVA-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Arrastre IVA
+
+### Objetivo
+Implementar arrastre de IVA a favor del mes anterior solo si el mes anterior esta CERRADO, con nuevo desglose en totales y reflejo en asiento.
+
+### Cambios clave
+1. **IVATotals extendido**: nuevos campos de arrastre y posiciones con/sin arrastre.
+2. **Calculo con carry**: applyIVACarry + lectura de cierre previo en hook; saldo final usa arrastre cuando aplica.
+3. **Asiento IVA**: linea de credito a IVA a favor por carry aplicado; IVA a pagar / IVA a favor del mes segun corresponda.
+
+### Archivos tocados
+- src/core/impuestos/types.ts
+- src/core/impuestos/iva.ts
+- src/core/impuestos/iva.test.ts
+- src/storage/impuestos.ts
+- src/hooks/useTaxClosure.ts
+- src/pages/Operaciones/ImpuestosPage.tsx
+- tests/repro_impuestos.test.ts
+
+### Tests
+- No ejecutados.
+
+---
+
+## CHECKPOINT #IMPUESTOS-PAGOS-SELF-HEAL-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Self-healing cuentas fiscales
+
+### Objetivo
+Crear self-healing de cuentas fiscales faltantes y fallback por codigo para evitar bloqueo en Pagos.
+
+### Cambios clave
+1. **repairTaxAccounts**: crea cuentas fiscales basicas si faltan (sin borrar datos).
+2. **Fallback por codigo**: resolveTaxLiabilityAccountId usa mapping y luego codigo default.
+3. **Errores con detalle**: preview incluye codigo esperado y mapping faltante.
+
+### Archivos tocados
+- src/storage/seed.ts
+- src/storage/index.ts
+- src/ui/Layout/MainLayout.tsx
+- src/storage/impuestos.ts
+- tests/repro_pagos.test.ts
+
+### Tests
+- No ejecutados.
+
+---
+
+## CHECKPOINT #IMPUESTOS-PAGOS-UI-ACCIONABLE-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - UI accionable en Pagos
+
+### Objetivo
+Evitar bloqueo en modal de Pagos cuando faltan cuentas: mostrar error claro, boton de reparacion, y acceso a Plan de Cuentas.
+
+### Cambios clave
+1. **Modal Pagos**: muestra detalle de cuenta faltante, botones "Reparar cuentas fiscales" y "Ir a Plan de Cuentas".
+2. **Reintento preview**: al reparar cuentas, recarga cuentas y refresca preview.
+3. **UI IVA**: muestra saldo a favor anterior y posicion del mes sin arrastre.
+
+### Archivos tocados
+- src/pages/Operaciones/ImpuestosPage.tsx
+
+### Tests
+- No ejecutados.
+
+---
+
 ## CHECKPOINT #ROLLUP-HELPER-2026-02-03
 **Fecha:** 2026-02-03
 **Estado:** COMPLETADO - Sin integracion UI
@@ -1998,6 +2068,58 @@ npm run build  # PASS
 | Pago de cuota con interes | P2 | Modal especifico para pagos |
 | Conciliacion huerfanos externos | P2 | Detectar asientos manuales que toquen ME |
 | Graficos de tendencia | P3 | Evolucion de cotizaciones |
+
+---
+
+## CHECKPOINT #AUDIT-IMPUESTOS-IVA-PAGOS-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Diagnóstico Finalizado
+
+### Objetivo
+Auditoría técnica del módulo de Impuestos para validar correctitud contable del IVA (arrastre de saldos) y diagnosticar bug en Pagos de retenciones.
+
+### Hallazgos Críticos (GAPS)
+1.  **Arrastre IVA a Favor (P0):** CONFIRMADO COMO FALTANTE. El cálculo mensual (`computeIVATotalsFromEntries`) aísla cada mes y no consulta ni incorpora el saldo a favor del período anterior (`1.1.03.06`). Esto rompe la continuidad de la Cuenta Corriente Fiscal.
+2.  **Bug Pagos (P1):** CONFIRMADO. El error ocurre cuando faltan las cuentas contables para "Retenciones a depositar" (`2.1.03.03`) o "Percepciones a depositar" (`2.1.03.06`). El sistema retorna un error controlado ("Falta cuenta...") que la UI muestra, bloqueando el pago.
+3.  **Configuración:** Faltan mecanismos de reparación automática para asegurar que estas cuentas existan en planes de cuentas antiguos.
+
+### Archivos de Reproducción (Tests)
+*   `tests/repro_impuestos.test.ts`: Demuestra que el cálculo del Mes 2 ignora el saldo a favor del Mes 1.
+*   `tests/repro_pagos.test.ts`: Simula el error de "Falta cuenta" en el flujo de pagos.
+
+### Plan de Acción (Siguientes Pasos)
+1.  **Implementar Arrastre:** Modificar `useTaxClosure` y `calculateIVAFromEntries` para leer el cierre del mes anterior y pasar el saldo inicial.
+2.  **Asiento con Arrastre:** Actualizar la generación del asiento de IVA para acreditar la cuenta `ivaAFavor` si se usa saldo anterior.
+3.  **Hardening Cuentas:** Crear script `repairTaxAccounts` (similar a `repairDefaultFxAccounts`) para asegurar cuentas de pasivo fiscal.
+4.  **UI Pagos:** Mejorar mensaje de error en `TaxSettlementModal` guiando a configuración.
+
+### Documentación
+Ver reporte completo en `docs/AI_AUDIT_IMPUESTOS_IVA.md`.
+
+---
+
+## CHECKPOINT #AUDIT-ESTADOS-ESP-RT9-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Diagnóstico Finalizado
+
+### Objetivo
+Auditoría técnica del módulo de Estados Contables (ESP) y Notas para verificar alineación con RT9 y robustez del cálculo.
+
+### Hallazgos
+1.  **Modelo de Datos:** El uso de `statementGroup` y `section` en las cuentas es correcto y flexible para armar el ESP.
+2.  **Riesgo de Huérfanas:** Las cuentas con saldo pero sin `statementGroup` se excluyen silenciosamente, desbalanceando el reporte sin aviso claro.
+3.  **Rubros Faltantes:** Faltan `PROVISIONS` (Previsiones de Pasivo) y `OTHER_ASSETS` para cumplimiento total RT9.
+4.  **Comparativo:** Es manual (importación). Falta opción de cálculo automático histórico.
+
+### Entregables
+- Reporte detallado en: `docs/audits/AUDIT_ESTADOS_ESP_RT9.md`
+
+### Pendientes (Next Steps)
+- [ ] **P0:** Implementar alerta de "Cuentas sin rubro asignado" en la pantalla de Balance.
+- [ ] **P1:** Agregar `PROVISIONS` y `OTHER_ASSETS` a `StatementGroup` y al cálculo.
+- [ ] **P2:** Implementar cálculo automático de comparativo (año anterior) si existen datos.
+
+
 
 ---
 
