@@ -20,7 +20,10 @@ import type {
 import type {
     TaxClosePeriod,
     TaxDueNotification,
+    TaxObligationRecord,
+    TaxPaymentLink,
 } from '../core/impuestos/types'
+import type { FixedAsset, FixedAssetEvent } from '../core/fixedAssets/types'
 
 /**
  * Configuración de la aplicación
@@ -66,6 +69,11 @@ class ContableDatabase extends Dexie {
     // Impuestos module
     taxClosures!: EntityTable<TaxClosePeriod, 'id'>
     taxDueNotifications!: EntityTable<TaxDueNotification, 'id'>
+    taxObligations!: EntityTable<TaxObligationRecord, 'id'>
+    taxPayments!: EntityTable<TaxPaymentLink, 'id'>
+    // Fixed Assets (Bienes de Uso) module
+    fixedAssets!: EntityTable<FixedAsset, 'id'>
+    fixedAssetEvents!: EntityTable<FixedAssetEvent, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -225,6 +233,85 @@ class ContableDatabase extends Dexie {
             fxRatesCache: 'id',
             taxClosures: 'id, month, regime, status',
             taxDueNotifications: 'id, obligation, month, dueDate, seen',
+        })
+
+        // Version 10: Fixed Assets (Bienes de Uso) module
+        this.version(10).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo, sourceModule, sourceId',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxDebts: 'id, currency, creditor, createdAt, status, periodId, accountId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
+            taxClosures: 'id, month, regime, status',
+            taxDueNotifications: 'id, obligation, month, dueDate, seen',
+            fixedAssets: 'id, periodId, category, status, accountId, contraAccountId',
+        })
+
+        // Version 11: Fixed Asset Events (Mejoras/Bajas/Revalúo)
+        this.version(11).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo, sourceModule, sourceId',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxDebts: 'id, currency, creditor, createdAt, status, periodId, accountId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
+            taxClosures: 'id, month, regime, status',
+            taxDueNotifications: 'id, obligation, month, dueDate, seen',
+            fixedAssets: 'id, periodId, category, status, accountId, contraAccountId',
+            fixedAssetEvents: 'id, periodId, assetId, date, type',
+        })
+
+        // Version 12: Tax obligations and payments
+        this.version(12).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo, sourceModule, sourceId',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxDebts: 'id, currency, creditor, createdAt, status, periodId, accountId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
+            taxClosures: 'id, month, regime, status',
+            taxDueNotifications: 'id, obligation, month, dueDate, seen',
+            taxObligations: 'id, &uniqueKey, taxType, taxPeriod, jurisdiction, status, dueDate',
+            taxPayments: 'id, obligationId, journalEntryId, paidAt',
+            fixedAssets: 'id, periodId, category, status, accountId, contraAccountId',
+            fixedAssetEvents: 'id, periodId, assetId, date, type',
         })
     }
 }

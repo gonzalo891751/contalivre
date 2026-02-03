@@ -13,6 +13,7 @@ import AmortizacionesPage from './pages/Planillas/AmortizacionesPage'
 import InventarioBienesPage from './pages/Planillas/InventarioBienesPage'
 import MonedaExtranjeraPage from './pages/Operaciones/MonedaExtranjeraPage'
 import ImpuestosPage from './pages/Operaciones/ImpuestosPage'
+import BienesUsoPage from './pages/Operaciones/BienesUsoPage'
 import ConciliacionesPage from './pages/Planillas/Conciliaciones/ConciliacionesPage'
 import CierreValuacionPage from './pages/Planillas/CierreValuacionPage'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
@@ -43,6 +44,7 @@ function App() {
                 <Route path="/operaciones/inventario" element={<InventarioBienesPage />} />
                 <Route path="/operaciones/moneda-extranjera" element={<MonedaExtranjeraPage />} />
                 <Route path="/operaciones/impuestos" element={<ImpuestosPage />} />
+                <Route path="/operaciones/bienes-uso" element={<BienesUsoPage />} />
                 <Route path="/cuentas" element={<Cuentas />} />
                 <Route path="/asientos" element={<Asientos />} />
                 <Route path="/mayor" element={<Mayor />} />

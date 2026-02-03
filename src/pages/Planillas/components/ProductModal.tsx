@@ -6,8 +6,10 @@ import type {
     ProductCategory,
     IVARate,
 } from '../../../core/inventario/types'
+import type { Account } from '../../../core/models'
 import { generateAutoSKU } from '../../../core/inventario/types'
 import { getAllBienesSKUs } from '../../../storage'
+import AccountSearchSelect from '../../../ui/AccountSearchSelect'
 
 interface ProductModalProps {
     product: BienesProduct | null // null = new product
@@ -15,6 +17,8 @@ interface ProductModalProps {
     onClose: () => void
     /** Default value for "generate opening journal" toggle (from global settings) */
     defaultAutoJournal?: boolean
+    accounts?: Account[]
+    defaultOpeningContraId?: string
 }
 
 const UNIT_OPTIONS: { value: UnidadMedida; label: string }[] = [
@@ -36,7 +40,14 @@ const IVA_OPTIONS: { value: IVARate; label: string }[] = [
     { value: 0, label: 'Exento' },
 ]
 
-export default function ProductModal({ product, onSave, onClose, defaultAutoJournal = true }: ProductModalProps) {
+export default function ProductModal({
+    product,
+    onSave,
+    onClose,
+    defaultAutoJournal = true,
+    accounts = [],
+    defaultOpeningContraId,
+}: ProductModalProps) {
     const isEditing = !!product
 
     const [formData, setFormData] = useState({
@@ -50,6 +61,7 @@ export default function ProductModal({ product, onSave, onClose, defaultAutoJour
         openingQty: 0,
         openingUnitCost: 0,
         openingDate: new Date().toISOString().split('T')[0],
+        openingContraAccountId: defaultOpeningContraId || '',
     })
     const [generateOpeningJournal, setGenerateOpeningJournal] = useState(defaultAutoJournal)
 
@@ -76,9 +88,16 @@ export default function ProductModal({ product, onSave, onClose, defaultAutoJour
                 openingQty: product.openingQty,
                 openingUnitCost: product.openingUnitCost,
                 openingDate: product.openingDate,
+                openingContraAccountId: product.openingContraAccountId || '',
             })
         }
     }, [product])
+
+    useEffect(() => {
+        if (!isEditing && defaultOpeningContraId && !formData.openingContraAccountId) {
+            setFormData(prev => ({ ...prev, openingContraAccountId: defaultOpeningContraId }))
+        }
+    }, [defaultOpeningContraId, formData.openingContraAccountId, isEditing])
 
     // Auto-generate SKU when name changes (only for new products)
     useEffect(() => {
@@ -106,14 +125,24 @@ export default function ProductModal({ product, onSave, onClose, defaultAutoJour
             setError('El SKU es obligatorio')
             return
         }
+        if (formData.openingQty < 0) {
+            setError('La existencia inicial no puede ser negativa')
+            return
+        }
 
         setIsSaving(true)
         try {
             const hasOpening = !isEditing && formData.openingQty > 0 && formData.openingUnitCost > 0
+            if (hasOpening && generateOpeningJournal && !formData.openingContraAccountId) {
+                setError('Selecciona la cuenta contrapartida para el inventario inicial')
+                setIsSaving(false)
+                return
+            }
             await onSave(
                 {
                     ...formData,
                     description: formData.description || undefined,
+                    openingContraAccountId: formData.openingContraAccountId || undefined,
                 },
                 hasOpening ? { generateOpeningJournal } : undefined
             )
@@ -326,6 +355,24 @@ export default function ProductModal({ product, onSave, onClose, defaultAutoJour
                             </div>
 
                             {formData.openingQty > 0 && formData.openingUnitCost > 0 && (
+                                <div className="mt-4">
+                                    <label className="block text-xs font-semibold text-slate-600 mb-1">
+                                        Contrapartida (Patrimonio Neto)
+                                    </label>
+                                    <AccountSearchSelect
+                                        accounts={accounts}
+                                        value={formData.openingContraAccountId}
+                                        onChange={(accountId) => handleChange('openingContraAccountId', accountId)}
+                                        placeholder="Capital Social (3.1.01)"
+                                        filter={(acc) => (acc.kind === 'EQUITY' || acc.type === 'PatrimonioNeto') && !acc.isHeader}
+                                    />
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        Por defecto: Capital Social si existe. PodÃ©s elegir otra cuenta de PN.
+                                    </p>
+                                </div>
+                            )}
+
+                            {formData.openingQty > 0 && formData.openingUnitCost > 0 && (
                                 <label className="flex items-center gap-2 cursor-pointer mt-3">
                                     <input
                                         type="checkbox"
@@ -334,7 +381,7 @@ export default function ProductModal({ product, onSave, onClose, defaultAutoJour
                                         className="accent-blue-600 rounded"
                                     />
                                     <span className="text-xs text-slate-600">
-                                        Generar asiento por inventario inicial (Mercaderias a Apertura Inventario)
+                                        Generar asiento por inventario inicial (Mercaderias a Contrapartida PN)
                                     </span>
                                 </label>
                             )}

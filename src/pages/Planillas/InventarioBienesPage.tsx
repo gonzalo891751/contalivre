@@ -54,10 +54,12 @@ import {
     saveBienesSettings,
     deleteBienesMovementWithJournal,
     reconcileMovementJournalLinks,
+    repairInitialStockMovements,
     clearBienesPeriodData,
     generatePeriodicClosingJournalEntries,
     getAccountBalanceByCode,
 } from '../../storage'
+import { resolveOpeningEquityAccountId } from '../../storage/openingEquity'
 import { db } from '../../storage/db'
 import {
     calculateAllValuations,
@@ -330,6 +332,7 @@ export default function InventarioBienesPage() {
         try {
             setIsLoading(true)
             await reconcileMovementJournalLinks(periodId)
+            const repairResult = await repairInitialStockMovements(periodId)
             const [loadedSettings, loadedProducts, loadedMovements] = await Promise.all([
                 loadBienesSettings(),
                 getAllBienesProducts(periodId),
@@ -338,6 +341,9 @@ export default function InventarioBienesPage() {
             setSettings(loadedSettings)
             setProducts(loadedProducts)
             setMovements(loadedMovements)
+            if (repairResult.fixed > 0) {
+                showToast(`Existencias iniciales reparadas: ${repairResult.fixed}`, 'success')
+            }
         } catch (error) {
             console.error('Error loading bienes data:', error)
             showToast('Error al cargar datos', 'error')
@@ -1604,6 +1610,13 @@ export default function InventarioBienesPage() {
         return mapped?.id || findAccountByCodeOrName('4.3.02', ['Diferencia de inventario'])
     }, [findAccountByCodeOrName, resolveAccountByIdOrCode, settings])
 
+    const defaultOpeningContraId = useMemo(() => {
+        return resolveOpeningEquityAccountId(
+            accounts || [],
+            settings?.accountMappings?.aperturaInventario || null
+        )
+    }, [accounts, settings])
+
     const getEntryTotal = useCallback((entry: JournalEntry) => {
         const debit = entry.lines.reduce((sum, line) => sum + (line.debit || 0), 0)
         const credit = entry.lines.reduce((sum, line) => sum + (line.credit || 0), 0)
@@ -2553,6 +2566,7 @@ export default function InventarioBienesPage() {
                                                 const isEntry = (mov.type === 'PURCHASE' && !mov.isDevolucion)
                                                     || (mov.type === 'SALE' && mov.isDevolucion)
                                                     || (mov.type === 'ADJUSTMENT' && mov.quantity > 0)
+                                                    || mov.type === 'INITIAL_STOCK'
                                                 const journalStatus = mov.journalStatus || ((mov.linkedJournalEntryIds || []).length > 0 ? 'generated' : 'none')
                                                 const hasEntries = (mov.linkedJournalEntryIds || []).length > 0
                                                 const statusConfig: Record<string, { label: string; className: string }> = {
@@ -3188,6 +3202,8 @@ export default function InventarioBienesPage() {
                         setEditingProduct(null)
                     }}
                     defaultAutoJournal={settings?.autoJournalEntries ?? true}
+                    accounts={accounts || []}
+                    defaultOpeningContraId={defaultOpeningContraId || undefined}
                 />
             )}
 

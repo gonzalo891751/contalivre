@@ -2,7 +2,7 @@ import { useMemo, useState, useRef, useCallback, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
 import { computeLedger } from '../core/ledger'
-import { computeTrialBalance } from '../core/balance'
+import { computeRollupTrialBalance } from '../core/balance'
 import { computeStatements } from '../core/statements'
 import { excludeClosingEntries } from '../utils/resultsStatement'
 import { exportElementToPdf } from '../utils/exportPdf'
@@ -294,7 +294,7 @@ export default function Estados() {
 
         const entriesWithoutClosing = excludeClosingEntries(entries, accounts)
         const ledger = computeLedger(entriesWithoutClosing, accounts)
-        const trialBalance = computeTrialBalance(ledger, accounts)
+        const trialBalance = computeRollupTrialBalance(ledger, accounts)
         return computeStatements(trialBalance, accounts)
     }, [accounts, entries])
 

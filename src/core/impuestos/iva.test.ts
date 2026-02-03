@@ -55,4 +55,27 @@ describe('computeIVATotalsFromEntries', () => {
         expect(totals.pagosACuenta).toBe(1500)
         expect(totals.saldo).toBe(13700)
     })
+
+    it('calculates IVA DF neto as credit minus debit', () => {
+        const entries: JournalEntry[] = [
+            {
+                id: 'e1',
+                date: '2025-01-05',
+                memo: 'Venta',
+                lines: [{ accountId: 'ivaDF', debit: 0, credit: 30240 }],
+            },
+            {
+                id: 'e2',
+                date: '2025-01-12',
+                memo: 'Devolucion',
+                lines: [{ accountId: 'ivaDF', debit: 1890, credit: 0 }],
+            },
+        ]
+
+        const totals = computeIVATotalsFromEntries(entries, {
+            ivaDFId: 'ivaDF',
+        })
+
+        expect(totals.debitoFiscal).toBe(28350)
+    })
 })

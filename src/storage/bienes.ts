@@ -24,9 +24,10 @@ import {
     calculateProductValuation,
     canChangeCostingMethod,
 } from '../core/inventario/costing'
-import { createEntry } from './entries'
+import { createEntry, updateEntry } from './entries'
+import { resolveOpeningEquityAccountId } from './openingEquity'
 
-const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
+export const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
     mercaderias: { code: '1.1.04.01', names: ['Mercaderias'] },
     ivaCF: { code: '1.1.03.01', names: ['IVA Credito Fiscal'] },
     ivaDF: { code: '2.1.03.01', names: ['IVA Debito Fiscal'] },
@@ -63,10 +64,13 @@ const ACCOUNT_CODE_ALIASES: Partial<Record<keyof typeof ACCOUNT_FALLBACKS, { cod
     devolVentas: { codes: ['4.1.04'], nameAny: ['devol'] },
 }
 
-const normalizeText = (value: string) => value
+export const normalizeText = (value: string) => value
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+
+const buildInventoryOpeningExternalId = (periodId?: string, productId?: string) =>
+    `INV_OPENING:${periodId || 'unknown'}:${productId || 'unknown'}`
 
 const matchesPeriod = (itemPeriodId: string | undefined, periodId?: string) => {
     if (!periodId) return true
@@ -76,12 +80,12 @@ const matchesPeriod = (itemPeriodId: string | undefined, periodId?: string) => {
     return effectiveItemPeriod === periodId
 }
 
-const resolveAccountByIdOrCode = (accounts: Account[], idOrCode?: string) => {
+export const resolveAccountByIdOrCode = (accounts: Account[], idOrCode?: string) => {
     if (!idOrCode) return null
     return accounts.find(a => a.id === idOrCode) || accounts.find(a => a.code === idOrCode) || null
 }
 
-const resolveAccountId = (
+export const resolveAccountId = (
     accounts: Account[],
     options: { mappedId?: string | null; code?: string; names?: string[] }
 ): string | null => {
@@ -99,7 +103,7 @@ const resolveAccountId = (
     return null
 }
 
-const resolveMappedAccountId = (
+export const resolveMappedAccountId = (
     accounts: Account[],
     settings: BienesSettings,
     key: AccountMappingKey,
@@ -177,7 +181,7 @@ const resolveCounterpartyAccountId = (
  * Resolve account ID for a TaxLine based on taxType, kind, and movement direction.
  * Priority: TaxLine.accountId (explicit) → mapped setting → fallback by code/name
  */
-const resolveTaxLineAccountId = (
+export const resolveTaxLineAccountId = (
     accounts: Account[],
     settings: BienesSettings,
     tax: TaxLine,
@@ -839,16 +843,19 @@ const buildJournalEntriesForMovement = async (
         }
     }
 
-    // P1: EXISTENCIA INICIAL - Genera asiento D Mercaderías / H Apertura Inventario
+    // P1: EXISTENCIA INICIAL - Genera asiento D Mercaderías / H Contrapartida PN
     if (movement.type === 'INITIAL_STOCK') {
         const amount = Math.abs(movement.subtotal || 0)
         if (amount <= 0) {
             return { entries: [], error: 'La existencia inicial no tiene importe para generar asiento.' }
         }
 
-        const aperturaId = resolveMappedAccountId(accounts, settings, 'aperturaInventario', 'aperturaInventario')
+        const aperturaId = resolveOpeningEquityAccountId(
+            accounts,
+            movement.openingContraAccountId || settings.accountMappings?.aperturaInventario || null
+        )
         if (!aperturaId) {
-            return { entries: [], error: 'Falta cuenta contable: Apertura Inventario' }
+            return { entries: [], error: 'Falta cuenta contable: Contrapartida PN' }
         }
 
         pushEntry(
@@ -857,7 +864,11 @@ const buildJournalEntriesForMovement = async (
                 { accountId: mercaderiasId!, debit: amount, credit: 0, description: 'Existencia inicial mercaderias' },
                 { accountId: aperturaId, debit: 0, credit: amount, description: 'Contrapartida apertura inventario' },
             ],
-            { journalRole: 'initial_stock' }
+            {
+                journalRole: 'initial_stock',
+                externalId: buildInventoryOpeningExternalId(movement.periodId, movement.productId),
+                openingContraAccountId: aperturaId,
+            }
         )
     }
 
@@ -935,6 +946,77 @@ const stripInventoryLinkFromEntry = (entry: JournalEntry, movementId: string): J
         sourceType: undefined,
         metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     }
+}
+
+/**
+ * Repair negative INITIAL_STOCK movements (soft migration, idempotent).
+ * Fixes quantity sign and updates auto-generated opening entries if present.
+ */
+export async function repairInitialStockMovements(
+    periodId?: string
+): Promise<{ fixed: number; entriesUpdated: number }> {
+    const allMovements = await db.bienesMovements.toArray()
+    const scoped = periodId
+        ? allMovements.filter(movement => matchesPeriod(movement.periodId, periodId))
+        : allMovements
+    const toFix = scoped.filter(m => m.type === 'INITIAL_STOCK' && m.quantity < 0)
+    if (toFix.length === 0) {
+        return { fixed: 0, entriesUpdated: 0 }
+    }
+
+    const entryIds = new Set<string>()
+    toFix.forEach(m => m.linkedJournalEntryIds?.forEach(id => entryIds.add(id)))
+    const entries = entryIds.size > 0
+        ? await db.entries.where('id').anyOf(Array.from(entryIds)).toArray()
+        : []
+    const entryMap = new Map(entries.map(entry => [entry.id, entry]))
+
+    let entriesUpdated = 0
+    await db.transaction('rw', db.bienesMovements, db.entries, async () => {
+        for (const movement of toFix) {
+            const qty = Math.abs(movement.quantity || 0)
+            const unitCost = movement.unitCost !== undefined ? Math.abs(movement.unitCost) : movement.unitCost
+            const subtotal = unitCost !== undefined ? qty * unitCost : Math.abs(movement.subtotal || 0)
+            const total = unitCost !== undefined ? qty * unitCost : Math.abs(movement.total || 0)
+
+            await db.bienesMovements.update(movement.id, {
+                quantity: qty,
+                unitCost,
+                subtotal,
+                total,
+                updatedAt: new Date().toISOString(),
+            })
+
+            const linkedIds = movement.linkedJournalEntryIds || []
+            if (linkedIds.length === 0) continue
+
+            const linkedEntries = linkedIds
+                .map(id => entryMap.get(id))
+                .filter(Boolean) as JournalEntry[]
+            const autoEntries = linkedEntries.filter(entry =>
+                isAutoGeneratedEntryForMovement(entry, movement.id)
+            )
+
+            const amount = Math.abs(subtotal || total || 0)
+            if (amount <= 0) continue
+
+            for (const entry of autoEntries) {
+                const lines = entry.lines.map(line => {
+                    if (line.debit !== 0) {
+                        return { ...line, debit: amount, credit: 0 }
+                    }
+                    if (line.credit !== 0) {
+                        return { ...line, debit: 0, credit: amount }
+                    }
+                    return line
+                })
+                await updateEntry(entry.id, { lines })
+                entriesUpdated++
+            }
+        }
+    })
+
+    return { fixed: toFix.length, entriesUpdated }
 }
 
 // ========================================
@@ -1038,14 +1120,21 @@ export async function createBienesProduct(
     }
 
     const now = new Date().toISOString()
-    const newProduct: BienesProduct = {
+    const openingQty = Math.abs(product.openingQty || 0)
+    const openingUnitCost = Math.abs(product.openingUnitCost || 0)
+    const normalizedProduct: Omit<BienesProduct, 'id' | 'createdAt' | 'updatedAt'> = {
         ...product,
+        openingQty,
+        openingUnitCost,
+    }
+    const newProduct: BienesProduct = {
+        ...normalizedProduct,
         id: generateInventoryId('bprod'),
         createdAt: now,
         updatedAt: now,
     }
 
-    const hasOpening = product.openingQty > 0 && product.openingUnitCost > 0
+    const hasOpening = openingQty > 0 && openingUnitCost > 0
     const shouldGenerateJournal = hasOpening && options?.generateOpeningJournal
 
     if (!hasOpening || !shouldGenerateJournal) {
@@ -1056,16 +1145,16 @@ export async function createBienesProduct(
 
     // Create initial stock movement + journal entry atomically
     const settings = await loadBienesSettings()
-    const openingAmount = product.openingQty * product.openingUnitCost
+    const openingAmount = openingQty * openingUnitCost
 
     const initialMovement: BienesMovement = {
         id: generateInventoryId('bmov'),
         date: product.openingDate,
         type: 'INITIAL_STOCK',
         productId: newProduct.id,
-        quantity: product.openingQty,
+        quantity: openingQty,
         periodId: product.periodId,
-        unitCost: product.openingUnitCost,
+        unitCost: openingUnitCost,
         ivaRate: 0,
         ivaAmount: 0,
         subtotal: openingAmount,
@@ -1081,18 +1170,22 @@ export async function createBienesProduct(
         updatedAt: now,
     }
 
-    // Build opening journal entry: Debe Mercaderias / Haber Apertura Inventario
+    // Build opening journal entry: Debe Mercaderias / Haber Contrapartida PN
     const allAccounts = await db.accounts.toArray()
     const mercaderiasId = resolveAccountId(allAccounts, {
         mappedId: product.accountMercaderias || settings.accountMappings?.mercaderias || null,
         code: ACCOUNT_FALLBACKS.mercaderias.code,
         names: ACCOUNT_FALLBACKS.mercaderias.names,
     })
-    const aperturaId = resolveMappedAccountId(allAccounts, settings, 'aperturaInventario', 'aperturaInventario')
+    const aperturaId = resolveOpeningEquityAccountId(
+        allAccounts,
+        product.openingContraAccountId || settings.accountMappings?.aperturaInventario || null
+    )
 
     if (!mercaderiasId || !aperturaId) {
-        throw new Error(`Faltan cuentas contables para inventario inicial: ${!mercaderiasId ? 'Mercaderias' : ''} ${!aperturaId ? 'Apertura Inventario' : ''}`.trim())
+        throw new Error(`Faltan cuentas contables para inventario inicial: ${!mercaderiasId ? 'Mercaderias' : ''} ${!aperturaId ? 'Contrapartida PN' : ''}`.trim())
     }
+    initialMovement.openingContraAccountId = aperturaId
 
     const journalEntry: Omit<JournalEntry, 'id'> = {
         date: product.openingDate,
@@ -1113,6 +1206,8 @@ export async function createBienesProduct(
             productId: newProduct.id,
             productName: product.name,
             journalRole: 'opening_stock',
+            externalId: buildInventoryOpeningExternalId(product.periodId, newProduct.id),
+            openingContraAccountId: aperturaId,
         },
     }
 
@@ -1219,6 +1314,20 @@ export async function createBienesMovement(
 ): Promise<BienesMovement> {
     const now = new Date().toISOString()
     const settings = await loadBienesSettings()
+
+    if (movement.type === 'INITIAL_STOCK') {
+        const qty = Math.abs(movement.quantity || 0)
+        const unitCost = movement.unitCost !== undefined ? Math.abs(movement.unitCost) : movement.unitCost
+        const subtotal = unitCost !== undefined ? qty * unitCost : Math.abs(movement.subtotal || 0)
+        const total = unitCost !== undefined ? qty * unitCost : Math.abs(movement.total || 0)
+        movement = {
+            ...movement,
+            quantity: qty,
+            unitCost,
+            subtotal,
+            total,
+        }
+    }
 
     // Calculate costs for exits
     let costUnitAssigned = 0
@@ -1508,6 +1617,17 @@ export async function updateBienesMovementWithJournal(
         ...updates,
         costMethod: settings.costMethod,
         updatedAt: now,
+    }
+
+    if (baseMovement.type === 'INITIAL_STOCK') {
+        const qty = Math.abs(baseMovement.quantity || 0)
+        const unitCost = baseMovement.unitCost !== undefined ? Math.abs(baseMovement.unitCost) : baseMovement.unitCost
+        const subtotal = unitCost !== undefined ? qty * unitCost : Math.abs(baseMovement.subtotal || 0)
+        const total = unitCost !== undefined ? qty * unitCost : Math.abs(baseMovement.total || 0)
+        baseMovement.quantity = qty
+        baseMovement.unitCost = unitCost
+        baseMovement.subtotal = subtotal
+        baseMovement.total = total
     }
 
     const product = await getBienesProductById(baseMovement.productId)

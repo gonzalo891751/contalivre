@@ -11,74 +11,159 @@ import type {
     TaxClosePeriod,
     TaxDueNotification,
     TaxRegime,
-    TaxObligation,
     IVATotals,
     IVAAlicuotaDetail,
     RetencionPercepcionRow,
+    TaxObligationRecord,
+    TaxPaymentLink,
+    TaxObligationSummary,
+    TaxType,
+    TaxPaymentMethod,
+    TaxSettlementObligation,
 } from '../core/impuestos/types'
 import { computeIVATotalsFromEntries } from '../core/impuestos/iva'
+import { buildTaxSettlementEntryLines, computeTaxSettlementRemaining } from '../core/impuestos/settlements'
 import {
     createDefaultTaxClosure,
     createDefaultNotification,
     getDefaultDueDate,
     generateTaxId,
+    buildTaxNotificationKey,
+    buildTaxObligationKey,
 } from '../core/impuestos/types'
+import { computeTaxObligationStatus, buildTaxObligationRecord } from '../core/impuestos/obligations'
 import { createEntry, updateEntry } from './entries'
+import { loadBienesSettings, resolveMappedAccountId, resolveAccountId } from './bienes'
 
 // ========================================
 // Account Resolution Helpers
 // ========================================
 
-const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
-    ivaCF: { code: '1.1.03.01', names: ['IVA Credito Fiscal'] },
-    ivaDF: { code: '2.1.03.01', names: ['IVA Debito Fiscal'] },
+const TAX_ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
     ivaAFavor: { code: '1.1.03.06', names: ['IVA a favor', 'IVA Saldo a favor'] },
     ivaAPagar: { code: '2.1.03.04', names: ['IVA a pagar'] },
-    percepcionIVASufrida: { code: '1.1.03.08', names: ['Percepciones IVA de terceros'] },
-    percepcionIVAPracticada: { code: '2.1.03.06', names: ['Percepciones IVA a terceros'] },
-    percepcionIIBBSufrida: { code: '1.1.03.02', names: ['Anticipos de impuestos'] },
-    retencionSufrida: { code: '1.1.03.07', names: ['Retenciones IVA de terceros'] },
-    retencionPracticada: { code: '2.1.03.03', names: ['Retenciones a depositar'] },
     iibbGasto: { code: '4.4.02', names: ['Impuesto Ingresos Brutos', 'IIBB', 'Ingresos Brutos'] },
     iibbAPagar: { code: '2.1.03.05', names: ['IIBB a pagar', 'Ingresos Brutos a pagar'] },
     monotributoGasto: { code: '4.4.01', names: ['Monotributo', 'Impuestos y tasas'] },
     monotributoAPagar: { code: '2.1.03.07', names: ['Monotributo a pagar'] },
     autonomosGasto: { code: '4.4.03', names: ['Aportes autonomos', 'Cargas sociales', 'Seguridad social', 'Aportes previsionales'] },
     autonomosAPagar: { code: '2.1.03.08', names: ['Autonomos a pagar', 'Aportes a pagar', 'Cargas sociales a pagar'] },
-    caja: { code: '1.1.01.01', names: ['Caja'] },
-    banco: { code: '1.1.01.02', names: ['Bancos cuenta corriente', 'Banco cuenta corriente', 'Bancos'] },
 }
 
-const normalizeText = (value: string) => value
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-
-const resolveAccountId = (
-    accounts: Account[],
-    options: { code?: string; names?: string[] }
-): string | null => {
-    if (options.code) {
-        const byCode = accounts.find(a => a.code === options.code)
-        if (byCode) return byCode.id
-    }
-    if (options.names && options.names.length > 0) {
-        const targets = options.names.map(normalizeText)
-        const byName = accounts.find(a => targets.includes(normalizeText(a.name)))
-        if (byName) return byName.id
-    }
-    return null
+const TAX_LIABILITY_LABELS: Record<TaxType, string> = {
+    IVA: 'IVA a pagar',
+    IIBB: 'IIBB a pagar',
+    RET_DEPOSITAR: 'Retenciones a depositar',
+    PER_DEPOSITAR: 'Percepciones a depositar',
+    AUTONOMOS: 'Autonomos a pagar',
+    MONOTRIBUTO: 'Monotributo a pagar',
 }
 
-const resolveFallbackAccountId = (
+const TAX_CREDIT_LABELS: Partial<Record<TaxType, string>> = {
+    IVA: 'IVA a favor',
+}
+
+const TAX_DISPLAY_LABELS: Record<TaxType, string> = {
+    IVA: 'IVA',
+    IIBB: 'IIBB',
+    RET_DEPOSITAR: 'Retenciones',
+    PER_DEPOSITAR: 'Percepciones',
+    AUTONOMOS: 'Autonomos',
+    MONOTRIBUTO: 'Monotributo',
+}
+
+const resolveTaxAccountId = (
     accounts: Account[],
-    key: keyof typeof ACCOUNT_FALLBACKS
+    key: keyof typeof TAX_ACCOUNT_FALLBACKS
 ): string | null => {
-    const fallback = ACCOUNT_FALLBACKS[key]
+    const fallback = TAX_ACCOUNT_FALLBACKS[key]
     return resolveAccountId(accounts, {
         code: fallback?.code,
         names: fallback?.names,
     })
+}
+
+export interface TaxPaymentSplitInput {
+    accountId: string
+    amount: number
+}
+
+export interface RegisterTaxPaymentInput {
+    paidAt: string
+    method: TaxPaymentMethod
+    reference?: string
+    amount: number
+    splits: TaxPaymentSplitInput[]
+    liabilityAccountId?: string
+    obligationAccountId?: string
+}
+
+export interface TaxPaymentPreviewResult {
+    entry?: Omit<JournalEntry, 'id'>
+    error?: string
+    missingAccountLabel?: string
+    resolvedLiabilityAccountId?: string
+    resolvedObligationAccountId?: string
+}
+
+const resolveTaxLiabilityAccountId = async (
+    taxType: TaxType,
+    accounts: Account[],
+    overrideId?: string | null
+): Promise<{ accountId: string | null; label: string }> => {
+    const label = TAX_LIABILITY_LABELS[taxType] || 'Cuenta de impuesto'
+    if (overrideId) {
+        const direct = accounts.find(acc => acc.id === overrideId && !acc.isHeader)
+        if (direct) {
+            return { accountId: direct.id, label }
+        }
+    }
+
+    const settings = await loadBienesSettings()
+
+    switch (taxType) {
+        case 'IVA':
+            return { accountId: resolveTaxAccountId(accounts, 'ivaAPagar'), label }
+        case 'IIBB':
+            return { accountId: resolveTaxAccountId(accounts, 'iibbAPagar'), label }
+        case 'MONOTRIBUTO':
+            return { accountId: resolveTaxAccountId(accounts, 'monotributoAPagar'), label }
+        case 'AUTONOMOS':
+            return { accountId: resolveTaxAccountId(accounts, 'autonomosAPagar'), label }
+        case 'RET_DEPOSITAR':
+            return {
+                accountId: resolveMappedAccountId(accounts, settings, 'retencionPracticada', 'retencionPracticada'),
+                label,
+            }
+        case 'PER_DEPOSITAR':
+            return {
+                accountId: resolveMappedAccountId(accounts, settings, 'percepcionIVAPracticada', 'percepcionIVAPracticada'),
+                label,
+            }
+        default:
+            return { accountId: null, label }
+    }
+}
+
+const resolveTaxCreditAccountId = async (
+    taxType: TaxType,
+    accounts: Account[],
+    overrideId?: string | null
+): Promise<{ accountId: string | null; label: string }> => {
+    const label = TAX_CREDIT_LABELS[taxType] || 'Cuenta de credito fiscal'
+    if (overrideId) {
+        const direct = accounts.find(acc => acc.id === overrideId && !acc.isHeader)
+        if (direct) {
+            return { accountId: direct.id, label }
+        }
+    }
+
+    switch (taxType) {
+        case 'IVA':
+            return { accountId: resolveTaxAccountId(accounts, 'ivaAFavor'), label }
+        default:
+            return { accountId: null, label }
+    }
 }
 
 // ========================================
@@ -153,6 +238,14 @@ export async function listClosuresByMonth(month: string): Promise<TaxClosePeriod
 }
 
 /**
+ * List all closures (sorted by month desc)
+ */
+export async function listAllTaxClosures(): Promise<TaxClosePeriod[]> {
+    const closures = await db.taxClosures.toArray()
+    return closures.sort((a, b) => b.month.localeCompare(a.month))
+}
+
+/**
  * Get a specific tax closure by ID
  */
 export async function getTaxClosureById(id: string): Promise<TaxClosePeriod | undefined> {
@@ -170,9 +263,13 @@ export async function upsertNotifications(
     notifications: Omit<TaxDueNotification, 'id' | 'createdAt'>[]
 ): Promise<void> {
     for (const notif of notifications) {
-        const normalizedKey = notif.uniqueKey
-            || `${notif.obligation}:${notif.month}:${notif.action || 'PAGO'}:${notif.jurisdiction || 'GENERAL'}`
-        const existing = await db.taxDueNotifications
+        const normalizedKey = buildTaxNotificationKey(
+            notif.obligation,
+            notif.month,
+            notif.action,
+            notif.jurisdiction
+        )
+        const matches = await db.taxDueNotifications
             .filter(n => (
                 (n.uniqueKey && n.uniqueKey === normalizedKey)
                 || (!n.uniqueKey
@@ -181,14 +278,18 @@ export async function upsertNotifications(
                     && (n.action || 'PAGO') === (notif.action || 'PAGO')
                     && (n.jurisdiction || 'GENERAL') === (notif.jurisdiction || 'GENERAL'))
             ))
-            .first()
+            .toArray()
 
-        if (existing) {
+        if (matches.length > 0) {
+            const [existing, ...duplicates] = matches
             await db.taxDueNotifications.update(existing.id, {
                 ...notif,
                 uniqueKey: normalizedKey,
                 updatedAt: new Date().toISOString(),
             })
+            if (duplicates.length > 0) {
+                await db.taxDueNotifications.bulkDelete(duplicates.map(d => d.id))
+            }
         } else {
             const newNotif: TaxDueNotification = {
                 ...notif,
@@ -259,7 +360,7 @@ export async function generateNotificationsForMonth(
 ): Promise<void> {
     const notifications: Omit<TaxDueNotification, 'id' | 'createdAt'>[] = []
     const includeIIBBLocal = options?.includeIIBBLocal !== false
-    const iibbJurisdiction = options?.iibbJurisdiction || 'LOCAL'
+    const iibbJurisdiction = options?.iibbJurisdiction || 'CORRIENTES'
 
     if (regime === 'RI') {
         const ivaDueDate = getDefaultDueDate(month, 'IVA')
@@ -382,18 +483,53 @@ function getMonthDateRange(month: string): { start: string; end: string } {
     return { start, end }
 }
 
+function getTaxEntryPeriod(entry: JournalEntry): string | null {
+    const meta = entry.metadata || {}
+    const period = (meta.taxPeriod || meta.period || meta.meta?.period) as string | undefined
+    if (period && typeof period === 'string') return period
+
+    if (entry.sourceId) {
+        const parts = entry.sourceId.split(':')
+        if (parts.length >= 2 && /^\d{4}-\d{2}$/.test(parts[1])) {
+            return parts[1]
+        }
+    }
+    return null
+}
+
+function isTaxGeneratedEntry(entry: JournalEntry, month?: string): boolean {
+    const meta = entry.metadata || {}
+    const source = (meta.source || meta.meta?.source) as string | undefined
+    const isTaxSource = source === 'tax' || source === 'impuestos' || entry.sourceModule === 'IMPUESTOS'
+    if (!isTaxSource) return false
+    if (!month) return true
+
+    const period = getTaxEntryPeriod(entry)
+    if (period) return period === month
+
+    return entry.sourceId ? entry.sourceId.includes(month) : true
+}
+
+function matchesTaxRegime(entry: JournalEntry, regime: TaxRegime): boolean {
+    const meta = entry.metadata || {}
+    const entryRegime = (meta.regime || meta.meta?.regime) as string | undefined
+    if (entryRegime) return entryRegime === regime
+    return entry.sourceId ? entry.sourceId.includes(`:${regime}`) : true
+}
+
 /**
  * Calculate IVA DF/CF from journal entries for a month
  */
 export async function calculateIVAFromEntries(month: string): Promise<IVATotals> {
     const accounts = await db.accounts.toArray()
+    const settings = await loadBienesSettings()
     const { start, end } = getMonthDateRange(month)
 
-    // Resolve account IDs
-    const ivaDFId = resolveFallbackAccountId(accounts, 'ivaDF')
-    const ivaCFId = resolveFallbackAccountId(accounts, 'ivaCF')
-    const retencionSufridaId = resolveFallbackAccountId(accounts, 'retencionSufrida')
-    const percepcionIVASufridaId = resolveFallbackAccountId(accounts, 'percepcionIVASufrida')
+    // Resolve account IDs (mapped first, fallback to defaults)
+    const ivaDFId = resolveMappedAccountId(accounts, settings, 'ivaDF', 'ivaDF')
+    const ivaCFId = resolveMappedAccountId(accounts, settings, 'ivaCF', 'ivaCF')
+    const retencionSufridaId = resolveMappedAccountId(accounts, settings, 'retencionSufrida', 'retencionSufrida')
+    const percepcionIVASufridaId = resolveMappedAccountId(accounts, settings, 'percepcionIVASufrida', 'percepcionIVASufrida')
 
     // Get all entries for the month
     const entries = await db.entries
@@ -401,7 +537,9 @@ export async function calculateIVAFromEntries(month: string): Promise<IVATotals>
         .between(start, end, true, true)
         .toArray()
 
-    return computeIVATotalsFromEntries(entries, {
+    const filteredEntries = entries.filter(entry => !isTaxGeneratedEntry(entry, month))
+
+    return computeIVATotalsFromEntries(filteredEntries, {
         ivaDFId,
         ivaCFId,
         retencionSufridaId,
@@ -485,11 +623,12 @@ export async function getRetencionesPercepciones(month: string): Promise<Retenci
         .toArray()
 
     const accounts = await db.accounts.toArray()
-    const retencionSufridaId = resolveFallbackAccountId(accounts, 'retencionSufrida')
-    const retencionPracticadaId = resolveFallbackAccountId(accounts, 'retencionPracticada')
-    const percepcionIVASufridaId = resolveFallbackAccountId(accounts, 'percepcionIVASufrida')
-    const percepcionIVAPracticadaId = resolveFallbackAccountId(accounts, 'percepcionIVAPracticada')
-    const percepcionIIBBSufridaId = resolveFallbackAccountId(accounts, 'percepcionIIBBSufrida')
+    const settings = await loadBienesSettings()
+    const retencionSufridaId = resolveMappedAccountId(accounts, settings, 'retencionSufrida', 'retencionSufrida')
+    const retencionPracticadaId = resolveMappedAccountId(accounts, settings, 'retencionPracticada', 'retencionPracticada')
+    const percepcionIVASufridaId = resolveMappedAccountId(accounts, settings, 'percepcionIVASufrida', 'percepcionIVASufrida')
+    const percepcionIVAPracticadaId = resolveMappedAccountId(accounts, settings, 'percepcionIVAPracticada', 'percepcionIVAPracticada')
+    const percepcionIIBBSufridaId = resolveMappedAccountId(accounts, settings, 'percepcionIIBBSufrida', 'percepcionIIBBSufrida')
 
     const resolveDirectionFromMovement = (movType: string, paymentDirection?: string): RetencionPercepcionRow['direction'] | null => {
         if (movType === 'PURCHASE') return 'SUFRIDA'
@@ -507,24 +646,23 @@ export async function getRetencionesPercepciones(month: string): Promise<Retenci
 
         if (mov.taxes && mov.taxes.length > 0) {
             for (const tax of mov.taxes) {
-                if (tax.kind === 'PERCEPCION' || tax.kind === 'RETENCION') {
-                    if (!direction) continue
-                    const amount = (tax.amount || 0) * sign
-                    if (!amount) continue
-                    rows.push({
-                        id: tax.id,
-                        fecha: mov.date,
-                        tipo: tax.kind === 'RETENCION' ? 'RETENCION' : 'PERCEPCION',
-                        impuesto: tax.taxType,
-                        comprobante: mov.reference,
-                        origen: mov.counterparty || 'Comprobante',
-                        base: mov.subtotal,
-                        monto: amount,
-                        estado: 'OK',
-                        sourceMovementId: mov.id,
-                        direction,
-                    })
-                }
+                if (tax.kind !== 'PERCEPCION' && tax.kind !== 'RETENCION') continue
+                if (!direction) continue
+                const amount = (tax.amount || 0) * sign
+                if (!amount) continue
+                rows.push({
+                    id: tax.id,
+                    fecha: mov.date,
+                    tipo: tax.kind === 'RETENCION' ? 'RETENCION' : 'PERCEPCION',
+                    impuesto: tax.taxType,
+                    comprobante: mov.reference,
+                    origen: mov.counterparty || 'Comprobante',
+                    base: mov.subtotal,
+                    monto: amount,
+                    estado: 'OK',
+                    sourceMovementId: mov.id,
+                    direction,
+                })
             }
         }
 
@@ -629,13 +767,670 @@ async function findExistingEntry(
     return entries.find(e => e.sourceModule === sourceModule && e.sourceId === sourceId)
 }
 
+export type TaxEntryType = 'iva' | 'iibb' | 'mt' | 'autonomos'
+
+const TAX_ENTRY_CONFIG: Record<TaxEntryType, { sourceType: string; taxType: string; kind: string }> = {
+    iva: { sourceType: 'iva_determination', taxType: 'IVA', kind: 'cierre' },
+    iibb: { sourceType: 'iibb_determination', taxType: 'IIBB', kind: 'cierre' },
+    mt: { sourceType: 'mt_determination', taxType: 'MONOTRIBUTO', kind: 'pago' },
+    autonomos: { sourceType: 'autonomos_determination', taxType: 'AUTONOMOS', kind: 'pago' },
+}
+
+function buildTaxEntryMetadata(closure: TaxClosePeriod, type: TaxEntryType) {
+    const config = TAX_ENTRY_CONFIG[type]
+    return {
+        closureId: closure.id,
+        regime: closure.regime,
+        source: 'tax',
+        taxType: config.taxType,
+        taxPeriod: closure.month,
+        kind: config.kind,
+        meta: {
+            source: 'impuestos',
+            tax: config.taxType,
+            period: closure.month,
+            kind: config.kind,
+            regime: closure.regime,
+        },
+    }
+}
+
+// ========================================
+// Tax Obligations & Payments
+// ========================================
+
+export async function getTaxObligationById(id: string): Promise<TaxObligationRecord | undefined> {
+    return db.taxObligations.get(id)
+}
+
+export async function listTaxObligationsByPeriod(taxPeriod?: string): Promise<TaxObligationRecord[]> {
+    if (taxPeriod) {
+        return db.taxObligations.where({ taxPeriod }).toArray()
+    }
+    return db.taxObligations.toArray()
+}
+
+export async function listTaxPaymentsByObligation(obligationId: string): Promise<TaxPaymentLink[]> {
+    const payments = await db.taxPayments.where({ obligationId }).toArray()
+    if (payments.length === 0) return []
+
+    const entries = await db.entries.bulkGet(payments.map(p => p.journalEntryId))
+    const validPayments: TaxPaymentLink[] = []
+    const orphanIds: string[] = []
+
+    payments.forEach((payment, idx) => {
+        if (entries[idx]) {
+            validPayments.push(payment)
+        } else {
+            orphanIds.push(payment.id)
+        }
+    })
+
+    if (orphanIds.length > 0) {
+        await db.taxPayments.bulkDelete(orphanIds)
+    }
+
+    return validPayments.sort((a, b) => a.paidAt.localeCompare(b.paidAt))
+}
+
+export async function listTaxObligationsWithPayments(taxPeriod?: string): Promise<TaxObligationSummary[]> {
+    const obligations = await listTaxObligationsByPeriod(taxPeriod)
+    if (obligations.length === 0) return []
+
+    const ids = obligations.map(o => o.id)
+    const payments = await db.taxPayments.where('obligationId').anyOf(ids).toArray()
+    const entries = await db.entries.bulkGet(payments.map(p => p.journalEntryId))
+
+    const validPayments: TaxPaymentLink[] = []
+    const orphanIds: string[] = []
+    payments.forEach((payment, idx) => {
+        if (entries[idx]) {
+            validPayments.push(payment)
+        } else {
+            orphanIds.push(payment.id)
+        }
+    })
+
+    if (orphanIds.length > 0) {
+        await db.taxPayments.bulkDelete(orphanIds)
+    }
+
+    const paidByObligation = new Map<string, number>()
+    for (const payment of validPayments) {
+        paidByObligation.set(
+            payment.obligationId,
+            (paidByObligation.get(payment.obligationId) || 0) + (payment.amount || 0)
+        )
+    }
+
+    const updates: Array<{ id: string; status: TaxObligationRecord['status']; updatedAt: string }> = []
+    const now = new Date().toISOString()
+
+    const summaries = obligations.map(obligation => {
+        const amountPaid = paidByObligation.get(obligation.id) || 0
+        const status = computeTaxObligationStatus(obligation.amountDue, amountPaid)
+        if (obligation.status !== status) {
+            updates.push({ id: obligation.id, status, updatedAt: now })
+        }
+        return {
+            ...obligation,
+            status,
+            amountPaid,
+            balance: Math.max(0, obligation.amountDue - amountPaid),
+        }
+    })
+
+    if (updates.length > 0) {
+        await db.transaction('rw', db.taxObligations, async () => {
+            for (const update of updates) {
+                await db.taxObligations.update(update.id, {
+                    status: update.status,
+                    updatedAt: update.updatedAt,
+                })
+            }
+        })
+    }
+
+    return summaries.sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+}
+
+export async function upsertTaxObligation(input: {
+    taxType: TaxType
+    taxPeriod: string
+    jurisdiction?: string
+    dueDate: string
+    amountDue: number
+}): Promise<TaxObligationRecord | null> {
+    const jurisdiction = input.jurisdiction || 'GENERAL'
+    const uniqueKey = buildTaxObligationKey(input.taxType, input.taxPeriod, jurisdiction)
+    const existing = await db.taxObligations.where({ uniqueKey }).first()
+
+    if (input.amountDue <= 0) {
+        if (existing) {
+            await db.taxObligations.update(existing.id, {
+                amountDue: input.amountDue,
+                dueDate: input.dueDate,
+                status: 'NOT_APPLICABLE',
+                updatedAt: new Date().toISOString(),
+            })
+            return { ...existing, amountDue: input.amountDue, dueDate: input.dueDate, status: 'NOT_APPLICABLE' }
+        }
+        return null
+    }
+
+    if (existing) {
+        const payments = await listTaxPaymentsByObligation(existing.id)
+        const amountPaid = payments.reduce((sum, p) => sum + (p.amount || 0), 0)
+        const status = computeTaxObligationStatus(input.amountDue, amountPaid)
+        const updated: TaxObligationRecord = {
+            ...existing,
+            amountDue: input.amountDue,
+            dueDate: input.dueDate,
+            status,
+            updatedAt: new Date().toISOString(),
+        }
+        await db.taxObligations.put(updated)
+        return updated
+    }
+
+    const draft = buildTaxObligationRecord({
+        taxType: input.taxType,
+        taxPeriod: input.taxPeriod,
+        jurisdiction,
+        dueDate: input.dueDate,
+        amountDue: input.amountDue,
+    })
+
+    if (!draft) return null
+
+    await db.taxObligations.add(draft)
+    return draft
+}
+
+function getIIBBObligationKind(jurisdiction?: string) {
+    return jurisdiction && jurisdiction.toUpperCase() === 'CM' ? 'IIBB_CM' : 'IIBB_LOCAL'
+}
+
+async function upsertObligationFromClosure(
+    closure: TaxClosePeriod,
+    type: TaxEntryType
+): Promise<TaxObligationRecord | null> {
+    const month = closure.month
+    if (type === 'iva') {
+        const amountDue = closure.ivaTotals?.saldo || 0
+        return upsertTaxObligation({
+            taxType: 'IVA',
+            taxPeriod: month,
+            jurisdiction: 'NACIONAL',
+            dueDate: getDefaultDueDate(month, 'IVA'),
+            amountDue,
+        })
+    }
+    if (type === 'iibb') {
+        const amountDue = closure.iibbTotals?.saldo || 0
+        const jurisdiction = closure.iibbTotals?.jurisdiction || 'GENERAL'
+        const obligationKind = getIIBBObligationKind(jurisdiction)
+        return upsertTaxObligation({
+            taxType: 'IIBB',
+            taxPeriod: month,
+            jurisdiction,
+            dueDate: getDefaultDueDate(month, obligationKind),
+            amountDue,
+        })
+    }
+    if (type === 'mt') {
+        const amountDue = closure.mtTotals?.montoMensual || 0
+        return upsertTaxObligation({
+            taxType: 'MONOTRIBUTO',
+            taxPeriod: month,
+            jurisdiction: 'NACIONAL',
+            dueDate: getDefaultDueDate(month, 'MONOTRIBUTO'),
+            amountDue,
+        })
+    }
+    if (type === 'autonomos') {
+        const amountDue = closure.autonomosSettings?.monthlyAmount || 0
+        return upsertTaxObligation({
+            taxType: 'AUTONOMOS',
+            taxPeriod: month,
+            jurisdiction: 'NACIONAL',
+            dueDate: getDefaultDueDate(month, 'AUTONOMOS', closure.autonomosSettings?.dueDay),
+            amountDue,
+        })
+    }
+    return null
+}
+
+const PAYMENT_EPSILON = 0.01
+
+function buildSettlementMemoBase(obligation: TaxSettlementObligation): string {
+    return `${TAX_DISPLAY_LABELS[obligation.tax]} ${obligation.periodKey}`
+}
+
+async function buildTaxSettlementEntry(
+    obligation: TaxSettlementObligation,
+    input: RegisterTaxPaymentInput,
+    accounts: Account[]
+): Promise<TaxPaymentPreviewResult> {
+    const amount = input.amount || 0
+    if (amount <= 0) {
+        return { error: 'El importe debe ser mayor a cero.' }
+    }
+
+    const overrideAccountId = input.obligationAccountId || input.liabilityAccountId
+    const accountResult = obligation.direction === 'RECEIVABLE'
+        ? await resolveTaxCreditAccountId(obligation.tax, accounts, overrideAccountId)
+        : await resolveTaxLiabilityAccountId(obligation.tax, accounts, overrideAccountId)
+    const { accountId: obligationAccountId, label } = accountResult
+
+    if (!obligationAccountId) {
+        const labelPrefix = obligation.direction === 'RECEIVABLE' ? 'credito' : 'pasivo'
+        return {
+            error: `Falta cuenta del ${labelPrefix} (${label}).`,
+            missingAccountLabel: label,
+        }
+    }
+
+    const validAccountIds = new Set(accounts.filter(acc => !acc.isHeader).map(acc => acc.id))
+    const splits = input.splits.filter(s => validAccountIds.has(s.accountId) && s.amount > 0)
+    if (splits.length === 0) {
+        return { error: 'Debes cargar al menos un split de pago/cobro.' }
+    }
+    const hasInvalidSplit = input.splits.some(s => s.amount > 0 && !validAccountIds.has(s.accountId))
+    if (hasInvalidSplit) {
+        return { error: 'Selecciona cuentas validas para los splits de pago/cobro.' }
+    }
+
+    const splitTotal = splits.reduce((sum, s) => sum + s.amount, 0)
+    if (Math.abs(splitTotal - amount) > PAYMENT_EPSILON) {
+        return { error: 'La suma de los splits no coincide con el importe a registrar.' }
+    }
+
+    const memoBase = buildSettlementMemoBase(obligation)
+    const actionLabel = obligation.direction === 'RECEIVABLE' ? 'Cobro' : 'Pago'
+    const memo = obligation.jurisdiction && obligation.jurisdiction !== 'GENERAL'
+        ? `${actionLabel} ${memoBase} (${obligation.jurisdiction})`
+        : `${actionLabel} ${memoBase}`
+
+    const lines = buildTaxSettlementEntryLines({
+        direction: obligation.direction,
+        amount,
+        obligationAccountId,
+        splits,
+        method: input.method,
+        memoBase,
+    })
+
+    const settlementKind = obligation.direction === 'RECEIVABLE' ? 'collection' : 'payment'
+    const sourceType = obligation.direction === 'RECEIVABLE' ? 'tax_collection' : 'tax_payment'
+    const entry: Omit<JournalEntry, 'id'> = {
+        date: input.paidAt,
+        memo,
+        lines,
+        sourceModule: 'IMPUESTOS',
+        sourceType,
+        sourceId: `taxset:${obligation.tax}:${obligation.periodKey}:${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        metadata: {
+            source: 'tax',
+            taxType: obligation.tax,
+            taxPeriod: obligation.periodKey,
+            obligationId: obligation.sourceObligationId || obligation.id,
+            paymentMethod: input.method,
+            reference: input.reference,
+            kind: settlementKind,
+            direction: obligation.direction,
+            periodKey: obligation.periodKey,
+            sourceTaxEntryId: obligation.sourceTaxEntryId,
+            meta: {
+                source: 'impuestos',
+                tax: obligation.tax,
+                period: obligation.periodKey,
+                kind: settlementKind === 'payment' ? 'pago' : 'cobro',
+            },
+        },
+    }
+
+    return {
+        entry,
+        resolvedLiabilityAccountId: obligationAccountId,
+        resolvedObligationAccountId: obligationAccountId,
+    }
+}
+
+async function buildTaxPaymentEntry(
+    obligation: TaxObligationRecord,
+    input: RegisterTaxPaymentInput,
+    accounts: Account[]
+): Promise<TaxPaymentPreviewResult> {
+    const settlementObligation: TaxSettlementObligation = {
+        id: obligation.id,
+        tax: obligation.taxType,
+        direction: 'PAYABLE',
+        amountTotal: obligation.amountDue,
+        amountSettled: 0,
+        amountRemaining: obligation.amountDue,
+        periodKey: obligation.taxPeriod,
+        suggestedDueDate: obligation.dueDate,
+        jurisdiction: obligation.jurisdiction,
+        sourceObligationId: obligation.id,
+        status: obligation.status,
+    }
+
+    return buildTaxSettlementEntry(settlementObligation, input, accounts)
+}
+
+export async function buildTaxPaymentEntryPreview(
+    obligationId: string,
+    input: RegisterTaxPaymentInput
+): Promise<TaxPaymentPreviewResult> {
+    const obligation = await getTaxObligationById(obligationId)
+    if (!obligation) return { error: 'Obligacion no encontrada.' }
+
+    const accounts = await db.accounts.toArray()
+    return buildTaxPaymentEntry(obligation, input, accounts)
+}
+
+export async function buildTaxSettlementEntryPreview(
+    obligation: TaxSettlementObligation,
+    input: RegisterTaxPaymentInput
+): Promise<TaxPaymentPreviewResult> {
+    const accounts = await db.accounts.toArray()
+    return buildTaxSettlementEntry(obligation, input, accounts)
+}
+
+export async function registerTaxPayment(
+    obligationId: string,
+    input: RegisterTaxPaymentInput
+): Promise<{ entryId?: string; paymentId?: string; error?: string; missingAccountLabel?: string }> {
+    const obligation = await getTaxObligationById(obligationId)
+    if (!obligation) return { error: 'Obligacion no encontrada.' }
+
+    const payments = await listTaxPaymentsByObligation(obligation.id)
+    const alreadyPaid = payments.reduce((sum, p) => sum + (p.amount || 0), 0)
+    const balance = obligation.amountDue - alreadyPaid
+    if (input.amount <= 0) {
+        return { error: 'El importe debe ser mayor a cero.' }
+    }
+    if (input.amount - balance > PAYMENT_EPSILON) {
+        return { error: 'El importe supera el saldo pendiente.' }
+    }
+
+    const accounts = await db.accounts.toArray()
+    const preview = await buildTaxPaymentEntry(obligation, input, accounts)
+    if (preview.error || !preview.entry) {
+        return { error: preview.error, missingAccountLabel: preview.missingAccountLabel }
+    }
+
+    try {
+        const createdEntry = await createEntry(preview.entry)
+        const paymentId = generateTaxId('taxpay')
+        const payment: TaxPaymentLink = {
+            id: paymentId,
+            obligationId: obligation.id,
+            journalEntryId: createdEntry.id,
+            paidAt: input.paidAt,
+            method: input.method,
+            reference: input.reference,
+            amount: input.amount,
+            taxType: obligation.taxType,
+            periodKey: obligation.taxPeriod,
+            direction: 'PAYABLE',
+            sourceTaxEntryId: (preview.entry?.metadata as { sourceTaxEntryId?: string } | undefined)?.sourceTaxEntryId,
+            createdAt: new Date().toISOString(),
+        }
+
+        await db.taxPayments.add(payment)
+
+        const allPayments = await listTaxPaymentsByObligation(obligation.id)
+        const amountPaid = allPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+        const status = computeTaxObligationStatus(obligation.amountDue, amountPaid)
+
+        await db.taxObligations.update(obligation.id, {
+            status,
+            updatedAt: new Date().toISOString(),
+        })
+
+        return { entryId: createdEntry.id, paymentId }
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : 'Error al registrar el pago.' }
+    }
+}
+
+function matchesSettlementPayment(payment: TaxPaymentLink, obligation: TaxSettlementObligation): boolean {
+    const paymentDirection = payment.direction || 'PAYABLE'
+    if (paymentDirection !== obligation.direction) return false
+
+    const primaryId = obligation.sourceObligationId || obligation.id
+    if (payment.obligationId === primaryId || payment.obligationId === obligation.id) return true
+
+    if (payment.taxType && payment.periodKey) {
+        if (payment.taxType === obligation.tax && payment.periodKey === obligation.periodKey) {
+            return true
+        }
+    }
+
+    if (payment.sourceTaxEntryId && obligation.sourceTaxEntryId) {
+        return payment.sourceTaxEntryId === obligation.sourceTaxEntryId
+    }
+
+    return false
+}
+
+export async function listTaxPaymentsForSettlement(
+    obligation: TaxSettlementObligation
+): Promise<TaxPaymentLink[]> {
+    const payments = await db.taxPayments.toArray()
+    if (payments.length === 0) return []
+
+    const entries = await db.entries.bulkGet(payments.map(p => p.journalEntryId))
+    const validPayments: TaxPaymentLink[] = []
+
+    payments.forEach((payment, idx) => {
+        if (entries[idx] && matchesSettlementPayment(payment, obligation)) {
+            validPayments.push(payment)
+        }
+    })
+
+    return validPayments.sort((a, b) => a.paidAt.localeCompare(b.paidAt))
+}
+
+export async function registerTaxSettlement(
+    obligation: TaxSettlementObligation,
+    input: RegisterTaxPaymentInput
+): Promise<{ entryId?: string; paymentId?: string; error?: string; missingAccountLabel?: string }> {
+    if (input.amount <= 0) {
+        return { error: 'El importe debe ser mayor a cero.' }
+    }
+    if (obligation.direction === 'RECEIVABLE' && obligation.tax === 'IVA' && !input.reference?.trim()) {
+        return { error: 'La referencia es obligatoria para registrar un cobro de IVA a favor.' }
+    }
+
+    const payments = await listTaxPaymentsForSettlement(obligation)
+    const alreadySettled = payments.reduce((sum, p) => sum + (p.amount || 0), 0)
+    const balance = computeTaxSettlementRemaining(obligation.amountTotal, alreadySettled)
+
+    if (input.amount - balance > PAYMENT_EPSILON) {
+        return { error: 'El importe supera el saldo pendiente.' }
+    }
+
+    const accounts = await db.accounts.toArray()
+    const preview = await buildTaxSettlementEntry(obligation, input, accounts)
+    if (preview.error || !preview.entry) {
+        return { error: preview.error, missingAccountLabel: preview.missingAccountLabel }
+    }
+
+    try {
+        const createdEntry = await createEntry(preview.entry)
+        const paymentId = generateTaxId('taxpay')
+        const payment: TaxPaymentLink = {
+            id: paymentId,
+            obligationId: obligation.sourceObligationId || obligation.id,
+            journalEntryId: createdEntry.id,
+            paidAt: input.paidAt,
+            method: input.method,
+            reference: input.reference,
+            amount: input.amount,
+            taxType: obligation.tax,
+            periodKey: obligation.periodKey,
+            direction: obligation.direction,
+            sourceTaxEntryId: obligation.sourceTaxEntryId,
+            createdAt: new Date().toISOString(),
+        }
+
+        await db.taxPayments.add(payment)
+
+        if (obligation.direction === 'PAYABLE' && obligation.sourceObligationId) {
+            const allPayments = await listTaxPaymentsByObligation(obligation.sourceObligationId)
+            const amountPaid = allPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+            const status = computeTaxObligationStatus(obligation.amountTotal, amountPaid)
+
+            await db.taxObligations.update(obligation.sourceObligationId, {
+                status,
+                updatedAt: new Date().toISOString(),
+            })
+        }
+
+        return { entryId: createdEntry.id, paymentId }
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : 'Error al registrar el pago.' }
+    }
+}
+
+export async function syncAgentDepositObligations(
+    month: string,
+    rows: RetencionPercepcionRow[],
+    jurisdiction?: string
+): Promise<void> {
+    if (!month) return
+
+    const byKey = new Map<string, number>()
+    for (const row of rows) {
+        if (row.direction !== 'PRACTICADA') continue
+
+        const isRet = row.tipo === 'RETENCION'
+        const taxType: TaxType = isRet ? 'RET_DEPOSITAR' : 'PER_DEPOSITAR'
+        const rowJurisdiction = row.impuesto === 'IVA'
+            ? 'NACIONAL'
+            : (jurisdiction || 'PROVINCIAL')
+
+        const key = buildTaxObligationKey(taxType, month, rowJurisdiction)
+        byKey.set(key, (byKey.get(key) || 0) + (row.monto || 0))
+    }
+
+    for (const [key, total] of byKey.entries()) {
+        const [taxType, taxPeriod, rowJurisdiction] = key.split(':') as [TaxType, string, string]
+        const dueDate = rowJurisdiction === 'NACIONAL'
+            ? getDefaultDueDate(taxPeriod, 'IVA')
+            : getDefaultDueDate(taxPeriod, 'IIBB_LOCAL')
+
+        await upsertTaxObligation({
+            taxType,
+            taxPeriod,
+            jurisdiction: rowJurisdiction,
+            dueDate,
+            amountDue: total,
+        })
+    }
+
+    const existing = await db.taxObligations.where({ taxPeriod: month }).toArray()
+    const toClear = existing.filter(o =>
+        (o.taxType === 'RET_DEPOSITAR' || o.taxType === 'PER_DEPOSITAR')
+        && !byKey.has(o.uniqueKey)
+    )
+
+    if (toClear.length > 0) {
+        const now = new Date().toISOString()
+        await db.transaction('rw', db.taxObligations, async () => {
+            for (const ob of toClear) {
+                await db.taxObligations.update(ob.id, {
+                    amountDue: 0,
+                    status: 'NOT_APPLICABLE',
+                    updatedAt: now,
+                })
+            }
+        })
+    }
+}
+
+function buildTaxEntrySource(closure: TaxClosePeriod, type: TaxEntryType) {
+    const sourceModule = 'IMPUESTOS'
+    const sourceId = `${type}:${closure.month}:${closure.regime}`
+    return { sourceModule, sourceId, sourceType: TAX_ENTRY_CONFIG[type].sourceType }
+}
+
+export async function saveTaxEntryFromPreview(
+    closure: TaxClosePeriod,
+    type: TaxEntryType,
+    entry: Omit<JournalEntry, 'id'>
+): Promise<{ entryId: string; error?: string }> {
+    const { sourceModule, sourceId, sourceType } = buildTaxEntrySource(closure, type)
+    const metadata = buildTaxEntryMetadata(closure, type)
+
+    const entryData: Omit<JournalEntry, 'id'> = {
+        ...entry,
+        sourceModule,
+        sourceId,
+        sourceType,
+        metadata: {
+            ...(entry.metadata || {}),
+            ...metadata,
+            meta: {
+                ...(entry.metadata?.meta || {}),
+                ...(metadata as { meta?: Record<string, unknown> }).meta,
+            },
+        },
+    }
+
+    const existing = await findExistingEntry(sourceModule, sourceId)
+    try {
+        let entryId: string
+        if (existing) {
+            await updateEntry(existing.id, entryData)
+            entryId = existing.id
+        } else {
+            const created = await createEntry(entryData)
+            entryId = created.id
+        }
+
+        try {
+            await upsertObligationFromClosure(closure, type)
+        } catch (error) {
+            console.error('Error syncing tax obligation:', error)
+        }
+
+        return { entryId }
+    } catch (error) {
+        return { entryId: '', error: error instanceof Error ? error.message : 'Error al guardar el asiento' }
+    }
+}
+
+export async function buildTaxEntryPreview(
+    closure: TaxClosePeriod,
+    type: TaxEntryType
+): Promise<{ entry?: Omit<JournalEntry, 'id'>; error?: string }> {
+    switch (type) {
+        case 'iva':
+            return buildIVAEntryData(closure)
+        case 'iibb':
+            return buildIIBBEntryData(closure)
+        case 'mt':
+            return buildMonotributoEntryData(closure)
+        case 'autonomos':
+            return buildAutonomosEntryData(closure)
+        default:
+            return { error: 'Tipo de asiento desconocido' }
+    }
+}
+
 /**
  * Generate IVA determination journal entry
  */
-export async function generateIVAEntry(
+async function buildIVAEntryData(
     closure: TaxClosePeriod
-): Promise<{ entryId: string; error?: string }> {
+): Promise<{ entry?: Omit<JournalEntry, 'id'>; error?: string }> {
     const accounts = await db.accounts.toArray()
+    const settings = await loadBienesSettings()
     const computedTotals = await calculateIVAFromEntries(closure.month)
     const {
         debitoFiscal,
@@ -646,12 +1441,12 @@ export async function generateIVAEntry(
     } = computedTotals
 
     // Resolve accounts
-    const ivaDFId = resolveFallbackAccountId(accounts, 'ivaDF')
-    const ivaCFId = resolveFallbackAccountId(accounts, 'ivaCF')
-    const ivaAPagarId = resolveFallbackAccountId(accounts, 'ivaAPagar')
-    const ivaAFavorId = resolveFallbackAccountId(accounts, 'ivaAFavor')
-    const retencionSufridaId = resolveFallbackAccountId(accounts, 'retencionSufrida')
-    const percepcionIVASufridaId = resolveFallbackAccountId(accounts, 'percepcionIVASufrida')
+    const ivaDFId = resolveMappedAccountId(accounts, settings, 'ivaDF', 'ivaDF')
+    const ivaCFId = resolveMappedAccountId(accounts, settings, 'ivaCF', 'ivaCF')
+    const ivaAPagarId = resolveTaxAccountId(accounts, 'ivaAPagar')
+    const ivaAFavorId = resolveTaxAccountId(accounts, 'ivaAFavor')
+    const retencionSufridaId = resolveMappedAccountId(accounts, settings, 'retencionSufrida', 'retencionSufrida')
+    const percepcionIVASufridaId = resolveMappedAccountId(accounts, settings, 'percepcionIVASufrida', 'percepcionIVASufrida')
 
     const missing: string[] = []
     if (!ivaDFId) missing.push('IVA Debito Fiscal')
@@ -662,7 +1457,7 @@ export async function generateIVAEntry(
     if ((percepcionesSufridas || 0) > 0 && !percepcionIVASufridaId) missing.push('Percepciones IVA sufridas')
 
     if (missing.length > 0) {
-        return { entryId: '', error: `Faltan cuentas: ${missing.join(', ')}` }
+        return { error: `Faltan cuentas: ${missing.join(', ')}` }
     }
 
     const lines: EntryLine[] = []
@@ -725,78 +1520,66 @@ export async function generateIVAEntry(
     }
 
     if (lines.length === 0) {
-        return { entryId: '', error: 'No hay importes para generar el asiento de IVA' }
+        return { error: 'No hay importes para generar el asiento de IVA' }
     }
 
     // Validate balance
     const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
     const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
-        return { entryId: '', error: `Asiento desbalanceado: D=${totalDebit}, H=${totalCredit}` }
+        return { error: `Asiento desbalanceado: D=${totalDebit}, H=${totalCredit}` }
     }
 
-    const sourceModule = 'IMPUESTOS'
-    const sourceId = `iva:${closure.month}:${closure.regime}`
-
-    // Check for existing entry (idempotency)
-    const existing = await findExistingEntry(sourceModule, sourceId)
-
+    const { sourceModule, sourceId, sourceType } = buildTaxEntrySource(closure, 'iva')
     const entryData: Omit<JournalEntry, 'id'> = {
         date: `${closure.month}-01`, // First day of the month
         memo: `Liquidacion IVA ${closure.month}`,
         lines,
         sourceModule,
         sourceId,
-        sourceType: 'iva_determination',
+        sourceType,
         createdAt: new Date().toISOString(),
-        metadata: {
-            closureId: closure.id,
-            regime: closure.regime,
-            meta: {
-                source: 'impuestos',
-                tax: 'IVA',
-                period: closure.month,
-                kind: 'cierre',
-            },
-        },
+        metadata: buildTaxEntryMetadata(closure, 'iva'),
     }
 
-    let entryId: string
-    if (existing) {
-        await updateEntry(existing.id, entryData)
-        entryId = existing.id
-    } else {
-        const created = await createEntry(entryData)
-        entryId = created.id
-    }
+    return { entry: entryData }
+}
 
-    return { entryId }
+export async function generateIVAEntry(
+    closure: TaxClosePeriod
+): Promise<{ entryId: string; error?: string }> {
+    const preview = await buildIVAEntryData(closure)
+    if (preview.error || !preview.entry) {
+        return { entryId: '', error: preview.error || 'No hay importes para generar el asiento de IVA' }
+    }
+    return saveTaxEntryFromPreview(closure, 'iva', preview.entry)
 }
 
 /**
  * Generate IIBB determination journal entry
  */
-export async function generateIIBBEntry(
+async function buildIIBBEntryData(
     closure: TaxClosePeriod
-): Promise<{ entryId: string; error?: string }> {
+): Promise<{ entry?: Omit<JournalEntry, 'id'>; error?: string }> {
     if (!closure.iibbTotals) {
-        return { entryId: '', error: 'No hay totales de IIBB calculados' }
+        return { error: 'No hay totales de IIBB calculados' }
     }
 
     const accounts = await db.accounts.toArray()
+    const settings = await loadBienesSettings()
     const { impuestoDeterminado, deducciones, saldo } = closure.iibbTotals
 
     // Resolve accounts
-    const iibbGastoId = resolveFallbackAccountId(accounts, 'iibbGasto')
-    const iibbAPagarId = resolveFallbackAccountId(accounts, 'iibbAPagar')
-    const percepcionIIBBSufridaId = resolveFallbackAccountId(accounts, 'percepcionIIBBSufrida')
+    const iibbGastoId = resolveTaxAccountId(accounts, 'iibbGasto')
+    const iibbAPagarId = resolveTaxAccountId(accounts, 'iibbAPagar')
+    const percepcionIIBBSufridaId = resolveMappedAccountId(accounts, settings, 'percepcionIIBBSufrida', 'percepcionIIBBSufrida')
 
     const missing: string[] = []
     if (!iibbGastoId) missing.push('Gasto IIBB')
     if (saldo > 0 && !iibbAPagarId) missing.push('IIBB a pagar')
 
     if (missing.length > 0) {
-        return { entryId: '', error: `Faltan cuentas: ${missing.join(', ')}` }
+        return { error: `Faltan cuentas: ${missing.join(', ')}` }
     }
 
     const lines: EntryLine[] = []
@@ -835,73 +1618,61 @@ export async function generateIIBBEntry(
     const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
     const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
-        return { entryId: '', error: `Asiento desbalanceado: D=${totalDebit}, H=${totalCredit}` }
+        return { error: `Asiento desbalanceado: D=${totalDebit}, H=${totalCredit}` }
     }
 
-    const sourceModule = 'IMPUESTOS'
-    const sourceId = `iibb:${closure.month}:${closure.regime}`
-
-    const existing = await findExistingEntry(sourceModule, sourceId)
-
+    const { sourceModule, sourceId, sourceType } = buildTaxEntrySource(closure, 'iibb')
     const entryData: Omit<JournalEntry, 'id'> = {
         date: `${closure.month}-01`,
         memo: `Provision IIBB ${closure.month}`,
         lines,
         sourceModule,
         sourceId,
-        sourceType: 'iibb_determination',
+        sourceType,
         createdAt: new Date().toISOString(),
-        metadata: {
-            closureId: closure.id,
-            regime: closure.regime,
-            meta: {
-                source: 'impuestos',
-                tax: 'IIBB',
-                period: closure.month,
-                kind: 'cierre',
-            },
-        },
+        metadata: buildTaxEntryMetadata(closure, 'iibb'),
     }
 
-    let entryId: string
-    if (existing) {
-        await updateEntry(existing.id, entryData)
-        entryId = existing.id
-    } else {
-        const created = await createEntry(entryData)
-        entryId = created.id
-    }
+    return { entry: entryData }
+}
 
-    return { entryId }
+export async function generateIIBBEntry(
+    closure: TaxClosePeriod
+): Promise<{ entryId: string; error?: string }> {
+    const preview = await buildIIBBEntryData(closure)
+    if (preview.error || !preview.entry) {
+        return { entryId: '', error: preview.error || 'No hay importes para generar el asiento de IIBB' }
+    }
+    return saveTaxEntryFromPreview(closure, 'iibb', preview.entry)
 }
 
 /**
  * Generate Monotributo journal entry
  */
-export async function generateMonotributoEntry(
+async function buildMonotributoEntryData(
     closure: TaxClosePeriod
-): Promise<{ entryId: string; error?: string }> {
+): Promise<{ entry?: Omit<JournalEntry, 'id'>; error?: string }> {
     if (!closure.mtTotals) {
-        return { entryId: '', error: 'No hay totales de Monotributo calculados' }
+        return { error: 'No hay totales de Monotributo calculados' }
     }
 
     const accounts = await db.accounts.toArray()
     const { montoMensual } = closure.mtTotals
 
     if (montoMensual <= 0) {
-        return { entryId: '', error: 'El monto de monotributo debe ser mayor a cero' }
+        return { error: 'El monto de monotributo debe ser mayor a cero' }
     }
 
     // Resolve accounts
-    const mtGastoId = resolveFallbackAccountId(accounts, 'monotributoGasto')
-    const mtAPagarId = resolveFallbackAccountId(accounts, 'monotributoAPagar')
+    const mtGastoId = resolveTaxAccountId(accounts, 'monotributoGasto')
+    const mtAPagarId = resolveTaxAccountId(accounts, 'monotributoAPagar')
 
     const missing: string[] = []
     if (!mtGastoId) missing.push('Gasto Monotributo')
     if (!mtAPagarId) missing.push('Monotributo a pagar')
 
     if (missing.length > 0) {
-        return { entryId: '', error: `Faltan cuentas: ${missing.join(', ')}` }
+        return { error: `Faltan cuentas: ${missing.join(', ')}` }
     }
 
     const lines: EntryLine[] = [
@@ -919,76 +1690,67 @@ export async function generateMonotributoEntry(
         },
     ]
 
-    const sourceModule = 'IMPUESTOS'
-    const sourceId = `mt:${closure.month}:${closure.regime}`
-
-    const existing = await findExistingEntry(sourceModule, sourceId)
-
+    const { sourceModule, sourceId, sourceType } = buildTaxEntrySource(closure, 'mt')
     const entryData: Omit<JournalEntry, 'id'> = {
         date: `${closure.month}-01`,
         memo: `Devengamiento Monotributo ${closure.month}`,
         lines,
         sourceModule,
         sourceId,
-        sourceType: 'mt_determination',
+        sourceType,
         createdAt: new Date().toISOString(),
         metadata: {
-            closureId: closure.id,
+            ...buildTaxEntryMetadata(closure, 'mt'),
             categoria: closure.mtTotals.categoria,
-            meta: {
-                source: 'impuestos',
-                tax: 'MONOTRIBUTO',
-                period: closure.month,
-                kind: 'pago',
-            },
         },
     }
 
-    let entryId: string
-    if (existing) {
-        await updateEntry(existing.id, entryData)
-        entryId = existing.id
-    } else {
-        const created = await createEntry(entryData)
-        entryId = created.id
-    }
+    return { entry: entryData }
+}
 
-    return { entryId }
+export async function generateMonotributoEntry(
+    closure: TaxClosePeriod
+): Promise<{ entryId: string; error?: string }> {
+    const preview = await buildMonotributoEntryData(closure)
+    if (preview.error || !preview.entry) {
+        return { entryId: '', error: preview.error || 'No hay importes para generar el asiento de Monotributo' }
+    }
+    return saveTaxEntryFromPreview(closure, 'mt', preview.entry)
 }
 
 /**
  * Generate Autónomos (aportes previsionales) journal entry
  * Only applicable for RI (Responsable Inscripto) regime
  */
-export async function generateAutonomosEntry(
+async function buildAutonomosEntryData(
     closure: TaxClosePeriod
-): Promise<{ entryId: string; error?: string }> {
+): Promise<{ entry?: Omit<JournalEntry, 'id'>; error?: string }> {
     if (closure.regime !== 'RI') {
-        return { entryId: '', error: 'Autonomos solo aplica para Responsables Inscriptos' }
+        return { error: 'Autonomos solo aplica para Responsables Inscriptos' }
     }
 
     if (!closure.autonomosSettings?.enabled) {
-        return { entryId: '', error: 'Autonomos no esta habilitado para este periodo' }
+        return { error: 'Autonomos no esta habilitado para este periodo' }
     }
 
     const { monthlyAmount } = closure.autonomosSettings
 
     if (!monthlyAmount || monthlyAmount <= 0) {
-        return { entryId: '', error: 'El monto de aportes autonomos debe ser mayor a cero' }
+        return { error: 'El monto de aportes autonomos debe ser mayor a cero' }
     }
 
     const accounts = await db.accounts.toArray()
 
     // Resolve accounts
-    const autonomosGastoId = resolveFallbackAccountId(accounts, 'autonomosGasto')
-    const autonomosAPagarId = resolveFallbackAccountId(accounts, 'autonomosAPagar')
+    const autonomosGastoId = resolveTaxAccountId(accounts, 'autonomosGasto')
+    const autonomosAPagarId = resolveTaxAccountId(accounts, 'autonomosAPagar')
 
     const missing: string[] = []
     if (!autonomosGastoId) missing.push('Gasto Autonomos (Aportes)')
     if (!autonomosAPagarId) missing.push('Autonomos a pagar')
 
     if (missing.length > 0) {
-        return { entryId: '', error: `Faltan cuentas: ${missing.join(', ')}. Crealas en el Plan de Cuentas.` }
+        return { error: `Faltan cuentas: ${missing.join(', ')}. Crealas en el Plan de Cuentas.` }
     }
 
     const lines: EntryLine[] = [
@@ -1006,41 +1768,32 @@ export async function generateAutonomosEntry(
         },
     ]
 
-    const sourceModule = 'IMPUESTOS'
-    const sourceId = `autonomos:${closure.month}:${closure.regime}`
-
-    const existing = await findExistingEntry(sourceModule, sourceId)
-
+    const { sourceModule, sourceId, sourceType } = buildTaxEntrySource(closure, 'autonomos')
     const entryData: Omit<JournalEntry, 'id'> = {
         date: `${closure.month}-01`,
         memo: `Devengamiento Aportes Autonomos ${closure.month}`,
         lines,
         sourceModule,
         sourceId,
-        sourceType: 'autonomos_determination',
+        sourceType,
         createdAt: new Date().toISOString(),
         metadata: {
-            closureId: closure.id,
+            ...buildTaxEntryMetadata(closure, 'autonomos'),
             categoria: closure.autonomosSettings.categoria,
-            meta: {
-                source: 'impuestos',
-                tax: 'AUTONOMOS',
-                period: closure.month,
-                kind: 'pago',
-            },
         },
     }
 
-    let entryId: string
-    if (existing) {
-        await updateEntry(existing.id, entryData)
-        entryId = existing.id
-    } else {
-        const created = await createEntry(entryData)
-        entryId = created.id
-    }
+    return { entry: entryData }
+}
 
-    return { entryId }
+export async function generateAutonomosEntry(
+    closure: TaxClosePeriod
+): Promise<{ entryId: string; error?: string }> {
+    const preview = await buildAutonomosEntryData(closure)
+    if (preview.error || !preview.entry) {
+        return { entryId: '', error: preview.error || 'No hay importes para generar el asiento de Autonomos' }
+    }
+    return saveTaxEntryFromPreview(closure, 'autonomos', preview.entry)
 }
 
 /**
@@ -1051,10 +1804,8 @@ export async function getGeneratedEntriesForClosure(
     regime: TaxRegime
 ): Promise<JournalEntry[]> {
     const entries = await db.entries.toArray()
-    const prefix = `${month}:${regime}`
 
-    return entries.filter(e =>
-        e.sourceModule === 'IMPUESTOS' &&
-        e.sourceId?.includes(prefix)
+    return entries.filter(entry =>
+        isTaxGeneratedEntry(entry, month) && matchesTaxRegime(entry, regime)
     )
 }

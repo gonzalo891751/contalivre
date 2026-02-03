@@ -102,6 +102,7 @@ export {
     deleteBienesMovementWithJournal,
     deleteBienesProductWithMovements,
     reconcileMovementJournalLinks,
+    repairInitialStockMovements,
     // Bulk
     clearAllBienesData,
     clearBienesPeriodData,

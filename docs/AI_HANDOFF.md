@@ -2,6 +2,216 @@
 
 ---
 
+## CHECKPOINT #ROLLUP-HELPER-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Sin integracion UI
+
+### Objetivo
+Crear helper generico de roll-up por jerarquia de cuentas con fallback por codigo, mas un test unitario minimo.
+
+### Cambios clave
+1. **Helper de roll-up**: calcula totales por cuenta incluyendo descendientes y resuelve jerarquia por parentId o code.
+2. **Presentacion base**: helper para mapear a cuenta de presentacion (madre) segun parent header.
+3. **Test unitario**: valida roll-up y fallback por codigo.
+
+### Archivos tocados
+- src/core/ledger/rollupBalances.ts
+- src/core/ledger/rollupBalances.test.ts
+
+### Tests
+- No ejecutados.
+
+---
+
+## CHECKPOINT #ROLLUP-ESTADOS-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - ESP con roll-up
+
+### Objetivo
+Usar el roll-up jerarquico en Estados para mostrar cuentas madre en el ESP.
+
+### Cambios clave
+1. **Balance roll-up**: nuevo computeRollupTrialBalance en core/balance.
+2. **Estados**: ESP usa trial balance con roll-up (presentacion por cuenta madre).
+
+### Archivos tocados
+- src/core/balance.ts
+- src/pages/Estados.tsx
+
+### Tests
+- No ejecutados.
+
+---
+
+## CHECKPOINT #ROLLUP-MAYOR-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Mayor consolidado
+
+### Objetivo
+Consolidar el Libro Mayor por jerarquia y permitir ver cuentas madre con totales y movimientos agregados.
+
+### Cambios clave
+1. **Totales consolidados**: Mayor usa roll-up para debe/haber/saldo por cuenta.
+2. **Movimientos consolidados**: detalle agrega lineas de subcuentas con etiqueta de origen.
+
+### Archivos tocados
+- src/pages/Mayor.tsx
+
+### Tests
+- No ejecutados.
+
+---
+
+## CHECKPOINT #ROLLUP-QA-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Tests OK
+
+### Objetivo
+Validar cambios de roll-up con tests y build.
+
+### Tests
+- `npm test` OK
+- `npm run build` OK
+
+---
+
+## CHECKPOINT #IMPUESTOS-PAGOS-CREDITOS-2026-02-03
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Build PASS
+
+### Objetivo
+Mejorar Pagos para soportar deudas y creditos (IVA a favor), con modal unico de vista previa + asiento contable, validacion de mes bloqueado y CTA mas visible en Posicion Mensual. Agregar navegacion desde Vencimientos a Pagos con obligacion preseleccionada.
+
+### Cambios clave
+1. **Modelo interno de obligaciones**: TaxSettlementObligation con direction PAYABLE/RECEIVABLE, id estable, remaining calculado y IVA a favor como credito.
+2. **Modal unico de settlement**: fecha editable (default hoy), splits, vista previa, referencia obligatoria para IVA a favor y bloqueo por mes cerrado.
+3. **Pagos en dos secciones**: Obligaciones a pagar + Creditos a favor, helper IVA a favor y acciones especificas.
+4. **Vencimientos -> Pagos**: accion "Pagar ya" navega con query params a tab Pagos + preselect.
+5. **CTA Posicion Mensual**: boton "Generar asiento" con texto visible.
+
+### Archivos tocados
+- src/pages/Operaciones/ImpuestosPage.tsx
+- src/hooks/useTaxClosure.ts
+- src/storage/impuestos.ts
+- src/core/impuestos/types.ts
+- src/core/impuestos/settlements.ts
+- src/core/impuestos/settlements.test.ts
+
+### Tests
+- `npm test` ✅
+- `npm run build` ✅
+
+### Riesgos / Edge cases
+- Cobro IVA a favor antes de generar liquidacion: se identifica por period/tax con metadata (no solo entryId).
+- Mes bloqueado: confirmacion bloqueada si la fecha cae en un mes cerrado (requiere desbloquear o cambiar fecha).
+
+## CHECKPOINT #BIENES-USO-V2
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Build PASS
+
+### Objetivo
+Implementar Bienes de Uso V2: asiento de apertura idempotente, eventos con asientos, planilla unificada y RT6 real.
+
+### Cambios clave
+1. **Apertura idempotente**: creación/actualización del asiento de apertura con cuenta PN "Apertura / Saldos Iniciales" y metadata para reconciliación.
+2. **Eventos**: tabla `fixedAssetEvents`, modal de eventos (Mejora/Baja/Revalúo) con vista previa y generación de asientos.
+3. **Planilla unificada**: `/planillas/amortizaciones` ahora lee `fixedAssets` con migración on-demand desde legacy.
+4. **RT6 real**: cálculo con índices FACPCE y generación de asiento RECPAM por bien.
+
+### Archivos tocados
+- src/storage/db.ts
+- src/core/fixedAssets/types.ts
+- src/core/models.ts
+- src/storage/fixedAssets.ts
+- src/pages/Operaciones/BienesUsoPage.tsx
+- src/pages/Planillas/AmortizacionesPage.tsx
+
+### QA
+- `npm run build` ✅
+- Manual: alta bien anterior al ejercicio -> asiento apertura; evento mejora y venta; planilla unificada; RT6 con índices.
+
+## CHECKPOINT #BIENES-USO-MVP
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Build PASS
+
+### Objetivo
+Implementar el modulo "Bienes de Uso" (Fixed Assets) dentro de Operaciones con:
+- Tarjeta en `/operaciones` con metricas reales (cantidad de bienes, valor neto)
+- Pagina `/operaciones/bienes-uso` con ABM, calculo de amortizacion (lineal/unidades/none), RT6 y generacion de asiento anual
+- Integracion con Plan de Cuentas (auto-creacion de cuentas activo + amort. acumulada)
+- Integracion con Libro Diario (asiento de amortizacion anual)
+
+### Archivos Creados
+| Archivo | Descripcion |
+|---|---|
+| src/core/fixedAssets/types.ts | Tipos FixedAsset, categorias, metodos, status labels, mapeo de cuentas |
+| src/storage/fixedAssets.ts | CRUD + calculo de amortizacion + generacion de asiento + metricas |
+| src/lib/assetAccounts.ts | Helper para auto-creacion de cuentas contables por categoria |
+| src/pages/Operaciones/BienesUsoPage.tsx | UI completa: list view, detail view con tabs, modal de creacion/edicion, RT6 toggle |
+
+### Archivos Modificados
+| Archivo | Cambio |
+|---|---|
+| src/storage/db.ts | Version 10 + tabla `fixedAssets` con indices periodId, category, status |
+| src/App.tsx | Ruta `/operaciones/bienes-uso` |
+| src/ui/Layout/Sidebar.tsx | Item "Bienes de Uso" bajo Operaciones con icono Armchair |
+| src/pages/OperacionesPage.tsx | Tarjeta "Bienes de Uso" con metricas de cantidad y valor neto |
+| src/hooks/useTaxClosure.ts | Fix TypeScript: closure ?? null en return |
+| src/storage/impuestos.ts | Fix: eliminar import TaxObligation no usado |
+
+### Funcionalidades Implementadas
+1. **CRUD de Bienes**: Crear, ver, editar, eliminar bienes de uso
+2. **Categorias**: Inmuebles, Instalaciones, Maquinarias, Rodados, Muebles y Utiles, Equipos de Computacion, Terrenos, Otros
+3. **Metodos de Amortizacion**: Lineal anual, Lineal mensual, Unidades de produccion, No amortizable
+4. **Estados**: En Uso, En Proyecto, Dado de Baja, Amortizado
+5. **Auto-creacion de Cuentas**: Al crear un bien se crean automaticamente la cuenta del activo y la de amortizacion acumulada bajo los padres correspondientes
+6. **Calculo de Amortizacion**: Valor residual, valor amortizable, amortizacion anual/ejercicio, acumulada inicio/cierre, valor libro, porcentaje de desgaste
+7. **Generacion de Asiento Anual**: Debe en 4.5.11 (Amortizaciones Bienes de Uso), Haber en cuenta amort. acumulada del bien
+8. **Prevencion de Duplicados**: linkedJournalEntryIds evita generar asiento dos veces para el mismo ejercicio
+9. **RT6 Toggle**: Switch para ver valores en moneda homogenea usando indices de CierreValuacionState
+10. **Planilla de Amortizaciones**: Tab con schedule año por año mostrando base, cuota, acumulado y valor residual
+11. **Tarjeta en Operaciones**: Muestra cantidad de bienes activos y valor neto total
+
+### Estructura de la Pagina
+```
+/operaciones/bienes-uso
+├── Header (Back, Titulo, RT6 Toggle, Nuevo Bien)
+├── Filters (Search, Category)
+├── List View
+│   └── Asset Cards (icono, badge status, barra desgaste, NBV/costo)
+└── Detail View
+    ├── Header (nombre, badges, botones editar/eliminar)
+    └── Tabs
+        ├── Resumen (KPIs + barra progreso)
+        ├── Planilla (schedule año x año)
+        ├── Asiento Anual (preview + generar)
+        └── Eventos (placeholder)
+```
+
+### Mapeo de Cuentas por Categoria
+| Categoria | Cuenta Activo | Cuenta Amort. Acum. |
+|---|---|---|
+| Inmuebles | 1.2.01.01 | 1.2.01.91 |
+| Instalaciones | 1.2.01.02 | 1.2.01.92 |
+| Maquinarias | 1.2.01.03 | 1.2.01.93 |
+| Rodados | 1.2.01.04 | 1.2.01.94 |
+| Muebles y Utiles | 1.2.01.05 | 1.2.01.95 |
+| Equipos Computacion | 1.2.01.05 | 1.2.01.95 |
+| Terrenos | 1.2.01.01 | 1.2.01.91 |
+| Otros | 1.2.01.06 | 1.2.01.96 |
+
+### Validacion
+- `npm run build`: PASS
+- QA Manual: Crear bien, ver calculos, generar asiento, toggle RT6
+
+### Limitaciones / Pendientes
+- Metodo "Unidades" necesita tracking historico de unidades producidas para acumulado correcto
+- Tab "Eventos" (mejoras, revaluos, bajas) es placeholder
+- No hay asientos RT6 (solo visualizacion)
+- Prorrateo por fecha exacta: asume año completo si no hay prorrateo mensual
+
+---
+
 ## CHECKPOINT #IMPUESTOS-FIXES-2026-02-03
 **Fecha:** 2026-02-03
 **Estado:** COMPLETADO - Build NO EJECUTADO
@@ -4732,6 +4942,6 @@ El hook `useTaxClosure` usaba `useLiveQuery` para obtener el cierre fiscal. Dent
 *   La UI de Impuestos debería crear el cierre automáticamente (si falta) sin errores de Dexie.
 
 
-#BIENES-USO-AUDIT (Auditor�a completada)
+#BIENES-USO-AUDIT (Auditor�a completada)
 - Reporte generado en docs/audits/AUDIT_BIENES_DE_USO.md
-- Diagn�stico de arquitectura listo para implementaci�n.
+- Diagn�stico de arquitectura listo para implementaci�n.

@@ -14,6 +14,8 @@ export type TaxRegime = 'RI' | 'MT'
  * Tax closure status workflow
  */
 export type TaxClosureStatus =
+    | 'OPEN'            // Abierto (recalculable)
+    | 'CLOSED'          // Cerrado (bloqueado)
     | 'DRAFT'           // Borrador inicial
     | 'REVIEWED'        // Revisado/conciliado
     | 'JOURNAL_POSTED'  // Asientos generados
@@ -29,6 +31,92 @@ export type TaxObligation = 'IVA' | 'IIBB_LOCAL' | 'IIBB_CM' | 'MONOTRIBUTO' | '
  * Tax action for due notifications
  */
 export type TaxAction = 'PRESENTACION' | 'PAGO' | 'DEPOSITO'
+
+/**
+ * Tax types for obligations and payments
+ */
+export type TaxType =
+    | 'IVA'
+    | 'IIBB'
+    | 'RET_DEPOSITAR'
+    | 'PER_DEPOSITAR'
+    | 'AUTONOMOS'
+    | 'MONOTRIBUTO'
+
+/**
+ * Payment methods for tax payments
+ */
+export type TaxPaymentMethod = 'VEP' | 'BOLETA' | 'TRANSFERENCIA' | 'EFECTIVO' | 'OTRO'
+
+/**
+ * Settlement direction (payments vs collections)
+ */
+export type TaxSettlementDirection = 'PAYABLE' | 'RECEIVABLE'
+
+/**
+ * Tax obligation status
+ */
+export type TaxObligationStatus = 'PENDING' | 'PARTIAL' | 'PAID' | 'NOT_APPLICABLE'
+
+/**
+ * Tax obligation record (persisted)
+ */
+export interface TaxObligationRecord {
+    id: string
+    uniqueKey: string
+    taxType: TaxType
+    taxPeriod: string
+    jurisdiction: string
+    dueDate: string
+    amountDue: number
+    status: TaxObligationStatus
+    createdAt: string
+    updatedAt: string
+}
+
+/**
+ * Tax payment link (persisted)
+ */
+export interface TaxPaymentLink {
+    id: string
+    obligationId: string
+    journalEntryId: string
+    paidAt: string
+    method: TaxPaymentMethod
+    reference?: string
+    amount: number
+    taxType?: TaxType
+    periodKey?: string
+    direction?: TaxSettlementDirection
+    sourceTaxEntryId?: string
+    createdAt: string
+}
+
+/**
+ * Tax obligation with computed payment info
+ */
+export interface TaxObligationSummary extends TaxObligationRecord {
+    amountPaid: number
+    balance: number
+}
+
+/**
+ * Internal obligation model for settlements (pagos/cobros)
+ */
+export interface TaxSettlementObligation {
+    id: string
+    tax: TaxType
+    direction: TaxSettlementDirection
+    amountTotal: number
+    amountSettled: number
+    amountRemaining: number
+    periodKey: string
+    suggestedDueDate?: string
+    jurisdiction?: string
+    sourceTaxEntryId?: string
+    sourceObligationId?: string
+    status: TaxObligationStatus
+}
 
 /**
  * Steps in the tax closing checklist
@@ -61,6 +149,9 @@ export interface IIBBTotals {
     impuestoDeterminado: number // base * alicuota
     deducciones: number       // Retenciones + percepciones sufridas
     saldo: number             // Impuesto - deducciones
+    jurisdiction?: string     // Jurisdiccion seleccionada
+    activity?: string         // Actividad seleccionada
+    sircreb?: number          // SIRCREB manual (pago a cuenta)
 }
 
 /**
@@ -149,6 +240,11 @@ export interface TaxClosePeriod {
     // Generated journal entries
     journalEntryIds?: TaxJournalEntryIds
 
+    // Close snapshot
+    closedAt?: string
+    closedBy?: string
+    snapshot?: TaxClosureSnapshot
+
     // Audit trail
     auditTrail?: {
         action: string
@@ -159,6 +255,18 @@ export interface TaxClosePeriod {
     // Timestamps
     createdAt: string
     updatedAt: string
+}
+
+/**
+ * Snapshot of key totals when closing a period
+ */
+export interface TaxClosureSnapshot {
+    ivaTotals?: IVATotals
+    iibbTotals?: IIBBTotals
+    mtTotals?: MonotributoTotals
+    autonomosSettings?: AutonomosSettings
+    journalEntryIds?: TaxJournalEntryIds
+    capturedAt: string
 }
 
 /**
@@ -268,6 +376,29 @@ export function generateTaxId(prefix: string): string {
 }
 
 /**
+ * Build a stable unique key for tax notifications
+ */
+export function buildTaxNotificationKey(
+    obligation: TaxObligation,
+    month: string,
+    action?: TaxAction,
+    jurisdiction?: string
+): string {
+    return `${obligation}:${month}:${action || 'PAGO'}:${jurisdiction || 'GENERAL'}`
+}
+
+/**
+ * Build a stable unique key for tax obligations
+ */
+export function buildTaxObligationKey(
+    taxType: TaxType,
+    taxPeriod: string,
+    jurisdiction?: string
+): string {
+    return `${taxType}:${taxPeriod}:${jurisdiction || 'GENERAL'}`
+}
+
+/**
  * Create default tax closure for a month
  */
 export function createDefaultTaxClosure(month: string, regime: TaxRegime): TaxClosePeriod {
@@ -276,7 +407,7 @@ export function createDefaultTaxClosure(month: string, regime: TaxRegime): TaxCl
         id: generateTaxId('taxclose'),
         month,
         regime,
-        status: 'DRAFT',
+        status: 'OPEN',
         steps: {
             operaciones: true,  // Default checked as per prototype
             conciliacion: false,
@@ -337,9 +468,7 @@ export function createDefaultNotification(
         description: options?.description || descriptions[obligation],
         action,
         jurisdiction: options?.jurisdiction,
-        uniqueKey: options?.title
-            ? `${obligation}:${month}:${action}:${options?.jurisdiction || 'GENERAL'}:${options?.title}`
-            : `${obligation}:${month}:${action}:${options?.jurisdiction || 'GENERAL'}`,
+        uniqueKey: buildTaxNotificationKey(obligation, month, action, options?.jurisdiction),
         actionLabel: options?.actionLabel,
         actionHref: options?.actionHref,
         status: 'PENDING',

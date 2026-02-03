@@ -2,8 +2,14 @@ import { useState, useMemo, useCallback, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useLedger } from '../hooks/useLedger'
 import { formatCurrencyARS } from '../core/amortizaciones/calc'
-import type { Account } from '../core/models'
+import type { Account, Ledger, LedgerMovement } from '../core/models'
 import { isMovimientoBienesDeCambio } from '../core/cierre-valuacion/auto-partidas-rt6'
+import {
+    buildAccountHierarchy,
+    computeRollupTotals,
+    getDirectTotalsFromLedger,
+    type AccountHierarchy,
+} from '../core/ledger/rollupBalances'
 import {
     LedgerHero,
     LedgerToolbar,
@@ -17,6 +23,78 @@ import {
 } from '../components/ledger'
 
 const ZERO_EPSILON = 0.0001
+
+function getDescendantAccountIds(accountId: string, hierarchy: AccountHierarchy): string[] {
+    const result: string[] = []
+    const stack: string[] = [accountId]
+    const visited = new Set<string>()
+
+    while (stack.length > 0) {
+        const current = stack.pop()!
+        if (visited.has(current)) continue
+        visited.add(current)
+        result.push(current)
+        const children = hierarchy.childrenById.get(current) ?? []
+        for (const childId of children) {
+            stack.push(childId)
+        }
+    }
+
+    return result
+}
+
+function buildConsolidatedMovements(
+    account: Account,
+    ledger: Ledger,
+    hierarchy: AccountHierarchy
+): LedgerMovement[] {
+    const descendants = getDescendantAccountIds(account.id, hierarchy)
+    const movementRows: Array<{
+        movement: LedgerMovement
+        account: Account
+        order: number
+    }> = []
+
+    for (const id of descendants) {
+        const la = ledger.get(id)
+        if (!la) continue
+        la.movements.forEach((movement, index) => {
+            movementRows.push({
+                movement,
+                account: la.account,
+                order: index,
+            })
+        })
+    }
+
+    movementRows.sort((a, b) => {
+        const dateDiff = a.movement.date.localeCompare(b.movement.date)
+        if (dateDiff !== 0) return dateDiff
+        const entryDiff = a.movement.entryId.localeCompare(b.movement.entryId)
+        if (entryDiff !== 0) return entryDiff
+        return a.order - b.order
+    })
+
+    let runningBalance = 0
+    const normalSide = account.normalSide || (['ASSET', 'EXPENSE'].includes(account.kind) ? 'DEBIT' : 'CREDIT')
+
+    return movementRows.map((row) => {
+        const netMovement = row.movement.debit - row.movement.credit
+        runningBalance = normalSide === 'DEBIT'
+            ? runningBalance + netMovement
+            : runningBalance - netMovement
+
+        const originLabel = row.account.id === account.id
+            ? ''
+            : ` (${row.account.code} ${row.account.name})`
+
+        return {
+            ...row.movement,
+            memo: `${row.movement.memo}${originLabel}`,
+            balance: runningBalance,
+        }
+    })
+}
 
 /**
  * Determines account status based on balance sign
@@ -67,6 +145,14 @@ function getRubroLabel(account?: Account): string {
 export default function Mayor() {
     const { ledger, accounts } = useLedger()
 
+    const rollupData = useMemo(() => {
+        if (!ledger || !accounts) return null
+        const hierarchy = buildAccountHierarchy(accounts)
+        const directTotals = getDirectTotalsFromLedger(ledger)
+        const rollupTotals = computeRollupTotals(accounts, directTotals, hierarchy)
+        return { hierarchy, rollupTotals }
+    }, [ledger, accounts])
+
     // State
     const [search, setSearch] = useState('')
     const [filterStatus, setFilterStatus] = useState<'all' | AccountStatus>('all')
@@ -76,7 +162,7 @@ export default function Mayor() {
 
     // Transform ledger data to summary rows
     const summaryRows = useMemo<LedgerSummaryRow[]>(() => {
-        if (!ledger || !accounts) return []
+        if (!ledger || !accounts || !rollupData) return []
 
         const rows: LedgerSummaryRow[] = []
 
@@ -84,7 +170,10 @@ export default function Mayor() {
             // Filter out header accounts (non-imputable)
             if (la.account.isHeader) return
 
-            const status = getAccountStatus(la.balance)
+            const rollup = rollupData.rollupTotals.get(la.account.id)
+            if (!rollup) return
+
+            const status = getAccountStatus(rollup.balance)
             const rubroLabel = getRubroLabel(la.account)
 
             rows.push({
@@ -94,16 +183,16 @@ export default function Mayor() {
                 kind: la.account.kind,
                 group: la.account.group,
                 rubroLabel,
-                totalDebit: la.totalDebit,
-                totalCredit: la.totalCredit,
-                balance: la.balance,
+                totalDebit: rollup.totalDebit,
+                totalCredit: rollup.totalCredit,
+                balance: rollup.balance,
                 status,
             })
         })
 
         // Sort by code
         return rows.sort((a, b) => a.code.localeCompare(b.code))
-    }, [ledger, accounts])
+    }, [ledger, accounts, rollupData])
 
     // Apply filters
     const filteredRows = useMemo(() => {
@@ -130,15 +219,20 @@ export default function Mayor() {
 
     // Get selected account data for drawer
     const selectedDrawerAccount = useMemo<DrawerAccount | null>(() => {
-        if (!selectedAccountId || !ledger) return null
+        if (!selectedAccountId || !ledger || !rollupData) return null
 
         const la = ledger.get(selectedAccountId)
         if (!la) return null
 
-        const status = getAccountStatus(la.balance)
-        const lastMovements = [...la.movements]
+        const rollup = rollupData.rollupTotals.get(selectedAccountId)
+        if (!rollup) return null
+
+        const movements = buildConsolidatedMovements(la.account, ledger, rollupData.hierarchy)
+        const lastMovements = [...movements]
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
             .slice(0, 5)
+
+        const status = getAccountStatus(rollup.balance)
 
         return {
             id: la.account.id,
@@ -147,35 +241,39 @@ export default function Mayor() {
             kind: la.account.kind,
             group: la.account.group,
             rubroLabel: getRubroLabel(la.account),
-            totalDebit: la.totalDebit,
-            totalCredit: la.totalCredit,
-            balance: la.balance,
+            totalDebit: rollup.totalDebit,
+            totalCredit: rollup.totalCredit,
+            balance: rollup.balance,
             status,
             lastMovements,
         }
-    }, [selectedAccountId, ledger])
+    }, [selectedAccountId, ledger, rollupData])
 
     // Get selected account data for full view
     const selectedFullAccount = useMemo<FullViewAccount | null>(() => {
-        if (!selectedAccountId || !ledger) return null
+        if (!selectedAccountId || !ledger || !rollupData) return null
 
         const la = ledger.get(selectedAccountId)
         if (!la) return null
 
-        const status = getAccountStatus(la.balance)
+        const rollup = rollupData.rollupTotals.get(selectedAccountId)
+        if (!rollup) return null
+
+        const movements = buildConsolidatedMovements(la.account, ledger, rollupData.hierarchy)
+        const status = getAccountStatus(rollup.balance)
 
         return {
             id: la.account.id,
             code: la.account.code,
             name: la.account.name,
             kind: la.account.kind,
-            totalDebit: la.totalDebit,
-            totalCredit: la.totalCredit,
-            balance: la.balance,
+            totalDebit: rollup.totalDebit,
+            totalCredit: rollup.totalCredit,
+            balance: rollup.balance,
             status,
-            movements: la.movements,
+            movements,
         }
-    }, [selectedAccountId, ledger])
+    }, [selectedAccountId, ledger, rollupData])
 
     // Handlers
     const handleRowClick = useCallback((row: LedgerSummaryRow) => {

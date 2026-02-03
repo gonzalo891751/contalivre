@@ -17,9 +17,11 @@ import {
     LockKey,
     Info,
     Clock,
+    Armchair,
 } from '@phosphor-icons/react'
 import { db } from '../storage/db'
 import { calculateAllValuations } from '../core/inventario/costing'
+import { getFixedAssetsMetrics } from '../storage/fixedAssets'
 import { useIndicatorsMetrics } from '../hooks/useIndicatorsMetrics'
 import { usePeriodYear } from '../hooks/usePeriodYear'
 import { useTaxClosure } from '../hooks/useTaxClosure'
@@ -49,6 +51,12 @@ export default function OperacionesPage() {
     const entries = useLiveQuery(() => db.entries.toArray(), [])
     const accounts = useLiveQuery(() => db.accounts.toArray(), [])
     const indicators = useIndicatorsMetrics()
+
+    // Fixed Assets metrics
+    const fixedAssetsMetrics = useLiveQuery(
+        () => getFixedAssetsMetrics(periodId, periodYear),
+        [periodId, periodYear]
+    )
 
     // Tax data for Fiscal/Impuestos card
     const currentMonth = useMemo(() => {
@@ -470,6 +478,40 @@ export default function OperacionesPage() {
                     <div className="mt-auto pt-4 border-t border-slate-50">
                         <button className="text-sm font-medium text-blue-600 flex items-center gap-2 group-hover:text-blue-700">
                             Ver cotizaciones <CaretRight size={14} weight="bold" />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Bienes de Uso */}
+                <div
+                    className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col hover:shadow-md hover:border-blue-400 transition-all cursor-pointer group"
+                    onClick={() => navigate('/operaciones/bienes-uso')}
+                >
+                    <div className="flex justify-between items-start mb-4">
+                        <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-xl group-hover:bg-amber-100 transition-colors">
+                            <Armchair weight="duotone" size={24} />
+                        </div>
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-600 border border-emerald-100">Activo</span>
+                    </div>
+                    <h3 className="font-display font-semibold text-lg text-slate-900 mb-1">Bienes de Uso</h3>
+                    <p className="text-sm text-slate-500 mb-4">Activos fijos, amortizaciones y ajuste por inflacion (RT6).</p>
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                        <div>
+                            <div className="text-xs text-slate-500">Bienes Activos</div>
+                            <div className="font-mono font-semibold text-slate-900">
+                                {fixedAssetsMetrics?.hasData ? fixedAssetsMetrics.count : '0'}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-slate-500">Valor Neto</div>
+                            <div className="font-mono font-semibold text-slate-900">
+                                {fixedAssetsMetrics?.hasData ? formatCurrency(fixedAssetsMetrics.totalNBV) : '—'}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="mt-auto pt-4 border-t border-slate-50">
+                        <button className="text-sm font-medium text-blue-600 flex items-center gap-2 group-hover:text-blue-700">
+                            Gestionar <CaretRight size={14} weight="bold" />
                         </button>
                     </div>
                 </div>

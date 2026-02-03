@@ -3,7 +3,7 @@
  * Uses Dexie liveQuery for reactive updates
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import type {
     TaxClosePeriod,
@@ -14,6 +14,10 @@ import type {
     RetencionPercepcionRow,
     TaxOverrideRow,
     AutonomosSettings,
+    TaxObligationSummary,
+    TaxPaymentLink,
+    TaxSettlementObligation,
+    TaxType,
 } from '../core/impuestos/types'
 import {
     getTaxClosure,
@@ -23,6 +27,8 @@ import {
     calculateIVAByAlicuota,
     getRetencionesPercepciones,
     calculateIIBBSuggestedBase,
+    buildTaxEntryPreview,
+    saveTaxEntryFromPreview,
     generateIVAEntry,
     generateIIBBEntry,
     generateMonotributoEntry,
@@ -30,9 +36,18 @@ import {
     getGeneratedEntriesForClosure,
     generateNotificationsForMonth,
     syncAutonomosNotification,
+    listTaxObligationsWithPayments,
+    listTaxPaymentsForSettlement,
+    registerTaxSettlement,
+    buildTaxSettlementEntryPreview,
+    syncAgentDepositObligations,
 } from '../storage/impuestos'
+import type { RegisterTaxPaymentInput, TaxPaymentPreviewResult } from '../storage/impuestos'
 import { db } from '../storage/db'
 import type { JournalEntry } from '../core/models'
+import type { TaxEntryType } from '../storage/impuestos'
+import { buildTaxSettlementObligationId, computeTaxSettlementRemaining } from '../core/impuestos/settlements'
+import { computeTaxObligationStatus } from '../core/impuestos/obligations'
 
 export interface UseTaxClosureReturn {
     // Data
@@ -42,10 +57,12 @@ export interface UseTaxClosureReturn {
     retencionesPercepciones: RetencionPercepcionRow[]
     iibbSuggestedBase: number
     generatedEntries: JournalEntry[]
+    taxObligations: TaxSettlementObligation[]
 
     // Loading states
     isLoading: boolean
     isCalculating: boolean
+    isLocked: boolean
 
     // Actions
     refreshCalculations: () => Promise<void>
@@ -55,8 +72,24 @@ export interface UseTaxClosureReturn {
     updateAutonomosSettings: (settings: AutonomosSettings) => Promise<void>
     addOverride: (override: Omit<TaxOverrideRow, 'id'>) => Promise<void>
     removeOverride: (id: string) => Promise<void>
-    generateEntry: (type: 'iva' | 'iibb' | 'mt' | 'autonomos') => Promise<{ success: boolean; error?: string }>
+    buildEntryPreview: (
+        type: TaxEntryType,
+        override?: Partial<TaxClosePeriod>
+    ) => Promise<{ entry?: Omit<JournalEntry, 'id'>; error?: string }>
+    saveEntryFromPreview: (type: TaxEntryType, entry: Omit<JournalEntry, 'id'>) => Promise<{ success: boolean; error?: string }>
+    generateEntry: (type: TaxEntryType, entry?: Omit<JournalEntry, 'id'>) => Promise<{ success: boolean; error?: string }>
+    getObligationsByPeriod: (taxPeriod: string) => Promise<TaxSettlementObligation[]>
+    getPaymentsByObligation: (obligation: TaxSettlementObligation) => Promise<TaxPaymentLink[]>
+    buildSettlementPreview: (
+        obligation: TaxSettlementObligation,
+        payload: RegisterTaxPaymentInput
+    ) => Promise<TaxPaymentPreviewResult>
+    registerTaxSettlement: (
+        obligation: TaxSettlementObligation,
+        payload: RegisterTaxPaymentInput
+    ) => Promise<{ success: boolean; error?: string; missingAccountLabel?: string; entryId?: string }>
     closePeriod: () => Promise<void>
+    unlockPeriod: () => Promise<void>
 }
 
 export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureReturn {
@@ -68,6 +101,22 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
     const [iibbSuggestedBase, setIibbSuggestedBase] = useState(0)
     const [generatedEntries, setGeneratedEntries] = useState<JournalEntry[]>([])
     const closureRef = useRef<TaxClosePeriod | null>(null)
+    const notificationsSignatureRef = useRef<string | null>(null)
+
+    const resolveEntryType = (entry: JournalEntry): TaxEntryType | null => {
+        const meta = entry.metadata || {}
+        const raw = (meta.taxType || meta.meta?.tax) as string | undefined
+        const normalized = raw ? raw.toUpperCase() : ''
+        if (normalized === 'IVA') return 'iva'
+        if (normalized === 'IIBB' || normalized === 'IIBB_LOCAL' || normalized === 'IIBB_CM') return 'iibb'
+        if (normalized === 'MONOTRIBUTO') return 'mt'
+        if (normalized === 'AUTONOMOS') return 'autonomos'
+        if (entry.sourceId?.startsWith('iva:')) return 'iva'
+        if (entry.sourceId?.startsWith('iibb:')) return 'iibb'
+        if (entry.sourceId?.startsWith('mt:')) return 'mt'
+        if (entry.sourceId?.startsWith('autonomos:')) return 'autonomos'
+        return null
+    }
 
     const getMonthRange = (value: string) => {
         const [year, monthNum] = value.split('-').map(Number)
@@ -77,10 +126,160 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
         return { start, end }
     }
 
+    const resolveSourceEntryId = (
+        taxType: TaxType,
+        closureDoc: TaxClosePeriod | null,
+        entries: JournalEntry[]
+    ): string | undefined => {
+        if (closureDoc?.journalEntryIds) {
+            if (taxType === 'IVA' && closureDoc.journalEntryIds.iva) return closureDoc.journalEntryIds.iva
+            if (taxType === 'IIBB' && closureDoc.journalEntryIds.iibb) return closureDoc.journalEntryIds.iibb
+            if (taxType === 'MONOTRIBUTO' && closureDoc.journalEntryIds.mt) return closureDoc.journalEntryIds.mt
+            if (taxType === 'AUTONOMOS' && closureDoc.journalEntryIds.autonomos) return closureDoc.journalEntryIds.autonomos
+        }
+
+        const entry = entries.find(candidate => {
+            const meta = candidate.metadata || {}
+            const raw = (meta.taxType || meta.meta?.tax) as string | undefined
+            const normalized = raw ? raw.toUpperCase() : ''
+            if (taxType === 'IVA' && normalized === 'IVA') return true
+            if (taxType === 'IIBB' && (normalized === 'IIBB' || normalized === 'IIBB_LOCAL' || normalized === 'IIBB_CM')) return true
+            if (taxType === 'MONOTRIBUTO' && normalized === 'MONOTRIBUTO') return true
+            if (taxType === 'AUTONOMOS' && normalized === 'AUTONOMOS') return true
+
+            if (taxType === 'IVA' && candidate.sourceId?.startsWith('iva:')) return true
+            if (taxType === 'IIBB' && candidate.sourceId?.startsWith('iibb:')) return true
+            if (taxType === 'MONOTRIBUTO' && candidate.sourceId?.startsWith('mt:')) return true
+            if (taxType === 'AUTONOMOS' && candidate.sourceId?.startsWith('autonomos:')) return true
+            return false
+        })
+
+        return entry?.id
+    }
+
+    const matchesSettlementPayment = (
+        payment: TaxPaymentLink,
+        obligation: TaxSettlementObligation
+    ): boolean => {
+        const paymentDirection = payment.direction || 'PAYABLE'
+        if (paymentDirection !== obligation.direction) return false
+
+        const primaryId = obligation.sourceObligationId || obligation.id
+        if (payment.obligationId === primaryId || payment.obligationId === obligation.id) return true
+
+        if (payment.taxType && payment.periodKey) {
+            if (payment.taxType === obligation.tax && payment.periodKey === obligation.periodKey) {
+                return true
+            }
+        }
+
+        if (payment.sourceTaxEntryId && obligation.sourceTaxEntryId) {
+            return payment.sourceTaxEntryId === obligation.sourceTaxEntryId
+        }
+
+        return false
+    }
+
+    const computeSettlementAmount = (
+        payments: TaxPaymentLink[],
+        obligation: TaxSettlementObligation
+    ): number => {
+        return payments
+            .filter(payment => matchesSettlementPayment(payment, obligation))
+            .reduce((sum, payment) => sum + (payment.amount || 0), 0)
+    }
+
+    const buildSettlementObligations = (
+        payables: TaxObligationSummary[],
+        ivaTotalsInput: IVATotals | null,
+        periodKey: string,
+        closureDoc: TaxClosePeriod | null,
+        entries: JournalEntry[],
+        payments: TaxPaymentLink[]
+    ): TaxSettlementObligation[] => {
+        const buildPayable = (obligation: TaxObligationSummary): TaxSettlementObligation => {
+            const sourceTaxEntryId = resolveSourceEntryId(obligation.taxType as TaxType, closureDoc, entries)
+            const settlementId = buildTaxSettlementObligationId({
+                tax: obligation.taxType as TaxType,
+                periodKey: obligation.taxPeriod,
+                direction: 'PAYABLE',
+                jurisdiction: obligation.jurisdiction,
+                sourceTaxEntryId,
+            })
+
+            const base: TaxSettlementObligation = {
+                id: settlementId,
+                tax: obligation.taxType as TaxType,
+                direction: 'PAYABLE',
+                amountTotal: obligation.amountDue,
+                amountSettled: 0,
+                amountRemaining: 0,
+                periodKey: obligation.taxPeriod,
+                suggestedDueDate: obligation.dueDate,
+                jurisdiction: obligation.jurisdiction,
+                sourceTaxEntryId,
+                sourceObligationId: obligation.id,
+                status: obligation.status,
+            }
+
+            const amountSettled = computeSettlementAmount(payments, base)
+            const amountRemaining = computeTaxSettlementRemaining(base.amountTotal, amountSettled)
+            const status = computeTaxObligationStatus(base.amountTotal, amountSettled)
+
+            return {
+                ...base,
+                amountSettled,
+                amountRemaining,
+                status,
+            }
+        }
+
+        const obligations: TaxSettlementObligation[] = (payables || []).map(buildPayable)
+
+        if ((ivaTotalsInput?.saldo || 0) < 0) {
+            const amountTotal = Math.abs(ivaTotalsInput?.saldo || 0)
+            const sourceTaxEntryId = resolveSourceEntryId('IVA', closureDoc, entries)
+            const settlementId = buildTaxSettlementObligationId({
+                tax: 'IVA',
+                periodKey,
+                direction: 'RECEIVABLE',
+                jurisdiction: 'NACIONAL',
+                sourceTaxEntryId,
+            })
+
+            const base: TaxSettlementObligation = {
+                id: settlementId,
+                tax: 'IVA',
+                direction: 'RECEIVABLE',
+                amountTotal,
+                amountSettled: 0,
+                amountRemaining: 0,
+                periodKey,
+                suggestedDueDate: undefined,
+                jurisdiction: 'NACIONAL',
+                sourceTaxEntryId,
+                status: 'PENDING',
+            }
+
+            const amountSettled = computeSettlementAmount(payments, base)
+            const amountRemaining = computeTaxSettlementRemaining(amountTotal, amountSettled)
+            const status = computeTaxObligationStatus(amountTotal, amountSettled)
+
+            obligations.push({
+                ...base,
+                amountSettled,
+                amountRemaining,
+                status,
+            })
+        }
+
+        return obligations
+    }
+
     const entriesVersion = useLiveQuery(async () => {
         if (!month) return []
         const { start, end } = getMonthRange(month)
-        return db.entries.where('date').between(start, end, true, true).primaryKeys()
+        return db.entries.where('date').between(start, end, true, true).toArray()
     }, [month])
 
     const movementsVersion = useLiveQuery(async () => {
@@ -91,6 +290,18 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
 
     const accountsVersion = useLiveQuery(async () => db.accounts.toCollection().primaryKeys(), [])
 
+    const payableObligations = useLiveQuery(async () => {
+        if (!month) return []
+        return listTaxObligationsWithPayments(month)
+    }, [month], [])
+
+    const taxPayments = useLiveQuery(async () => {
+        const payments = await db.taxPayments.toArray()
+        if (payments.length === 0) return []
+        const entries = await db.entries.bulkGet(payments.map(p => p.journalEntryId))
+        return payments.filter((_payment, idx) => entries[idx])
+    }, [], [])
+
     // Live query for the closure document
     const closure = useLiveQuery(
         () => {
@@ -100,6 +311,20 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
         [month, regime],
         null
     )
+    const isLocked = closure?.status === 'CLOSED'
+
+    const taxObligations = useMemo(() => {
+        if (!month) return []
+
+        return buildSettlementObligations(
+            (payableObligations || []) as TaxObligationSummary[],
+            ivaTotals,
+            month,
+            closure ?? null,
+            generatedEntries || [],
+            (taxPayments || []) as TaxPaymentLink[]
+        )
+    }, [month, payableObligations, ivaTotals, closure, generatedEntries, taxPayments])
 
     useEffect(() => {
         closureRef.current = closure ?? null
@@ -137,7 +362,7 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
 
         setIsCalculating(true)
         try {
-            const [iva, byAlicuota, retPerc, suggestedBase, entries] = await Promise.all([
+            const [ivaComputed, byAlicuota, retPerc, suggestedBase, entries] = await Promise.all([
                 calculateIVAFromEntries(month),
                 calculateIVAByAlicuota(month),
                 getRetencionesPercepciones(month),
@@ -145,38 +370,62 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
                 getGeneratedEntriesForClosure(month, regime),
             ])
 
-            setIvaTotals(iva)
+            const currentClosure = closureRef.current
+            const locked = currentClosure?.status === 'CLOSED'
+            const snapshotIva = currentClosure?.snapshot?.ivaTotals || currentClosure?.ivaTotals || null
+
+            setIvaTotals(locked && snapshotIva ? snapshotIva : ivaComputed)
             setIvaByAlicuota(byAlicuota)
             setRetencionesPercepciones(retPerc)
             setIibbSuggestedBase(suggestedBase)
             setGeneratedEntries(entries)
 
-            const currentClosure = closureRef.current
             if (currentClosure) {
-                const updates: Partial<Omit<TaxClosePeriod, 'id'>> = { ivaTotals: iva }
-                const journalEntryIds = currentClosure.journalEntryIds || {}
-                const ids = Object.values(journalEntryIds).filter(Boolean) as string[]
+                const updates: Partial<Omit<TaxClosePeriod, 'id'>> = {}
 
-                if (ids.length > 0) {
-                    const existing = await db.entries.bulkGet(ids)
-                    const existingIds = new Set(existing.filter(Boolean).map(entry => entry!.id))
-                    const nextIds = { ...journalEntryIds }
-                    let changed = false
+                if (!locked) {
+                    updates.ivaTotals = ivaComputed
+                }
 
-                    for (const [key, value] of Object.entries(journalEntryIds)) {
-                        if (value && !existingIds.has(value)) {
-                            delete nextIds[key as keyof typeof nextIds]
-                            changed = true
-                        }
-                    }
+                const journalEntryIds = { ...(currentClosure.journalEntryIds || {}) }
+                const derivedIds: Record<string, string> = {}
 
-                    if (changed) {
-                        updates.journalEntryIds = nextIds
-                        updates.steps = { ...currentClosure.steps, asientos: false }
+                for (const entry of entries) {
+                    const type = resolveEntryType(entry)
+                    if (type) {
+                        derivedIds[type] = entry.id
                     }
                 }
 
-                await updateTaxClosure(currentClosure.id, updates)
+                let idsChanged = false
+                Object.entries(derivedIds).forEach(([key, value]) => {
+                    if ((journalEntryIds as Record<string, string | undefined>)[key] !== value) {
+                        ;(journalEntryIds as Record<string, string>)[key] = value
+                        idsChanged = true
+                    }
+                })
+
+                const existingIds = new Set(entries.map(entry => entry.id))
+                for (const [key, value] of Object.entries(journalEntryIds)) {
+                    if (value && !existingIds.has(value)) {
+                        delete (journalEntryIds as Record<string, string>)[key]
+                        idsChanged = true
+                    }
+                }
+
+                if (idsChanged) {
+                    updates.journalEntryIds = journalEntryIds
+                    if (!locked) {
+                        updates.steps = {
+                            ...currentClosure.steps,
+                            asientos: entries.length > 0,
+                        }
+                    }
+                }
+
+                if (Object.keys(updates).length > 0) {
+                    await updateTaxClosure(currentClosure.id, updates)
+                }
             }
         } catch (error) {
             console.error('Error calculating tax data:', error)
@@ -198,12 +447,26 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
             r => r.direction === 'PRACTICADA' && r.impuesto === 'IVA'
         )
         const includeIIBBCM = (closure.iibbCMJurisdictions || []).length > 0
+        const signature = JSON.stringify({
+            month,
+            regime,
+            includeAgentDeposits,
+            includeIIBBCM,
+            hasAutonomos: closure.autonomosSettings?.enabled,
+            autonomosDueDay: closure.autonomosSettings?.dueDay,
+            iibbJurisdiction: closure.iibbTotals?.jurisdiction || null,
+        })
+        if (notificationsSignatureRef.current === signature) {
+            return
+        }
+        notificationsSignatureRef.current = signature
 
         generateNotificationsForMonth(month, regime, {
             hasAutonomos: closure.autonomosSettings?.enabled,
             autonomosDueDay: closure.autonomosSettings?.dueDay,
             includeAgentDeposits,
             includeIIBBCM,
+            iibbJurisdiction: closure.iibbTotals?.jurisdiction,
         }).catch(console.error)
     }, [
         closure?.id,
@@ -212,12 +475,20 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
         closure?.autonomosSettings?.enabled,
         closure?.autonomosSettings?.dueDay,
         closure?.iibbCMJurisdictions?.length,
+        closure?.iibbTotals?.jurisdiction,
         retencionesPercepciones,
     ])
+
+    useEffect(() => {
+        if (!month) return
+        syncAgentDepositObligations(month, retencionesPercepciones, closure?.iibbTotals?.jurisdiction)
+            .catch(console.error)
+    }, [month, retencionesPercepciones, closure?.iibbTotals?.jurisdiction])
 
     // Update steps
     const updateSteps = useCallback(async (steps: Partial<TaxClosePeriod['steps']>) => {
         if (!closure) return
+        if (closure.status === 'CLOSED') return
 
         await updateTaxClosure(closure.id, {
             steps: { ...closure.steps, ...steps },
@@ -227,6 +498,7 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
     // Update IIBB totals
     const updateIIBBTotals = useCallback(async (totals: IIBBTotals) => {
         if (!closure) return
+        if (closure.status === 'CLOSED') return
 
         await updateTaxClosure(closure.id, { iibbTotals: totals })
     }, [closure])
@@ -234,6 +506,7 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
     // Update MT totals
     const updateMTTotals = useCallback(async (categoria: string, monto: number) => {
         if (!closure) return
+        if (closure.status === 'CLOSED') return
 
         await updateTaxClosure(closure.id, {
             mtTotals: { categoria, montoMensual: monto },
@@ -244,6 +517,7 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
     const updateAutonomosSettings = useCallback(async (settings: AutonomosSettings) => {
         if (!closure) return
         if (closure.regime !== 'RI') return // Only for Responsable Inscripto
+        if (closure.status === 'CLOSED') return
 
         await updateTaxClosure(closure.id, { autonomosSettings: settings })
 
@@ -254,6 +528,7 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
     // Add manual override
     const addOverride = useCallback(async (override: Omit<TaxOverrideRow, 'id'>) => {
         if (!closure) return
+        if (closure.status === 'CLOSED') return
 
         const newOverride: TaxOverrideRow = {
             ...override,
@@ -268,33 +543,78 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
     // Remove override
     const removeOverride = useCallback(async (id: string) => {
         if (!closure) return
+        if (closure.status === 'CLOSED') return
 
         await updateTaxClosure(closure.id, {
             overrides: (closure.overrides || []).filter(o => o.id !== id),
         })
     }, [closure])
 
-    // Generate entry
-    const generateEntry = useCallback(async (type: 'iva' | 'iibb' | 'mt' | 'autonomos'): Promise<{ success: boolean; error?: string }> => {
+    const buildEntryPreview = useCallback(async (type: TaxEntryType, override?: Partial<TaxClosePeriod>) => {
+        if (!closure) {
+            return { error: 'No hay cierre cargado' }
+        }
+        if (closure.status === 'CLOSED') {
+            return { error: 'El periodo esta cerrado. Desbloquealo para generar asientos.' }
+        }
+        const closureInput = override ? { ...closure, ...override } : closure
+        return buildTaxEntryPreview(closureInput, type)
+    }, [closure])
+
+    const saveEntryFromPreview = useCallback(async (type: TaxEntryType, entry: Omit<JournalEntry, 'id'>) => {
         if (!closure) return { success: false, error: 'No hay cierre cargado' }
+        if (closure.status === 'CLOSED') {
+            return { success: false, error: 'El periodo esta cerrado. Desbloquealo para generar asientos.' }
+        }
+
+        const result = await saveTaxEntryFromPreview(closure, type, entry)
+        if (result.error) {
+            return { success: false, error: result.error }
+        }
+
+        const journalEntryIds = { ...closure.journalEntryIds, [type]: result.entryId }
+        await updateTaxClosure(closure.id, {
+            journalEntryIds,
+            steps: { ...closure.steps, asientos: true },
+        })
+
+        const entries = await getGeneratedEntriesForClosure(month, regime)
+        setGeneratedEntries(entries)
+
+        return { success: true }
+    }, [closure, month, regime])
+
+    // Generate entry
+    const generateEntry = useCallback(async (
+        type: TaxEntryType,
+        entry?: Omit<JournalEntry, 'id'>
+    ): Promise<{ success: boolean; error?: string }> => {
+        if (!closure) return { success: false, error: 'No hay cierre cargado' }
+        if (closure.status === 'CLOSED') {
+            return { success: false, error: 'El periodo esta cerrado. Desbloquealo para generar asientos.' }
+        }
 
         let result: { entryId: string; error?: string }
 
-        switch (type) {
-            case 'iva':
-                result = await generateIVAEntry(closure)
-                break
-            case 'iibb':
-                result = await generateIIBBEntry(closure)
-                break
-            case 'autonomos':
-                result = await generateAutonomosEntry(closure)
-                break
-            case 'mt':
-                result = await generateMonotributoEntry(closure)
-                break
-            default:
-                return { success: false, error: 'Tipo de asiento desconocido' }
+        if (entry) {
+            result = await saveTaxEntryFromPreview(closure, type, entry)
+        } else {
+            switch (type) {
+                case 'iva':
+                    result = await generateIVAEntry(closure)
+                    break
+                case 'iibb':
+                    result = await generateIIBBEntry(closure)
+                    break
+                case 'autonomos':
+                    result = await generateAutonomosEntry(closure)
+                    break
+                case 'mt':
+                    result = await generateMonotributoEntry(closure)
+                    break
+                default:
+                    return { success: false, error: 'Tipo de asiento desconocido' }
+            }
         }
 
         if (result.error) {
@@ -315,21 +635,97 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
         return { success: true }
     }, [closure, month, regime])
 
+    const getObligationsByPeriod = useCallback(async (taxPeriod: string) => {
+        const [payables, computedIva, closureDoc, generated, payments] = await Promise.all([
+            listTaxObligationsWithPayments(taxPeriod),
+            calculateIVAFromEntries(taxPeriod),
+            getTaxClosure(taxPeriod, regime),
+            getGeneratedEntriesForClosure(taxPeriod, regime),
+            db.taxPayments.toArray(),
+        ])
+
+        const ivaTotalsForPeriod = closureDoc?.status === 'CLOSED'
+            ? (closureDoc.snapshot?.ivaTotals || closureDoc.ivaTotals || computedIva)
+            : computedIva
+
+        return buildSettlementObligations(
+            payables,
+            ivaTotalsForPeriod,
+            taxPeriod,
+            closureDoc ?? null,
+            generated,
+            payments
+        )
+    }, [buildSettlementObligations, regime])
+
+    const getPaymentsByObligation = useCallback(async (obligation: TaxSettlementObligation) => {
+        return listTaxPaymentsForSettlement(obligation)
+    }, [])
+
+    const buildSettlementPreview = useCallback(async (
+        obligation: TaxSettlementObligation,
+        payload: RegisterTaxPaymentInput
+    ) => {
+        return buildTaxSettlementEntryPreview(obligation, payload)
+    }, [])
+
+    const registerSettlement = useCallback(async (
+        obligation: TaxSettlementObligation,
+        payload: RegisterTaxPaymentInput
+    ): Promise<{ success: boolean; error?: string; missingAccountLabel?: string; entryId?: string }> => {
+        const result = await registerTaxSettlement(obligation, payload)
+        if (result.error) {
+            return { success: false, error: result.error, missingAccountLabel: result.missingAccountLabel }
+        }
+        return { success: true, entryId: result.entryId }
+    }, [])
+
     // Close period
     const closePeriod = useCallback(async () => {
         if (!closure) return
+        if (closure.status === 'CLOSED') return
+
+        const now = new Date().toISOString()
+        const snapshot = {
+            ivaTotals: ivaTotals || closure.ivaTotals,
+            iibbTotals: closure.iibbTotals,
+            mtTotals: closure.mtTotals,
+            autonomosSettings: closure.autonomosSettings,
+            journalEntryIds: closure.journalEntryIds,
+            capturedAt: now,
+        }
 
         await updateTaxClosure(closure.id, {
-            status: 'DJ_SUBMITTED',
+            status: 'CLOSED',
+            closedAt: now,
+            snapshot,
+            auditTrail: [
+                ...(closure.auditTrail || []),
+                { action: 'CLOSED', timestamp: now },
+            ],
             steps: {
                 ...closure.steps,
                 presentacion: true,
             },
         })
+    }, [closure, ivaTotals])
+
+    const unlockPeriod = useCallback(async () => {
+        if (!closure) return
+        if (closure.status !== 'CLOSED') return
+
+        const now = new Date().toISOString()
+        await updateTaxClosure(closure.id, {
+            status: 'OPEN',
+            auditTrail: [
+                ...(closure.auditTrail || []),
+                { action: 'UNLOCKED', timestamp: now },
+            ],
+        })
     }, [closure])
 
     return {
-        closure,
+        closure: closure ?? null,
         ivaTotals,
         ivaByAlicuota,
         retencionesPercepciones,
@@ -337,6 +733,7 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
         generatedEntries,
         isLoading,
         isCalculating,
+        isLocked,
         refreshCalculations,
         updateSteps,
         updateIIBBTotals,
@@ -344,7 +741,15 @@ export function useTaxClosure(month: string, regime: TaxRegime): UseTaxClosureRe
         updateAutonomosSettings,
         addOverride,
         removeOverride,
+        buildEntryPreview,
+        saveEntryFromPreview,
         generateEntry,
+        taxObligations: (taxObligations || []) as TaxSettlementObligation[],
+        getObligationsByPeriod,
+        getPaymentsByObligation,
+        buildSettlementPreview,
+        registerTaxSettlement: registerSettlement,
         closePeriod,
+        unlockPeriod,
     }
 }

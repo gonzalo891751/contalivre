@@ -86,6 +86,7 @@ export interface Account {
     isContra: boolean         // Cuenta regularizadora/contra
     allowOppositeBalance?: boolean // Permitir saldo contrario (ej: RECPAM, Dif Cambio)
     isHeader: boolean         // Cuenta cabecera (no se puede imputar)
+    tags?: string[]           // Optional tags for account classification
 
     // Legacy compatibility
     type?: AccountType        // Mantenido para compatibilidad con MVP 0.1

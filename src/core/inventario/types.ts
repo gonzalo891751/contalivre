@@ -395,6 +395,7 @@ export interface BienesProduct {
     openingQty: number
     openingUnitCost: number
     openingDate: string            // ISO date
+    openingContraAccountId?: string // Contrapartida elegida para apertura (PN)
     // Metadata
     createdAt: string
     updatedAt: string
@@ -487,6 +488,8 @@ export interface BienesMovement {
     linkedJournalEntryIds: string[] // References to generated entries (Etapa 2)
     journalStatus: JournalStatus   // Estado real del asiento
     journalMissingReason?: 'entry_deleted' | 'manual_unlinked'
+    // Opening stock contra account (if selected)
+    openingContraAccountId?: string
     // Metadata
     createdAt: string
     updatedAt: string
