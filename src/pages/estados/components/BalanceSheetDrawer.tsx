@@ -3,6 +3,7 @@
  * Shows detail of accounts within a rubro (off-canvas panel)
  */
 import { useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import type { Rubro } from '../adapters/balanceSheetViewModel'
 import { formatCurrencyARS } from '../../../core/amortizaciones/calc'
 
@@ -48,11 +49,12 @@ export function BalanceSheetDrawer({ isOpen, onClose, rubro }: BalanceSheetDrawe
         onClose()
     }, [onClose])
 
+    if (typeof document === 'undefined') return null
     if (!isOpen || !rubro) return null
 
     const totalAmount = rubro.accounts.reduce((sum, acc) => sum + acc.amount, 0)
 
-    return (
+    return createPortal(
         <div className={`bsd-overlay ${isOpen ? 'visible' : ''}`}>
             {/* Backdrop */}
             <div className="bsd-backdrop" onClick={handleBackdropClick}></div>
@@ -112,7 +114,8 @@ export function BalanceSheetDrawer({ isOpen, onClose, rubro }: BalanceSheetDrawe
             </div>
 
             <style>{drawerStyles}</style>
-        </div>
+        </div>,
+        document.body
     )
 }
 

@@ -687,6 +687,7 @@ const espV2Styles = `
         flex-direction: row;
         justify-content: space-between;
         align-items: flex-end;
+        flex-wrap: wrap;
     }
 }
 
@@ -708,6 +709,12 @@ const espV2Styles = `
 @media (min-width: 768px) {
     .esp2-main-title {
         font-size: 2.25rem;
+    }
+}
+
+@media (min-width: 1024px) {
+    .esp2-main-title {
+        white-space: nowrap;
     }
 }
 
