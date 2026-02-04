@@ -27,10 +27,12 @@ import {
 
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics'
 import { usePeriodYear } from '../hooks/usePeriodYear'
+import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { loadSeedDataIfNeeded } from '../storage/seed'
 import IndicatorsDashboard from '../components/Indicators/IndicatorsDashboard'
 import MappingWizardModal from '../components/mapping/MappingWizardModal'
 import QuickActionsGrid from '../components/dashboard/QuickActionsGrid'
+import { CompanyProfileModal, CompanyProfileCard } from '../components/CompanyProfile'
 
 // ============================================================================
 // Formatters
@@ -58,7 +60,15 @@ export default function Dashboard() {
     const [showImportModal, setShowImportModal] = useState(false)
     const [showResetModal, setShowResetModal] = useState(false)
     const [showMappingWizard, setShowMappingWizard] = useState(false)
-    
+    const [showCompanyProfileModal, setShowCompanyProfileModal] = useState(false)
+
+    // Company Profile hook
+    const { profile, isConfigured, save: saveProfile, isSaving } = useCompanyProfile()
+
+    // Dynamic greeting
+    const greetingName = profile?.userName
+    const greeting = greetingName ? `¡Bienvenido, ${greetingName}!` : '¡Bienvenido!'
+
     // Destructure for easier access
     const { isLoading, hasCOA, unmappedCount, isSetupComplete, hasEntries, totals, kpis, charts, recentActivity } =
         metrics
@@ -125,7 +135,7 @@ export default function Dashboard() {
             <header className="dashboard-header">
                 <div className="dashboard-header-content">
                     <div className="dashboard-header-left">
-                        <h1 className="dashboard-greeting">¡Bienvenido!</h1>
+                        <h1 className="dashboard-greeting">{greeting}</h1>
                         <p className="dashboard-subtitle">
                             {isSetupComplete
                                 ? 'Tu panel de finanzas, patrimonio y gestión contable.'
@@ -166,6 +176,23 @@ export default function Dashboard() {
             </header>
 
             <main className="dashboard-main">
+                {/* COMPANY PROFILE SECTION */}
+                <section className="dashboard-company-profile">
+                    <div className="cp-section-header">
+                        <h3 className="cp-section-main-title">Datos de la Empresa</h3>
+                        <span className="cp-section-badge">Uso Oficial</span>
+                    </div>
+                    <CompanyProfileCard
+                        profile={profile}
+                        isConfigured={isConfigured}
+                        onEdit={() => setShowCompanyProfileModal(true)}
+                        onPrintPdf={() => {
+                            // TODO: Implement PDF print
+                            window.print()
+                        }}
+                    />
+                </section>
+
                 {/* QUICK ACTIONS */}
                 <QuickActionsGrid />
 
@@ -672,6 +699,15 @@ export default function Dashboard() {
             <MappingWizardModal
                 isOpen={showMappingWizard}
                 onClose={() => setShowMappingWizard(false)}
+            />
+
+            {/* COMPANY PROFILE MODAL */}
+            <CompanyProfileModal
+                isOpen={showCompanyProfileModal}
+                onClose={() => setShowCompanyProfileModal(false)}
+                profile={profile}
+                onSave={saveProfile}
+                isSaving={isSaving}
             />
         </div>
     )

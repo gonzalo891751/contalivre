@@ -220,6 +220,17 @@ export async function saveInvestmentSettings(settings: Partial<InvestmentSetting
     return updated
 }
 
+async function enableRubroForPeriod(periodId: string | undefined, rubro: InvestmentRubro): Promise<void> {
+    if (!periodId) return
+    const current = await loadInvestmentSettings()
+    const enabled = { ...(current.enabledRubros || {}) }
+    const set = new Set<InvestmentRubro>(enabled[periodId] || [])
+    if (set.has(rubro)) return
+    set.add(rubro)
+    enabled[periodId] = Array.from(set)
+    await saveInvestmentSettings({ enabledRubros: enabled })
+}
+
 // ========================================
 // Instruments CRUD
 // ========================================
@@ -257,6 +268,12 @@ export async function createInstrument(
         updatedAt: now,
     }
     await db.invInstruments.add(instrument)
+    // Auto-habilitar rubro cuando se crea el primer instrumento del rubro/ejercicio
+    try {
+        await enableRubroForPeriod(instrument.periodId, instrument.rubro)
+    } catch {
+        // Non-blocking: settings are optional UX state
+    }
     return instrument
 }
 
@@ -398,6 +415,7 @@ export async function calculateSaleCostPPP(
     sellQuantity: number,
     _sellDate?: string // Reserved for future FIFO/UEPS date-based costing
 ): Promise<{ costAssigned: number; gainLoss: number; error?: string }> {
+    void _sellDate
     const { quantity, ppp } = await calculatePPP(instrumentId)
 
     if (sellQuantity > quantity) {
@@ -423,9 +441,24 @@ export async function buildJournalPreview(
     let error: string | undefined
     let warning: string | undefined
 
-    const contraAccount = accounts.find(a => a.id === movement.contraAccountId)
-    if (!contraAccount) {
-        error = 'Cuenta contrapartida no encontrada'
+    const requiresContraAccount =
+        movement.type === 'BUY' ||
+        movement.type === 'SELL' ||
+        movement.type === 'INCOME' ||
+        movement.type === 'PF_CONSTITUTE' ||
+        movement.type === 'PF_MATURITY' ||
+        movement.type === 'VPP_ALTA'
+
+    const contraAccountId = movement.contraAccountId
+    const contraAccount = contraAccountId ? accounts.find(a => a.id === contraAccountId) : undefined
+
+    if (requiresContraAccount && !contraAccount) {
+        error = 'Cuenta contrapartida requerida'
+        return { lines, totalDebit: 0, totalCredit: 0, isBalanced: false, memo: '', date: movement.date, error }
+    }
+
+    if (contraAccount?.isHeader) {
+        error = 'La cuenta contrapartida debe ser imputable (no cabecera)'
         return { lines, totalDebit: 0, totalCredit: 0, isBalanced: false, memo: '', date: movement.date, error }
     }
 
@@ -495,9 +528,9 @@ export async function buildJournalPreview(
                 }
             } else {
                 lines.push({
-                    accountId: contraAccount.id,
-                    accountCode: contraAccount.code,
-                    accountName: contraAccount.name,
+                    accountId: contraAccount!.id,
+                    accountCode: contraAccount!.code,
+                    accountName: contraAccount!.name,
                     debit: 0,
                     credit: netAmount + ivaAmount,
                     description: `Pago compra ${instrument?.ticker || ''}`,
@@ -533,9 +566,9 @@ export async function buildJournalPreview(
             const gainLoss = netReceived - costAssigned
 
             lines.push({
-                accountId: contraAccount.id,
-                accountCode: contraAccount.code,
-                accountName: contraAccount.name,
+                accountId: contraAccount!.id,
+                accountCode: contraAccount!.code,
+                accountName: contraAccount!.name,
                 debit: netReceived,
                 credit: 0,
                 description: `Cobro venta ${instrument?.ticker || ''}`,
@@ -589,9 +622,9 @@ export async function buildJournalPreview(
                     : resolveResultAccount(accounts, 'DIVIDENDOS_GANADOS')
 
             lines.push({
-                accountId: contraAccount.id,
-                accountCode: contraAccount.code,
-                accountName: contraAccount.name,
+                accountId: contraAccount!.id,
+                accountCode: contraAccount!.code,
+                accountName: contraAccount!.name,
                 debit: movement.amount,
                 credit: 0,
                 description: `Cobro ${movement.rubro === 'RENTAS' ? 'alquiler' : 'dividendo/interés'}`,
@@ -691,9 +724,9 @@ export async function buildJournalPreview(
             })
 
             lines.push({
-                accountId: contraAccount.id,
-                accountCode: contraAccount.code,
-                accountName: contraAccount.name,
+                accountId: contraAccount!.id,
+                accountCode: contraAccount!.code,
+                accountName: contraAccount!.name,
                 debit: 0,
                 credit: movement.pfCapital || movement.amount,
                 description: 'Transferencia a plazo fijo',
@@ -717,9 +750,9 @@ export async function buildJournalPreview(
             const total = capital + interest
 
             lines.push({
-                accountId: contraAccount.id,
-                accountCode: contraAccount.code,
-                accountName: contraAccount.name,
+                accountId: contraAccount!.id,
+                accountCode: contraAccount!.code,
+                accountName: contraAccount!.name,
                 debit: total,
                 credit: 0,
                 description: `Cobro PF vencido`,
@@ -768,9 +801,9 @@ export async function buildJournalPreview(
             })
 
             lines.push({
-                accountId: contraAccount.id,
-                accountCode: contraAccount.code,
-                accountName: contraAccount.name,
+                accountId: contraAccount!.id,
+                accountCode: contraAccount!.code,
+                accountName: contraAccount!.name,
                 debit: 0,
                 credit: movement.amount,
                 description: `Pago participación ${instrument?.vppCompanyName || ''}`,

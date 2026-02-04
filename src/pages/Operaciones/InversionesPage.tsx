@@ -30,6 +30,8 @@ import {
 } from '@phosphor-icons/react'
 import { db } from '../../storage/db'
 import { usePeriodYear } from '../../hooks/usePeriodYear'
+import { useLedgerBalances } from '../../hooks/useLedgerBalances'
+import AccountSearchSelectWithBalance from '../../ui/AccountSearchSelectWithBalance'
 import {
     type InvestmentRubro,
     type InvestmentMovementType,
@@ -53,6 +55,7 @@ import {
     buildJournalPreview,
     createJournalEntryFromMovement,
     loadInvestmentSettings,
+    saveInvestmentSettings,
     syncFromCierreValuacion,
     checkPFMaturityNotifications,
     getInvestmentNotifications,
@@ -118,6 +121,9 @@ export default function InversionesPage() {
     // State
     const [expandedRubros, setExpandedRubros] = useState<Set<InvestmentRubro>>(new Set())
     const [wizardOpen, setWizardOpen] = useState(false)
+    const [newModalOpen, setNewModalOpen] = useState(false)
+    const [newRubro, setNewRubro] = useState<InvestmentRubro>('ACCIONES')
+    const [newAction, setNewAction] = useState<'CREATE_INSTRUMENT' | 'REGISTER_MOVEMENT'>('CREATE_INSTRUMENT')
     const [wizardStep, setWizardStep] = useState(1)
     const [wizardRubro, setWizardRubro] = useState<InvestmentRubro>('ACCIONES')
     const [wizardType, setWizardType] = useState<InvestmentMovementType | null>(null)
@@ -131,8 +137,29 @@ export default function InversionesPage() {
     const instruments = useLiveQuery(() => getAllInstruments(periodId), [periodId])
     const movements = useLiveQuery(() => getAllMovements(periodId), [periodId])
     const accounts = useLiveQuery(() => db.accounts.toArray(), [])
+    const entries = useLiveQuery(() => db.entries.toArray(), [])
     const settings = useLiveQuery(() => loadInvestmentSettings(), [])
     const notifications = useLiveQuery(() => getInvestmentNotifications(), [])
+
+    const wizardDate = typeof wizardForm.date === 'string' ? (wizardForm.date as string) : undefined
+    const { byAccount: ledgerBalances } = useLedgerBalances(entries, accounts, { closingDate: wizardDate })
+
+    const enabledRubrosForPeriod = useMemo(() => {
+        const byPeriod = settings?.enabledRubros || {}
+        return byPeriod[periodId] || []
+    }, [settings, periodId])
+
+    const enabledRubrosSet = useMemo(() => new Set<InvestmentRubro>(enabledRubrosForPeriod), [enabledRubrosForPeriod])
+
+    const rubrosWithInstruments = useMemo(() => {
+        const set = new Set<InvestmentRubro>()
+        for (const instr of instruments || []) set.add(instr.rubro)
+        return set
+    }, [instruments])
+
+    const visibleRubros = useMemo(() => {
+        return RUBROS.filter(r => rubrosWithInstruments.has(r) || enabledRubrosSet.has(r))
+    }, [rubrosWithInstruments, enabledRubrosSet])
 
     // Calculate summaries for each rubro
     const rubroSummaries = useLiveQuery(async () => {
@@ -187,7 +214,7 @@ export default function InversionesPage() {
             setSyncMessage(result.synced > 0
                 ? `Sincronizados ${result.synced} instrumentos`
                 : 'Sin nuevos datos para sincronizar')
-        } catch (err) {
+        } catch {
             setSyncMessage('Error al sincronizar')
         } finally {
             setIsSyncing(false)
@@ -211,6 +238,49 @@ export default function InversionesPage() {
         setWizardError(null)
         setWizardOpen(true)
     }, [])
+
+    const enableRubro = useCallback(async (rubro: InvestmentRubro) => {
+        const current = await loadInvestmentSettings()
+        const enabled = { ...(current.enabledRubros || {}) }
+        const set = new Set<InvestmentRubro>(enabled[periodId] || [])
+        if (set.has(rubro)) return
+        set.add(rubro)
+        enabled[periodId] = Array.from(set)
+        await saveInvestmentSettings({ enabledRubros: enabled })
+    }, [periodId])
+
+    const getDefaultTypeForRubro = useCallback((rubro: InvestmentRubro): InvestmentMovementType => {
+        switch (rubro) {
+            case 'PLAZO_FIJO':
+                return 'PF_CONSTITUTE'
+            case 'VPP':
+                return 'VPP_ALTA'
+            case 'RENTAS':
+                return 'INCOME'
+            default:
+                return 'BUY'
+        }
+    }, [])
+
+    const openNewModal = useCallback(() => {
+        const suggestion =
+            RUBROS.find(r => !rubrosWithInstruments.has(r) && !enabledRubrosSet.has(r)) ||
+            RUBROS[0]
+        setNewRubro(suggestion)
+        setNewAction(rubrosWithInstruments.has(suggestion) ? 'REGISTER_MOVEMENT' : 'CREATE_INSTRUMENT')
+        setNewModalOpen(true)
+    }, [rubrosWithInstruments, enabledRubrosSet])
+
+    const handleNewConfirm = useCallback(async () => {
+        await enableRubro(newRubro)
+        setNewModalOpen(false)
+
+        if (newAction === 'REGISTER_MOVEMENT') {
+            openWizard(newRubro)
+        } else {
+            openWizard(newRubro, getDefaultTypeForRubro(newRubro))
+        }
+    }, [enableRubro, newRubro, newAction, openWizard, getDefaultTypeForRubro])
 
     const closeWizard = useCallback(() => {
         setWizardOpen(false)
@@ -276,7 +346,7 @@ export default function InversionesPage() {
                     amount: ((form.quantity as number) || 1) * ((form.price as number) || (form.amount as number) || 0),
                     fees: form.fees as number,
                     feesIva: (form.feesIva as boolean) ? ((form.fees as number) || 0) * 0.21 : 0,
-                    contraAccountId: form.contraAccountId as string,
+                    contraAccountId: (form.contraAccountId as string) || '',
                     pfCapital: form.pfCapital as number,
                     pfTna: form.pfTna as number,
                     pfTea: form.pfTna ? calculateTEA(form.pfTna as number, (form.pfDays as number) || 30) : undefined,
@@ -481,13 +551,180 @@ export default function InversionesPage() {
         )
     }
 
+    const renderNewModal = () => {
+        if (!newModalOpen) return null
+
+        const rubroHasInstruments = rubrosWithInstruments.has(newRubro)
+        const canRegisterMovement = rubroHasInstruments
+        const Icon = RUBRO_ICONS[newRubro]
+        const colors = RUBRO_COLORS[newRubro]
+
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm print:hidden">
+                <div className="bg-white rounded-2xl w-full max-w-2xl mx-4 shadow-2xl border border-slate-200 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                        <div>
+                            <h3 className="font-display font-bold text-xl text-slate-900">Nuevo</h3>
+                            <p className="text-sm text-slate-500 mt-1">Habilitá un rubro y elegí qué querés cargar.</p>
+                        </div>
+                        <button
+                            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
+                            onClick={() => setNewModalOpen(false)}
+                        >
+                            <X size={18} />
+                        </button>
+                    </div>
+
+                    <div className="p-6 space-y-5">
+                        <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">Rubro</div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                {RUBROS.map(r => {
+                                    const RIcon = RUBRO_ICONS[r]
+                                    const rColors = RUBRO_COLORS[r]
+                                    const inUse = rubrosWithInstruments.has(r)
+                                    const isEnabled = enabledRubrosSet.has(r)
+                                    const selected = newRubro === r
+                                    return (
+                                        <button
+                                            key={r}
+                                            className={`p-3 rounded-xl border text-left transition-all ${
+                                                selected ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500' : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50/50'
+                                            }`}
+                                            onClick={() => {
+                                                setNewRubro(r)
+                                                setNewAction(inUse ? 'REGISTER_MOVEMENT' : 'CREATE_INSTRUMENT')
+                                            }}
+                                        >
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <span className={`w-8 h-8 rounded-lg ${rColors.bg} ${rColors.text} flex items-center justify-center shrink-0`}>
+                                                        <RIcon size={18} weight="duotone" />
+                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <div className="text-sm font-semibold text-slate-900 truncate">{RUBRO_LABELS[r]}</div>
+                                                        <div className="text-[11px] text-slate-500">
+                                                            {inUse ? 'En uso' : isEnabled ? 'Habilitado' : 'Oculto'}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </div>
+
+                        <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">Acción</div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <button
+                                    className={`p-4 rounded-xl border text-left transition-all ${
+                                        newAction === 'CREATE_INSTRUMENT'
+                                            ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500'
+                                            : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50/50'
+                                    }`}
+                                    onClick={() => setNewAction('CREATE_INSTRUMENT')}
+                                >
+                                    <div className="font-semibold text-slate-900">Crear instrumento</div>
+                                    <div className="text-xs text-slate-500 mt-1">
+                                        Arranca el alta (y el primer movimiento) para <span className="font-medium">{RUBRO_LABELS[newRubro]}</span>.
+                                    </div>
+                                </button>
+                                <button
+                                    className={`p-4 rounded-xl border text-left transition-all ${
+                                        !canRegisterMovement
+                                            ? 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
+                                            : newAction === 'REGISTER_MOVEMENT'
+                                                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500'
+                                                : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50/50'
+                                    }`}
+                                    onClick={() => canRegisterMovement && setNewAction('REGISTER_MOVEMENT')}
+                                    disabled={!canRegisterMovement}
+                                >
+                                    <div className="font-semibold">Registrar movimiento</div>
+                                    <div className="text-xs mt-1">
+                                        {canRegisterMovement
+                                            ? `Usa un instrumento existente en ${RUBRO_LABELS[newRubro]}.`
+                                            : 'Primero necesitás crear al menos un instrumento.'}
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                            <div className={`w-10 h-10 rounded-lg ${colors.bg} ${colors.text} flex items-center justify-center`}>
+                                <Icon weight="duotone" size={22} />
+                            </div>
+                            <div className="text-sm text-slate-600">
+                                <span className="font-semibold text-slate-900">{RUBRO_LABELS[newRubro]}</span>
+                                <span className="text-slate-400"> • </span>
+                                {rubroHasInstruments ? 'Con instrumentos' : 'Sin instrumentos'}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+                        <button
+                            className="px-4 py-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-100"
+                            onClick={() => setNewModalOpen(false)}
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-emerald-500 text-white rounded-lg font-medium hover:from-blue-500 hover:to-emerald-400 flex items-center gap-2"
+                            onClick={handleNewConfirm}
+                        >
+                            Continuar
+                            <CaretRight size={16} weight="bold" />
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
     // Render wizard modal
     const renderWizard = () => {
         if (!wizardOpen) return null
 
         const movementTypes = getMovementTypesForRubro(wizardRubro)
-        const bankAccounts = accounts?.filter(a => a.statementGroup === 'CASH_AND_BANKS' && !a.isHeader) || []
         const rubroInstruments = instruments?.filter(i => i.rubro === wizardRubro) || []
+        const requiresContraAccount = Boolean(
+            wizardType && ['BUY', 'SELL', 'INCOME', 'PF_CONSTITUTE', 'PF_MATURITY', 'VPP_ALTA'].includes(wizardType)
+        )
+        const contraAccountId = (wizardForm.contraAccountId as string) || ''
+        const contraAccount = (accounts || []).find(a => a.id === contraAccountId)
+        const contraBalance = contraAccountId ? ledgerBalances.get(contraAccountId)?.balance : undefined
+
+        const estimatedOutflow = (() => {
+            if (!wizardType) return 0
+            switch (wizardType) {
+                case 'BUY': {
+                    const quantity = (wizardForm.quantity as number) || 0
+                    const price = (wizardForm.price as number) || 0
+                    const amount = quantity > 0 && price > 0 ? quantity * price : ((wizardForm.amount as number) || 0)
+                    const fees = (wizardForm.fees as number) || 0
+                    const feesIva = (wizardForm.feesIva as boolean) ? fees * 0.21 : 0
+                    return amount + fees + feesIva
+                }
+                case 'PF_CONSTITUTE':
+                    return (wizardForm.pfCapital as number) || (wizardForm.amount as number) || 0
+                case 'VPP_ALTA':
+                    return (wizardForm.amount as number) || 0
+                default:
+                    return 0
+            }
+        })()
+
+        const showInsufficientBalanceWarning = Boolean(
+            contraAccountId &&
+            contraAccount &&
+            contraAccount.normalSide === 'DEBIT' &&
+            typeof contraBalance === 'number' &&
+            estimatedOutflow > 0 &&
+            contraBalance < estimatedOutflow
+        )
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm print:hidden">
@@ -811,19 +1048,23 @@ export default function InversionesPage() {
                                 )}
 
                                 {/* Contrapartida (common for most types) */}
-                                {wizardType !== 'OPENING' && (
+                                {requiresContraAccount && (
                                     <div className="pt-4 border-t border-dashed border-slate-200">
                                         <label className="block text-sm font-medium text-slate-600 mb-1">Cuenta Contrapartida / Origen Fondos</label>
-                                        <select
-                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                            value={(wizardForm.contraAccountId as string) || ''}
-                                            onChange={e => setWizardForm(prev => ({ ...prev, contraAccountId: e.target.value }))}
-                                        >
-                                            <option value="">Seleccionar cuenta...</option>
-                                            {bankAccounts.map(a => (
-                                                <option key={a.id} value={a.id}>{a.code} {a.name}</option>
-                                            ))}
-                                        </select>
+                                        <AccountSearchSelectWithBalance
+                                            accounts={accounts || []}
+                                            value={contraAccountId}
+                                            onChange={(accountId) => setWizardForm(prev => ({ ...prev, contraAccountId: accountId }))}
+                                            placeholder="Buscar caja/banco..."
+                                            filter={(acc) => !acc.isHeader && acc.statementGroup === 'CASH_AND_BANKS'}
+                                            balances={ledgerBalances}
+                                        />
+                                        {showInsufficientBalanceWarning && (
+                                            <div className="mt-2 p-2 bg-amber-50 text-amber-700 rounded-lg text-xs">
+                                                <Warning size={14} className="inline mr-1" />
+                                                Saldo insuficiente para este importe al {formatDate(wizardDate || new Date().toISOString().split('T')[0])}.
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -944,6 +1185,12 @@ export default function InversionesPage() {
                 </div>
                 <div className="flex gap-2 print:hidden">
                     <button
+                        className="px-4 py-2 bg-gradient-to-r from-blue-600 to-emerald-500 text-white rounded-lg font-medium hover:from-blue-500 hover:to-emerald-400 flex items-center gap-2"
+                        onClick={openNewModal}
+                    >
+                        <Plus size={16} weight="bold" /> Nuevo
+                    </button>
+                    <button
                         className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                         onClick={handleSync}
                         disabled={isSyncing}
@@ -1050,17 +1297,35 @@ export default function InversionesPage() {
             </div>
 
             {/* Rubro Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                {RUBROS.map(renderRubroCard)}
-            </div>
+            {visibleRubros.length === 0 ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-10 text-center print:hidden">
+                    <Info size={38} className="mx-auto mb-3 text-slate-300" />
+                    <h3 className="font-display font-bold text-xl text-slate-900 mb-2">Todavía no hay inversiones</h3>
+                    <p className="text-slate-500 max-w-xl mx-auto">
+                        Empezá habilitando un rubro y creando tu primer instrumento.
+                    </p>
+                    <button
+                        className="mt-5 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-emerald-500 text-white rounded-lg font-medium hover:from-blue-500 hover:to-emerald-400 inline-flex items-center gap-2"
+                        onClick={openNewModal}
+                    >
+                        <Plus size={16} weight="bold" /> Nuevo
+                    </button>
+                </div>
+            ) : (
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                        {visibleRubros.map(renderRubroCard)}
+                    </div>
 
-            {/* Accordion Details */}
-            <div className="space-y-4">
-                {RUBROS.map(renderAccordion)}
-            </div>
+                    <div className="space-y-4">
+                        {visibleRubros.map(renderAccordion)}
+                    </div>
+                </>
+            )}
 
             {/* Wizard Modal */}
             {renderWizard()}
+            {renderNewModal()}
 
             {/* Print Styles */}
             <style>{`

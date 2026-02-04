@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Prototipo Datos de Empresa v2</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Brand Configuration -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',
+                            secondary: '#10B981',
+                        },
+                        ui: {
+                            bg: '#F8FAFC',
+                            paper: '#FFFFFF',
+                            textMain: '#0F172A',
+                            textSec: '#64748B',
+                            border: '#E2E8F0'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    boxShadow: {
+                        'brand': '0 10px 15px -3px rgba(59, 130, 246, 0.1), 0 4px 6px -4px rgba(59, 130, 246, 0.1)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        :root {
+            /* TOKENS DEL BRAND BOOK */
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --brand-gradient-hover: linear-gradient(135deg, #1D4ED8 0%, #059669 100%);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #F1F5F9;
+            color: #0F172A;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        h1, h2, h3, h4, .font-display { font-family: 'Outfit', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* Custom Utilities */
+        .btn-primary {
+            background: var(--brand-gradient);
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            background: var(--brand-gradient-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+
+        /* Toggle Switch Styles */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #10B981;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #10B981;
+        }
+        
+        /* Advanced Section Transition */
+        .advanced-section {
+            transition: all 0.4s ease-in-out;
+            overflow: hidden;
+            max-height: 2000px; /* Arbitrary large height */
+            opacity: 1;
+        }
+        .advanced-section.collapsed {
+            max-height: 0;
+            opacity: 0;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+        }
+
+        /* Animations */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+
+        /* PRINT STYLES - PDF OFICIAL */
+        @media print {
+            @page { size: A4; margin: 1.5cm; }
+            body { background: white; -webkit-print-color-adjust: exact; }
+            .no-print { display: none !important; }
+            .only-print { display: block !important; }
+            
+            /* Official Document Styling */
+            .doc-official {
+                font-family: 'Times New Roman', Times, serif;
+                color: #000;
+                line-height: 1.3;
+                font-size: 10pt;
+            }
+            .doc-official h1 { font-family: Arial, sans-serif; font-size: 12pt; font-weight: bold; text-align: center; text-transform: uppercase; margin-bottom: 1rem; color: black !important; background: none !important; -webkit-text-fill-color: black !important; }
+            .doc-official h2 { font-family: Arial, sans-serif; font-size: 10pt; font-weight: bold; margin-top: 1rem; margin-bottom: 0.3rem; border-bottom: 1px solid #000; padding-bottom: 2px; }
+            .doc-official table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 9pt; }
+            .doc-official th, .doc-official td { border: 1px solid #000; padding: 3px 6px; text-align: left; }
+            .doc-official th { background-color: #f0f0f0; font-weight: bold; text-align: center; }
+            .doc-official .label { font-weight: bold; width: 35%; }
+            .doc-official .money { text-align: right; font-family: 'Courier New', Courier, monospace; }
+        }
+        
+        .only-print { display: none; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden selection:bg-blue-100 selection:text-blue-900">
+
+    <!-- SIDEBAR -->
+    <aside class="w-64 bg-white border-r border-ui-border flex-col hidden md:flex z-20 no-print">
+        <div class="p-6 border-b border-ui-border">
+            <div class="flex items-center gap-2 font-display font-bold text-xl text-brand-ui-textMain">
+                <i class="ph-duotone ph-robot text-brand-primary text-2xl"></i>
+                ContaLivre
+            </div>
+        </div>
+
+        <nav class="flex-1 overflow-y-auto p-4 space-y-1">
+            <div class="text-xs font-bold text-ui-textSec uppercase tracking-wider px-3 mb-2 mt-2">General</div>
+            
+            <a href="#" onclick="switchView('dashboard')" id="nav-dashboard" class="nav-item flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-blue-50 text-brand-primary">
+                <i class="ph ph-squares-four text-lg"></i> Dashboard
+            </a>
+
+            <div class="text-xs font-bold text-ui-textSec uppercase tracking-wider px-3 mb-2 mt-6">Contabilidad</div>
+            
+            <a href="#" class="nav-item flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-ui-textSec hover:bg-ui-bg hover:text-ui-textMain transition-colors">
+                <i class="ph ph-tree-structure text-lg"></i> Plan de Cuentas
+            </a>
+            <a href="#" class="nav-item flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-ui-textSec hover:bg-ui-bg hover:text-ui-textMain transition-colors">
+                <i class="ph ph-notebook text-lg"></i> Libro Diario
+            </a>
+            <a href="#" onclick="switchView('states')" id="nav-states" class="nav-item flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-ui-textSec hover:bg-ui-bg hover:text-ui-textMain transition-colors">
+                <i class="ph ph-chart-line-up text-lg"></i> Estados Contables
+            </a>
+        </nav>
+
+        <div class="p-4 border-t border-ui-border">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-brand-gradient flex items-center justify-center text-white font-bold text-xs">SG</div>
+                <div class="flex-1">
+                    <div class="text-sm font-medium text-ui-textMain">Santiago G.</div>
+                    <div class="text-xs text-ui-textSec">Admin</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 flex flex-col h-screen overflow-hidden relative no-print">
+        
+        <!-- Top Navigation -->
+        <header class="h-16 bg-white border-b border-ui-border flex items-center justify-between px-6 z-10">
+            <div class="flex items-center gap-4">
+                <button class="md:hidden text-ui-textSec"><i class="ph ph-list text-2xl"></i></button>
+                <span class="text-ui-textSec text-sm">Ejercicio 2025</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <button class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-ui-bg text-ui-textSec relative">
+                    <i class="ph ph-bell text-xl"></i>
+                    <span class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- SCROLLABLE CONTENT AREA -->
+        <div class="flex-1 overflow-y-auto bg-slate-50 p-6 md:p-10 relative" id="content-area">
+            
+            <!-- VIEW: DASHBOARD -->
+            <div id="view-dashboard" class="animate-fade-in max-w-5xl mx-auto space-y-8">
+                
+                <!-- Welcome Banner -->
+                <div class="bg-white rounded-2xl p-8 border border-ui-border shadow-sm relative overflow-hidden">
+                    <div class="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+                         <i class="ph-duotone ph-robot text-9xl text-brand-primary"></i>
+                    </div>
+                    <div class="relative z-10">
+                        <h1 class="font-display text-3xl font-bold text-ui-textMain mb-2" id="welcome-msg">¡Bienvenido, Santiago!</h1>
+                        <p class="text-ui-textSec max-w-xl">
+                            Aquí tenés un resumen de tu actividad reciente. Recordá mantener los datos de tu empresa actualizados para los reportes fiscales.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- COMPANY DATA WIDGET (Dynamic) -->
+                <div>
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-display font-semibold text-lg text-ui-textMain">Datos de la Empresa</h3>
+                        <span class="text-xs text-ui-textSec bg-white px-2 py-1 rounded border border-ui-border">Uso Oficial</span>
+                    </div>
+
+                    <!-- STATE: EMPTY -->
+                    <div id="company-empty-state" class="hidden bg-white rounded-xl border border-ui-border p-8 text-center shadow-sm">
+                        <div class="w-16 h-16 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-4 text-orange-500">
+                            <i class="ph-duotone ph-warning-circle text-3xl"></i>
+                        </div>
+                        <h4 class="font-display text-xl font-bold text-ui-textMain mb-2">Faltan configurar los datos</h4>
+                        <p class="text-ui-textSec mb-6 max-w-md mx-auto">
+                            Para que los Estados Contables y reportes PDF salgan bien, necesitamos que cargues la información fiscal de la empresa.
+                        </p>
+                        <button onclick="openModal()" class="btn-primary text-white px-6 py-2.5 rounded-lg font-medium inline-flex items-center gap-2">
+                            <i class="ph-bold ph-pencil-simple"></i> Configurar ficha ahora
+                        </button>
+                    </div>
+
+                    <!-- STATE: FILLED -->
+                    <div id="company-filled-state" class="hidden bg-white rounded-xl border border-ui-border overflow-hidden shadow-sm hover:shadow-brand transition-shadow duration-300">
+                        <div class="p-6 border-b border-ui-border flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-white to-slate-50">
+                            <div class="flex items-center gap-4">
+                                <div class="w-12 h-12 rounded-lg bg-blue-50 text-brand-primary flex items-center justify-center text-2xl">
+                                    <i class="ph-fill ph-buildings"></i>
+                                </div>
+                                <div>
+                                    <h2 class="font-display text-2xl font-bold text-ui-textMain leading-tight" id="disp-name">Mi Empresa S.A.</h2>
+                                    <div class="flex items-center gap-2 text-ui-textSec text-sm mt-1">
+                                        <i class="ph ph-identification-card"></i>
+                                        <span class="font-mono" id="disp-cuit">30-00000000-0</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex gap-3">
+                                <button onclick="validateAndPrint()" class="px-4 py-2 bg-white border border-ui-border rounded-lg text-sm font-medium text-ui-textMain hover:bg-slate-50 transition-colors flex items-center gap-2">
+                                    <i class="ph ph-file-pdf"></i> PDF Oficial
+                                </button>
+                                <button onclick="openModal()" class="px-4 py-2 bg-white border border-brand-primary text-brand-primary rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors flex items-center gap-2">
+                                    <i class="ph ph-pencil-simple"></i> Editar
+                                </button>
+                            </div>
+                        </div>
+                        <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div>
+                                <label class="text-xs font-bold text-ui-textSec uppercase tracking-wide">Actividad Principal</label>
+                                <p class="text-ui-textMain font-medium mt-1" id="disp-activity">Servicios de Consultoría</p>
+                            </div>
+                            <div>
+                                <label class="text-xs font-bold text-ui-textSec uppercase tracking-wide">Domicilio Legal</label>
+                                <p class="text-ui-textMain font-medium mt-1" id="disp-address">Av. Corrientes 1234, CABA</p>
+                            </div>
+                            <div>
+                                <label class="text-xs font-bold text-ui-textSec uppercase tracking-wide">Ejercicio Actual</label>
+                                <p class="text-ui-textMain font-medium mt-1">
+                                    <span id="disp-start">01/01/2025</span> al <span id="disp-end">31/12/2025</span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+            <!-- END VIEW: DASHBOARD -->
+
+            <!-- VIEW: STATES (Estados Contables) -->
+            <div id="view-states" class="hidden animate-fade-in max-w-6xl mx-auto h-full flex flex-col">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="font-display text-2xl font-bold text-ui-textMain">Estados Contables</h2>
+                        <p class="text-ui-textSec text-sm mt-1">Visualización y exportación de reportes anuales.</p>
+                    </div>
+                    
+                    <!-- Integrated Company Badge -->
+                    <div id="ec-company-badge" class="bg-white border border-ui-border rounded-full py-1.5 px-4 flex items-center gap-2 shadow-sm cursor-pointer hover:border-brand-primary transition-colors" onclick="openModal()">
+                        <div class="w-2 h-2 rounded-full bg-ui-border" id="ec-status-dot"></div>
+                        <span class="text-sm font-medium text-ui-textMain truncate max-w-[150px]" id="ec-name-label">Mi Empresa S.A.</span>
+                        <i class="ph-bold ph-caret-down text-ui-textSec text-xs"></i>
+                    </div>
+                </div>
+
+                <!-- Tabs Mockup -->
+                <div class="border-b border-ui-border flex gap-6 mb-6">
+                    <button class="pb-3 border-b-2 border-brand-primary text-brand-primary font-medium text-sm">Estado de Situación Patrimonial</button>
+                    <button class="pb-3 border-b-2 border-transparent text-ui-textSec hover:text-ui-textMain font-medium text-sm transition-colors">Estado de Resultados</button>
+                    <button class="pb-3 border-b-2 border-transparent text-ui-textSec hover:text-ui-textMain font-medium text-sm transition-colors">Evolución del P.N.</button>
+                </div>
+
+                <!-- Mock Content -->
+                <div class="bg-white border border-ui-border rounded-xl flex-1 p-8 flex items-center justify-center text-center">
+                    <div class="max-w-md">
+                        <div class="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-brand-primary">
+                            <i class="ph-duotone ph-chart-polar text-4xl"></i>
+                        </div>
+                        <h3 class="font-display text-xl font-bold text-ui-textMain">Reporte Interactivo</h3>
+                        <p class="text-ui-textSec mt-2 mb-6">
+                            Aquí se visualizarían los cuadros contables dinámicos utilizando la información de la empresa configurada.
+                        </p>
+                        <div class="text-xs text-ui-textSec border-t border-ui-border pt-4">
+                            Datos activos: <strong id="ec-footer-info">Sin configurar</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- END VIEW: STATES -->
+
+        </div>
+    </main>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="fixed bottom-6 right-6 transform translate-y-20 opacity-0 transition-all duration-500 z-50 flex items-center gap-3 bg-slate-900 text-white px-4 py-3 rounded-lg shadow-lg">
+        <i class="ph-fill ph-check-circle text-green-400 text-xl" id="toast-icon"></i>
+        <div>
+            <h4 class="font-medium text-sm" id="toast-title">¡Listo!</h4>
+            <p class="text-xs text-slate-300" id="toast-message">Datos guardados correctamente.</p>
+        </div>
+    </div>
+
+    <!-- MODAL: COMPANY CONFIG -->
+    <div id="modal-backdrop" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 hidden opacity-0 transition-opacity duration-300" onclick="closeModal(event)">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div id="modal-panel" class="bg-white w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden max-h-[95vh] transform scale-95 transition-transform duration-300" onclick="event.stopPropagation()">
+                
+                <!-- LEFT COLUMN: FORM -->
+                <div class="flex-1 flex flex-col min-w-0 border-r border-ui-border bg-white">
+                    <div class="p-6 border-b border-ui-border flex justify-between items-center">
+                        <div class="flex flex-col">
+                            <h2 class="font-display text-xl font-bold text-ui-textMain">Ficha de la Empresa</h2>
+                            <p class="text-xs text-ui-textSec mt-1">Datos para reportes legales.</p>
+                        </div>
+                        
+                        <div class="flex items-center gap-4">
+                            <!-- TOGGLE SWITCH -->
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs font-medium text-ui-textSec">Básico</span>
+                                <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                    <input type="checkbox" name="toggle" id="toggle-advanced" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-300" onclick="toggleAdvancedMode()"/>
+                                    <label for="toggle-advanced" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-300 cursor-pointer"></label>
+                                </div>
+                                <span class="text-xs font-medium text-ui-textSec">Más datos</span>
+                            </div>
+                            
+                            <button onclick="loadExampleData()" class="text-xs font-medium text-brand-primary bg-blue-50 px-3 py-1.5 rounded-md hover:bg-blue-100 transition-colors">
+                                Ejemplo
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                        
+                        <!-- Section 1: Identification (BASIC) -->
+                        <div class="space-y-4">
+                            <h3 class="flex items-center gap-2 text-sm font-bold text-ui-textMain uppercase tracking-wide">
+                                <i class="ph-duotone ph-identification-badge text-brand-primary text-lg"></i> Identificación
+                            </h3>
+                            <div class="grid grid-cols-1 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Denominación de la Entidad <span class="text-red-500">*</span></label>
+                                    <input type="text" id="inp-name" placeholder="Ej: Tech Solutions S.R.L." class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all">
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-ui-textMain mb-1">CUIT <span class="text-red-500">*</span></label>
+                                        <input type="text" id="inp-cuit" placeholder="30-12345678-9" class="w-full font-mono border border-ui-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-ui-textMain mb-1">Tipo Societario</label>
+                                        <select class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm bg-white">
+                                            <option>S.A.</option>
+                                            <option>S.R.L.</option>
+                                            <option>S.A.S.</option>
+                                            <option>Unipersonal</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Actividad Principal <span class="text-red-500">*</span></label>
+                                    <input type="text" id="inp-activity" placeholder="Ej: Servicios de informática" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Domicilio Legal <span class="text-red-500">*</span></label>
+                                    <input type="text" id="inp-address" placeholder="Calle, Altura, Localidad" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section 1B: Advanced Identification (ADVANCED) -->
+                        <div id="adv-ident" class="advanced-section collapsed space-y-4 pt-4 border-t border-ui-border">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Duración de la Sociedad</label>
+                                    <input type="text" id="inp-duration" placeholder="Ej: 99 años" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Unidad de medida</label>
+                                    <input type="text" id="inp-measure" placeholder="Ej: Pesos Argentinos" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section 2: Fiscal Year (BASIC/ADVANCED MIX) -->
+                        <div class="space-y-4 pt-4 border-t border-ui-border">
+                            <h3 class="flex items-center gap-2 text-sm font-bold text-ui-textMain uppercase tracking-wide">
+                                <i class="ph-duotone ph-calendar text-brand-secondary text-lg"></i> Ejercicio Económico
+                            </h3>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Fecha Inicio</label>
+                                    <input type="date" id="inp-start" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm text-ui-textSec">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Fecha Cierre</label>
+                                    <input type="date" id="inp-end" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm text-ui-textSec">
+                                </div>
+                            </div>
+                            
+                            <!-- Advanced Year Fields -->
+                            <div id="adv-year" class="advanced-section collapsed pt-2 grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Estados contables al</label>
+                                    <input type="date" id="inp-states-at" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm text-ui-textSec">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Ejercicio Económico N°</label>
+                                    <input type="text" id="inp-year-num" placeholder="Ej: 5" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section 3: Control Body (ADVANCED) -->
+                        <div id="adv-control" class="advanced-section collapsed space-y-4 pt-4 border-t border-ui-border">
+                            <h3 class="flex items-center gap-2 text-sm font-bold text-ui-textMain uppercase tracking-wide">
+                                <i class="ph-duotone ph-bank text-purple-600 text-lg"></i> Organismo de Control / Registro
+                            </h3>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Inscrip. Estatuto</label>
+                                    <input type="date" id="inp-reg-statute" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm text-ui-textSec">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Inscrip. Modificación</label>
+                                    <input type="date" id="inp-reg-mod" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm text-ui-textSec">
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Identificación de Registro (RPC/IGJ)</label>
+                                    <input type="text" id="inp-reg-id" placeholder="Ej: Matrícula 1234, Libro 56, Tomo ..." class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section 4: Capital (AUTOMATIC) -->
+                        <div class="space-y-4 pt-4 border-t border-ui-border">
+                             <div class="flex items-center justify-between">
+                                 <h3 class="flex items-center gap-2 text-sm font-bold text-ui-textMain uppercase tracking-wide">
+                                    <i class="ph-duotone ph-lock-key text-slate-400 text-lg"></i> Composición del Capital (Automática)
+                                </h3>
+                                <button onclick="simulateCapitalData()" class="text-[10px] text-brand-primary hover:underline">
+                                    <i class="ph-bold ph-arrows-clockwise"></i> Simular carga sistema
+                                </button>
+                             </div>
+                             
+                            <div class="bg-slate-50 border border-ui-border rounded-lg overflow-x-auto">
+                                <div class="p-3 border-b border-ui-border text-xs text-ui-textSec bg-slate-100 flex items-center gap-2">
+                                    <i class="ph-fill ph-info"></i>
+                                    Se calcula desde el sistema contable (Patrimonio Neto / Capital). Solo lectura.
+                                </div>
+                                <table class="w-full text-xs text-left whitespace-nowrap">
+                                    <thead class="bg-white text-ui-textSec font-medium border-b border-ui-border">
+                                        <tr>
+                                            <th class="px-3 py-2">Estado</th>
+                                            <th class="px-3 py-2 text-right">Cant.</th>
+                                            <th class="px-3 py-2">Clase</th>
+                                            <th class="px-3 py-2 text-right">VN ($)</th>
+                                            <th class="px-3 py-2 text-right">Suscripto</th>
+                                            <th class="px-3 py-2 text-right">Integrado</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-ui-border font-mono text-ui-textMain" id="capital-table-body">
+                                        <!-- Populated via JS -->
+                                        <tr>
+                                            <td colspan="6" class="p-4 text-center text-ui-textSec">Cargando datos...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                         <!-- Section 5: Controlling Entity (ADVANCED) -->
+                         <div id="adv-parent" class="advanced-section collapsed space-y-4 pt-4 border-t border-ui-border">
+                            <h3 class="flex items-center gap-2 text-sm font-bold text-ui-textMain uppercase tracking-wide">
+                                <i class="ph-duotone ph-globe-hemisphere-west text-indigo-500 text-lg"></i> Entidad Controladora
+                            </h3>
+                            <div class="grid grid-cols-1 gap-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div class="col-span-2">
+                                        <label class="block text-sm font-medium text-ui-textMain mb-1">Denominación</label>
+                                        <input type="text" id="inp-parent-name" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-ui-textMain mb-1">CUIT</label>
+                                        <input type="text" id="inp-parent-cuit" class="w-full font-mono border border-ui-border rounded-lg px-3 py-2 text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-ui-textMain mb-1">Actividad</label>
+                                        <input type="text" id="inp-parent-activity" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-ui-textMain mb-1">Domicilio Legal</label>
+                                    <input type="text" id="inp-parent-address" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Preferences (BASIC) -->
+                        <div class="space-y-4 pt-4 border-t border-ui-border">
+                           <div>
+                               <label class="block text-sm font-medium text-ui-textMain mb-1">Nombre para Bienvenida</label>
+                               <input type="text" id="inp-user" placeholder="Como querés que te llamemos" class="w-full border border-ui-border rounded-lg px-3 py-2 text-sm">
+                           </div>
+                       </div>
+
+                    </div>
+                    
+                    <div class="p-6 border-t border-ui-border bg-slate-50 flex justify-end gap-3">
+                        <button onclick="closeModalDirect()" class="px-4 py-2 bg-white border border-ui-border rounded-lg text-sm font-medium text-ui-textMain hover:bg-slate-100 transition-colors">
+                            Cancelar
+                        </button>
+                        <button onclick="saveData()" class="btn-primary text-white px-6 py-2 rounded-lg text-sm font-medium shadow-lg shadow-blue-500/30">
+                            Guardar Cambios
+                        </button>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN: PREVIEW -->
+                <div class="w-full md:w-[400px] bg-slate-100 p-6 flex flex-col border-l border-ui-border">
+                    <div class="flex items-center justify-between mb-6">
+                        <span class="text-xs font-bold text-ui-textSec uppercase tracking-wide">Vista Previa</span>
+                        <div class="flex bg-white rounded-lg p-1 border border-ui-border">
+                            <button class="p-1.5 rounded text-ui-textMain bg-slate-100 shadow-sm"><i class="ph-bold ph-file-pdf"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- PDF PREVIEW MOCKUP -->
+                    <div class="bg-white flex-1 shadow-sm border border-ui-border rounded-sm p-8 font-serif text-[10px] leading-relaxed text-black overflow-hidden relative select-none">
+                        <div class="absolute top-0 left-0 right-0 h-1 bg-black/5"></div>
+                        
+                        <div class="text-center font-bold uppercase mb-4 text-xs" id="prev-name">NOMBRE ENTIDAD</div>
+                        
+                        <div class="border-b border-black pb-1 mb-2 font-bold uppercase">ESTADOS CONTABLES</div>
+                        
+                        <div class="grid grid-cols-[80px_1fr] gap-y-2">
+                            <div class="font-bold">Domicilio:</div>
+                            <div id="prev-address">...</div>
+                            
+                            <div class="font-bold">Actividad:</div>
+                            <div id="prev-activity">...</div>
+                            
+                            <div class="font-bold">CUIT:</div>
+                            <div id="prev-cuit">...</div>
+                        </div>
+
+                        <div class="border-b border-black pb-1 mb-2 mt-4 font-bold uppercase">CAPITAL</div>
+                        <div class="w-full border border-black h-8 mt-1 relative">
+                            <div class="absolute inset-0 flex items-center justify-center opacity-20 italic font-sans text-[9px] text-slate-500">
+                                Datos del Sistema (Automático)
+                            </div>
+                        </div>
+                        
+                        <!-- Advanced hint -->
+                        <div id="prev-advanced-hint" class="hidden mt-4 border-t border-dashed border-slate-300 pt-2 text-center text-slate-400 italic text-[9px]">
+                            [+ Secciones Oficiales Adicionales]
+                        </div>
+
+                        <div class="absolute bottom-8 left-8 right-8 text-center text-slate-300 font-sans text-[8px] uppercase tracking-[0.2em]">
+                            Vista Preliminar
+                        </div>
+                    </div>
+                    
+                    <p class="text-xs text-ui-textSec text-center mt-4">
+                        Así se verá el encabezado en el PDF oficial.
+                    </p>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- PRINT TEMPLATE (HIDDEN UNTIL PRINT) -->
+    <div id="print-area" class="only-print doc-official">
+        <h1 id="print-name">DENOMINACIÓN DE LA ENTIDAD</h1>
+        
+        <div style="text-align: center; margin-bottom: 2rem;">
+            <strong>ESTADOS CONTABLES</strong><br>
+            Correspondientes al ejercicio económico Nº <span id="print-nro">...</span><br>
+            Iniciado el <span id="print-start">...</span> y finalizado el <span id="print-end">...</span>
+        </div>
+
+        <h2>1. IDENTIFICACIÓN</h2>
+        <table>
+            <tr>
+                <td class="label">Denominación:</td>
+                <td id="print-name-2"></td>
+            </tr>
+            <tr>
+                <td class="label">Domicilio Legal:</td>
+                <td id="print-address"></td>
+            </tr>
+            <tr>
+                <td class="label">Actividad Principal:</td>
+                <td id="print-activity"></td>
+            </tr>
+            <tr>
+                <td class="label">C.U.I.T.:</td>
+                <td id="print-cuit"></td>
+            </tr>
+            <!-- ADVANCED FIELDS: DURATION/MEASURE -->
+            <tr class="adv-print-row hidden">
+                <td class="label">Duración de la Sociedad:</td>
+                <td id="print-duration"></td>
+            </tr>
+            <tr class="adv-print-row hidden">
+                <td class="label">Unidad de Medida:</td>
+                <td id="print-measure"></td>
+            </tr>
+        </table>
+
+        <h2>2. COMPOSICIÓN DEL CAPITAL</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th style="text-align: left;">Clase de Acciones</th>
+                    <th style="text-align: right;">Cant.</th>
+                    <th style="text-align: right;">VN</th>
+                    <th style="text-align: right;">Suscripto</th>
+                    <th style="text-align: right;">Inscripto</th>
+                    <th style="text-align: right;">Integrado</th>
+                </tr>
+            </thead>
+            <tbody id="print-capital-body">
+                <!-- Populated dynamically -->
+            </tbody>
+        </table>
+
+        <!-- ADVANCED SECTIONS -->
+        <div id="print-adv-control" class="adv-print-section hidden">
+            <h2>3. ORGANISMO DE CONTROL</h2>
+            <table>
+                <tr>
+                    <td class="label">Inscripción Estatuto:</td>
+                    <td id="print-reg-statute"></td>
+                </tr>
+                <tr>
+                    <td class="label">Última Modificación:</td>
+                    <td id="print-reg-mod"></td>
+                </tr>
+                <tr>
+                    <td class="label">Identificación Registro:</td>
+                    <td id="print-reg-id"></td>
+                </tr>
+            </table>
+        </div>
+
+        <div id="print-adv-parent" class="adv-print-section hidden">
+            <h2>4. ENTIDAD CONTROLADORA</h2>
+            <table>
+                <tr>
+                    <td class="label">Denominación:</td>
+                    <td id="print-parent-name"></td>
+                </tr>
+                <tr>
+                    <td class="label">C.U.I.T.:</td>
+                    <td id="print-parent-cuit"></td>
+                </tr>
+                <tr>
+                    <td class="label">Actividad Principal:</td>
+                    <td id="print-parent-activity"></td>
+                </tr>
+                <tr>
+                    <td class="label">Domicilio Legal:</td>
+                    <td id="print-parent-address"></td>
+                </tr>
+            </table>
+        </div>
+
+        <div style="margin-top: 4rem; border-top: 1px solid #000; width: 200px; margin-left: auto; text-align: center; padding-top: 5px; font-size: 10pt;">
+            Firma Presidente
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // --- CONSTANTS ---
+        const DATA_KEY = 'contalivre_company_profile_v1';
+        const CAPITAL_KEY = 'contalivre_capital_composition_v1';
+        
+        // --- STATE ---
+        let companyData = {
+            name: '', cuit: '', activity: '', address: '',
+            startDate: '', endDate: '', userName: '',
+            // Advanced Fields
+            advancedMode: false,
+            duration: '', measure: '',
+            statesAt: '', yearNum: '',
+            regStatute: '', regMod: '', regId: '',
+            parentName: '', parentCuit: '', parentActivity: '', parentAddress: ''
+        };
+
+        // --- INIT ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadFromStorage();
+            renderUI();
+            setupLivePreview();
+        });
+
+        // --- NAVIGATION ---
+        function switchView(viewName) {
+            document.getElementById('view-dashboard').classList.add('hidden');
+            document.getElementById('view-states').classList.add('hidden');
+            
+            document.querySelectorAll('.nav-item').forEach(el => {
+                el.classList.remove('bg-blue-50', 'text-brand-primary');
+                el.classList.add('text-ui-textSec');
+            });
+
+            if(viewName === 'dashboard') {
+                document.getElementById('view-dashboard').classList.remove('hidden');
+                document.getElementById('nav-dashboard').classList.add('bg-blue-50', 'text-brand-primary');
+                document.getElementById('nav-dashboard').classList.remove('text-ui-textSec');
+            } else {
+                document.getElementById('view-states').classList.remove('hidden');
+                document.getElementById('nav-states').classList.add('bg-blue-50', 'text-brand-primary');
+                document.getElementById('nav-states').classList.remove('text-ui-textSec');
+            }
+        }
+
+        // --- MODAL LOGIC ---
+        const modalBackdrop = document.getElementById('modal-backdrop');
+        const modalPanel = document.getElementById('modal-panel');
+
+        function openModal() {
+            // Fill Basic Inputs
+            document.getElementById('inp-name').value = companyData.name || '';
+            document.getElementById('inp-cuit').value = companyData.cuit || '';
+            document.getElementById('inp-activity').value = companyData.activity || '';
+            document.getElementById('inp-address').value = companyData.address || '';
+            document.getElementById('inp-start').value = companyData.startDate || '';
+            document.getElementById('inp-end').value = companyData.endDate || '';
+            document.getElementById('inp-user').value = companyData.userName || '';
+            
+            // Fill Advanced Inputs
+            document.getElementById('toggle-advanced').checked = companyData.advancedMode || false;
+            document.getElementById('inp-duration').value = companyData.duration || '';
+            document.getElementById('inp-measure').value = companyData.measure || '';
+            document.getElementById('inp-states-at').value = companyData.statesAt || '';
+            document.getElementById('inp-year-num').value = companyData.yearNum || '';
+            document.getElementById('inp-reg-statute').value = companyData.regStatute || '';
+            document.getElementById('inp-reg-mod').value = companyData.regMod || '';
+            document.getElementById('inp-reg-id').value = companyData.regId || '';
+            document.getElementById('inp-parent-name').value = companyData.parentName || '';
+            document.getElementById('inp-parent-cuit').value = companyData.parentCuit || '';
+            document.getElementById('inp-parent-activity').value = companyData.parentActivity || '';
+            document.getElementById('inp-parent-address').value = companyData.parentAddress || '';
+
+            // Apply Mode
+            applyAdvancedMode(companyData.advancedMode);
+            
+            // Load Capital Table
+            renderCapitalTable();
+
+            updatePreview();
+
+            modalBackdrop.classList.remove('hidden');
+            setTimeout(() => {
+                modalBackdrop.classList.remove('opacity-0');
+                modalPanel.classList.remove('scale-95');
+                modalPanel.classList.add('scale-100');
+            }, 10);
+        }
+
+        function closeModal(e) { closeModalDirect(); }
+
+        function closeModalDirect() {
+            modalBackdrop.classList.add('opacity-0');
+            modalPanel.classList.remove('scale-100');
+            modalPanel.classList.add('scale-95');
+            setTimeout(() => { modalBackdrop.classList.add('hidden'); }, 300);
+        }
+
+        function setupLivePreview() {
+            const inputs = ['inp-name', 'inp-cuit', 'inp-activity', 'inp-address'];
+            inputs.forEach(id => {
+                document.getElementById(id).addEventListener('input', updatePreview);
+            });
+        }
+
+        function updatePreview() {
+            document.getElementById('prev-name').textContent = document.getElementById('inp-name').value || 'NOMBRE ENTIDAD';
+            document.getElementById('prev-cuit').textContent = document.getElementById('inp-cuit').value || '...';
+            document.getElementById('prev-activity').textContent = document.getElementById('inp-activity').value || '...';
+            document.getElementById('prev-address').textContent = document.getElementById('inp-address').value || '...';
+        }
+
+        // --- ADVANCED MODE TOGGLE ---
+        function toggleAdvancedMode() {
+            const isChecked = document.getElementById('toggle-advanced').checked;
+            applyAdvancedMode(isChecked);
+        }
+
+        function applyAdvancedMode(isEnabled) {
+            const sections = document.querySelectorAll('.advanced-section');
+            const hint = document.getElementById('prev-advanced-hint');
+            
+            sections.forEach(sec => {
+                if (isEnabled) {
+                    sec.classList.remove('collapsed');
+                } else {
+                    sec.classList.add('collapsed');
+                }
+            });
+
+            if(hint) {
+                if(isEnabled) hint.classList.remove('hidden');
+                else hint.classList.add('hidden');
+            }
+        }
+
+        // --- CAPITAL LOGIC (AUTOMATIC) ---
+        function getCapitalComposition() {
+            const stored = localStorage.getItem(CAPITAL_KEY);
+            if (stored) return JSON.parse(stored);
+            
+            // Default Empty/Mock Structure
+            return {
+                circulation: { qty: 0, class: '-', nominal: 0, subscribed: 0, registered: 0, integrated: 0 },
+                portfolio: { qty: 0, class: '-', nominal: 0, subscribed: 0, registered: 0, integrated: 0 }
+            };
+        }
+
+        function simulateCapitalData() {
+            const mockData = {
+                circulation: { qty: 1000, class: 'Ordinarias Nom.', nominal: 100, subscribed: 100000, registered: 100000, integrated: 100000 },
+                portfolio: { qty: 0, class: '-', nominal: 0, subscribed: 0, registered: 0, integrated: 0 }
+            };
+            localStorage.setItem(CAPITAL_KEY, JSON.stringify(mockData));
+            renderCapitalTable();
+            showToast('Capital simulado', 'success');
+        }
+
+        function renderCapitalTable() {
+            const data = getCapitalComposition();
+            const tbody = document.getElementById('capital-table-body');
+            
+            const formatMoney = (val) => val ? `$ ${val.toLocaleString('es-AR', {minimumFractionDigits: 2})}` : '-';
+
+            const row1 = `
+                <tr>
+                    <td class="px-3 py-2 font-medium">En circulación</td>
+                    <td class="px-3 py-2 text-right">${data.circulation.qty}</td>
+                    <td class="px-3 py-2">${data.circulation.class}</td>
+                    <td class="px-3 py-2 text-right">${formatMoney(data.circulation.nominal)}</td>
+                    <td class="px-3 py-2 text-right font-medium text-blue-600">${formatMoney(data.circulation.subscribed)}</td>
+                    <td class="px-3 py-2 text-right text-green-600">${formatMoney(data.circulation.integrated)}</td>
+                </tr>
+            `;
+            const row2 = `
+                <tr>
+                    <td class="px-3 py-2 font-medium text-ui-textSec">En cartera</td>
+                    <td class="px-3 py-2 text-right text-ui-textSec">${data.portfolio.qty || '-'}</td>
+                    <td class="px-3 py-2 text-ui-textSec">${data.portfolio.class}</td>
+                    <td class="px-3 py-2 text-right text-ui-textSec">${formatMoney(data.portfolio.nominal)}</td>
+                    <td class="px-3 py-2 text-right text-ui-textSec">${formatMoney(data.portfolio.subscribed)}</td>
+                    <td class="px-3 py-2 text-right text-ui-textSec">${formatMoney(data.portfolio.integrated)}</td>
+                </tr>
+            `;
+            tbody.innerHTML = row1 + row2;
+        }
+
+        // --- DATA SAVING ---
+        function loadExampleData() {
+            document.getElementById('inp-name').value = 'Tech Solutions S.A.';
+            document.getElementById('inp-cuit').value = '30-71003002-5';
+            document.getElementById('inp-activity').value = 'Desarrollo de Software';
+            document.getElementById('inp-address').value = 'Av. Libertador 1002, Piso 5, CABA';
+            document.getElementById('inp-start').value = '2025-01-01';
+            document.getElementById('inp-end').value = '2025-12-31';
+            document.getElementById('inp-user').value = 'Santiago';
+            
+            // Advanced Example
+            document.getElementById('toggle-advanced').checked = true;
+            applyAdvancedMode(true);
+            document.getElementById('inp-duration').value = '99 años';
+            document.getElementById('inp-measure').value = 'Pesos Argentinos';
+            document.getElementById('inp-year-num').value = '5';
+            document.getElementById('inp-reg-id').value = 'IGJ Nro 123456';
+            
+            updatePreview();
+        }
+
+        function saveData() {
+            const name = document.getElementById('inp-name').value;
+            const cuit = document.getElementById('inp-cuit').value;
+
+            if (!name || !cuit) {
+                alert('Che, para guardar necesitamos al menos la Denominación y el CUIT.');
+                return;
+            }
+
+            companyData = {
+                // Basic
+                name: name,
+                cuit: cuit,
+                activity: document.getElementById('inp-activity').value,
+                address: document.getElementById('inp-address').value,
+                startDate: document.getElementById('inp-start').value,
+                endDate: document.getElementById('inp-end').value,
+                userName: document.getElementById('inp-user').value,
+                // Advanced
+                advancedMode: document.getElementById('toggle-advanced').checked,
+                duration: document.getElementById('inp-duration').value,
+                measure: document.getElementById('inp-measure').value,
+                statesAt: document.getElementById('inp-states-at').value,
+                yearNum: document.getElementById('inp-year-num').value,
+                regStatute: document.getElementById('inp-reg-statute').value,
+                regMod: document.getElementById('inp-reg-mod').value,
+                regId: document.getElementById('inp-reg-id').value,
+                parentName: document.getElementById('inp-parent-name').value,
+                parentCuit: document.getElementById('inp-parent-cuit').value,
+                parentActivity: document.getElementById('inp-parent-activity').value,
+                parentAddress: document.getElementById('inp-parent-address').value,
+            };
+
+            localStorage.setItem(DATA_KEY, JSON.stringify(companyData));
+            
+            renderUI();
+            closeModalDirect();
+            showToast('Datos guardados correctamente', 'success');
+        }
+
+        function loadFromStorage() {
+            const stored = localStorage.getItem(DATA_KEY);
+            if (stored) {
+                try { companyData = JSON.parse(stored); } 
+                catch (e) { console.error('Error loading data', e); }
+            }
+        }
+
+        // --- VALIDATION & PRINT ---
+        function validateAndPrint() {
+            if (!companyData.name || !companyData.cuit) {
+                showToast('Falta Denominación y CUIT', 'error');
+                openModal();
+                // Focus name input after modal animation
+                setTimeout(() => document.getElementById('inp-name').focus(), 400);
+                return;
+            }
+
+            preparePrintTemplate();
+            window.print();
+        }
+
+        function preparePrintTemplate() {
+            // Basic Info
+            document.getElementById('print-name').textContent = companyData.name;
+            document.getElementById('print-name-2').textContent = companyData.name;
+            document.getElementById('print-cuit').textContent = companyData.cuit;
+            document.getElementById('print-address').textContent = companyData.address || '—';
+            document.getElementById('print-activity').textContent = companyData.activity || '—';
+            
+            // Fiscal Year
+            if (companyData.startDate) document.getElementById('print-start').textContent = formatDate(companyData.startDate);
+            if (companyData.endDate) document.getElementById('print-end').textContent = formatDate(companyData.endDate);
+            document.getElementById('print-nro').textContent = companyData.yearNum || '...';
+
+            // Capital Table (Read from Automatic)
+            const capData = getCapitalComposition();
+            const formatMoney = (val) => val ? `$ ${val.toLocaleString('es-AR', {minimumFractionDigits: 2})}` : '-';
+            
+            let capHtml = `
+                <tr>
+                    <td>En circulación</td>
+                    <td class="money">${capData.circulation.qty}</td>
+                    <td class="money">${formatMoney(capData.circulation.nominal)}</td>
+                    <td class="money">${formatMoney(capData.circulation.subscribed)}</td>
+                    <td class="money">${formatMoney(capData.circulation.registered)}</td>
+                    <td class="money">${formatMoney(capData.circulation.integrated)}</td>
+                </tr>
+            `;
+            // Only add portfolio if it has data
+            if(capData.portfolio.qty > 0) {
+                 capHtml += `<tr>
+                    <td>En cartera</td>
+                    <td class="money">${capData.portfolio.qty}</td>
+                    <td class="money">${formatMoney(capData.portfolio.nominal)}</td>
+                    <td class="money">${formatMoney(capData.portfolio.subscribed)}</td>
+                    <td class="money">${formatMoney(capData.portfolio.registered)}</td>
+                    <td class="money">${formatMoney(capData.portfolio.integrated)}</td>
+                </tr>`;
+            }
+            // Total row
+            const totalSub = (capData.circulation.subscribed || 0) + (capData.portfolio.subscribed || 0);
+            const totalInt = (capData.circulation.integrated || 0) + (capData.portfolio.integrated || 0);
+            
+            capHtml += `
+                 <tr style="font-weight:bold; background:#fafafa;">
+                    <td>TOTALES</td>
+                    <td></td>
+                    <td></td>
+                    <td class="money">${formatMoney(totalSub)}</td>
+                    <td class="money"></td>
+                    <td class="money">${formatMoney(totalInt)}</td>
+                </tr>
+            `;
+
+            document.getElementById('print-capital-body').innerHTML = capHtml;
+
+            // Advanced Logic
+            const advRows = document.querySelectorAll('.adv-print-row');
+            const advSections = document.querySelectorAll('.adv-print-section');
+            
+            if (companyData.advancedMode) {
+                // Show rows
+                advRows.forEach(el => el.classList.remove('hidden'));
+                document.getElementById('print-duration').textContent = companyData.duration || '—';
+                document.getElementById('print-measure').textContent = companyData.measure || '—';
+
+                // Show sections
+                advSections.forEach(el => el.classList.remove('hidden'));
+                
+                // Control Body
+                document.getElementById('print-reg-statute').textContent = formatDate(companyData.regStatute) || '—';
+                document.getElementById('print-reg-mod').textContent = formatDate(companyData.regMod) || '—';
+                document.getElementById('print-reg-id').textContent = companyData.regId || '—';
+
+                // Parent Entity
+                document.getElementById('print-parent-name').textContent = companyData.parentName || '—';
+                document.getElementById('print-parent-cuit').textContent = companyData.parentCuit || '—';
+                document.getElementById('print-parent-activity').textContent = companyData.parentActivity || '—';
+                document.getElementById('print-parent-address').textContent = companyData.parentAddress || '—';
+
+            } else {
+                // Hide advanced
+                advRows.forEach(el => el.classList.add('hidden'));
+                advSections.forEach(el => el.classList.add('hidden'));
+            }
+        }
+
+        function renderUI() {
+            const hasData = !!companyData.name;
+
+            if (hasData) {
+                document.getElementById('company-empty-state').classList.add('hidden');
+                document.getElementById('company-filled-state').classList.remove('hidden');
+                
+                document.getElementById('disp-name').textContent = companyData.name;
+                document.getElementById('disp-cuit').textContent = companyData.cuit;
+                document.getElementById('disp-activity').textContent = companyData.activity || '-';
+                document.getElementById('disp-address').textContent = companyData.address || '-';
+                
+                if (companyData.startDate) document.getElementById('disp-start').textContent = formatDate(companyData.startDate);
+                if (companyData.endDate) document.getElementById('disp-end').textContent = formatDate(companyData.endDate);
+
+            } else {
+                document.getElementById('company-empty-state').classList.remove('hidden');
+                document.getElementById('company-filled-state').classList.add('hidden');
+            }
+
+            const userName = companyData.userName || 'Santiago';
+            document.getElementById('welcome-msg').textContent = `¡Bienvenido, ${userName}!`;
+
+            const dot = document.getElementById('ec-status-dot');
+            const label = document.getElementById('ec-name-label');
+            const footerInfo = document.getElementById('ec-footer-info');
+
+            if (hasData) {
+                label.textContent = companyData.name;
+                label.classList.add('text-ui-textMain');
+                label.classList.remove('text-ui-textSec', 'italic');
+                dot.classList.remove('bg-ui-border');
+                dot.classList.add('bg-brand-secondary');
+                footerInfo.textContent = `${companyData.name} (${companyData.cuit})`;
+            } else {
+                label.textContent = 'Mi Empresa S.A.';
+                label.classList.add('text-ui-textSec', 'italic');
+                dot.classList.add('bg-ui-border');
+                dot.classList.remove('bg-brand-secondary');
+                footerInfo.textContent = "Sin configurar";
+            }
+        }
+
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toast-icon');
+            const title = document.getElementById('toast-title');
+            
+            document.getElementById('toast-message').textContent = msg;
+
+            if(type === 'error') {
+                icon.className = 'ph-fill ph-warning-circle text-red-400 text-xl';
+                title.textContent = 'Atención';
+            } else {
+                icon.className = 'ph-fill ph-check-circle text-green-400 text-xl';
+                title.textContent = '¡Listo!';
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            const [y, m, d] = dateStr.split('-');
+            return `${d}/${m}/${y}`;
+        }
+
+    </script>
+</body>
+</html>

@@ -2,6 +2,121 @@
 
 ---
 
+## CHECKPOINT #COMPANY-PROFILE-V1
+**Fecha:** 2026-02-04  
+**Estado:** COMPLETADO - Build pasa, feature implementado
+
+### Objetivo
+Implementar "Datos de la Empresa" (Company Profile) como fuente única de verdad para UI, Estados Contables y PDFs.
+
+### Alcance
+- **INCLUIDO:** Storage Dexie v14, hook, modal 2-columnas, card, integración Dashboard + Estados
+- **EXCLUIDO:** PDF oficial de ficha, integración completa en journalPdf
+
+### Archivos Creados
+| Archivo | Propósito |
+|:--------|:----------|
+| `src/core/companyProfile/types.ts` | Interface CompanyProfile (20+ campos) |
+| `src/storage/companyProfile.ts` | CRUD API para Dexie |
+| `src/hooks/useCompanyProfile.ts` | Hook reactivo con useLiveQuery |
+| `src/components/CompanyProfile/CompanyProfileModal.tsx` | Modal 2 columnas con toggle |
+| `src/components/CompanyProfile/CompanyProfileCard.tsx` | Card empty/filled |
+| `src/components/CompanyProfile/CompanyProfile.css` | Estilos pixel-perfect |
+| `src/components/CompanyProfile/index.ts` | Re-exports |
+
+### Archivos Modificados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/storage/db.ts` | Dexie v14 + tabla `companyProfile` |
+| `src/pages/Dashboard.tsx` | Card + modal + greeting dinámico |
+| `src/pages/Estados.tsx` | `empresaName` desde hook con fallback |
+
+### Verificación
+- `npm run build` — **PASSED** ✅
+
+### Próximos Pasos Sugeridos
+1. Agregar badge clickable en header de Estados
+2. Implementar CompanyProfilePrintView para PDF oficial
+3. Integrar CUIT real en journalPdf, Conciliaciones, Amortizaciones
+
+---
+
+## CHECKPOINT #DATOS-EMPRESA-AUDIT-V2
+**Fecha:** 2026-02-04
+**Estado:** COMPLETADO - Auditoría técnica sin cambios en src/
+
+### Objetivo
+Auditar codebase para identificar datos de empresa hardcodeados, puntos de anclaje, estrategia de almacenamiento y plan de cálculo automático de capital, sin modificar código de producción.
+
+### Alcance
+- **INCLUIDO:** Análisis de rutas, componentes, hooks, storage, PDFs; propuesta de modelo CompanyProfile; estrategia capital; entrega de AUDIT_DATOS_EMPRESA_V2.md
+- **EXCLUIDO:** Crear tablas Dexie, modificar componentes, agregar dependencias
+
+### Hallazgos Clave
+| Hallazgo | Ubicación | Impacto |
+|:---------|:----------|:--------|
+| `empresaName = 'Mi Empresa S.A.'` | `Estados.tsx:190` | **CRÍTICO** — header de todos los estados |
+| Dexie v13 sin tabla companyProfile | `db.ts` | Requiere v14 para persistir datos |
+| `PdfMeta` con placeholders | `journalPdf.ts:78-89` | Listo para inyectar datos reales |
+| Capital Social código `3.1.01` | `seed.ts:201` | Plan A factible (por código fijo) |
+| Prototipo Datosiniciales.html | `docs/prototypes/` | **FALTANTE** — requiere obtener del usuario |
+
+### Entregables
+- [x] `docs/AUDIT_DATOS_EMPRESA_V2.md` — Reporte completo con 10 secciones
+- [x] Actualización de AI_HANDOFF.md
+- [x] Sin cambios en `src/` (verificado con git diff --stat)
+
+### Próximos Pasos (Implementación Futura)
+1. Obtener prototipo UI o diseñar basado en patrones existentes
+2. Crear modelo + storage (Dexie v14)
+3. Hook `useCompanyProfile()`
+4. Conectar Estados.tsx, Dashboard.tsx, PDFs
+5. Lógica de capital automático
+
+---
+
+## CHECKPOINT #INVERSIONES-P2-UX-PULIDO
+**Fecha:** 2026-02-04
+**Estado:** COMPLETADO - UX rubros dinamicos + selector de cuentas con saldo
+
+### Resumen
+Pulido de `/operaciones/inversiones` para reducir ruido visual (rubros dinamicos) y hacer mas seguros los selectores de cuentas (busqueda + saldo + solo imputables) sin romper storage ni flujos existentes.
+
+### Cambios realizados (MVP)
+1. **Rubros dinamicos**:
+   - La grilla/accordion ya no renderiza 7 tarjetas por defecto.
+   - Se muestran solo rubros en uso (con instrumentos) y/o habilitados por el usuario.
+   - Empty state prolijo cuando no hay instrumentos ni rubros habilitados.
+2. **CTA global "Nuevo"**:
+   - Boton principal en header + modal para habilitar rubro y continuar a cargar.
+   - Persistencia de rubros habilitados por ejercicio.
+   - Auto-habilita el rubro al crear el primer instrumento.
+3. **Selector de cuentas con busqueda + saldo**:
+   - Reemplazo del select simple de contrapartida por `AccountSearchSelectWithBalance`.
+   - Filtro: solo cuentas imputables (`!isHeader`) y del grupo Caja/Bancos (statementGroup `CASH_AND_BANKS`).
+   - Saldo al dia segun fecha del wizard (ledger balances con `closingDate`).
+   - Warning no bloqueante por saldo insuficiente en egresos (BUY / PF_CONSTITUTE / VPP_ALTA).
+
+### Persistencia / DB
+- **Sin bump de version (DB v13)**: se agrega campo NO indexado:
+  - `invSettings.enabledRubros[periodId] = InvestmentRubro[]`
+
+### Hardening
+- `buildJournalPreview()` ahora:
+  - exige contrapartida solo para tipos que la usan,
+  - bloquea cuentas cabecera (no imputables) como contrapartida.
+
+### Archivos tocados
+- `src/pages/Operaciones/InversionesPage.tsx`
+- `src/storage/inversiones.ts`
+- `src/core/inversiones/types.ts`
+- `docs/AI_HANDOFF.md`
+
+### Validacion
+- `npm run test` ✅
+- `npm run build` ✅
+- `npm run lint` ❌ (errores preexistentes fuera del modulo; `npx eslint src/pages/Operaciones/InversionesPage.tsx src/storage/inversiones.ts src/core/inversiones/types.ts` ✅)
+
 ## CHECKPOINT #INVERSIONES-P1-COMPLETADO
 **Fecha:** 2026-02-04
 **Estado:** COMPLETADO - Módulo Inversiones funcional

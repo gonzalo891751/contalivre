@@ -246,6 +246,12 @@ export interface InvestmentSettings {
     lastSyncDate?: string
     lastSyncStatus?: 'ok' | 'warning' | 'error'
 
+    /**
+     * Rubros habilitados manualmente por el usuario, por ejercicio (periodId).
+     * Se usa para mostrar/ocultar tarjetas del dashboard sin romper compatibilidad.
+     */
+    enabledRubros?: Record<string, InvestmentRubro[]>
+
     updatedAt: string
 }
 
