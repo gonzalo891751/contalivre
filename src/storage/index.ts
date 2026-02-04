@@ -3,7 +3,16 @@ export { db, generateId, cleanupDuplicateAccounts, hasDuplicateCodes } from './d
 export type { Settings } from './db'
 
 // Seed data
-export { loadSeedDataIfNeeded, resetDatabase, getAccountsByKind, getAccountTree, getChildAccounts, repairDefaultFxAccounts, repairEquityAccounts } from './seed'
+export {
+    loadSeedDataIfNeeded,
+    resetDatabase,
+    getAccountsByKind,
+    getAccountTree,
+    getChildAccounts,
+    repairDefaultFxAccounts,
+    repairTaxAccounts,
+    repairEquityAccounts,
+} from './seed'
 
 // Accounts CRUD
 export {
@@ -102,6 +111,7 @@ export {
     deleteBienesMovementWithJournal,
     deleteBienesProductWithMovements,
     reconcileMovementJournalLinks,
+    repairInitialStockMovements,
     // Bulk
     clearAllBienesData,
     clearBienesPeriodData,

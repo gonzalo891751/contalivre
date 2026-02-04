@@ -4,7 +4,7 @@ import Sidebar from './Sidebar'
 import { TopHeader } from './TopHeader'
 import MobileDrawer from './MobileDrawer'
 import MobileBottomNav from './MobileBottomNav'
-import { loadSeedDataIfNeeded, repairDefaultFxAccounts, repairEquityAccounts } from '../../storage'
+import { loadSeedDataIfNeeded, repairDefaultFxAccounts, repairTaxAccounts, repairEquityAccounts } from '../../storage'
 import { useMobileBreakpoint } from '../../hooks/useMobileBreakpoint'
 
 interface Props {
@@ -49,6 +49,7 @@ export default function MainLayout({ children }: Props) {
             try {
                 await loadSeedDataIfNeeded()
                 await repairDefaultFxAccounts()
+                await repairTaxAccounts()
                 await repairEquityAccounts()
                 setIsLoading(false)
             } catch (err) {

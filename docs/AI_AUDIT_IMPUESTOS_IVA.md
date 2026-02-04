@@ -1,134 +1,119 @@
-# Auditoría Técnica: Impuestos, IVA y Percepciones en ContaLivre
+# Auditoría Técnica: Módulo Impuestos (IVA + Pagos)
 
-**Fecha:** 31 de Enero 2026
-**Auditor:** AI Staff Engineer / Senior Accountant
-**Módulo:** Operaciones / Inventario (Bienes de Cambio)
+**Fecha:** 2026-02-03
+**Auditor:** AI Staff Engineer
+**Estado:** COMPLETADO - GAPS Identificados
 
 ---
 
 ## 1. Resumen Ejecutivo
 
-El sistema actual cuenta con una base sólida para el manejo de IVA estándar (21%, 10.5%, 0%) en compras y ventas de inventario, incluyendo la generación automática de asientos contables que imputan correctamente al Debe/Haber de las cuentas de IVA Crédito/Débito Fiscal.
+La auditoría del módulo de Impuestos ha revelado una **falta crítica de continuidad en el saldo de IVA** (arrastre de saldo a favor) y un **error bloqueante en el flujo de Pagos** relacionado con la configuración de cuentas.
 
-Sin embargo, el sistema **carece completamente de soporte para Regímenes de Recaudación (Percepciones y Retenciones)** y presenta limitaciones estructurales para escenarios complejos (ej. facturas "A" recibidas por Monotributistas donde el IVA es costo, o discriminación de alícuotas múltiples en un mismo comprobante).
-
-**Estado Actual:**
-*   ✅ **IVA Básico:** Funcional (Cálculo, UI simple, Asiento automático).
-*   ⚠️ **Pagos/Cobros:** Implementación "Mixta" flexible, pero sin concepto de "Retenciones" explícito.
-*   ❌ **Percepciones:** No existen en el modelo de datos, UI ni asientos.
-*   ❌ **IVA como Costo:** No soportado (siempre se segrega a cuenta de impuesto).
+*   **Integridad Contable (IVA):** 🔴 **FALLA**. El sistema calcula la posición mensual aislada, ignorando por completo el saldo a favor del mes anterior. Esto genera asientos incorrectos (duplica saldo a favor o exige pago indebido).
+*   **Pagos (Ret/Per):** 🟠 **ERROR**. El flujo de "Registrar Pago" falla controladamente (devuelve error) cuando faltan cuentas contables específicas (Retenciones a depositar), pero esto bloquea al usuario sin una vía clara de corrección en la UI.
+*   **Configuración:** Faltan mappings explícitos en la configuración de usuario para cuentas críticas de pasivo fiscal.
 
 ---
 
-## 2. Mapa del Código
+## 2. Mapa del Flujo Actual
 
-| Archivo | Responsabilidad | Estado Impuestos |
-| :--- | :--- | :--- |
-| `src/core/inventario/types.ts` | Definición de `BienesMovement` y `IVARate` | Solo campo `ivaRate` y `ivaAmount`. Falta soporte para impuestos extra. |
-| `src/pages/Planillas/components/MovementModalV3.tsx` | UI de carga (Compra/Venta/Ajuste) | Select de Alícuota (21/10.5/0). Checkbox "Gravado" en gastos. Sin campos para percepciones. |
-| `src/storage/bienes.ts` | **Motor Contable** (`buildJournalEntries...`) | Genera asientos. Resuelve cuentas `ivaCF` y `ivaDF`. Lógica rígida: `Neto + IVA = Total`. |
-| `src/storage/seed.ts` | Plan de Cuentas Base | Contiene cuentas para Percepciones/Retenciones (`1.1.03.xx`, `2.1.03.xx`), pero no se usan. |
-| `src/core/inventario/closing.ts` | Cierre de Inventario | Calcula IVA Saldo (`ivaDF - ivaCF`) informativo. |
+### A. Determinación de IVA (RI)
+1.  **Trigger:** `useTaxClosure` detecta cambio de mes.
+2.  **Cálculo:** Llama a `calculateIVAFromEntries(month)`.
+    *   Lee asientos del mes actual.
+    *   Suma Débito Fiscal (2.1.03.01) y Crédito Fiscal (1.1.03.01).
+    *   Suma Retenciones/Percepciones sufridas del mes.
+    *   **GAP:** No consulta el cierre del mes anterior ni el saldo de la cuenta `1.1.03.06` (IVA a Favor).
+3.  **Resultado:** `saldo = DF - CF - PagosACuenta`.
+4.  **Asiento:** `generateIVAEntry` crea un asiento que cancela DF/CF y genera `IVA a Pagar` o `IVA a Favor` nuevo.
 
----
-
-## 3. Flujos Actuales (Evidencia)
-
-### A. Registro de Compra (MovementModalV3)
-*   **UI:** El usuario ingresa `Costo Unitario` (Neto) y selecciona `Alícuota IVA` (por defecto 21%).
-*   **Cálculo:**
-    *   `Subtotal` = Cantidad * Costo
-    *   `Bonificación` = % sobre Subtotal
-    *   `Base Imponible` = Subtotal - Bonif + Gastos Netos
-    *   `IVA` = Base Imponible * Tasa
-    *   `Total` = Base + IVA + Gastos IVA - Descuento Fin.
-*   **Gap:** No hay dónde ingresar "Percepción IIBB" o "Percepción IVA" que suelen venir en la factura.
-
-### B. Asiento Contable (bienes.ts)
-La función `buildJournalEntriesForMovement` genera:
-```typescript
-// Pseudocódigo lógica actual
-Debit:  Mercaderías (Base Imponible)
-Debit:  IVA Crédito Fiscal (Monto IVA)
-Credit: Proveedores / Caja (Total)
-```
-*   **Gap:** Si hubiera una percepción de $1.000, el asiento debería debitar `1.1.03.08 - Percep. IVA` por $1.000 y acreditar Proveedores por $1.000 extra. Esto hoy es imposible sin "hackear" el sistema (ej. cargándolo como un "Gasto" no capitalizable, lo cual es conceptualmente erróneo).
+### B. Pagos y Obligaciones
+1.  **Obligaciones:** `listTaxObligationsWithPayments` lista deudas.
+2.  **Agentes:** `syncAgentDepositObligations` detecta retenciones practicadas y crea obligación `RET_DEPOSITAR`.
+3.  **Pago:** El usuario clickea "Registrar Pago".
+4.  **Resolución de Cuentas:** Se intenta resolver la cuenta del pasivo (`resolveTaxLiabilityAccountId`).
+    *   Si la cuenta "Retenciones a depositar" no existe o no está mapeada, retorna `null`.
+5.  **Falla:** `buildTaxSettlementEntry` retorna error: `"Falta cuenta del pasivo (Retenciones a depositar)"`.
 
 ---
 
-## 4. GAPS vs Requerimientos
+## 3. Matriz de Requisitos vs Estado
 
-| Requerimiento | Estado | Detalle del GAP |
-| :--- | :--- | :--- |
-| **IVA Tasa Variable** | ✅ OK | Soporta 21%, 10.5% y 0% (Exento). |
-| **IVA como Costo** | ❌ CRÍTICO | Si soy Monotributista y compro con Factura A, el sistema separa el IVA a `1.1.03.01`. Debería sumarse al costo de `Mercaderías`. |
-| **Percepciones (Sufridas)** | ❌ CRÍTICO | Frecuentes en compras (IIBB, IVA). No hay campos ni lógica contable. |
-| **Retenciones (Sufridas/Pract.)** | ⚠️ PARCIAL | Se pueden "simular" usando el split de pagos y seleccionando manualmente la cuenta de Retención, pero no es intuitivo ni valida montos. |
-| **Neto vs Final** | ⚠️ UX | La carga es "Neto-céntrica". No hay un modo "Tengo el total, desglosame el IVA". |
-
----
-
-## 5. Plan Mínimo de Cambios (MVP Seguro)
-
-Para soportar la operatoria argentina real sin romper la arquitectura actual:
-
-### Paso 1: Modelo de Datos (`types.ts`)
-Extender `BienesMovement` para alojar impuestos adicionales sin alterar la estructura base.
-```typescript
-interface TaxLine {
-  id: string;
-  kind: 'PERCEPCION' | 'RETENCION' | 'IMPUESTO_INTERNO';
-  taxType: 'IVA' | 'IIBB' | 'GANANCIAS' | 'SUSS';
-  amount: number;
-  accountId?: string; // Opcional, para override
-}
-
-// En BienesMovement:
-taxes?: TaxLine[];
-```
-
-### Paso 2: UI MovementModalV3
-1.  **Sección Impuestos Adicionales:** Debajo de los totales, agregar un repetidor simple para agregar "Percepciones/Impuestos".
-    *   Campos: Tipo (Selector), Monto ($).
-    *   Impacto: Suma al `Total` a pagar.
-2.  **Toggle "Discriminar IVA":**
-    *   Si está ON (default RI): Comportamiento actual (IVA va a Crédito Fiscal).
-    *   Si está OFF (Monotributo/Exento): El monto de IVA se calcula visualmente pero **se suma al Costo Unitario** (o se imputa a Gasto) y NO genera línea de IVA CF en el asiento.
-
-### Paso 3: Motor Contable (`bienes.ts`)
-Actualizar `buildJournalEntriesForMovement`:
-1.  Leer el array `taxes`.
-2.  Para cada tax, resolver la cuenta contable (usando `resolveMappedAccountId` con nuevos keys o hardcodes seguros del seed como `1.1.03.08`).
-3.  Agregar líneas al asiento:
-    *   Percepción Compra: **Debit** Cuenta Activo (Crédito Fiscal) / **Credit** Proveedores.
-    *   Retención Venta (sufrida): **Debit** Cuenta Activo (Pago a cuenta) / **Credit** Deudores (implícito en el cobro neto).
-
-### Paso 4: Retenciones en Pagos
-Aprovechar la funcionalidad existente de **Payment Splits**.
-*   En la sección "Pago / Contrapartidas", agregar un "Quick Add" para Retenciones.
-*   Al seleccionar "Agregar Retención", pre-llenar con cuentas de pasivo (ej. `2.1.03.03 - Retenciones a depositar`) para compras.
+| Requisito | Estado | Observación |
+|:---|:---:|:---|
+| (i) Asiento determinación IVA (DF/CF) | ✅ OK | Cancela cuentas transitorias correctamente. |
+| (ii) Genera IVA a pagar vs IVA a favor | ✅ OK | Lógica correcta basada en el mes actual. |
+| **(iii) Arrastre IVA a favor mes anterior** | 🔴 **MISSING** | **CRÍTICO.** El cálculo ignora el saldo previo. |
+| (iv) Pagos a cuenta (Sufridas) | ✅ OK | Se descuentan del impuesto determinado. |
+| (v) Ret/Per Practicadas (A depositar) | ✅ OK | Se clasifican como pasivo. |
+| (vi) Asiento pago IVA | ✅ OK | Funciona si la cuenta existe. |
+| (vii) Asientos depósito retenciones | 🟠 **FAIL** | Falla si falta cuenta `2.1.03.03` o `2.1.03.06`. |
+| (viii) Vencimientos/Notificaciones | ✅ OK | Genera alertas correctamente. |
+| (ix) Bug Pagos reproducido | ✅ OK | Reproducido en test. Causa: Falta cuenta/mapping. |
 
 ---
 
-## 6. Matriz de Pruebas Recomendada
+## 4. Análisis del Bug de Pagos
 
-| ID | Escenario | Resultado Esperado |
-| :--- | :--- | :--- |
-| **T01** | Compra RI Típica (Neto + IVA 21%) | Asiento: D Mercaderías / D IVA CF / H Proveedores. |
-| **T02** | Compra con Percepción IIBB | Asiento incluye: D Percep. IIBB / H Proveedores (monto total mayor). |
-| **T03** | Compra Monotributista (IVA al Costo) | Asiento: D Mercaderías (Neto + IVA) / H Proveedores. Sin línea de IVA CF. |
-| **T04** | Venta con Retención Sufrida (IIBB) | En cobro mixto: Línea 1 Caja ($90), Línea 2 Retención IIBB ($10). |
-| **T05** | Compra con Gasto No Gravado | Gasto se suma al debe (Gasto/Mercadería) sin generar IVA proporcional. |
-| **T06** | Ajuste RT6 (Inflación) | No debe disparar cálculos de impuestos (IVA 0, Percep 0). |
+**Síntoma:** El usuario reporta "tira error" al intentar pagar retenciones/percepciones.
+**Causa Raíz:**
+El sistema busca las cuentas:
+*   `retencionPracticada` (Default: `2.1.03.03` - Retenciones a depositar)
+*   `percepcionIVAPracticada` (Default: `2.1.03.06` - Percepciones IVA a terceros)
+
+Si el usuario tiene un Plan de Cuentas antiguo o personalizado donde estas cuentas no existen con esos códigos exactos, y no ha configurado el mapping manual, la resolución falla.
+
+**Evidencia (Test `tests/repro_pagos.test.ts`):**
+La función `buildTaxSettlementEntryPreview` retorna un objeto `{ error: 'Falta cuenta del pasivo...' }`. Si la UI no maneja este estado informando al usuario *cómo arreglarlo* (ir a Configuración), se percibe como un error del sistema.
+
+---
+
+## 5. Plan de Corrección (GAPS Priorizados)
+
+### P0 - Implementar Arrastre de Saldo a Favor (IVA)
+**Objetivo:** Que la determinación de IVA tome el saldo a favor del cierre anterior.
+
+**Cambios requeridos:**
+1.  **`src/storage/impuestos.ts`**:
+    *   Modificar `calculateIVAFromEntries` o crear `calculateIVAMonthlyPosition`.
+    *   Leer `getTaxClosure(prevMonth)`.
+    *   Si `prevClosure.status === 'CLOSED'` y tenía saldo a favor, sumarlo (como crédito) al cálculo actual.
+    *   Alternativa contable: Leer saldo de la cuenta `1.1.03.06` al inicio del período.
+2.  **`src/core/impuestos/iva.ts`**:
+    *   Actualizar `IVATotals` para incluir campo `saldoTecnicoAnterior` o `saldoAFavorAnterior`.
+    *   Actualizar fórmula: `saldo = DF - CF - PagosCuenta - SaldoAnterior`.
+3.  **`src/storage/impuestos.ts` (Asiento)**:
+    *   En `buildIVAEntryData`, si hay `saldoAnterior`, acreditar la cuenta `1.1.03.06` (IVA a Favor) por ese monto para cancelarlo y usarlo en la determinación.
+
+### P1 - Fix Bug Pagos (Robustez de Cuentas)
+**Objetivo:** Evitar el error en Pagos y facilitar la configuración.
+
+**Cambios requeridos:**
+1.  **`src/storage/seed.ts`**: Asegurar que `repairDefaultFxAccounts` o una nueva función `repairTaxAccounts` cree las cuentas `2.1.03.03` y `2.1.03.06` si no existen.
+2.  **`src/pages/Operaciones/ImpuestosPage.tsx`**:
+    *   Mejorar el manejo de error en `TaxSettlementModal`. Si el error es "Falta cuenta...", mostrar botón "Configurar Cuentas".
+3.  **`src/storage/impuestos.ts`**:
+    *   Agregar logs detallados cuando `resolveTaxLiabilityAccountId` retorna null.
+
+### P2 - Configuración de Mappings
+**Objetivo:** Permitir al usuario mapear estas cuentas manualmente si usa un plan custom.
+1.  Agregar los keys `retencionPracticada` y `percepcionIVAPracticada` al modal de configuración de cuentas (si no están ya accesibles).
 
 ---
 
-## 7. Supuestos y Preguntas Abiertas
+## 6. Comandos Ejecutados y Validación
 
-*   **Supuesto:** El usuario sabe qué cuenta contable usar para las percepciones si el sistema no la detecta automáticamente.
-*   **Supuesto:** Las retenciones sufridas en ventas se manejan como "una forma de cobro" (el cliente me da un papel de retención en lugar de billetes).
-*   **Pregunta:** ¿Necesitamos validar consistencia con AFIP (validar alícuotas)? *R: No para el MVP, confiamos en la carga manual.*
-*   **Pregunta:** ¿Cómo impacta esto en el Costo PPP? *R: Si el IVA se trata como costo (Monotributo), debe entrar al numerador del PPP. Si es Crédito Fiscal, se excluye (como hoy).*
+*   `git status`: Verificación de contexto.
+*   `rg`: Búsqueda de uso de `ivaAFavor` (confirmado que solo se usa para el asiento final, no para lectura de saldo inicial).
+*   `npm test -- tests/repro_impuestos.test.ts`: **PASS**. Confirmó que el cálculo ignora el saldo del mes 1.
+*   `npm test -- tests/repro_pagos.test.ts`: **PASS**. Confirmó que la falta de cuenta devuelve error controlado.
 
----
-**Checkpoint:** Auditoría finalizada. El sistema es robusto pero incompleto para la fiscalidad argentina real. La implementación de Percepciones es el próximo paso crítico.
+## 7. Archivos Inspeccionados
+*   `src/hooks/useTaxClosure.ts`
+*   `src/core/impuestos/iva.ts`
+*   `src/storage/impuestos.ts`
+*   `src/core/impuestos/settlements.ts`
+*   `src/pages/Operaciones/ImpuestosPage.tsx`
+*   `src/storage/bienes.ts` (resolución de cuentas)
+*   `src/storage/seed.ts` (plan de cuentas)

@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Bienes de Uso</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        /* --- BRAND TOKENS (Source of Truth) --- */
+        :root {
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --brand-gradient-hover: linear-gradient(135deg, #1D4ED8 0%, #059669 100%);
+            
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            --bg-sidebar: #FFFFFF;
+            
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            --text-inverse: #FFFFFF;
+
+            --border-light: #E2E8F0;
+            --border-focus: #3B82F6;
+
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --info: #3B82F6;
+
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 24px;
+            --radius-pill: 9999px;
+
+            --sidebar-width: 260px;
+            --header-height: 70px;
+        }
+
+        /* --- RESET & BASE --- */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            background-color: var(--bg-app);
+            font-family: var(--font-body);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+            font-size: 15px; /* Base size */
+        }
+
+        h1, h2, h3, h4 { font-family: var(--font-display); line-height: 1.1; }
+        button { font-family: var(--font-body); cursor: pointer; border: none; background: none; }
+        
+        /* --- COMPONENTS --- */
+        
+        /* Buttons */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+            padding: 0.6rem 1.2rem; border-radius: var(--radius-sm);
+            font-weight: 600; font-size: 0.9rem; transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .btn-sm { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+        .btn-primary { 
+            background: var(--brand-gradient); color: white; 
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); 
+        }
+        .btn-primary:hover { opacity: 0.95; transform: translateY(-1px); }
+        .btn-secondary { 
+            background: white; border: 1px solid var(--border-light); color: var(--text-main); 
+        }
+        .btn-secondary:hover { border-color: var(--brand-primary); color: var(--brand-primary); }
+        .btn-ghost { color: var(--text-secondary); }
+        .btn-ghost:hover { background: rgba(0,0,0,0.03); color: var(--text-main); }
+        .btn-danger { color: var(--error); background: #FEF2F2; }
+        
+        /* Inputs */
+        .input-group { margin-bottom: 1rem; }
+        .input-group label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.4rem; color: var(--text-secondary); }
+        .input-field, select.input-field {
+            width: 100%; padding: 0.6rem; border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm); font-family: var(--font-body); font-size: 0.95rem;
+            transition: border 0.2s; background: white;
+        }
+        .input-field:focus { outline: none; border-color: var(--brand-primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+        
+        /* Badges */
+        .badge { 
+            padding: 0.2rem 0.6rem; border-radius: var(--radius-pill); 
+            font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+        }
+        .badge-success { background: #ECFDF5; color: var(--success); }
+        .badge-warning { background: #FFFBEB; color: var(--warning); }
+        .badge-error { background: #FEF2F2; color: var(--error); }
+        .badge-info { background: #EFF6FF; color: var(--info); }
+        .badge-neutral { background: #F1F5F9; color: var(--text-secondary); }
+
+        /* Tables (High Density) */
+        .table-container { 
+            border: 1px solid var(--border-light); border-radius: var(--radius-sm); 
+            overflow: hidden; background: white; width: 100%;
+        }
+        .acc-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .acc-table th { 
+            background: #F8FAFC; text-align: left; padding: 0.6rem 1rem; 
+            font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-light);
+            white-space: nowrap;
+        }
+        .acc-table td { padding: 0.6rem 1rem; border-bottom: 1px solid var(--border-light); color: var(--text-main); }
+        .acc-table tr:last-child td { border-bottom: none; }
+        .acc-table .num { font-family: var(--font-mono); text-align: right; }
+        
+        /* Switch Toggle */
+        .toggle-wrapper { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;}
+        .toggle-switch { position: relative; width: 40px; height: 22px; margin-right: 0.5rem; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border-light); transition: .3s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        input:checked + .slider { background-color: var(--brand-secondary); }
+        input:checked + .slider:before { transform: translateX(18px); }
+
+        /* --- LAYOUT STRUCTURE --- */
+        
+        /* Sidebar */
+        .sidebar {
+            width: var(--sidebar-width); background: var(--bg-sidebar); border-right: 1px solid var(--border-light);
+            display: flex; flex-direction: column; padding: 1.5rem 1rem; flex-shrink: 0;
+            transition: transform 0.3s ease;
+        }
+        .logo { 
+            font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; 
+            color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; margin-bottom: 2rem; 
+        }
+        .logo i { color: var(--brand-primary); }
+        
+        .nav-group { margin-bottom: 1.5rem; }
+        .nav-label { font-size: 0.75rem; text-transform: uppercase; color: var(--text-tertiary); font-weight: 700; padding: 0 0.5rem; margin-bottom: 0.5rem; }
+        .nav-item {
+            display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem;
+            color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-sm);
+            font-weight: 500; font-size: 0.9rem; transition: all 0.2s; cursor: pointer;
+        }
+        .nav-item:hover { background: var(--bg-app); color: var(--text-main); }
+        .nav-item.active { background: #EFF6FF; color: var(--brand-primary); }
+        .nav-item i { font-size: 1.2rem; }
+
+        /* Main Content */
+        .main-content {
+            flex: 1; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden;
+        }
+        
+        .topbar {
+            height: var(--header-height); border-bottom: 1px solid var(--border-light);
+            background: rgba(255,255,255,0.8); backdrop-filter: var(--blur);
+            display: flex; align-items: center; justify-content: space-between; padding: 0 2rem;
+            position: sticky; top: 0; z-index: 10;
+        }
+        
+        .breadcrumbs { font-size: 0.85rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem; }
+        .breadcrumbs span.current { color: var(--text-main); font-weight: 600; }
+
+        .content-area { padding: 2rem; max-width: 1400px; margin: 0 auto; width: 100%; }
+
+        /* --- VIEWS --- */
+        
+        /* List View */
+        .filters-bar { 
+            display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; 
+            align-items: center; justify-content: space-between;
+        }
+        .search-box { position: relative; width: 300px; }
+        .search-box i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-tertiary); }
+        .search-box input { padding-left: 2.2rem; }
+
+        .assets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
+        
+        .asset-card {
+            background: white; border: 1px solid var(--border-light); border-radius: var(--radius-md);
+            padding: 1.5rem; transition: all 0.2s; box-shadow: var(--shadow-sm); cursor: pointer;
+            position: relative; overflow: hidden;
+        }
+        .asset-card:hover { border-color: var(--brand-primary); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+        
+        .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; }
+        .asset-icon { 
+            width: 40px; height: 40px; background: #F1F5F9; border-radius: 8px; 
+            display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 1.2rem; 
+        }
+        .progress-bar { height: 6px; background: #F1F5F9; border-radius: 4px; overflow: hidden; margin: 1rem 0 0.5rem 0; }
+        .progress-fill { height: 100%; background: var(--brand-secondary); border-radius: 4px; transition: width 0.5s ease; }
+        
+        /* Detail View */
+        .detail-header { margin-bottom: 2rem; }
+        .tabs { display: flex; border-bottom: 1px solid var(--border-light); margin-bottom: 2rem; gap: 2rem; }
+        .tab-item { 
+            padding: 0.75rem 0; font-size: 0.95rem; font-weight: 500; color: var(--text-secondary); 
+            cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s;
+        }
+        .tab-item:hover { color: var(--text-main); }
+        .tab-item.active { color: var(--brand-primary); border-bottom-color: var(--brand-primary); }
+        
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .kpi-card { background: white; border: 1px solid var(--border-light); padding: 1.2rem; border-radius: var(--radius-sm); }
+        .kpi-label { font-size: 0.8rem; color: var(--text-tertiary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.5rem; }
+        .kpi-value { font-family: var(--font-mono); font-size: 1.4rem; font-weight: 600; color: var(--text-main); }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px);
+            z-index: 100; display: none; align-items: center; justify-content: center;
+        }
+        .modal-overlay.open { display: flex; animation: fadeIn 0.2s; }
+        .modal-card {
+            background: white; width: 100%; max-width: 600px; max-height: 90vh; overflow-y: auto;
+            border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 2rem;
+            animation: slideUp 0.3s;
+        }
+
+        /* Utilities */
+        .hidden { display: none !important; }
+        .flex-between { display: flex; justify-content: space-between; align-items: center; }
+        .text-sm { font-size: 0.85rem; }
+        .text-muted { color: var(--text-secondary); }
+        .mt-4 { margin-top: 1rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        /* Toast */
+        #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 200; display: flex; flex-direction: column; gap: 10px; }
+        .toast {
+            background: white; border-left: 4px solid var(--brand-primary);
+            padding: 1rem; border-radius: 4px; box-shadow: var(--shadow-lg);
+            display: flex; align-items: center; gap: 10px; min-width: 300px;
+            animation: slideInRight 0.3s;
+        }
+        @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+        /* Mobile */
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; transform: translateX(-100%); z-index: 50; height: 100%; box-shadow: var(--shadow-lg); }
+            .sidebar.open { transform: translateX(0); }
+            .topbar { padding: 0 1rem; }
+            .filters-bar { flex-direction: column; align-items: stretch; }
+            .search-box { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+        <div class="logo">
+            <i class="ph-duotone ph-robot"></i> ContaLivre
+        </div>
+        
+        <div class="nav-group">
+            <div class="nav-label">General</div>
+            <a href="#" class="nav-item"><i class="ph ph-squares-four"></i> Dashboard</a>
+        </div>
+        
+        <div class="nav-group">
+            <div class="nav-label">Operaciones</div>
+            <a href="#" class="nav-item active"><i class="ph-fill ph-armchair"></i> Bienes de uso</a>
+            <a href="#" class="nav-item"><i class="ph ph-receipt"></i> Compras</a>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-label">Contabilidad</div>
+            <a href="#" class="nav-item"><i class="ph ph-book-bookmark"></i> Libro Mayor</a>
+            <a href="#" class="nav-item"><i class="ph ph-table"></i> Planillas</a>
+        </div>
+        
+        <!-- QA Panel (Solo para demo) -->
+        <div style="margin-top: auto; border-top: 1px dashed var(--border-light); padding-top: 1rem;">
+            <div class="nav-label" style="color: var(--brand-primary);">QA DEMO PANEL</div>
+            <button class="btn-sm btn-secondary" onclick="qaResetData()" style="width: 100%; text-align: left; margin-bottom: 0.5rem;">
+                <i class="ph ph-trash"></i> Resetear Datos
+            </button>
+            <div class="text-sm text-muted">RT6 Coef: <strong id="qa-rt6-val">2.35</strong></div>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        <!-- HEADER -->
+        <header class="topbar">
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <button class="btn-ghost" id="menu-toggle" style="font-size: 1.5rem; display: none;">
+                    <i class="ph ph-list"></i>
+                </button>
+                <div class="breadcrumbs">
+                    <span class="text-muted">Operaciones</span>
+                    <i class="ph ph-caret-right text-muted"></i>
+                    <span class="current">Bienes de uso</span>
+                </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <div class="input-group" style="margin:0;">
+                    <select class="input-field" style="padding: 0.4rem 2rem 0.4rem 0.8rem; font-size: 0.85rem;">
+                        <option>Ejercicio 2026</option>
+                        <option>Ejercicio 2025</option>
+                    </select>
+                </div>
+                <!-- RT6 Switch Global -->
+                <div class="toggle-wrapper" title="Aplicar ajuste por inflación (RT6)">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="rt6-toggle">
+                        <span class="slider"></span>
+                    </label>
+                    <div style="display: flex; flex-direction: column; line-height: 1;">
+                        <span style="font-size: 0.8rem; font-weight: 600;">Moneda Homogénea</span>
+                        <span style="font-size: 0.7rem; color: var(--text-tertiary);">RT6</span>
+                    </div>
+                </div>
+                
+                <div style="width: 32px; height: 32px; background: var(--brand-primary); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: 600;">S</div>
+            </div>
+        </header>
+
+        <!-- CONTENT AREA -->
+        <div class="content-area">
+            
+            <!-- --- VIEW: LIST --- -->
+            <div id="view-list">
+                <div class="flex-between mb-4">
+                    <div>
+                        <h1>Bienes de Uso</h1>
+                        <p class="text-muted">Gestioná tus activos fijos, amortizaciones y revalúos.</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="openModal()">
+                        <i class="ph-bold ph-plus"></i> Nuevo Bien
+                    </button>
+                </div>
+
+                <div class="filters-bar">
+                    <div class="search-box">
+                        <i class="ph ph-magnifying-glass"></i>
+                        <input type="text" id="search-input" class="input-field" placeholder="Buscar por nombre o categoría... (Atajo: /)">
+                    </div>
+                    
+                    <div style="display: flex; gap: 0.5rem;">
+                        <select class="input-field" id="filter-category" style="width: auto;">
+                            <option value="all">Todas las categorías</option>
+                            <option value="Rodados">Rodados</option>
+                            <option value="Maquinarias">Maquinarias</option>
+                            <option value="Muebles y Útiles">Muebles y Útiles</option>
+                            <option value="Instalaciones">Instalaciones</option>
+                            <option value="Inmuebles">Inmuebles</option>
+                            <option value="Terrenos">Terrenos (No amort.)</option>
+                        </select>
+                        <button class="btn btn-secondary" id="view-toggle-btn" title="Cambiar vista">
+                            <i class="ph ph-squares-four"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="assets-container" class="assets-grid">
+                    <!-- Javascript will populate this -->
+                </div>
+                
+                <!-- Empty State -->
+                <div id="empty-state" class="hidden" style="text-align: center; padding: 4rem 2rem;">
+                    <i class="ph-duotone ph-robot" style="font-size: 4rem; color: var(--text-tertiary); margin-bottom: 1rem;"></i>
+                    <h3>¡Todo limpio por acá!</h3>
+                    <p class="text-muted">No tenés bienes de uso cargados en este ejercicio.</p>
+                    <button class="btn btn-secondary mt-4" onclick="openModal()">Cargar el primero</button>
+                </div>
+            </div>
+
+            <!-- --- VIEW: DETAIL --- -->
+            <div id="view-detail" class="hidden">
+                <button class="btn btn-ghost mb-4" onclick="switchView('list')">
+                    <i class="ph ph-arrow-left"></i> Volver al listado
+                </button>
+
+                <div class="detail-header flex-between">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.5rem;">
+                            <h2 id="detail-name">Toyota Hilux 4x4</h2>
+                            <span class="badge badge-success" id="detail-status">EN USO</span>
+                            <span class="badge badge-info" id="detail-method">LINEAL</span>
+                        </div>
+                        <p class="text-muted" id="detail-category">Rodados • Adquirido el 15/01/2025</p>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-secondary" onclick="editCurrentAsset()">
+                            <i class="ph ph-pencil-simple"></i> Editar
+                        </button>
+                        <button class="btn btn-secondary" onclick="openEventModal()">
+                            <i class="ph ph-calendar-plus"></i> Evento
+                        </button>
+                        <button class="btn btn-ghost btn-danger" onclick="deleteCurrentAsset()">
+                            <i class="ph ph-trash"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="tabs">
+                    <div class="tab-item active" onclick="switchTab('resumen')">Resumen</div>
+                    <div class="tab-item" onclick="switchTab('planilla')">Planilla</div>
+                    <div class="tab-item" onclick="switchTab('asiento')">Asiento Anual</div>
+                    <div class="tab-item" onclick="switchTab('eventos')">Historial</div>
+                </div>
+
+                <!-- Tab Content: Resumen -->
+                <div id="tab-resumen" class="tab-content">
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Valor Origen</div>
+                            <div class="kpi-value" id="kpi-cost">-</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Amort. Acumulada</div>
+                            <div class="kpi-value" style="color: var(--warning);" id="kpi-accum">-</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Valor Residual (NBV)</div>
+                            <div class="kpi-value" style="color: var(--success);" id="kpi-nbv">-</div>
+                        </div>
+                         <div class="kpi-card">
+                            <div class="kpi-label">Vida Restante</div>
+                            <div class="kpi-value" style="font-size: 1.1rem;" id="kpi-life">-</div>
+                        </div>
+                    </div>
+
+                    <div class="asset-card mb-4" id="amort-preview-block">
+                        <div class="flex-between">
+                            <h4>Desgaste Progresivo</h4>
+                            <span class="text-sm text-muted" id="percent-consumed">0% consumido</span>
+                        </div>
+                        <div class="progress-bar" style="height: 12px; background: #E2E8F0;">
+                            <div class="progress-fill" id="detail-progress" style="width: 0%"></div>
+                        </div>
+                        
+                        <div class="mt-4" style="padding: 1rem; background: #F8FAFC; border-radius: var(--radius-sm);">
+                            <div class="flex-between mb-4">
+                                <h5 style="margin:0;">Preview Mensual (2026)</h5>
+                                <select class="input-field" style="width: auto; padding: 0.2rem;" id="month-selector" onchange="renderMonthlyPreview()">
+                                    <option value="1">Enero</option>
+                                    <option value="2">Febrero</option>
+                                    <option value="3">Marzo</option>
+                                    <option value="4">Abril</option>
+                                    <option value="5">Mayo</option>
+                                    <option value="6" selected>Junio (Actual)</option>
+                                    <option value="7">Julio</option>
+                                    <option value="8">Agosto</option>
+                                    <option value="9">Septiembre</option>
+                                    <option value="10">Octubre</option>
+                                    <option value="11">Noviembre</option>
+                                    <option value="12">Diciembre</option>
+                                </select>
+                            </div>
+                            <div class="flex-between text-sm">
+                                <span>Amortización del mes:</span>
+                                <strong class="font-mono" id="monthly-amort-val">$ 0,00</strong>
+                            </div>
+                            <div class="flex-between text-sm mt-4">
+                                <span>Acumulada al cierre del mes:</span>
+                                <strong class="font-mono" id="monthly-accum-val">$ 0,00</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Planilla -->
+                <div id="tab-planilla" class="tab-content hidden">
+                    <div class="table-container">
+                        <table class="acc-table">
+                            <thead>
+                                <tr>
+                                    <th>Año</th>
+                                    <th style="text-align: right;">Base Amortizable</th>
+                                    <th style="text-align: right;">Cuota Anual</th>
+                                    <th style="text-align: right;">Total Acumulado</th>
+                                    <th style="text-align: right;">Valor Residual (Cierre)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="schedule-body">
+                                <!-- JS Generated -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Asiento -->
+                <div id="tab-asiento" class="tab-content hidden">
+                    <div class="flex-between mb-4">
+                        <p class="text-muted text-sm">Preview del asiento de cierre al 31/12/2026. No impacta en contabilidad hasta confirmar cierre.</p>
+                        <button class="btn btn-secondary btn-sm" onclick="copyEntry()">
+                            <i class="ph ph-copy"></i> Copiar
+                        </button>
+                    </div>
+                    <div class="table-container">
+                        <table class="acc-table">
+                            <thead>
+                                <tr>
+                                    <th>Cuenta</th>
+                                    <th style="text-align: right;">Debe</th>
+                                    <th style="text-align: right;">Haber</th>
+                                </tr>
+                            </thead>
+                            <tbody id="entry-body">
+                                <!-- JS Generated -->
+                            </tbody>
+                            <tfoot style="background: #F8FAFC; font-weight: 600;">
+                                <tr>
+                                    <td style="text-align: right;">Totales</td>
+                                    <td class="num" id="entry-total-debit">-</td>
+                                    <td class="num" id="entry-total-credit">-</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                 <!-- Tab Content: Eventos -->
+                 <div id="tab-eventos" class="tab-content hidden">
+                    <div class="table-container">
+                        <table class="acc-table">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Tipo</th>
+                                    <th>Nota</th>
+                                    <th style="text-align: right;">Impacto ($)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="events-body">
+                                <!-- JS Generated -->
+                            </tbody>
+                        </table>
+                    </div>
+                 </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- FORM MODAL -->
+    <div class="modal-overlay" id="asset-modal">
+        <div class="modal-card">
+            <h3 class="mb-4" id="modal-title">Nuevo Bien de Uso</h3>
+            <form id="asset-form" onsubmit="handleSaveAsset(event)">
+                <input type="hidden" id="asset-id">
+                
+                <div class="grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="input-group">
+                        <label>Nombre del Bien *</label>
+                        <input type="text" id="inp-name" class="input-field" required placeholder="Ej: Escritorio Gerencia">
+                    </div>
+                    <div class="input-group">
+                        <label>Categoría *</label>
+                        <select id="inp-category" class="input-field" required>
+                            <option value="Rodados">Rodados</option>
+                            <option value="Maquinarias">Maquinarias</option>
+                            <option value="Muebles y Útiles">Muebles y Útiles</option>
+                            <option value="Instalaciones">Instalaciones</option>
+                            <option value="Equipos de Computación">Equipos de Computación</option>
+                            <option value="Inmuebles">Inmuebles</option>
+                            <option value="Terrenos">Terrenos</option>
+                            <option value="Obra en curso">Obra en curso</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="input-group">
+                        <label>Fecha de Alta *</label>
+                        <input type="date" id="inp-date" class="input-field" required>
+                    </div>
+                    <div class="input-group">
+                        <label>Estado</label>
+                        <select id="inp-status" class="input-field">
+                            <option value="En uso">En uso</option>
+                            <option value="En proyecto">En proyecto</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="input-group">
+                        <label>Valor de Origen (Histórico) *</label>
+                        <input type="number" id="inp-cost" class="input-field" required step="0.01" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>Valor de Recupero (Residual)</label>
+                        <input type="number" id="inp-residual" class="input-field" step="0.01" min="0" value="0">
+                    </div>
+                </div>
+
+                <div style="margin: 1.5rem 0; padding: 1rem; background: var(--bg-app); border-radius: var(--radius-sm);">
+                    <div class="input-group">
+                        <label>Método de Amortización</label>
+                        <select id="inp-method" class="input-field" onchange="toggleMethodFields()">
+                            <option value="lineal">Lineal (Años)</option>
+                            <option value="unidades">Unidades de Producción</option>
+                            <option value="no_amortizable">No Amortizable (Ej: Terreno)</option>
+                        </select>
+                    </div>
+
+                    <!-- Campos Lineal -->
+                    <div id="method-lineal-fields">
+                        <div class="input-group">
+                            <label>Vida Útil (Años)</label>
+                            <input type="number" id="inp-life" class="input-field" value="5" min="1">
+                        </div>
+                    </div>
+
+                    <!-- Campos Unidades -->
+                    <div id="method-units-fields" class="hidden">
+                        <div class="grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="input-group">
+                                <label>Total Unidades Estimadas</label>
+                                <input type="number" id="inp-total-units" class="input-field" placeholder="Ej: 100000 km">
+                            </div>
+                            <div class="input-group">
+                                <label>Producidas este año (2026)</label>
+                                <input type="number" id="inp-current-units" class="input-field" placeholder="Ej: 12000">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Info No Amortizable -->
+                    <div id="method-none-info" class="hidden">
+                        <p class="text-sm text-muted"><i class="ph-fill ph-info"></i> Este bien no sufrirá depreciación en el sistema.</p>
+                    </div>
+                </div>
+
+                <!-- Auto Accounts (Mock UI) -->
+                <div class="text-sm text-muted mb-4">
+                    <strong>Contabilidad Automática:</strong><br>
+                    Cuenta Activo: Bienes de Uso > <span id="preview-acc-cat">Rodados</span><br>
+                    Cuenta Amort: Amort. Acum. > <span id="preview-acc-cat-2">Rodados</span>
+                </div>
+
+                <div class="flex-between" style="margin-top: 2rem;">
+                    <button type="button" class="btn btn-ghost" onclick="closeModal('asset-modal')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Bien</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- EVENT MODAL -->
+    <div class="modal-overlay" id="event-modal">
+        <div class="modal-card" style="max-width: 500px;">
+            <h3>Registrar Evento</h3>
+            <p class="text-muted text-sm mb-4">Mejoras, revalúos o bajas anticipadas.</p>
+            <form onsubmit="handleSaveEvent(event)">
+                <div class="input-group">
+                    <label>Tipo de Evento</label>
+                    <select id="evt-type" class="input-field" required>
+                        <option value="mejora">Mejora (Aumenta Costo)</option>
+                        <option value="revaluo">Revalúo Técnico (Ajusta Valor)</option>
+                        <option value="baja">Baja / Venta</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>Fecha</label>
+                    <input type="date" id="evt-date" class="input-field" required>
+                </div>
+                <div class="input-group" id="evt-amount-group">
+                    <label>Importe / Nuevo Valor ($)</label>
+                    <input type="number" id="evt-amount" class="input-field" step="0.01">
+                </div>
+                <div class="input-group">
+                    <label>Nota</label>
+                    <input type="text" id="evt-note" class="input-field" placeholder="Motivo...">
+                </div>
+                <div class="flex-between mt-4">
+                    <button type="button" class="btn btn-ghost" onclick="closeModal('event-modal')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Registrar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- TOAST CONTAINER -->
+    <div id="toast-container"></div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // --- CONSTANTS & MOCKS ---
+        const RT6_COEF = 2.35; // Mock coefficient linked to "/planillas/cierre-valuacion"
+        const CURRENT_YEAR = 2026;
+        
+        // --- STATE MANAGEMENT ---
+        let assets = JSON.parse(localStorage.getItem('contaLivre_assets')) || [];
+        let uiState = {
+            view: 'list', // list | detail
+            activeTab: 'resumen',
+            currentAssetId: null,
+            rt6Enabled: false,
+            filterCategory: 'all',
+            searchQuery: ''
+        };
+
+        // --- DOM ELEMENTS ---
+        const $ = id => document.getElementById(id);
+
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', () => {
+            renderAssetsList();
+            setupEventListeners();
+            
+            // Check Responsive sidebar
+            if(window.innerWidth < 768) {
+                $('menu-toggle').style.display = 'block';
+            }
+        });
+
+        function setupEventListeners() {
+            // Filter & Search
+            $('search-input').addEventListener('input', (e) => {
+                uiState.searchQuery = e.target.value.toLowerCase();
+                renderAssetsList();
+            });
+            $('filter-category').addEventListener('change', (e) => {
+                uiState.filterCategory = e.target.value;
+                renderAssetsList();
+            });
+
+            // View Switcher (Simple toggle icon logic)
+            $('view-toggle-btn').addEventListener('click', () => {
+                const container = $('assets-container');
+                container.classList.toggle('assets-grid');
+                // En una app real cambiaría a estructura de tabla, aquí solo demo toggle
+                showToast('Cambio de vista (Grid/Lista)', 'info');
+            });
+
+            // RT6 Toggle
+            $('rt6-toggle').addEventListener('change', (e) => {
+                uiState.rt6Enabled = e.target.checked;
+                // Re-render current view
+                if(uiState.view === 'list') renderAssetsList();
+                else if(uiState.view === 'detail') loadAssetDetail(uiState.currentAssetId);
+                
+                showToast(uiState.rt6Enabled 
+                    ? `Moneda Homogénea activada (Coef: ${RT6_COEF})` 
+                    : 'Valores Históricos restaurados');
+            });
+
+            // Input Mirroring for Category
+            $('inp-category').addEventListener('change', (e) => {
+                $('preview-acc-cat').textContent = e.target.value;
+                $('preview-acc-cat-2').textContent = e.target.value;
+            });
+            
+            // Keyboard Shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.key === '/' && uiState.view === 'list') {
+                    e.preventDefault();
+                    $('search-input').focus();
+                }
+            });
+
+            // Menu Toggle
+            $('menu-toggle').addEventListener('click', () => {
+                $('sidebar').classList.toggle('open');
+            });
+        }
+
+        // --- CORE LOGIC: CALCULATIONS ---
+        
+        function getAssetValues(asset) {
+            // Base values
+            let cost = parseFloat(asset.cost);
+            let residual = parseFloat(asset.residual || 0);
+            
+            // Apply Events (Simple Snapshot Logic)
+            if(asset.events) {
+                asset.events.forEach(evt => {
+                    if(evt.type === 'mejora') cost += parseFloat(evt.amount);
+                    // Revalúo logic is complex, for prototype we assume cost is updated or handled here
+                });
+            }
+
+            // Apply RT6
+            const coef = uiState.rt6Enabled ? RT6_COEF : 1;
+            const finalCost = cost * coef;
+            const finalResidual = residual * coef;
+            const depreciableBase = finalCost - finalResidual;
+            
+            // Calculate Amortization
+            let accumAmort = 0;
+            let annualAmort = 0;
+            let percentConsumed = 0;
+            let monthlyAmort = 0;
+            let remainingLife = 0;
+
+            const purchaseDate = new Date(asset.date);
+            const purchaseYear = purchaseDate.getFullYear();
+            const yearsSincePurchase = CURRENT_YEAR - purchaseYear; // Simple full year logic for prototype
+
+            if (asset.method === 'no_amortizable' || asset.status === 'En proyecto') {
+                // No amortiza
+            } else if (asset.method === 'lineal') {
+                const life = parseInt(asset.life);
+                annualAmort = depreciableBase / life;
+                monthlyAmort = annualAmort / 12;
+                
+                // Simple Accum Logic: (Years passed * Annual) 
+                // In real app, consider exact months. Here assumes full years for past + proportional current
+                const yearsToAmort = Math.min(yearsSincePurchase, life); 
+                // Assume we are mid-year 2026? Let's assume end-of-year calculation for "accumulated" display usually
+                // But for "Accumulated until now", let's say:
+                accumAmort = annualAmort * yearsToAmort;
+                
+                // Cap at base
+                if (accumAmort > depreciableBase) accumAmort = depreciableBase;
+
+                percentConsumed = (accumAmort / depreciableBase) * 100;
+                remainingLife = Math.max(0, life - yearsToAmort) + " años";
+
+            } else if (asset.method === 'unidades') {
+                const totalUnits = parseFloat(asset.totalUnits || 1);
+                const currentUnits = parseFloat(asset.currentUnits || 0);
+                const unitCost = depreciableBase / totalUnits;
+                
+                annualAmort = unitCost * currentUnits; // Amort of this year
+                monthlyAmort = annualAmort / 12; // Average monthly
+
+                // Mock accumulation for demo (assuming constant usage)
+                accumAmort = (unitCost * currentUnits) * (yearsSincePurchase + 1);
+                if (accumAmort > depreciableBase) accumAmort = depreciableBase;
+                
+                percentConsumed = (accumAmort / depreciableBase) * 100;
+                remainingLife = (totalUnits - (accumAmort/unitCost)) + " un.";
+            }
+
+            const nbv = finalCost - accumAmort;
+
+            return {
+                cost: finalCost,
+                residual: finalResidual,
+                base: depreciableBase,
+                accum: accumAmort,
+                nbv: nbv,
+                annual: annualAmort,
+                monthly: monthlyAmort,
+                percent: Math.min(100, percentConsumed),
+                lifeStr: remainingLife
+            };
+        }
+
+        function formatCurrency(val) {
+            return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val);
+        }
+
+        // --- RENDER FUNCTIONS ---
+
+        function renderAssetsList() {
+            const container = $('assets-container');
+            container.innerHTML = '';
+            
+            const filtered = assets.filter(a => {
+                const matchesSearch = a.name.toLowerCase().includes(uiState.searchQuery) || a.category.toLowerCase().includes(uiState.searchQuery);
+                const matchesCat = uiState.filterCategory === 'all' || a.category === uiState.filterCategory;
+                return matchesSearch && matchesCat;
+            });
+
+            if (filtered.length === 0) {
+                $('empty-state').classList.remove('hidden');
+                return;
+            }
+            $('empty-state').classList.add('hidden');
+
+            filtered.forEach(asset => {
+                const vals = getAssetValues(asset);
+                const card = document.createElement('div');
+                card.className = 'asset-card';
+                card.onclick = () => loadAssetDetail(asset.id);
+                
+                const iconClass = getIconForCategory(asset.category);
+                const statusClass = asset.status === 'En uso' ? 'badge-success' : (asset.status === 'Baja' ? 'badge-error' : 'badge-warning');
+
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div class="asset-icon"><i class="${iconClass}"></i></div>
+                        <span class="badge ${statusClass}">${asset.status}</span>
+                    </div>
+                    <h4 class="mb-4">${asset.name}</h4>
+                    <p class="text-sm text-muted mb-4">${asset.category}</p>
+                    
+                    ${asset.method !== 'no_amortizable' ? `
+                        <div class="flex-between text-sm mb-4">
+                            <span class="text-muted">Desgaste</span>
+                            <strong>${Math.round(vals.percent)}%</strong>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${vals.percent}%"></div>
+                        </div>
+                    ` : '<div class="text-sm text-muted" style="margin: 1rem 0;">No amortizable</div>'}
+                    
+                    <div class="flex-between mt-4" style="border-top: 1px solid var(--border-light); padding-top: 1rem;">
+                        <div>
+                            <div class="text-sm text-muted">Valor Libro</div>
+                            <div class="font-mono" style="font-weight: 600; color: var(--brand-primary);">${formatCurrency(vals.nbv)}</div>
+                        </div>
+                         <div style="text-align: right;">
+                            <div class="text-sm text-muted">Costo Orig.</div>
+                            <div class="font-mono text-muted">${formatCurrency(vals.cost)}</div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function loadAssetDetail(id) {
+            uiState.currentAssetId = id;
+            uiState.view = 'detail';
+            
+            const asset = assets.find(a => a.id === id);
+            const vals = getAssetValues(asset);
+
+            // Populate Header
+            $('detail-name').innerText = asset.name;
+            $('detail-status').innerText = asset.status;
+            $('detail-method').innerText = asset.method === 'lineal' ? 'LINEAL' : (asset.method === 'unidades' ? 'UNIDADES' : 'NO AMORT.');
+            $('detail-category').innerText = `${asset.category} • Adquirido el ${new Date(asset.date).toLocaleDateString()}`;
+
+            // Populate Summary Tab
+            $('kpi-cost').innerText = formatCurrency(vals.cost);
+            $('kpi-accum').innerText = formatCurrency(vals.accum);
+            $('kpi-nbv').innerText = formatCurrency(vals.nbv);
+            $('kpi-life').innerText = vals.lifeStr;
+            
+            $('percent-consumed').innerText = `${vals.percent.toFixed(1)}% consumido`;
+            $('detail-progress').style.width = `${vals.percent}%`;
+            
+            if(asset.method === 'no_amortizable') {
+                $('amort-preview-block').classList.add('hidden');
+            } else {
+                $('amort-preview-block').classList.remove('hidden');
+                // Set Monthly hidden data
+                $('monthly-amort-val').dataset.val = vals.monthly;
+                $('monthly-accum-val').dataset.baseAccum = vals.accum - vals.annual; // Previous year accum aprox
+                renderMonthlyPreview();
+            }
+
+            // Populate Tables (Planilla & Asiento)
+            renderSchedule(asset, vals);
+            renderEntry(asset, vals);
+            renderEvents(asset);
+
+            // Switch Views
+            $('view-list').classList.add('hidden');
+            $('view-detail').classList.remove('hidden');
+            
+            // Re-render tab content
+            switchTab(uiState.activeTab);
+        }
+
+        function renderMonthlyPreview() {
+            const month = parseInt($('month-selector').value);
+            const monthlyVal = parseFloat($('monthly-amort-val').dataset.val);
+            const baseAccum = parseFloat($('monthly-accum-val').dataset.baseAccum);
+            
+            // Calculation logic for preview
+            // Accum at month X = BaseAccum (Prev Year) + (Monthly * Month)
+            const currentAccum = baseAccum + (monthlyVal * month);
+            
+            $('monthly-amort-val').innerText = formatCurrency(monthlyVal);
+            $('monthly-accum-val').innerText = formatCurrency(currentAccum);
+        }
+
+        function renderSchedule(asset, vals) {
+            const tbody = $('schedule-body');
+            tbody.innerHTML = '';
+            
+            // Mock 3 rows: Last Year, This Year (2026), Next Year
+            // This is simplified. Real app needs full array loop.
+            
+            const years = [CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1];
+            let runningAccum = vals.accum - vals.annual; // Start before this year
+            
+            years.forEach(year => {
+                let yearAmort = vals.annual;
+                if(year > CURRENT_YEAR + parseInt(asset.life)) yearAmort = 0; // Past life
+                
+                runningAccum += yearAmort;
+                if(runningAccum > vals.base) runningAccum = vals.base;
+                
+                const nbv = vals.cost - runningAccum;
+                
+                const tr = document.createElement('tr');
+                if(year === CURRENT_YEAR) tr.style.background = '#F0F9FF'; // Highlight current
+                
+                tr.innerHTML = `
+                    <td>${year}</td>
+                    <td class="num">${formatCurrency(vals.base)}</td>
+                    <td class="num">${formatCurrency(yearAmort)}</td>
+                    <td class="num">${formatCurrency(runningAccum)}</td>
+                    <td class="num font-bold">${formatCurrency(nbv)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderEntry(asset, vals) {
+            const tbody = $('entry-body');
+            tbody.innerHTML = '';
+            
+            const amount = vals.annual;
+            
+            // Row 1: Gasto
+            tbody.innerHTML += `
+                <tr>
+                    <td>Amortizaciones Bienes de Uso (R.N)</td>
+                    <td class="num">${formatCurrency(amount)}</td>
+                    <td class="num">-</td>
+                </tr>
+            `;
+            // Row 2: Reguladora
+            tbody.innerHTML += `
+                <tr>
+                    <td>Amort. Acum. ${asset.category} (Reg. Activo)</td>
+                    <td class="num">-</td>
+                    <td class="num">${formatCurrency(amount)}</td>
+                </tr>
+            `;
+            
+            $('entry-total-debit').innerText = formatCurrency(amount);
+            $('entry-total-credit').innerText = formatCurrency(amount);
+        }
+
+        function renderEvents(asset) {
+            const tbody = $('events-body');
+            tbody.innerHTML = '';
+            if(!asset.events || asset.events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Sin eventos registrados</td></tr>';
+                return;
+            }
+            asset.events.forEach(evt => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${new Date(evt.date).toLocaleDateString()}</td>
+                        <td><span class="badge badge-neutral">${evt.type}</span></td>
+                        <td>${evt.note || '-'}</td>
+                        <td class="num">${evt.amount ? formatCurrency(evt.amount) : '-'}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // --- CRUD OPERATIONS ---
+
+        function handleSaveAsset(e) {
+            e.preventDefault();
+            
+            const newAsset = {
+                id: $('asset-id').value || crypto.randomUUID(),
+                name: $('inp-name').value,
+                category: $('inp-category').value,
+                date: $('inp-date').value,
+                status: $('inp-status').value,
+                cost: parseFloat($('inp-cost').value),
+                residual: parseFloat($('inp-residual').value),
+                method: $('inp-method').value,
+                life: $('inp-life').value,
+                totalUnits: $('inp-total-units').value,
+                currentUnits: $('inp-current-units').value,
+                events: [] // Initialize events
+            };
+
+            // If editing, preserve events
+            if ($('asset-id').value) {
+                const existing = assets.find(a => a.id === newAsset.id);
+                if(existing) newAsset.events = existing.events;
+                // Update array
+                assets = assets.map(a => a.id === newAsset.id ? newAsset : a);
+            } else {
+                assets.push(newAsset);
+            }
+
+            saveToStorage();
+            closeModal('asset-modal');
+            renderAssetsList();
+            
+            if (uiState.view === 'detail') loadAssetDetail(newAsset.id);
+            
+            showToast('Bien guardado correctamente', 'success');
+        }
+
+        function deleteCurrentAsset() {
+            if(confirm('¿Seguro querés eliminar este bien? Esta acción no se puede deshacer.')) {
+                assets = assets.filter(a => a.id !== uiState.currentAssetId);
+                saveToStorage();
+                switchView('list');
+                showToast('Bien eliminado', 'neutral');
+            }
+        }
+        
+        function handleSaveEvent(e) {
+            e.preventDefault();
+            const asset = assets.find(a => a.id === uiState.currentAssetId);
+            if(!asset) return;
+
+            const evt = {
+                type: $('evt-type').value,
+                date: $('evt-date').value,
+                amount: $('evt-amount').value,
+                note: $('evt-note').value
+            };
+
+            if(!asset.events) asset.events = [];
+            asset.events.push(evt);
+            
+            // Apply logic to main object for simplicity
+            if(evt.type === 'mejora') {
+                asset.cost = parseFloat(asset.cost) + parseFloat(evt.amount);
+            } else if (evt.type === 'baja') {
+                asset.status = 'Baja';
+            }
+
+            saveToStorage();
+            closeModal('event-modal');
+            loadAssetDetail(asset.id);
+            showToast('Evento registrado con éxito', 'success');
+        }
+
+        // --- UI HELPERS ---
+
+        function openModal() {
+            $('asset-form').reset();
+            $('asset-id').value = '';
+            $('modal-title').innerText = 'Nuevo Bien de Uso';
+            $('inp-date').valueAsDate = new Date();
+            toggleMethodFields();
+            $('asset-modal').classList.add('open');
+        }
+
+        function editCurrentAsset() {
+            const asset = assets.find(a => a.id === uiState.currentAssetId);
+            if(!asset) return;
+            
+            $('asset-id').value = asset.id;
+            $('inp-name').value = asset.name;
+            $('inp-category').value = asset.category;
+            $('inp-date').value = asset.date;
+            $('inp-status').value = asset.status;
+            $('inp-cost').value = asset.cost;
+            $('inp-residual').value = asset.residual;
+            $('inp-method').value = asset.method;
+            $('inp-life').value = asset.life;
+            $('inp-total-units').value = asset.totalUnits || '';
+            $('inp-current-units').value = asset.currentUnits || '';
+            
+            $('modal-title').innerText = 'Editar Bien';
+            toggleMethodFields();
+            $('asset-modal').classList.add('open');
+        }
+        
+        function openEventModal() {
+            $('event-modal').classList.add('open');
+            $('evt-date').valueAsDate = new Date();
+        }
+
+        function closeModal(id) {
+            $(id).classList.remove('open');
+        }
+
+        function switchView(viewName) {
+            uiState.view = viewName;
+            if (viewName === 'list') {
+                $('view-detail').classList.add('hidden');
+                $('view-list').classList.remove('hidden');
+                renderAssetsList(); // Refresh in case of changes
+            }
+        }
+
+        function switchTab(tabName) {
+            uiState.activeTab = tabName;
+            
+            // UI Classes
+            document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+            event.target.classList.add('active'); // Assumes triggered by click
+            
+            // Content Visibility
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            $(`tab-${tabName}`).classList.remove('hidden');
+        }
+
+        function toggleMethodFields() {
+            const method = $('inp-method').value;
+            $('method-lineal-fields').classList.add('hidden');
+            $('method-units-fields').classList.add('hidden');
+            $('method-none-info').classList.add('hidden');
+
+            if (method === 'lineal') $('method-lineal-fields').classList.remove('hidden');
+            else if (method === 'unidades') $('method-units-fields').classList.remove('hidden');
+            else $('method-none-info').classList.remove('hidden');
+        }
+        
+        function getIconForCategory(cat) {
+            const map = {
+                'Rodados': 'ph-car',
+                'Maquinarias': 'ph-factory',
+                'Muebles y Útiles': 'ph-chair',
+                'Instalaciones': 'ph-lamp',
+                'Equipos de Computación': 'ph-desktop',
+                'Inmuebles': 'ph-house',
+                'Terrenos': 'ph-globe',
+                'Obra en curso': 'ph-bricks'
+            };
+            return map[cat] ? `ph-duotone ${map[cat]}` : 'ph-duotone ph-cube';
+        }
+
+        function saveToStorage() {
+            localStorage.setItem('contaLivre_assets', JSON.stringify(assets));
+        }
+
+        function showToast(msg, type = 'success') {
+            const container = $('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            
+            let icon = type === 'success' ? 'ph-check-circle' : 'ph-info';
+            let color = type === 'success' ? 'var(--success)' : 'var(--brand-primary)';
+            if(type === 'neutral') { color = 'var(--text-secondary)'; icon = 'ph-trash'; }
+
+            toast.innerHTML = `
+                <i class="ph-fill ${icon}" style="color: ${color}; font-size: 1.5rem;"></i>
+                <span style="font-weight: 500;">${msg}</span>
+            `;
+            
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function copyEntry() {
+            // Mock Copy
+            navigator.clipboard.writeText("Asiento copiado al portapapeles (formato JSON)");
+            showToast('Asiento copiado al portapapeles', 'success');
+        }
+
+        // --- QA TOOLS ---
+        function qaResetData() {
+            if(confirm('Resetear todos los datos de prueba?')) {
+                localStorage.removeItem('contaLivre_assets');
+                assets = [];
+                renderAssetsList();
+                showToast('Datos eliminados', 'neutral');
+            }
+        }
+
+    </script>
+</body>
+</html>

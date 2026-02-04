@@ -2,7 +2,7 @@ import { useMemo, useState, useRef, useCallback, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
 import { computeLedger } from '../core/ledger'
-import { computeTrialBalance } from '../core/balance'
+import { computeTrialBalance, computeRollupTrialBalance } from '../core/balance'
 import { computeStatements } from '../core/statements'
 import { excludeClosingEntries } from '../utils/resultsStatement'
 import { exportElementToPdf } from '../utils/exportPdf'
@@ -28,6 +28,13 @@ import {
 } from '../storage/espComparativeStore'
 import { EvolucionPNTab } from '../components/Estados/EvolucionPNTab'
 import { NotasAnexosTab } from '../components/Estados/NotasAnexosTab'
+
+// ESP V2 Components
+import { EstadoSituacionPatrimonialV2 } from './estados/components/EstadoSituacionPatrimonialV2'
+import { adaptBalanceSheetToViewModel } from './estados/adapters/balanceSheetViewModel'
+
+// Feature flag for ESP V2 (set to true to use new UI)
+const USE_ESP_V2 = true
 
 // ============================================
 // Data Adapter: BalanceSheet → Gemini Format
@@ -289,14 +296,47 @@ export default function Estados() {
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
     const entries = useLiveQuery(() => db.entries.toArray())
 
-    const statements = useMemo(() => {
+    // Compute ledger and trial balance for statements
+    const statementsData = useMemo(() => {
         if (!accounts || !entries || entries.length === 0) return null
 
         const entriesWithoutClosing = excludeClosingEntries(entries, accounts)
         const ledger = computeLedger(entriesWithoutClosing, accounts)
-        const trialBalance = computeTrialBalance(ledger, accounts)
-        return computeStatements(trialBalance, accounts)
+        const trialBalanceRollup = computeRollupTrialBalance(ledger, accounts)
+        // Also compute raw trial balance for unmapped account detection
+        const trialBalanceRaw = computeTrialBalance(ledger, accounts)
+        const statements = computeStatements(trialBalanceRollup, accounts)
+
+        return {
+            statements,
+            trialBalanceRaw,
+            ledger
+        }
     }, [accounts, entries])
+
+    const statements = statementsData?.statements ?? null
+
+    // ESP V2 ViewModel
+    const espViewModel = useMemo(() => {
+        if (!statements || !accounts || !statementsData) return null
+
+        const comparativeMap = espShowComparative && espComparativeData
+            ? espComparativeData
+            : undefined
+
+        return adaptBalanceSheetToViewModel(statements.balanceSheet, {
+            empresa: empresaName,
+            ejercicioActual: currentYear,
+            fechaCorte: new Date(globalEnd).toLocaleDateString('es-AR', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+            }),
+            comparativeData: comparativeMap,
+            trialBalance: statementsData.trialBalanceRaw,
+            accounts
+        })
+    }, [statements, accounts, statementsData, espShowComparative, espComparativeData, empresaName, currentYear, globalEnd])
 
     const estadoResultadosData = useMemo(() => {
         if (!accounts || !entries) return null
@@ -403,71 +443,81 @@ export default function Estados() {
                 {/* ESP View */}
                 {viewMode === 'ESP' && (
                     <div className="animate-slide-up">
-                        {/* Document Toolbar */}
-                        <DocumentToolbar
-                            showComparative={espShowComparative}
-                            onToggleComparative={handleEspToggleComparative}
-                            comparativeYear={espComparativeYear}
-                            availableYears={espAvailableYears}
-                            onYearChange={setEspComparativeYear}
-                            hasComparativeData={hasEspComparativeData}
-                            onImportClick={() => setEspImportModalOpen(true)}
-                            onClearClick={handleEspClearComparative}
-                            infoTitle="Sobre este estado"
-                            infoItems={espInfoItems}
-                            onDownloadPdf={handleDownload}
-                            isExporting={isExporting}
-                        />
-
-                        {/* ESP Document */}
-                        {(() => {
-                            const comparativeMap = espShowComparative && hasEspComparativeData
-                                ? espComparativeData
-                                : undefined
-                            const geminiData = adaptBalanceSheetToGemini(balanceSheet, comparativeMap ?? undefined)
-
-                            return (
-                                <EstadoSituacionPatrimonialGemini
-                                    loading={false}
-                                    entidad={empresaName}
-                                    fechaCorte={new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
-                                    activoSections={geminiData.activoSections}
-                                    pasivoSections={geminiData.pasivoSections}
-                                    patrimonioNetoSection={geminiData.patrimonioNetoSection}
-                                    totalActivo={geminiData.totalActivo}
-                                    totalPasivo={geminiData.totalPasivo}
-                                    totalPN={geminiData.totalPN}
-                                    isBalanced={geminiData.isBalanced}
-                                    diff={geminiData.diff}
-                                    onExportPdf={handleDownload}
-                                    isExporting={isExporting}
-                                    pdfRef={espRef}
-                                    // Comparative props
-                                    showComparative={espShowComparative && hasEspComparativeData}
+                        {USE_ESP_V2 && espViewModel ? (
+                            /* ESP V2 - New pixel-perfect UI */
+                            <EstadoSituacionPatrimonialV2
+                                viewModel={espViewModel}
+                                showComparative={espShowComparative}
+                                onToggleComparative={handleEspToggleComparative}
+                                hasComparativeData={hasEspComparativeData}
+                                onImportClick={() => setEspImportModalOpen(true)}
+                            />
+                        ) : (
+                            /* ESP V1 - Original Gemini UI (fallback) */
+                            <>
+                                <DocumentToolbar
+                                    showComparative={espShowComparative}
+                                    onToggleComparative={handleEspToggleComparative}
                                     comparativeYear={espComparativeYear}
-                                    currentYear={currentYear}
-                                    comparativeTotalActivo={geminiData.comparativeTotalActivo}
-                                    comparativeTotalPasivo={geminiData.comparativeTotalPasivo}
-                                    comparativeTotalPN={geminiData.comparativeTotalPN}
+                                    availableYears={espAvailableYears}
+                                    onYearChange={setEspComparativeYear}
+                                    hasComparativeData={hasEspComparativeData}
+                                    onImportClick={() => setEspImportModalOpen(true)}
+                                    onClearClick={handleEspClearComparative}
+                                    infoTitle="Sobre este estado"
+                                    infoItems={espInfoItems}
+                                    onDownloadPdf={handleDownload}
+                                    isExporting={isExporting}
                                 />
-                            )
-                        })()}
 
-                        {/* Overlay CTA when comparative is ON but no data */}
-                        {espShowComparative && !hasEspComparativeData && (
-                            <div className="esp-overlay-cta">
-                                <div className="esp-overlay-card">
-                                    <div className="esp-overlay-icon">📄</div>
-                                    <h3>Faltan datos de {espComparativeYear}</h3>
-                                    <p>Para ver la comparación, necesitás importar el balance del ejercicio anterior.</p>
-                                    <button
-                                        className="esp-overlay-btn"
-                                        onClick={() => setEspImportModalOpen(true)}
-                                    >
-                                        Importar Comparativo
-                                    </button>
-                                </div>
-                            </div>
+                                {(() => {
+                                    const comparativeMap = espShowComparative && hasEspComparativeData
+                                        ? espComparativeData
+                                        : undefined
+                                    const geminiData = adaptBalanceSheetToGemini(balanceSheet, comparativeMap ?? undefined)
+
+                                    return (
+                                        <EstadoSituacionPatrimonialGemini
+                                            loading={false}
+                                            entidad={empresaName}
+                                            fechaCorte={new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                            activoSections={geminiData.activoSections}
+                                            pasivoSections={geminiData.pasivoSections}
+                                            patrimonioNetoSection={geminiData.patrimonioNetoSection}
+                                            totalActivo={geminiData.totalActivo}
+                                            totalPasivo={geminiData.totalPasivo}
+                                            totalPN={geminiData.totalPN}
+                                            isBalanced={geminiData.isBalanced}
+                                            diff={geminiData.diff}
+                                            onExportPdf={handleDownload}
+                                            isExporting={isExporting}
+                                            pdfRef={espRef}
+                                            showComparative={espShowComparative && hasEspComparativeData}
+                                            comparativeYear={espComparativeYear}
+                                            currentYear={currentYear}
+                                            comparativeTotalActivo={geminiData.comparativeTotalActivo}
+                                            comparativeTotalPasivo={geminiData.comparativeTotalPasivo}
+                                            comparativeTotalPN={geminiData.comparativeTotalPN}
+                                        />
+                                    )
+                                })()}
+
+                                {espShowComparative && !hasEspComparativeData && (
+                                    <div className="esp-overlay-cta">
+                                        <div className="esp-overlay-card">
+                                            <div className="esp-overlay-icon">📄</div>
+                                            <h3>Faltan datos de {espComparativeYear}</h3>
+                                            <p>Para ver la comparación, necesitás importar el balance del ejercicio anterior.</p>
+                                            <button
+                                                className="esp-overlay-btn"
+                                                onClick={() => setEspImportModalOpen(true)}
+                                            >
+                                                Importar Comparativo
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 )}

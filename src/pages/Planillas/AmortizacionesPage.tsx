@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
 import {
     ArrowLeft,
     FileText,
@@ -11,6 +12,7 @@ import {
     Tray,
     X,
 } from '@phosphor-icons/react'
+import { db } from '../../storage/db'
 import {
     type AmortizationAsset,
     type AmortizationMethod,
@@ -26,6 +28,17 @@ import {
     parseDate,
 } from '../../core/amortizaciones/calc'
 import { loadAmortizationState, saveAmortizationState } from '../../storage'
+import {
+    calculateFixedAssetDepreciationWithEvents,
+    createFixedAsset,
+    getAllFixedAssets,
+} from '../../storage/fixedAssets'
+import { ensureAssetAccounts, validateCategoryParentsExist } from '../../lib/assetAccounts'
+import {
+    type FixedAssetCategory,
+    type FixedAssetEvent,
+    METHOD_LABELS,
+} from '../../core/fixedAssets/types'
 import { usePeriodYear } from '../../hooks/usePeriodYear'
 
 const DEFAULT_RUBRO = 'Muebles y Útiles'
@@ -45,6 +58,34 @@ const RUBROS = [
 const RUBRO_ALIASES: Record<string, string> = {
     'Muebles y Utiles': DEFAULT_RUBRO,
     'Eq. Computacion': 'Eq. Computación',
+}
+
+const CATEGORY_TO_RUBRO: Record<FixedAssetCategory, string> = {
+    // Tangibles
+    'Muebles y Utiles': DEFAULT_RUBRO,
+    'Equipos de Computacion': 'Eq. Computación',
+    'Rodados': 'Rodados',
+    'Instalaciones': 'Instalaciones',
+    'Maquinarias': 'Maquinarias',
+    'Inmuebles': 'Inmuebles',
+    'Terrenos': 'Terrenos',
+    'Otros': 'Otros Bienes',
+    // Intangibles
+    'Software': 'Intangibles',
+    'Marcas y Patentes': 'Intangibles',
+    'Otros Intangibles': 'Intangibles',
+}
+
+const LEGACY_RUBRO_TO_CATEGORY: Record<string, FixedAssetCategory> = {
+    [DEFAULT_RUBRO]: 'Muebles y Utiles',
+    'Rodados': 'Rodados',
+    'Instalaciones': 'Instalaciones',
+    'Eq. Computación': 'Equipos de Computacion',
+    'Maquinarias': 'Maquinarias',
+    'Inmuebles': 'Inmuebles',
+    'Terrenos': 'Terrenos',
+    'Mejoras': 'Otros',
+    'Otros Bienes': 'Otros',
 }
 
 const DEFAULT_LIFE_YEARS: Record<string, number> = {
@@ -78,6 +119,11 @@ type AssetFormState = {
 }
 
 const normalizeRubro = (rubro: string) => RUBRO_ALIASES[rubro] ?? rubro
+
+const mapLegacyRubroToCategory = (rubro: string): FixedAssetCategory => {
+    const normalized = normalizeRubro(rubro)
+    return LEGACY_RUBRO_TO_CATEGORY[normalized] || 'Otros'
+}
 
 const emptyForm = (): AssetFormState => {
     const rubro = DEFAULT_RUBRO
@@ -182,6 +228,10 @@ export default function AmortizacionesPage() {
     const [state, setState] = useState<AmortizationState | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [activeTab, setActiveTab] = useState<ActiveTab>('carga')
+    const [viewMode, setViewMode] = useState<'v2' | 'legacy'>('v2')
+    const [legacyReadOnly, setLegacyReadOnly] = useState(false)
+    const [migrationStatus, setMigrationStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+    const [migrationError, setMigrationError] = useState<string | null>(null)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [formState, setFormState] = useState<AssetFormState | null>(null)
     const [formError, setFormError] = useState<string | null>(null)
@@ -189,6 +239,13 @@ export default function AmortizacionesPage() {
     const saveTimeoutRef = useRef<number | null>(null)
     const viewBeforePrintRef = useRef<ActiveTab | null>(null)
     const { year: periodYear } = usePeriodYear()
+
+    const periodId = String(periodYear)
+    const fixedAssets = useLiveQuery(() => getAllFixedAssets(periodId), [periodId])
+    const fixedAssetEvents = useLiveQuery(
+        () => db.fixedAssetEvents.where('periodId').equals(periodId).toArray(),
+        [periodId]
+    )
 
     useEffect(() => {
         async function load() {
@@ -391,6 +448,184 @@ export default function AmortizacionesPage() {
         }, 100)
     }, [activeTab])
 
+    const legacyAssets = useMemo(() => {
+        if (!state) return []
+        return state.assets.filter(isAssetPopulated)
+    }, [state])
+
+    const v2Assets = useMemo(() => fixedAssets || [], [fixedAssets])
+
+    const v2EventsByAsset = useMemo(() => {
+        const map = new Map<string, FixedAssetEvent[]>()
+        if (!fixedAssetEvents) return map
+        for (const event of fixedAssetEvents) {
+            const list = map.get(event.assetId) || []
+            list.push(event)
+            map.set(event.assetId, list)
+        }
+        return map
+    }, [fixedAssetEvents])
+
+    const legacyHasData = legacyAssets.length > 0
+    const v2HasData = v2Assets.length > 0
+    const legacyMismatch =
+        legacyHasData &&
+        (!v2HasData ||
+            Math.abs(legacyAssets.length - v2Assets.length) >=
+                Math.max(3, Math.round(legacyAssets.length * 0.3)))
+
+    const shouldShowMigration = viewMode === 'v2' && legacyMismatch
+
+    const v2Rows = useMemo(() => {
+        return v2Assets.map(asset => {
+            const events = v2EventsByAsset.get(asset.id) || []
+            const calc = calculateFixedAssetDepreciationWithEvents(asset, periodYear, events)
+            const rubro = CATEGORY_TO_RUBRO[asset.category as FixedAssetCategory] || asset.category
+            const metodoLabel =
+                asset.method === 'none' || asset.category === 'Terrenos'
+                    ? 'No Amortiza'
+                    : METHOD_LABELS[asset.method]
+            return { asset, calc, rubro, metodoLabel }
+        })
+    }, [v2Assets, v2EventsByAsset, periodYear])
+
+    const v2Totals = useMemo(() => {
+        return v2Rows.reduce(
+            (acc, row) => {
+                acc.amortizacionEjercicio += row.calc.amortizacionEjercicio
+                acc.vrContable += row.calc.valorLibro
+                return acc
+            },
+            { amortizacionEjercicio: 0, vrContable: 0 }
+        )
+    }, [v2Rows])
+
+    const v2AnnexGroups = useMemo(() => {
+        const groups = new Map<string, {
+            rubro: string
+            originStart: number
+            originAlta: number
+            originEnd: number
+            amortStart: number
+            amortYear: number
+            amortEnd: number
+            net: number
+        }>()
+
+        v2Rows.forEach(({ asset, calc, rubro }) => {
+            const altaYear = new Date(asset.acquisitionDate).getFullYear()
+            const isAlta = altaYear === periodYear
+            const valorOrigen = calc.valorOrigenAjustado
+
+            if (!groups.has(rubro)) {
+                groups.set(rubro, {
+                    rubro,
+                    originStart: 0,
+                    originAlta: 0,
+                    originEnd: 0,
+                    amortStart: 0,
+                    amortYear: 0,
+                    amortEnd: 0,
+                    net: 0,
+                })
+            }
+
+            const group = groups.get(rubro)
+            if (!group) return
+
+            group.originStart += isAlta ? 0 : valorOrigen
+            group.originAlta += isAlta ? valorOrigen : 0
+            group.originEnd += valorOrigen
+            group.amortStart += calc.acumuladaInicio
+            group.amortYear += calc.amortizacionEjercicio
+            group.amortEnd += calc.acumuladaCierre
+            group.net += calc.valorLibro
+        })
+
+        return Array.from(groups.values())
+    }, [v2Rows, periodYear])
+
+    const v2AnnexTotals = useMemo(() => {
+        return v2AnnexGroups.reduce(
+            (acc, group) => {
+                acc.originEnd += group.originEnd
+                acc.amortYear += group.amortYear
+                acc.net += group.net
+                return acc
+            },
+            { originEnd: 0, amortYear: 0, net: 0 }
+        )
+    }, [v2AnnexGroups])
+
+    const handleMigrateLegacy = useCallback(async () => {
+        if (!legacyAssets.length) return
+        setMigrationStatus('running')
+        setMigrationError(null)
+        try {
+            const existing = await getAllFixedAssets(periodId)
+            const existingLegacyIds = new Set(
+                existing.map(asset => asset.legacySourceId).filter(Boolean) as string[]
+            )
+            const existingFingerprint = new Set(
+                existing.map(asset =>
+                    `${asset.name}|${asset.acquisitionDate}|${Math.round(asset.originalValue * 100) / 100}`
+                )
+            )
+
+            let createdCount = 0
+
+            for (const legacyAsset of legacyAssets) {
+                if (existingLegacyIds.has(legacyAsset.id)) continue
+                const fingerprint = `${legacyAsset.detalle}|${legacyAsset.fechaAlta}|${Math.round((legacyAsset.valorOrigen || 0) * 100) / 100}`
+                if (existingFingerprint.has(fingerprint)) continue
+
+                const category = mapLegacyRubroToCategory(legacyAsset.rubro)
+                const validation = await validateCategoryParentsExist(category)
+                if (!validation.valid) {
+                    throw new Error(
+                        `Faltan cuentas padre para ${category}: ${
+                            validation.missingAsset || validation.missingContra || 'sin detalle'
+                        }`
+                    )
+                }
+
+                const accounts = await ensureAssetAccounts(category, legacyAsset.detalle || 'Bien de uso')
+                const method =
+                    legacyAsset.noAmortiza || legacyAsset.metodo === 'none'
+                        ? 'none'
+                        : legacyAsset.metodo === 'lineal-month'
+                            ? 'lineal-month'
+                            : 'lineal-year'
+
+                await createFixedAsset({
+                    name: legacyAsset.detalle || 'Bien de uso',
+                    periodId,
+                    legacySourceId: legacyAsset.id,
+                    category,
+                    accountId: accounts.assetAccountId,
+                    contraAccountId: accounts.contraAccountId,
+                    acquisitionDate: legacyAsset.fechaAlta,
+                    originalValue: legacyAsset.valorOrigen || 0,
+                    residualValuePct: legacyAsset.residualPct || 0,
+                    method,
+                    lifeYears: legacyAsset.vidaUtilValor || 0,
+                    status: 'active',
+                    rt6Enabled: false,
+                    notes: legacyAsset.detalle || '',
+                })
+                createdCount += 1
+            }
+
+            setMigrationStatus('done')
+            if (createdCount === 0) {
+                setMigrationError('No se detectaron bienes nuevos para migrar.')
+            }
+        } catch (err) {
+            setMigrationStatus('error')
+            setMigrationError(err instanceof Error ? err.message : 'Error al migrar datos legacy.')
+        }
+    }, [legacyAssets, periodId])
+
     const assets = useMemo(() => {
         if (!state) return []
         return state.assets.filter(isAssetPopulated)
@@ -470,18 +705,9 @@ export default function AmortizacionesPage() {
         )
     }, [annexGroups])
 
-    if (isLoading || !state) {
-        return (
-            <div className="empty-state">
-                <div className="empty-state-icon">⏳</div>
-                <p>Cargando planilla...</p>
-            </div>
-        )
-    }
-
     const subtitleYear = Number.isFinite(periodYear)
         ? periodYear
-        : Number(state.params.fechaCierreEjercicio?.slice(0, 4)) || new Date().getFullYear()
+        : Number(state?.params.fechaCierreEjercicio?.slice(0, 4)) || new Date().getFullYear()
 
     const pageStyles = `
 .amort-page {
@@ -864,6 +1090,299 @@ export default function AmortizacionesPage() {
 }
 `
 
+    if (viewMode === 'v2') {
+        return (
+            <div className="amort-page">
+                <style>{pageStyles}</style>
+
+                <header className="amort-header">
+                    <Link to="/planillas" className="amort-back-link">
+                        <ArrowLeft size={14} /> Volver a planillas
+                    </Link>
+                    <div className="amort-header-bar">
+                        <div>
+                            <h1 className="amort-title">Planilla de Amortizaciones</h1>
+                            <p className="amort-subtitle">
+                                Ejercicio {subtitleYear} · Fuente: Bienes de Uso V2
+                            </p>
+                        </div>
+
+                        <div className="amort-actions amort-print-hide">
+                            <div className="amort-tabs" role="tablist">
+                                <button
+                                    type="button"
+                                    className={`amort-tab-btn ${activeTab === 'carga' ? 'active' : ''}`}
+                                    onClick={() => setActiveTab('carga')}
+                                    aria-selected={activeTab === 'carga'}
+                                >
+                                    <PencilSimple size={16} /> Carga
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`amort-tab-btn ${activeTab === 'anexo' ? 'active' : ''}`}
+                                    onClick={() => setActiveTab('anexo')}
+                                    aria-selected={activeTab === 'anexo'}
+                                >
+                                    <FileText size={16} /> Anexo Imprimible
+                                </button>
+                            </div>
+
+                            <div className="amort-divider" />
+
+                            {legacyHasData && (
+                                <button
+                                    className="btn btn-secondary"
+                                    onClick={() => {
+                                        setLegacyReadOnly(false)
+                                        setViewMode('legacy')
+                                    }}
+                                >
+                                    Ver legacy
+                                </button>
+                            )}
+                            <button className="btn btn-secondary" onClick={handlePrint}>
+                                <Printer size={16} /> Imprimir
+                            </button>
+                        </div>
+                    </div>
+                </header>
+
+                {shouldShowMigration && (
+                    <div className="amort-print-hide bg-amber-50 border border-amber-200 rounded-lg p-4">
+                        <div className="text-sm font-semibold text-amber-800 mb-1">
+                            Datos legacy detectados
+                        </div>
+                        <p className="text-sm text-amber-700 mb-3">
+                            Hay {legacyAssets.length} bienes en la planilla legacy. Podés migrarlos a V2
+                            sin borrar el historial anterior.
+                        </p>
+                        {migrationError && (
+                            <div className="text-xs text-amber-700 mb-2">
+                                {migrationError}
+                            </div>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleMigrateLegacy}
+                                disabled={migrationStatus === 'running'}
+                            >
+                                {migrationStatus === 'running' ? 'Migrando...' : 'Migrar a V2'}
+                            </button>
+                            <button
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                    setLegacyReadOnly(true)
+                                    setViewMode('legacy')
+                                }}
+                            >
+                                Ver legacy (solo lectura)
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                <section className="amort-header-bar">
+                    <div className="amort-params">
+                        <div className="amort-pill">
+                            <Info size={14} /> Gestioná los bienes desde Operaciones › Bienes de Uso.
+                        </div>
+                        <div className="amort-pill">
+                            <Info size={14} /> Moneda Homogénea disponible en el módulo de bienes.
+                        </div>
+                    </div>
+
+                    <div className="amort-kpis">
+                        <div className="amort-kpi">
+                            <span className="amort-kpi-label">Depreciación Ej.</span>
+                            <span className="amort-kpi-value highlight">
+                                {dashIfZero(v2Totals.amortizacionEjercicio)}
+                            </span>
+                        </div>
+                        <div className="amort-kpi">
+                            <span className="amort-kpi-label">Valor Neto Total</span>
+                            <span className="amort-kpi-value">
+                                {dashIfZero(v2Totals.vrContable)}
+                            </span>
+                        </div>
+                        <div className="amort-kpi">
+                            <span className="amort-kpi-label">Bienes Cargados</span>
+                            <span className="amort-kpi-value">{v2Assets.length}</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section className={`amort-table-wrapper amort-view-carga ${activeTab === 'carga' ? '' : 'amort-hidden'}`}>
+                    <div className="amort-scroll">
+                        <table className="amort-work-table">
+                            <thead>
+                                <tr>
+                                    <th>Rubro</th>
+                                    <th>Detalle del Bien</th>
+                                    <th>F. Alta</th>
+                                    <th>Vida Útil</th>
+                                    <th>Método</th>
+                                    <th className="amort-text-right">V. Origen</th>
+                                    <th className="amort-text-right">% Res.</th>
+                                    <th className="amort-text-right">Amort. Ejercicio</th>
+                                    <th className="amort-text-right">Acum. Cierre</th>
+                                    <th className="amort-text-right">Valor Neto</th>
+                                    <th style={{ textAlign: 'center' }}>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {v2Rows.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={11} className="amort-empty">
+                                            <div className="amort-empty-icon">
+                                                <Tray size={32} />
+                                            </div>
+                                            No hay bienes cargados.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    v2Rows.map(({ asset, calc, rubro, metodoLabel }) => (
+                                        <tr key={asset.id}>
+                                            <td><strong>{rubro}</strong></td>
+                                            <td>{asset.name}</td>
+                                            <td className="amort-mono">{formatDate(asset.acquisitionDate)}</td>
+                                            <td className="amort-mono amort-text-right">
+                                                {asset.method === 'none' || asset.category === 'Terrenos' || !asset.lifeYears
+                                                    ? '-'
+                                                    : asset.lifeYears}
+                                            </td>
+                                            <td className="amort-muted" style={{ fontSize: '0.75rem' }}>
+                                                {metodoLabel}
+                                            </td>
+                                            <td className="amort-mono amort-text-right">
+                                                {calc.valorOrigenAjustado ? formatAmount(calc.valorOrigenAjustado) : '-'}
+                                            </td>
+                                            <td className="amort-mono amort-text-right">
+                                                {formatPercentOrDash(asset.residualValuePct)}
+                                            </td>
+                                            <td className="amort-mono amort-text-right amort-highlight">
+                                                {dashIfZero(calc.amortizacionEjercicio)}
+                                            </td>
+                                            <td className="amort-mono amort-text-right">
+                                                {dashIfZero(calc.acumuladaCierre)}
+                                            </td>
+                                            <td className="amort-mono amort-text-right" style={{ fontWeight: 700 }}>
+                                                {calc.valorLibro ? formatAmount(calc.valorLibro) : '-'}
+                                            </td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                <Link
+                                                    to="/operaciones/bienes-uso"
+                                                    className="amort-action-btn"
+                                                    title="Ver en Operaciones"
+                                                >
+                                                    <PencilSimple size={16} />
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section className={`amort-table-wrapper amort-view-anexo ${activeTab === 'anexo' ? '' : 'amort-hidden'}`}>
+                    <div className="amort-annex">
+                        <div className="amort-annex-header">
+                            <div className="amort-annex-title">
+                                ANEXO — BIENES DE USO
+                            </div>
+                            <div style={{ marginTop: '0.5rem' }}>
+                                Correspondiente al ejercicio anual finalizado el{' '}
+                                <span style={{ fontWeight: 600 }}>
+                                    {formatDate(`${subtitleYear}-12-31`)}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="amort-annex-meta">
+                            <div>
+                                <strong>Entidad:</strong> -
+                            </div>
+                            <div>
+                                <strong>CUIT:</strong> -
+                            </div>
+                        </div>
+
+                        <div className="amort-scroll">
+                            <table className="amort-annex-table">
+                                <thead>
+                                    <tr>
+                                        <th rowSpan={2} style={{ textAlign: 'left', verticalAlign: 'middle', minWidth: 150, borderBottom: '2px solid #64748B' }}>
+                                            RUBRO
+                                        </th>
+                                        <th colSpan={4} style={{ borderBottom: '1px solid #94A3B8' }}>
+                                            VALORES DE INCORPORACIÓN
+                                        </th>
+                                        <th colSpan={4} style={{ borderBottom: '1px solid #94A3B8' }}>
+                                            AMORTIZACIONES
+                                        </th>
+                                        <th style={{ borderBottom: '2px solid #64748B' }}>
+                                            VALOR NETO
+                                        </th>
+                                    </tr>
+                                    <tr>
+                                        <th style={{ minWidth: 90 }}>Al Inicio</th>
+                                        <th style={{ minWidth: 90 }}>Altas</th>
+                                        <th style={{ minWidth: 90 }}>Bajas</th>
+                                        <th style={{ minWidth: 90, borderRight: '2px solid #CBD5E1' }}>Al Cierre</th>
+                                        <th style={{ minWidth: 90 }}>Acum. Inicio</th>
+                                        <th style={{ minWidth: 90 }}>Bajas</th>
+                                        <th style={{ minWidth: 90 }}>Del Ejercicio</th>
+                                        <th style={{ minWidth: 90, borderRight: '2px solid #CBD5E1' }}>Acum. Cierre</th>
+                                        <th style={{ minWidth: 100 }}>Al Cierre</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {v2AnnexGroups.map((group) => (
+                                        <tr key={group.rubro} className="amort-annex-rubro">
+                                            <td style={{ textAlign: 'left' }}>{group.rubro}</td>
+                                            <td className="amort-annex-number">{dashIfZero(group.originStart)}</td>
+                                            <td className="amort-annex-number">{dashIfZero(group.originAlta)}</td>
+                                            <td className="amort-annex-number">-</td>
+                                            <td className="amort-annex-number amort-annex-sep">{dashIfZero(group.originEnd)}</td>
+                                            <td className="amort-annex-number">{dashIfZero(group.amortStart)}</td>
+                                            <td className="amort-annex-number">-</td>
+                                            <td className="amort-annex-number">{dashIfZero(group.amortYear)}</td>
+                                            <td className="amort-annex-number amort-annex-sep">{dashIfZero(group.amortEnd)}</td>
+                                            <td className="amort-annex-number">{dashIfZero(group.net)}</td>
+                                        </tr>
+                                    ))}
+                                    <tr className="amort-annex-total">
+                                        <td style={{ textAlign: 'left' }}>TOTALES</td>
+                                        <td className="amort-annex-number">-</td>
+                                        <td className="amort-annex-number">-</td>
+                                        <td className="amort-annex-number">-</td>
+                                        <td className="amort-annex-number amort-annex-sep">{dashIfZero(v2AnnexTotals.originEnd)}</td>
+                                        <td className="amort-annex-number">-</td>
+                                        <td className="amort-annex-number">-</td>
+                                        <td className="amort-annex-number">{dashIfZero(v2AnnexTotals.amortYear)}</td>
+                                        <td className="amort-annex-number amort-annex-sep">-</td>
+                                        <td className="amort-annex-number">{dashIfZero(v2AnnexTotals.net)}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        )
+    }
+
+    if (isLoading || !state) {
+        return (
+            <div className="empty-state">
+                <div className="empty-state-icon">⏳</div>
+                <p>Cargando planilla...</p>
+            </div>
+        )
+    }
+
     return (
         <div className="amort-page">
             <style>{pageStyles}</style>
@@ -909,12 +1428,23 @@ export default function AmortizacionesPage() {
 
                         <div className="amort-divider" />
 
+                        <button
+                            className="btn btn-secondary"
+                            onClick={() => {
+                                setLegacyReadOnly(false)
+                                setViewMode('v2')
+                            }}
+                        >
+                            Ver V2
+                        </button>
                         <button className="btn btn-secondary" onClick={handlePrint}>
                             <Printer size={16} /> Imprimir
                         </button>
-                        <button className="btn btn-primary" onClick={() => openModal()}>
-                            <Plus size={16} /> Agregar Bien
-                        </button>
+                        {!legacyReadOnly && (
+                            <button className="btn btn-primary" onClick={() => openModal()}>
+                                <Plus size={16} /> Agregar Bien
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -1017,22 +1547,30 @@ export default function AmortizacionesPage() {
                                                     : '-'}
                                             </td>
                                             <td style={{ textAlign: 'center' }}>
-                                                <button
-                                                    type="button"
-                                                    className="amort-action-btn"
-                                                    onClick={() => openModal(asset)}
-                                                    title="Editar"
-                                                >
-                                                    <PencilSimple size={16} />
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    className="amort-action-btn amort-action-delete"
-                                                    onClick={() => deleteAsset(asset.id)}
-                                                    title="Eliminar"
-                                                >
-                                                    <Trash size={16} />
-                                                </button>
+                                                {legacyReadOnly ? (
+                                                    <span className="amort-muted" style={{ fontSize: '0.75rem' }}>
+                                                        Solo lectura
+                                                    </span>
+                                                ) : (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            className="amort-action-btn"
+                                                            onClick={() => openModal(asset)}
+                                                            title="Editar"
+                                                        >
+                                                            <PencilSimple size={16} />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className="amort-action-btn amort-action-delete"
+                                                            onClick={() => deleteAsset(asset.id)}
+                                                            title="Eliminar"
+                                                        >
+                                                            <Trash size={16} />
+                                                        </button>
+                                                    </>
+                                                )}
                                             </td>
                                         </tr>
                                     )

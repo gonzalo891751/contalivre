@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Liquidación de Impuestos</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- Tailwind CSS (CDN con Configuración de Marca) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',
+                            secondary: '#10B981',
+                            dark: '#0F172A'
+                        },
+                        text: {
+                            main: '#0F172A',
+                            secondary: '#64748B',
+                            tertiary: '#94A3B8'
+                        },
+                        surface: {
+                            light: '#F8FAFC',
+                            paper: '#FFFFFF',
+                            hover: '#F1F5F9'
+                        },
+                        semantic: {
+                            success: '#10B981',
+                            warning: '#F59E0B',
+                            error: '#EF4444',
+                            info: '#3B82F6'
+                        }
+                    },
+                    fontFamily: {
+                        display: ['Outfit', 'sans-serif'],
+                        body: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+                        'card': '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Estilos base del Brand Book */
+        body {
+            background-color: #F8FAFC;
+            font-family: 'Inter', sans-serif;
+            color: #0F172A;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+            font-feature-settings: "tnum"; 
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Utilidades específicas */
+        .btn-primary {
+            background: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            transition: all 0.2s;
+        }
+        .btn-primary:hover {
+            opacity: 0.95;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+
+        .tab-active {
+            background-color: #EFF6FF;
+            color: #3B82F6;
+            font-weight: 600;
+            border: 1px solid #DBEAFE;
+        }
+        
+        .tab-inactive {
+            color: #64748B;
+            border: 1px solid transparent;
+        }
+        .tab-inactive:hover {
+            color: #0F172A;
+            background-color: #F1F5F9;
+        }
+
+        /* Scrollbars finos para tablas */
+        .custom-scrollbar::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #F1F5F9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #CBD5E1;
+            border-radius: 10px;
+        }
+
+        /* Toast Animation */
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .toast {
+            animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- HEADER SUPERIOR -->
+    <header class="bg-surface-paper border-b border-gray-200 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <!-- Logo & Title -->
+            <div class="flex items-center gap-3">
+                <div class="text-brand-primary text-2xl flex items-center">
+                    <i class="ph-duotone ph-robot"></i>
+                </div>
+                <div class="h-6 w-px bg-gray-200 hidden sm:block"></div>
+                <div>
+                    <h1 class="text-lg font-bold leading-none text-text-main hidden sm:block">Impuestos</h1>
+                    <span class="text-xs text-text-secondary font-medium">Liquidación Mensual</span>
+                </div>
+            </div>
+
+            <!-- Global Controls -->
+            <div class="flex items-center gap-3 sm:gap-6">
+                
+                <!-- Period Selector -->
+                <div class="flex items-center gap-2 bg-surface-light px-3 py-1.5 rounded-lg border border-gray-200">
+                    <i class="ph ph-calendar-blank text-text-tertiary"></i>
+                    <input type="month" id="periodSelector" value="2025-02" class="bg-transparent border-none text-sm font-medium focus:outline-none text-text-main font-mono">
+                </div>
+
+                <!-- Regime Switch -->
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-semibold text-text-secondary hidden md:block">Régimen:</span>
+                    <select id="regimeSelector" onchange="toggleRegime()" class="text-sm bg-white border border-gray-300 rounded-md px-2 py-1.5 focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none cursor-pointer">
+                        <option value="RI">Resp. Inscripto</option>
+                        <option value="MT">Monotributo</option>
+                    </select>
+                </div>
+
+                <!-- User & Notifs -->
+                <div class="flex items-center gap-4 border-l border-gray-200 pl-4">
+                    <button class="relative text-text-secondary hover:text-brand-primary transition-colors" onclick="toggleNotifications()">
+                        <i class="ph ph-bell text-xl"></i>
+                        <span id="notifBadge" class="absolute -top-1 -right-1 h-2.5 w-2.5 bg-semantic-error rounded-full ring-2 ring-white hidden"></span>
+                    </button>
+                    <div class="h-8 w-8 rounded-full bg-brand-gradient flex items-center justify-center text-white font-bold text-xs shadow-md">
+                        JS
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN LAYOUT -->
+    <div class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <!-- SIDEBAR: Checklist (Pasos del cierre) -->
+        <aside class="lg:col-span-3 space-y-6">
+            <div class="bg-surface-paper rounded-2xl shadow-card p-5 border border-gray-100">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-sm font-bold uppercase tracking-wider text-text-secondary">Estado del Cierre</h3>
+                    <span id="statusBadge" class="bg-blue-50 text-brand-primary text-xs px-2 py-1 rounded-md font-bold border border-blue-100">BORRADOR</span>
+                </div>
+                
+                <div class="space-y-1 relative">
+                    <!-- Progress Line -->
+                    <div class="absolute left-3.5 top-2 bottom-2 w-0.5 bg-gray-100 -z-10"></div>
+
+                    <!-- Steps -->
+                    <div class="step-item flex gap-3 items-start group cursor-pointer" onclick="toggleStep(0)">
+                        <div class="w-7 h-7 rounded-full bg-brand-secondary text-white flex items-center justify-center shrink-0 border-2 border-white shadow-sm z-10 transition-colors">
+                            <i class="ph-bold ph-check text-xs"></i>
+                        </div>
+                        <div class="pt-1">
+                            <p class="text-sm font-semibold text-text-main group-hover:text-brand-primary transition-colors">Operaciones</p>
+                            <p class="text-xs text-text-tertiary">Ventas y Compras ok</p>
+                        </div>
+                    </div>
+
+                    <div class="step-item flex gap-3 items-start group cursor-pointer opacity-50" onclick="toggleStep(1)">
+                        <div class="w-7 h-7 rounded-full bg-surface-paper border border-gray-300 text-transparent flex items-center justify-center shrink-0 z-10 shadow-sm transition-all">
+                            <i class="ph-bold ph-check text-xs"></i>
+                        </div>
+                        <div class="pt-1">
+                            <p class="text-sm font-medium text-text-secondary">Conciliación</p>
+                            <p class="text-xs text-text-tertiary">Retenciones/Perc.</p>
+                        </div>
+                    </div>
+
+                    <div class="step-item flex gap-3 items-start group cursor-pointer opacity-50" onclick="toggleStep(2)">
+                        <div class="w-7 h-7 rounded-full bg-surface-paper border border-gray-300 text-transparent flex items-center justify-center shrink-0 z-10 shadow-sm transition-all">
+                            <i class="ph-bold ph-check text-xs"></i>
+                        </div>
+                        <div class="pt-1">
+                            <p class="text-sm font-medium text-text-secondary">Asientos</p>
+                            <p class="text-xs text-text-tertiary">Generar y exportar</p>
+                        </div>
+                    </div>
+
+                    <div class="step-item flex gap-3 items-start group cursor-pointer opacity-50" onclick="toggleStep(3)">
+                        <div class="w-7 h-7 rounded-full bg-surface-paper border border-gray-300 text-transparent flex items-center justify-center shrink-0 z-10 shadow-sm transition-all">
+                            <i class="ph-bold ph-check text-xs"></i>
+                        </div>
+                        <div class="pt-1">
+                            <p class="text-sm font-medium text-text-secondary">Presentación</p>
+                            <p class="text-xs text-text-tertiary">Marcar DJ presentada</p>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="btnCloseMonth" class="w-full mt-6 btn-primary text-white py-2.5 px-4 rounded-lg font-semibold text-sm shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 opacity-50 cursor-not-allowed" disabled>
+                    <i class="ph-bold ph-lock-key"></i> Cerrar Mes
+                </button>
+            </div>
+
+            <!-- Contextual Help -->
+            <div class="bg-blue-50 rounded-xl p-4 border border-blue-100 flex gap-3 items-start">
+                <i class="ph-duotone ph-info text-brand-primary text-xl shrink-0 mt-0.5"></i>
+                <div>
+                    <h4 class="text-sm font-bold text-brand-primary mb-1">¿Necesitás ayuda?</h4>
+                    <p class="text-xs text-text-secondary leading-relaxed">Si tenés dudas sobre IIBB Convenio Multilateral, consultá la wiki interna o escribile al contador senior.</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CONTENT AREA -->
+        <main class="lg:col-span-9 flex flex-col gap-6">
+            
+            <!-- TABS NAVIGATION -->
+            <nav class="flex gap-2 overflow-x-auto pb-2 custom-scrollbar no-scrollbar-mobile">
+                <button onclick="switchTab('iva')" id="tab-iva" class="tab-active whitespace-nowrap px-4 py-2 rounded-full text-sm transition-all flex items-center gap-2">
+                    IVA <span class="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded ml-1 font-mono regime-ri-only">RI</span>
+                </button>
+                <button onclick="switchTab('iibb')" id="tab-iibb" class="tab-inactive whitespace-nowrap px-4 py-2 rounded-full text-sm transition-all">
+                    Ingresos Brutos
+                </button>
+                <button onclick="switchTab('ret')" id="tab-ret" class="tab-inactive whitespace-nowrap px-4 py-2 rounded-full text-sm transition-all flex items-center gap-2">
+                    Retenciones <span class="w-2 h-2 rounded-full bg-semantic-warning"></span>
+                </button>
+                <button onclick="switchTab('alertas')" id="tab-alertas" class="tab-inactive whitespace-nowrap px-4 py-2 rounded-full text-sm transition-all">
+                    Vencimientos
+                </button>
+                <button onclick="switchTab('asientos')" id="tab-asientos" class="tab-inactive whitespace-nowrap px-4 py-2 rounded-full text-sm transition-all">
+                    Asientos
+                </button>
+            </nav>
+
+            <!-- TAB PANELS -->
+            <div id="tab-content">
+
+                <!-- 1. TAB IVA (RESPONSABLE INSCRIPTO) -->
+                <div id="panel-iva" class="space-y-6 animate-fade-in">
+                    
+                    <!-- RI VIEW -->
+                    <div id="iva-ri-view">
+                        <!-- KPIs -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="bg-surface-paper p-4 rounded-xl shadow-card border border-gray-100">
+                                <p class="text-xs font-semibold text-text-tertiary uppercase tracking-wider mb-2">Débito Fiscal (Ventas)</p>
+                                <div class="flex items-baseline gap-2">
+                                    <span class="text-2xl font-bold text-text-main font-mono" id="val-df">$ 420.000,00</span>
+                                    <span class="text-xs text-semantic-success bg-green-50 px-1.5 py-0.5 rounded font-medium">+12%</span>
+                                </div>
+                            </div>
+                            <div class="bg-surface-paper p-4 rounded-xl shadow-card border border-gray-100">
+                                <p class="text-xs font-semibold text-text-tertiary uppercase tracking-wider mb-2">Crédito Fiscal (Compras)</p>
+                                <div class="flex items-baseline gap-2">
+                                    <span class="text-2xl font-bold text-text-main font-mono" id="val-cf">$ 150.000,00</span>
+                                </div>
+                            </div>
+                            <div class="bg-surface-paper p-4 rounded-xl shadow-card border border-gray-100 relative overflow-hidden group">
+                                <div class="absolute inset-0 bg-brand-gradient opacity-5 group-hover:opacity-10 transition-opacity"></div>
+                                <p class="text-xs font-semibold text-brand-primary uppercase tracking-wider mb-2">Posición Mensual</p>
+                                <div class="flex flex-col">
+                                    <span class="text-2xl font-bold text-brand-primary font-mono" id="val-saldo">$ 270.000,00</span>
+                                    <span class="text-xs text-text-secondary font-medium">A Pagar</span>
+                                </div>
+                                <button onclick="generateEntry('iva')" class="absolute bottom-4 right-4 bg-white border border-blue-100 text-brand-primary hover:bg-blue-50 p-2 rounded-lg shadow-sm transition-all" title="Generar Asiento">
+                                    <i class="ph-bold ph-magic-wand"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Detalle por Alícuota -->
+                        <div class="bg-surface-paper rounded-xl shadow-card border border-gray-100 overflow-hidden mt-6">
+                            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+                                <h3 class="text-sm font-bold text-text-main">Detalle por Alícuota</h3>
+                                <button class="text-xs text-brand-primary font-semibold hover:underline">Ver Libro IVA Digital</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm text-left">
+                                    <thead class="bg-surface-light text-text-secondary font-medium">
+                                        <tr>
+                                            <th class="px-6 py-3">Alícuota</th>
+                                            <th class="px-6 py-3 text-right">Neto Gravado</th>
+                                            <th class="px-6 py-3 text-right">Débito Fiscal</th>
+                                            <th class="px-6 py-3 text-right">Crédito Fiscal</th>
+                                            <th class="px-6 py-3 text-right">Saldo Técnico</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-100 text-text-main font-mono text-sm">
+                                        <tr>
+                                            <td class="px-6 py-3 font-sans font-medium">General (21%)</td>
+                                            <td class="px-6 py-3 text-right text-text-secondary">$ 2.000.000,00</td>
+                                            <td class="px-6 py-3 text-right font-semibold">$ 420.000,00</td>
+                                            <td class="px-6 py-3 text-right text-text-secondary">$ 105.000,00</td>
+                                            <td class="px-6 py-3 text-right font-bold text-brand-primary">$ 315.000,00</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-6 py-3 font-sans font-medium">Reducida (10.5%)</td>
+                                            <td class="px-6 py-3 text-right text-text-secondary">$ 0,00</td>
+                                            <td class="px-6 py-3 text-right font-semibold">$ 0,00</td>
+                                            <td class="px-6 py-3 text-right text-text-secondary">$ 45.000,00</td>
+                                            <td class="px-6 py-3 text-right font-bold text-semantic-success">- $ 45.000,00</td>
+                                        </tr>
+                                    </tbody>
+                                    <tfoot class="bg-gray-50 font-bold">
+                                        <tr>
+                                            <td class="px-6 py-3">TOTALES</td>
+                                            <td class="px-6 py-3 text-right">-</td>
+                                            <td class="px-6 py-3 text-right text-brand-primary">$ 420.000,00</td>
+                                            <td class="px-6 py-3 text-right text-semantic-success">$ 150.000,00</td>
+                                            <td class="px-6 py-3 text-right text-text-main">$ 270.000,00</td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- MONOTRIBUTO VIEW -->
+                    <div id="iva-mt-view" class="hidden">
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center">
+                            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white text-brand-primary text-3xl mb-4 shadow-sm">
+                                <i class="ph-duotone ph-shield-check"></i>
+                            </div>
+                            <h2 class="text-xl font-bold text-text-main mb-2">Régimen Simplificado</h2>
+                            <p class="text-text-secondary max-w-lg mx-auto mb-6">Como Monotributista, no liquidás IVA Débito/Crédito. El IVA de tus compras se considera costo. Solo debés abonar tu cuota mensual fija.</p>
+                            
+                            <div class="bg-white max-w-md mx-auto rounded-xl p-6 shadow-card border border-gray-100 text-left">
+                                <div class="flex justify-between items-center mb-4">
+                                    <span class="text-sm font-semibold text-text-secondary">Categoría Vigente</span>
+                                    <span class="bg-brand-secondary/10 text-brand-secondary px-2 py-1 rounded text-xs font-bold border border-brand-secondary/20">CATEGORÍA H</span>
+                                </div>
+                                <div class="mb-4">
+                                    <label class="block text-xs font-medium text-text-tertiary mb-1">Monto Mensual</label>
+                                    <div class="flex items-center bg-surface-light border border-gray-200 rounded-md px-3 py-2">
+                                        <span class="text-text-secondary mr-2">$</span>
+                                        <input type="text" value="68.900,00" class="bg-transparent border-none w-full font-mono font-semibold focus:outline-none text-text-main">
+                                    </div>
+                                </div>
+                                <button onclick="generateEntry('mt')" class="w-full btn-primary text-white py-2 rounded-lg font-medium text-sm">
+                                    Generar Asiento de Pago
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- 2. TAB IIBB -->
+                <div id="panel-iibb" class="hidden space-y-6 animate-fade-in">
+                    <!-- Subtabs Simple -->
+                    <div class="flex gap-4 border-b border-gray-200 pb-1 mb-4">
+                        <button class="text-sm font-bold text-brand-primary border-b-2 border-brand-primary pb-2">Local (Directo)</button>
+                        <button class="text-sm font-medium text-text-tertiary pb-2 hover:text-text-main transition-colors">Conv. Multilateral</button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Calculadora -->
+                        <div class="bg-surface-paper rounded-xl shadow-card p-6 border border-gray-100">
+                            <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                                <i class="ph-duotone ph-calculator text-brand-primary"></i> Calculadora
+                            </h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-text-secondary mb-1.5">Jurisdicción</label>
+                                    <select class="w-full text-sm bg-surface-light border border-gray-200 rounded-lg p-2.5 outline-none focus:border-brand-primary">
+                                        <option>CABA (Ciudad Autónoma)</option>
+                                        <option>Buenos Aires (ARBA)</option>
+                                        <option>Córdoba</option>
+                                    </select>
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-text-secondary mb-1.5">Base Imponible</label>
+                                        <input type="text" id="iibb-base" value="2000000" class="w-full text-sm bg-surface-light border border-gray-200 rounded-lg p-2.5 outline-none focus:border-brand-primary font-mono tabular-nums" oninput="calcIIBB()">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-text-secondary mb-1.5">Alícuota (%)</label>
+                                        <input type="number" id="iibb-rate" value="3.0" step="0.1" class="w-full text-sm bg-surface-light border border-gray-200 rounded-lg p-2.5 outline-none focus:border-brand-primary font-mono" oninput="calcIIBB()">
+                                    </div>
+                                </div>
+                                <div class="bg-blue-50 p-4 rounded-lg flex justify-between items-center mt-4">
+                                    <span class="text-sm font-medium text-text-secondary">Impuesto Determinado</span>
+                                    <span class="text-lg font-bold text-brand-primary font-mono" id="iibb-result">$ 60.000,00</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Deducciones -->
+                        <div class="bg-surface-paper rounded-xl shadow-card p-6 border border-gray-100 flex flex-col">
+                            <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                                <i class="ph-duotone ph-receipt text-semantic-secondary"></i> Pagos a Cuenta
+                            </h3>
+                            
+                            <div class="flex-1 overflow-y-auto mb-4 custom-scrollbar max-h-48">
+                                <div class="flex justify-between items-center py-2 border-b border-gray-100">
+                                    <div>
+                                        <p class="text-sm font-medium">SIRCREB Bancario</p>
+                                        <p class="text-xs text-text-tertiary">Automático</p>
+                                    </div>
+                                    <span class="font-mono text-sm font-semibold text-semantic-success">- $ 12.500,00</span>
+                                </div>
+                                <div class="flex justify-between items-center py-2 border-b border-gray-100">
+                                    <div>
+                                        <p class="text-sm font-medium">Percepción AGIP</p>
+                                        <p class="text-xs text-text-tertiary">Factura A-0001-9482</p>
+                                    </div>
+                                    <span class="font-mono text-sm font-semibold text-semantic-success">- $ 3.200,00</span>
+                                </div>
+                            </div>
+
+                            <div class="mt-auto border-t border-gray-200 pt-4 flex justify-between items-center">
+                                <span class="text-sm font-bold text-text-main">A PAGAR</span>
+                                <span class="text-xl font-bold text-text-main font-mono" id="iibb-final">$ 44.300,00</span>
+                            </div>
+                            <button onclick="generateEntry('iibb')" class="mt-4 w-full btn-primary text-white py-2 rounded-lg font-medium text-sm shadow-md">
+                                Confirmar y Generar Asiento
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. TAB RETENCIONES -->
+                <div id="panel-ret" class="hidden animate-fade-in">
+                    <div class="bg-surface-paper rounded-xl shadow-card overflow-hidden border border-gray-100">
+                        <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                            <h3 class="text-sm font-bold text-text-main">Retenciones y Percepciones Sufridas</h3>
+                            <button class="text-xs bg-white border border-gray-300 px-3 py-1.5 rounded-md hover:border-brand-primary text-text-secondary font-medium transition-colors">
+                                + Agregar Manual
+                            </button>
+                        </div>
+                        <table class="w-full text-sm text-left">
+                            <thead class="bg-surface-light text-text-secondary font-medium border-b border-gray-200">
+                                <tr>
+                                    <th class="px-4 py-3">Fecha</th>
+                                    <th class="px-4 py-3">Tipo</th>
+                                    <th class="px-4 py-3">Impuesto</th>
+                                    <th class="px-4 py-3">Comprobante</th>
+                                    <th class="px-4 py-3 text-right">Base</th>
+                                    <th class="px-4 py-3 text-right">Monto</th>
+                                    <th class="px-4 py-3 text-center">Estado</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 text-text-main font-mono text-sm">
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-4 py-3 font-sans text-text-secondary">02 Feb</td>
+                                    <td class="px-4 py-3 font-sans"><span class="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold">Retención</span></td>
+                                    <td class="px-4 py-3 font-sans font-medium">IVA</td>
+                                    <td class="px-4 py-3 font-sans text-text-secondary">Recibo X-0001-0023</td>
+                                    <td class="px-4 py-3 text-right text-text-tertiary">$ 100.000</td>
+                                    <td class="px-4 py-3 text-right font-bold">$ 3.000,00</td>
+                                    <td class="px-4 py-3 text-center"><i class="ph-fill ph-check-circle text-semantic-success text-lg"></i></td>
+                                </tr>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-4 py-3 font-sans text-text-secondary">05 Feb</td>
+                                    <td class="px-4 py-3 font-sans"><span class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xs font-bold">Percepción</span></td>
+                                    <td class="px-4 py-3 font-sans font-medium">IIBB</td>
+                                    <td class="px-4 py-3 font-sans text-text-secondary">Factura A-0002-4411</td>
+                                    <td class="px-4 py-3 text-right text-text-tertiary">$ 50.000</td>
+                                    <td class="px-4 py-3 text-right font-bold">$ 1.500,00</td>
+                                    <td class="px-4 py-3 text-center"><i class="ph-fill ph-check-circle text-semantic-success text-lg"></i></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="p-4 bg-gray-50 border-t border-gray-200 text-right">
+                             <p class="text-xs text-text-secondary">Total Computable: <strong class="text-text-main text-sm font-mono ml-2">$ 4.500,00</strong></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. TAB VENCIMIENTOS -->
+                <div id="panel-alertas" class="hidden animate-fade-in">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <!-- Alerta Card -->
+                        <div class="bg-white border-l-4 border-semantic-warning rounded-r-xl shadow-card p-5 relative">
+                            <div class="flex justify-between items-start mb-2">
+                                <h4 class="font-bold text-text-main">Presentación IVA</h4>
+                                <span class="text-xs font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded">PENDIENTE</span>
+                            </div>
+                            <p class="text-sm text-text-secondary mb-4">Declaración Jurada Mensual F.2002</p>
+                            <div class="flex items-center gap-2 text-sm font-medium text-text-main mb-4">
+                                <i class="ph-duotone ph-clock text-semantic-warning text-lg"></i>
+                                <span>Vence: 18/02/2026</span>
+                            </div>
+                            <div class="w-full bg-gray-100 rounded-full h-1.5 mb-2">
+                                <div class="bg-semantic-warning h-1.5 rounded-full" style="width: 70%"></div>
+                            </div>
+                            <p class="text-xs text-text-tertiary text-right">Faltan 5 días</p>
+                        </div>
+
+                         <!-- Alerta Card -->
+                         <div class="bg-white border-l-4 border-brand-primary rounded-r-xl shadow-card p-5 relative">
+                            <div class="flex justify-between items-start mb-2">
+                                <h4 class="font-bold text-text-main">Pago IIBB Local</h4>
+                                <span class="text-xs font-bold bg-green-100 text-green-800 px-2 py-1 rounded">AL DÍA</span>
+                            </div>
+                            <p class="text-sm text-text-secondary mb-4">Anticipo 02/2026</p>
+                            <div class="flex items-center gap-2 text-sm font-medium text-text-main mb-4">
+                                <i class="ph-duotone ph-calendar-check text-brand-primary text-lg"></i>
+                                <span>Vence: 20/02/2026</span>
+                            </div>
+                             <div class="flex gap-2">
+                                 <button class="flex-1 text-xs border border-gray-200 py-1.5 rounded hover:bg-gray-50 font-medium">Ver VEP</button>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 5. TAB ASIENTOS -->
+                <div id="panel-asientos" class="hidden animate-fade-in">
+                    <div class="bg-surface-paper rounded-xl shadow-card border border-gray-100 min-h-[300px] flex flex-col items-center justify-center text-center p-8" id="empty-asientos">
+                        <div class="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 text-3xl mb-4">
+                            <i class="ph-duotone ph-notebook"></i>
+                        </div>
+                        <h3 class="text-text-main font-bold mb-2">Aún no hay asientos generados</h3>
+                        <p class="text-text-secondary text-sm max-w-xs mb-6">Completá la liquidación de IVA o IIBB y hacé clic en "Generar Asiento" para verlos acá.</p>
+                        <button onclick="switchTab('iva')" class="text-brand-primary text-sm font-semibold hover:underline">Ir a Liquidación</button>
+                    </div>
+
+                    <!-- Contenedor dinámico de asientos -->
+                    <div id="asientos-list" class="space-y-4 hidden">
+                        <!-- Se llena con JS -->
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="fixed bottom-6 right-6 bg-surface-paper border-l-4 border-semantic-success shadow-lg rounded-lg p-4 flex items-center gap-3 transform translate-x-full opacity-0 transition-all z-50 max-w-sm">
+        <i class="ph-fill ph-check-circle text-semantic-success text-2xl"></i>
+        <div>
+            <h4 class="text-sm font-bold text-text-main">¡Listo!</h4>
+            <p class="text-xs text-text-secondary" id="toast-msg">Acción realizada con éxito.</p>
+        </div>
+    </div>
+
+    <script>
+        // --- ESTADO & CONFIG ---
+        let appState = {
+            regime: 'RI', // RI or MT
+            taxes: {
+                iva: { debit: 420000, credit: 150000, retentions: 0 },
+                iibb: { base: 2000000, rate: 3.0, deductions: 15700 }
+            },
+            entries: []
+        };
+
+        // --- FUNCIONES UI ---
+
+        function switchTab(tabId) {
+            // Update buttons
+            document.querySelectorAll('nav button').forEach(btn => {
+                if(btn.id === `tab-${tabId}`) {
+                    btn.classList.remove('tab-inactive');
+                    btn.classList.add('tab-active');
+                } else {
+                    btn.classList.add('tab-inactive');
+                    btn.classList.remove('tab-active');
+                }
+            });
+
+            // Update panels
+            document.querySelectorAll('#tab-content > div').forEach(panel => {
+                panel.classList.add('hidden');
+            });
+            document.getElementById(`panel-${tabId}`).classList.remove('hidden');
+        }
+
+        function toggleRegime() {
+            const selector = document.getElementById('regimeSelector');
+            appState.regime = selector.value;
+            
+            // Toggle visibility of RI vs MT elements
+            const riView = document.getElementById('iva-ri-view');
+            const mtView = document.getElementById('iva-mt-view');
+            const riLabels = document.querySelectorAll('.regime-ri-only');
+
+            if (appState.regime === 'RI') {
+                riView.classList.remove('hidden');
+                mtView.classList.add('hidden');
+                riLabels.forEach(el => el.style.display = 'inline-block');
+            } else {
+                riView.classList.add('hidden');
+                mtView.classList.remove('hidden');
+                riLabels.forEach(el => el.style.display = 'none');
+            }
+            showToast(`Régimen cambiado a ${selector.options[selector.selectedIndex].text}`);
+        }
+
+        function toggleStep(index) {
+            const steps = document.querySelectorAll('.step-item');
+            const step = steps[index];
+            const iconContainer = step.querySelector('div:first-child');
+            const icon = step.querySelector('i');
+
+            // Simular marcar/desmarcar
+            const isCompleted = iconContainer.classList.contains('bg-brand-secondary');
+
+            if (!isCompleted) {
+                iconContainer.classList.remove('bg-surface-paper', 'text-transparent', 'border-gray-300');
+                iconContainer.classList.add('bg-brand-secondary', 'text-white', 'border-white');
+                step.classList.remove('opacity-50');
+                
+                // Activar siguiente paso visualmente
+                if (index < steps.length - 1) {
+                    steps[index + 1].classList.remove('opacity-50');
+                }
+                
+                // Si es el último, habilitar cierre
+                if(index === 3) {
+                    const btn = document.getElementById('btnCloseMonth');
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    document.getElementById('statusBadge').innerText = "LISTO PARA CERRAR";
+                    document.getElementById('statusBadge').className = "bg-green-100 text-green-700 text-xs px-2 py-1 rounded-md font-bold border border-green-200";
+                }
+            }
+        }
+
+        // --- CÁLCULOS ---
+
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value);
+        }
+
+        function calcIIBB() {
+            const base = parseFloat(document.getElementById('iibb-base').value) || 0;
+            const rate = parseFloat(document.getElementById('iibb-rate').value) || 0;
+            
+            const tax = base * (rate / 100);
+            const final = tax - appState.taxes.iibb.deductions;
+
+            document.getElementById('iibb-result').innerText = formatCurrency(tax);
+            document.getElementById('iibb-final').innerText = formatCurrency(final);
+        }
+
+        // --- GENERADOR DE ASIENTOS ---
+
+        function generateEntry(type) {
+            let entry = {};
+            let html = '';
+            
+            if (type === 'iva') {
+                const saldo = appState.taxes.iva.debit - appState.taxes.iva.credit;
+                const isPayable = saldo > 0;
+                
+                entry = {
+                    date: new Date().toLocaleDateString('es-AR'),
+                    concept: "Liquidación IVA Mensual",
+                    lines: [
+                        { account: "IVA Débito Fiscal", debit: appState.taxes.iva.debit, credit: 0 },
+                        { account: "IVA Crédito Fiscal", debit: 0, credit: appState.taxes.iva.credit },
+                        { account: isPayable ? "IVA a Pagar" : "IVA Saldo a Favor", debit: isPayable ? 0 : Math.abs(saldo), credit: isPayable ? saldo : 0 }
+                    ]
+                };
+            } else if (type === 'iibb') {
+                // Mock logic for IIBB
+                entry = {
+                     date: new Date().toLocaleDateString('es-AR'),
+                     concept: "Provisión IIBB CABA",
+                     lines: [
+                         { account: "Impuesto Ingresos Brutos (Gasto)", debit: 60000, credit: 0 },
+                         { account: "Retenciones IIBB CABA", debit: 0, credit: 12500 },
+                         { account: "Percepciones IIBB CABA", debit: 0, credit: 3200 },
+                         { account: "IIBB a Pagar", debit: 0, credit: 44300 }
+                     ]
+                }
+            } else if (type === 'mt') {
+                 entry = {
+                     date: new Date().toLocaleDateString('es-AR'),
+                     concept: "Devengamiento Monotributo",
+                     lines: [
+                         { account: "Impuestos y Tasas (Gasto)", debit: 68900, credit: 0 },
+                         { account: "Monotributo a Pagar", debit: 0, credit: 68900 }
+                     ]
+                }
+            }
+
+            appState.entries.push(entry);
+            renderEntries();
+            switchTab('asientos');
+            showToast("Asiento generado correctamente");
+        }
+
+        function renderEntries() {
+            const container = document.getElementById('asientos-list');
+            const empty = document.getElementById('empty-asientos');
+            
+            if (appState.entries.length > 0) {
+                empty.classList.add('hidden');
+                container.classList.remove('hidden');
+                
+                container.innerHTML = appState.entries.map((entry, idx) => `
+                    <div class="bg-white rounded-xl shadow-card border border-gray-100 overflow-hidden">
+                        <div class="bg-gray-50 px-6 py-3 border-b border-gray-100 flex justify-between items-center">
+                            <div>
+                                <span class="text-xs font-bold text-text-tertiary uppercase mr-2">#${idx + 1}</span>
+                                <span class="text-sm font-bold text-text-main">${entry.concept}</span>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="copyToClipboard('${JSON.stringify(entry).replace(/"/g, '&quot;')}')" class="text-xs flex items-center gap-1 text-brand-primary font-medium hover:bg-blue-50 px-2 py-1 rounded transition-colors">
+                                    <i class="ph-bold ph-copy"></i> Copiar JSON
+                                </button>
+                            </div>
+                        </div>
+                        <table class="w-full text-sm">
+                            <thead class="bg-surface-light text-text-secondary text-xs uppercase">
+                                <tr>
+                                    <th class="px-6 py-2 text-left font-medium">Cuenta</th>
+                                    <th class="px-6 py-2 text-right font-medium">Debe</th>
+                                    <th class="px-6 py-2 text-right font-medium">Haber</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-50 font-mono text-text-main">
+                                ${entry.lines.map(line => `
+                                    <tr>
+                                        <td class="px-6 py-2 font-sans">${line.account}</td>
+                                        <td class="px-6 py-2 text-right ${line.debit ? 'text-text-main' : 'text-gray-300'}">${line.debit ? formatCurrency(line.debit) : '-'}</td>
+                                        <td class="px-6 py-2 text-right ${line.credit ? 'text-text-main' : 'text-gray-300'}">${line.credit ? formatCurrency(line.credit) : '-'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function copyToClipboard(text) {
+            // Fake copy interaction
+            showToast("JSON copiado al portapapeles");
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            
+            toast.classList.remove('translate-x-full', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-x-full', 'opacity-0');
+            }, 3000);
+        }
+
+        function toggleNotifications() {
+            // Mock toggle
+            const badge = document.getElementById('notifBadge');
+            badge.classList.toggle('hidden');
+        }
+
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+             // Set default view
+             toggleRegime();
+        });
+
+    </script>
+</body>
+</html>
