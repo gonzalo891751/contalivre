@@ -28,6 +28,9 @@ import {
 } from '../storage/espComparativeStore'
 import { EvolucionPNTab } from '../components/Estados/EvolucionPNTab'
 import { NotasAnexosTab } from '../components/Estados/NotasAnexosTab'
+import { useCompanyProfile } from '../hooks/useCompanyProfile'
+import { CompanyProfileModal } from '../components/CompanyProfile'
+import '../components/CompanyProfile/CompanyProfile.css'
 
 // ESP V2 Components
 import { EstadoSituacionPatrimonialV2 } from './estados/components/EstadoSituacionPatrimonialV2'
@@ -187,7 +190,11 @@ export default function Estados() {
 
     // Empresa ID (hardcoded for now, could be from context/store)
     const empresaId = 'default'
-    const empresaName = 'Mi Empresa S.A.'
+    // Company Profile: dynamic company name from Dexie
+    const { profile: companyProfile, save: saveCompanyProfile, isSaving: isSavingCompanyProfile } = useCompanyProfile()
+    const [showCompanyProfileModal, setShowCompanyProfileModal] = useState(false)
+    // FALLBACK: Use profile.legalName or default placeholder
+    const empresaName = companyProfile?.legalName || 'Mi Empresa S.A.' // Fallback if not configured
 
     // Load ESP comparative from storage on mount/year change
     useEffect(() => {
@@ -595,6 +602,15 @@ export default function Estados() {
                 targetYear={erSelectedYear - 1}
                 accounts={accounts || []}
                 hasComparativeData={erComparativeOverrides.size > 0}
+            />
+
+            {/* Company Profile Modal - allows editing from Estados page */}
+            <CompanyProfileModal
+                isOpen={showCompanyProfileModal}
+                onClose={() => setShowCompanyProfileModal(false)}
+                profile={companyProfile}
+                onSave={saveCompanyProfile}
+                isSaving={isSavingCompanyProfile}
             />
 
             <style>{pageStyles}</style>

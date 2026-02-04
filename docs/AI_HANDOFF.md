@@ -2,6 +2,260 @@
 
 ---
 
+## CHECKPOINT #COMPANY-PROFILE-V1
+**Fecha:** 2026-02-04  
+**Estado:** COMPLETADO - Build pasa, feature implementado
+
+### Objetivo
+Implementar "Datos de la Empresa" (Company Profile) como fuente única de verdad para UI, Estados Contables y PDFs.
+
+### Alcance
+- **INCLUIDO:** Storage Dexie v14, hook, modal 2-columnas, card, integración Dashboard + Estados
+- **EXCLUIDO:** PDF oficial de ficha, integración completa en journalPdf
+
+### Archivos Creados
+| Archivo | Propósito |
+|:--------|:----------|
+| `src/core/companyProfile/types.ts` | Interface CompanyProfile (20+ campos) |
+| `src/storage/companyProfile.ts` | CRUD API para Dexie |
+| `src/hooks/useCompanyProfile.ts` | Hook reactivo con useLiveQuery |
+| `src/components/CompanyProfile/CompanyProfileModal.tsx` | Modal 2 columnas con toggle |
+| `src/components/CompanyProfile/CompanyProfileCard.tsx` | Card empty/filled |
+| `src/components/CompanyProfile/CompanyProfile.css` | Estilos pixel-perfect |
+| `src/components/CompanyProfile/index.ts` | Re-exports |
+
+### Archivos Modificados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/storage/db.ts` | Dexie v14 + tabla `companyProfile` |
+| `src/pages/Dashboard.tsx` | Card + modal + greeting dinámico |
+| `src/pages/Estados.tsx` | `empresaName` desde hook con fallback |
+
+### Verificación
+- `npm run build` — **PASSED** ✅
+
+### Próximos Pasos Sugeridos
+1. Agregar badge clickable en header de Estados
+2. Implementar CompanyProfilePrintView para PDF oficial
+3. Integrar CUIT real en journalPdf, Conciliaciones, Amortizaciones
+
+---
+
+## CHECKPOINT #DATOS-EMPRESA-AUDIT-V2
+**Fecha:** 2026-02-04
+**Estado:** COMPLETADO - Auditoría técnica sin cambios en src/
+
+### Objetivo
+Auditar codebase para identificar datos de empresa hardcodeados, puntos de anclaje, estrategia de almacenamiento y plan de cálculo automático de capital, sin modificar código de producción.
+
+### Alcance
+- **INCLUIDO:** Análisis de rutas, componentes, hooks, storage, PDFs; propuesta de modelo CompanyProfile; estrategia capital; entrega de AUDIT_DATOS_EMPRESA_V2.md
+- **EXCLUIDO:** Crear tablas Dexie, modificar componentes, agregar dependencias
+
+### Hallazgos Clave
+| Hallazgo | Ubicación | Impacto |
+|:---------|:----------|:--------|
+| `empresaName = 'Mi Empresa S.A.'` | `Estados.tsx:190` | **CRÍTICO** — header de todos los estados |
+| Dexie v13 sin tabla companyProfile | `db.ts` | Requiere v14 para persistir datos |
+| `PdfMeta` con placeholders | `journalPdf.ts:78-89` | Listo para inyectar datos reales |
+| Capital Social código `3.1.01` | `seed.ts:201` | Plan A factible (por código fijo) |
+| Prototipo Datosiniciales.html | `docs/prototypes/` | **FALTANTE** — requiere obtener del usuario |
+
+### Entregables
+- [x] `docs/AUDIT_DATOS_EMPRESA_V2.md` — Reporte completo con 10 secciones
+- [x] Actualización de AI_HANDOFF.md
+- [x] Sin cambios en `src/` (verificado con git diff --stat)
+
+### Próximos Pasos (Implementación Futura)
+1. Obtener prototipo UI o diseñar basado en patrones existentes
+2. Crear modelo + storage (Dexie v14)
+3. Hook `useCompanyProfile()`
+4. Conectar Estados.tsx, Dashboard.tsx, PDFs
+5. Lógica de capital automático
+
+---
+
+## CHECKPOINT #INVERSIONES-P2-UX-PULIDO
+**Fecha:** 2026-02-04
+**Estado:** COMPLETADO - UX rubros dinamicos + selector de cuentas con saldo
+
+### Resumen
+Pulido de `/operaciones/inversiones` para reducir ruido visual (rubros dinamicos) y hacer mas seguros los selectores de cuentas (busqueda + saldo + solo imputables) sin romper storage ni flujos existentes.
+
+### Cambios realizados (MVP)
+1. **Rubros dinamicos**:
+   - La grilla/accordion ya no renderiza 7 tarjetas por defecto.
+   - Se muestran solo rubros en uso (con instrumentos) y/o habilitados por el usuario.
+   - Empty state prolijo cuando no hay instrumentos ni rubros habilitados.
+2. **CTA global "Nuevo"**:
+   - Boton principal en header + modal para habilitar rubro y continuar a cargar.
+   - Persistencia de rubros habilitados por ejercicio.
+   - Auto-habilita el rubro al crear el primer instrumento.
+3. **Selector de cuentas con busqueda + saldo**:
+   - Reemplazo del select simple de contrapartida por `AccountSearchSelectWithBalance`.
+   - Filtro: solo cuentas imputables (`!isHeader`) y del grupo Caja/Bancos (statementGroup `CASH_AND_BANKS`).
+   - Saldo al dia segun fecha del wizard (ledger balances con `closingDate`).
+   - Warning no bloqueante por saldo insuficiente en egresos (BUY / PF_CONSTITUTE / VPP_ALTA).
+
+### Persistencia / DB
+- **Sin bump de version (DB v13)**: se agrega campo NO indexado:
+  - `invSettings.enabledRubros[periodId] = InvestmentRubro[]`
+
+### Hardening
+- `buildJournalPreview()` ahora:
+  - exige contrapartida solo para tipos que la usan,
+  - bloquea cuentas cabecera (no imputables) como contrapartida.
+
+### Archivos tocados
+- `src/pages/Operaciones/InversionesPage.tsx`
+- `src/storage/inversiones.ts`
+- `src/core/inversiones/types.ts`
+- `docs/AI_HANDOFF.md`
+
+### Validacion
+- `npm run test` ✅
+- `npm run build` ✅
+- `npm run lint` ❌ (errores preexistentes fuera del modulo; `npx eslint src/pages/Operaciones/InversionesPage.tsx src/storage/inversiones.ts src/core/inversiones/types.ts` ✅)
+
+## CHECKPOINT #INVERSIONES-P1-COMPLETADO
+**Fecha:** 2026-02-04
+**Estado:** COMPLETADO - Módulo Inversiones funcional
+
+### Resumen
+Módulo `/operaciones/inversiones` completamente implementado siguiendo el prototipo `docs/prototypes/Inversiones.html`.
+
+### Funcionalidades implementadas
+1. **7 rubros soportados**: ACCIONES/CEDEARs, BONOS, FCI, PLAZO_FIJO, CRIPTO, RENTAS, VPP
+2. **11 tipos de movimiento**: BUY, SELL, INCOME, VALUATION, OPENING, PF_CONSTITUTE, PF_MATURITY, PF_RENEW, VPP_ALTA, VPP_UPDATE, VPP_DIVIDEND
+3. **Wizard 3 pasos**: Selección rubro/tipo → Datos del movimiento → Preview de asiento
+4. **Preview de asiento balanceado** antes de confirmar
+5. **Costeo PPP** (Precio Promedio Ponderado) implementado, FIFO/UEPS preparado
+6. **Plazos Fijos**: TNA→TEA, cálculo de intereses, notificaciones de vencimiento
+7. **VPP**: % participación, conexión con Cierre/Valuación
+8. **Sync Cierre-Valuación**: Lectura de valuaciones por cuenta
+9. **Notificaciones**: Vencimientos PF con días configurables
+10. **PDF/Impresión**: CSS @media print para exportación
+
+### Hardening aplicado
+- Idempotencia en creación de asientos (no duplicados)
+- Validación de cantidad en ventas (no vender más de lo poseído)
+- Validación de cuenta de instrumento antes de generar asiento
+
+### Archivos creados
+| Archivo | Descripción | Líneas |
+|---------|-------------|--------|
+| `src/core/inversiones/types.ts` | Tipos, interfaces, helpers TEA/intereses | ~450 |
+| `src/core/inversiones/index.ts` | Re-export | ~2 |
+| `src/storage/inversiones.ts` | CRUD + journal preview + positions + sync | ~1200 |
+| `src/pages/Operaciones/InversionesPage.tsx` | UI completa con wizard y print | ~1100 |
+
+### Archivos modificados
+| Archivo | Cambio |
+|---------|--------|
+| `src/storage/db.ts` | Versión 13 con tablas invInstruments, invMovements, invSettings, invNotifications |
+| `src/App.tsx` | Ruta `/operaciones/inversiones` |
+| `src/pages/OperacionesPage.tsx` | Tarjeta Inversiones activada con métricas |
+
+### Base de datos v13
+```
+invInstruments: id, periodId, rubro, ticker, name, currency, accountId, accountCode, costMethod, createdAt, updatedAt, metadata
+invMovements: id, periodId, date, rubro, type, instrumentId, quantity, price, amount, fees, feesIva, contraAccountId, journalEntryId, notes, createdAt, updatedAt, metadata
+invSettings: id, periodId, defaultCostMethod, defaultIvaComision, accountMappings, pfNotificationDays, lastSyncDate, updatedAt
+invNotifications: id, type, instrumentId, movementId, date, title, description, dismissed, createdAt
+```
+
+### Validación
+- `npm run build` ✅
+
+### Pendientes opcionales (FASE futura)
+- [ ] FIFO/UEPS costing completo (infraestructura lista)
+- [ ] Tests unitarios
+- [ ] Integración más profunda con Cierre/Valuación (escritura automática)
+
+---
+
+## CHECKPOINT #INVERSIONES-P0-DIAGNOSTICO
+**Fecha:** 2026-02-04
+**Estado:** COMPLETADO - Diagnóstico y planificación iniciales
+
+### Objetivo actual
+Activar y hacer funcional el módulo `/operaciones/inversiones` siguiendo el prototipo `docs/prototypes/Inversiones.html`.
+
+### Criterio de listo
+Tarjeta Inversiones activa + página con wizard 3 pasos + asientos contables balanceados + sync cierre-valuación + PDF.
+
+### Hallazgos del diagnóstico
+
+| Aspecto | Ubicación | Estado |
+|---------|-----------|--------|
+| Tarjeta Inversiones | `src/pages/OperacionesPage.tsx:519-534` | "Proximamente" → Activar |
+| Router | `src/App.tsx:43-47` | Falta ruta `/operaciones/inversiones` |
+| DB | `src/storage/db.ts` v12 | Agregar v13 con tablas inversiones |
+| Cuentas | `src/storage/seed.ts:95-130` | `1.1.05.*` y `1.2.03.*` existen |
+| Notificaciones | `src/hooks/useTaxNotifications.ts` | Reutilizable |
+| Cierre-Valuación | `src/core/cierre-valuacion/types.ts` | VPP definido, sync posible |
+| Apertura | `src/storage/fixedAssets.ts:81-150` | `ensureOpeningBalanceAccount()` reutilizable |
+| Costeo | `src/core/inventario/costing.ts` | PPP reutilizable |
+
+### Decisiones arquitectónicas
+
+1. **Storage (DB v13)**:
+   - `invInstruments`: `id, periodId, rubro, ticker, name, currency, accountId, costMethod, comisionCompra, comisionVenta, ivaComision`
+   - `invMovements`: `id, periodId, date, rubro, type, instrumentId, qty, price, amount, fees, feesIva, contraAccountId, journalEntryId, notes, metadata`
+   - `invSettings`: configuración del módulo
+
+2. **Rubros**: `ACCIONES`, `BONOS`, `FCI`, `PLAZO_FIJO`, `CRIPTO`, `RENTAS`, `VPP`
+
+3. **Tipos de movimiento**:
+   - `BUY` / `SELL` / `INCOME` / `VALUATION` / `OPENING`
+   - `PF_CONSTITUTE` / `PF_MATURITY` / `PF_RENEW`
+   - `VPP_ALTA` / `VPP_UPDATE` / `VPP_DIVIDEND`
+
+4. **Cuentas contables**:
+   - Reutilizar `1.1.05.*` (corrientes) y `1.2.03.*` (no corrientes)
+   - Auto-crear subcuentas por instrumento con `generateNextCode()`
+   - Resultado por tenencia: `4.1.06` o crear si no existe
+
+5. **Apertura**: Usar `resolveOpeningEquityAccountId()` de `openingEquity.ts`
+
+6. **Sync Cierre-Valuación**: Leer `cierreValuacionState.valuations` por `accountId`
+
+7. **Notificaciones PF**: Extender sistema existente o crear tabla `invNotifications`
+
+8. **PDF**: CSS `@media print` + `window.print()` (patrón del prototipo)
+
+### Riesgos identificados
+
+| Riesgo | Mitigación |
+|--------|------------|
+| Costeo FIFO/UEPS complejo | PPP default, FIFO/UEPS opcional por instrumento |
+| Sync bidireccional | Solo lectura desde CV, escritura manual |
+| Cuentas faltantes | `ensureInvestmentAccounts()` auto-crea |
+| VPP requiere PN externo | Campo manual o sync con CV Paso 3 |
+
+### Próximos pasos (FASE 1)
+1. Crear `src/core/inversiones/types.ts`
+2. Crear `src/storage/inversiones.ts` + DB v13
+3. Activar tarjeta en OperacionesPage + agregar ruta
+4. Crear `src/pages/Operaciones/InversionesPage.tsx` (UI prototipo)
+5. Implementar wizard 3 pasos con preview de asiento
+6. Integrar notificaciones PF
+7. Implementar Sincronizar + PDF
+
+### Archivos a crear
+- `src/core/inversiones/types.ts`
+- `src/core/inversiones/index.ts`
+- `src/storage/inversiones.ts`
+- `src/pages/Operaciones/InversionesPage.tsx`
+
+### Archivos a modificar
+- `src/storage/db.ts` (v13)
+- `src/App.tsx` (ruta)
+- `src/pages/OperacionesPage.tsx` (tarjeta)
+- `src/ui/Layout/Sidebar.tsx` (opcional, menú)
+
+---
+
 ## [CHECKPOINT #UI-SIDEBAR-RAIL-FIX-001]
 **Fecha:** 2026-02-04
 **Estado:** COMPLETADO - Sidebar rail sin gap + íconos estables

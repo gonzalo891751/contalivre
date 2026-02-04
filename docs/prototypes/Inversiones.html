@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Módulo Inversiones</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        /* --- 1. TOKENS (Brand Book) --- */
+        :root {
+            /* Brand Colors */
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --brand-gradient-hover: linear-gradient(135deg, #1D4ED8 0%, #059669 100%);
+            
+            /* Neutrals */
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            --border-light: #E2E8F0;
+            --border-focus: #3B82F6;
+
+            /* Semantic */
+            --success: #10B981;
+            --success-bg: #ECFDF5;
+            --warning: #F59E0B;
+            --warning-bg: #FFFBEB;
+            --error: #EF4444;
+            --error-bg: #FEF2F2;
+
+            /* Typography */
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+
+            /* Spacing & Effects */
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 24px;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* --- 2. RESET & BASE --- */
+        * { box-sizing: border-box; margin: 0; padding: 0; outline: none; }
+        
+        body {
+            background-color: var(--bg-app);
+            font-family: var(--font-body);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            overflow: hidden; /* App-like feel */
+        }
+
+        h1, h2, h3, h4 { font-family: var(--font-display); line-height: 1.1; }
+        p { line-height: 1.5; color: var(--text-secondary); }
+        a { text-decoration: none; color: inherit; cursor: pointer; }
+        
+        /* Utils */
+        .flex { display: flex; }
+        .flex-col { flex-direction: column; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .justify-end { justify-content: flex-end; }
+        .gap-1 { gap: 0.25rem; }
+        .gap-2 { gap: 0.5rem; }
+        .gap-4 { gap: 1rem; }
+        .gap-6 { gap: 1.5rem; }
+        .mt-1 { margin-top: 0.25rem; }
+        .mt-2 { margin-top: 0.5rem; }
+        .mt-4 { margin-top: 1rem; }
+        .mt-6 { margin-top: 1.5rem; }
+        .mb-1 { margin-bottom: 0.25rem; }
+        .mb-2 { margin-bottom: 0.5rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        .p-4 { padding: 1rem; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        .font-mono { font-family: var(--font-mono); }
+        .font-bold { font-weight: 700; }
+        .text-sm { font-size: 0.875rem; }
+        .text-xs { font-size: 0.75rem; }
+        .hidden { display: none !important; }
+        .w-full { width: 100%; }
+        .text-success { color: var(--success); }
+        .text-error { color: var(--error); }
+        .text-warning { color: var(--warning); }
+        .text-brand { color: var(--brand-primary); }
+
+        /* --- 3. COMPONENTS --- */
+        
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.6rem 1.2rem;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: var(--transition);
+            gap: 0.5rem;
+        }
+        .btn-primary {
+            background: var(--brand-gradient);
+            color: white;
+            box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
+        }
+        .btn-primary:hover {
+            background: var(--brand-gradient-hover);
+            transform: translateY(-1px);
+        }
+        .btn-secondary {
+            background: white;
+            border-color: var(--border-light);
+            color: var(--text-main);
+        }
+        .btn-secondary:hover { background: #F1F5F9; }
+        .btn-ghost { background: transparent; color: var(--text-secondary); }
+        .btn-ghost:hover { background: rgba(0,0,0,0.05); color: var(--text-main); }
+        .btn-sm { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.6rem;
+            border-radius: 99px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .badge-success { background: var(--success-bg); color: var(--success); }
+        .badge-warning { background: var(--warning-bg); color: var(--warning); }
+        .badge-error { background: var(--error-bg); color: var(--error); }
+        .badge-blue { background: #EFF6FF; color: var(--brand-primary); }
+        .badge-neutral { background: #F1F5F9; color: var(--text-secondary); }
+
+        /* Cards */
+        .card {
+            background: var(--bg-paper);
+            border-radius: var(--radius-md); /* Internal cards */
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-light);
+            padding: 1.5rem;
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+        .card-lg { border-radius: var(--radius-lg); }
+        .card:hover { border-color: var(--brand-primary); box-shadow: var(--shadow-md); }
+        
+        /* Inputs */
+        .input-group label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.4rem; color: var(--text-secondary); }
+        .input {
+            width: 100%;
+            padding: 0.6rem;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-body);
+            transition: var(--transition);
+        }
+        .input:focus { border-color: var(--brand-primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+        select.input { background-color: white; }
+        .input[readonly] { background-color: #F8FAFC; color: var(--text-secondary); cursor: not-allowed; }
+
+        /* Tables (High Density) */
+        .table-wrapper {
+            overflow-x: auto;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            background: white;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th {
+            background: #F8FAFC;
+            text-align: left;
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-light);
+            white-space: nowrap;
+        }
+        td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        td.num { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+        
+        /* --- 4. LAYOUT STRUCTURE --- */
+        .app-container { display: flex; width: 100%; height: 100%; }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: var(--bg-paper);
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            padding: 1.5rem;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+        .logo { font-family: var(--font-display); font-weight: 800; font-size: 1.4rem; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 2.5rem; }
+        .logo i { color: var(--brand-primary); font-size: 1.8rem; }
+        
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            transition: var(--transition);
+        }
+        .nav-item:hover { background: var(--bg-app); color: var(--text-main); }
+        .nav-item.active { background: #EFF6FF; color: var(--brand-primary); }
+        .nav-item i { font-size: 1.25rem; }
+
+        /* Main Content */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+        
+        .topbar {
+            height: 64px;
+            border-bottom: 1px solid var(--border-light);
+            background: var(--bg-paper);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2rem;
+            flex-shrink: 0;
+        }
+        
+        .page-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 2rem;
+            background: var(--bg-app);
+        }
+
+        /* --- 5. SPECIFIC VIEWS --- */
+        
+        /* Dashboard Grid */
+        .dash-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        /* Investments Header */
+        .inv-header {
+            background: var(--bg-paper);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        /* Rubro Grid */
+        .rubro-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .rubro-card {
+            background: var(--bg-paper);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+        }
+        .rubro-card:hover { border-color: var(--brand-primary); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+        .rubro-icon {
+            width: 40px; height: 40px;
+            background: #EFF6FF;
+            color: var(--brand-primary);
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .result-row {
+            display: flex; justify-content: space-between; align-items: baseline;
+            font-size: 0.8rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--border-light);
+        }
+
+        /* Accordion Panel */
+        .accordion-item {
+            background: var(--bg-paper);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+        .accordion-header {
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #F8FAFC;
+            transition: background 0.2s;
+        }
+        .accordion-header:hover { background: #F1F5F9; }
+        .accordion-content {
+            display: none;
+            padding: 1.5rem;
+            border-top: 1px solid var(--border-light);
+        }
+        .accordion-content.open { display: block; animation: slideDown 0.3s ease; }
+
+        /* Notifications Panel */
+        .alert-panel {
+            background: #FFFBEB;
+            border: 1px solid #FCD34D;
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .alert-item {
+            display: flex; gap: 0.75rem; align-items: start;
+            font-size: 0.9rem; color: #92400E; margin-bottom: 0.5rem;
+            justify-content: space-between;
+            background: rgba(255,255,255,0.5);
+            padding: 0.5rem;
+            border-radius: var(--radius-sm);
+        }
+        .alert-item:last-child { margin-bottom: 0; }
+        .alert-actions { display: flex; gap: 0.5rem; }
+
+        /* Integration Panel */
+        .integration-panel {
+            background: white;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr auto;
+            gap: 1.5rem;
+            align-items: center;
+        }
+        .int-stat-label { font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+        .int-stat-val { font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; }
+
+        /* --- 6. WIZARD MODAL --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(4px);
+            z-index: 100;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        
+        .modal-content {
+            background: white;
+            width: 90%; max-width: 700px;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            overflow: hidden;
+            display: flex; flex-direction: column;
+            max-height: 90vh;
+        }
+        
+        .modal-header { padding: 1.5rem; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 2rem; overflow-y: auto; }
+        .modal-footer { padding: 1.5rem; border-top: 1px solid var(--border-light); background: #F8FAFC; display: flex; justify-content: flex-end; gap: 1rem; }
+
+        .step-indicator { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+        .step { flex: 1; height: 4px; background: var(--border-light); border-radius: 2px; }
+        .step.active { background: var(--brand-primary); }
+
+        .type-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+        .type-btn {
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            text-align: left;
+            transition: var(--transition);
+            background: white;
+            cursor: pointer;
+        }
+        .type-btn:hover { border-color: var(--brand-primary); background: #EFF6FF; }
+        .type-btn.selected { border-color: var(--brand-primary); background: #EFF6FF; box-shadow: 0 0 0 2px var(--brand-primary); }
+        .form-section { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px dashed var(--border-light); }
+
+        /* Animation */
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* --- 7. PRINT STYLES --- */
+        @media print {
+            .sidebar, .topbar, .btn, .modal-footer, .accordion-header, .alert-panel, .integration-panel { display: none !important; }
+            .app-container { display: block; height: auto; overflow: visible; }
+            .main-content { overflow: visible; }
+            .page-scroll { overflow: visible; padding: 0; }
+            .rubro-card { border: 1px solid #000; break-inside: avoid; box-shadow: none; margin-bottom: 1rem; }
+            .accordion-content { display: block !important; border: none; padding: 0; margin-top: 1rem; }
+            table { font-size: 10pt; width: 100%; }
+            th, td { border: 1px solid #ccc; padding: 4px; }
+            .badge { border: 1px solid #000; color: #000 !important; background: transparent !important; }
+            body { font-size: 12pt; background: white; }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="ph-duotone ph-robot"></i> ContaLivre
+            </div>
+            
+            <nav class="flex-col" style="gap: 0.5rem;">
+                <a href="#" class="nav-item" onclick="navigate('dashboard')">
+                    <i class="ph ph-squares-four"></i> Dashboard
+                </a>
+                <div class="nav-item">
+                    <i class="ph ph-notebook"></i> Contabilidad
+                </div>
+                <div class="nav-item">
+                    <i class="ph ph-receipt"></i> Impuestos
+                </div>
+                <a href="#" class="nav-item active" onclick="navigate('dashboard')">
+                    <i class="ph ph-chart-line-up"></i> Operaciones
+                </a>
+                <div class="nav-item">
+                    <i class="ph ph-file-text"></i> Reportes
+                </div>
+            </nav>
+
+            <div style="margin-top: auto;">
+                <div class="card" style="padding: 1rem; background: #F1F5F9; border: none;">
+                    <div class="flex items-center gap-2 mb-2">
+                        <i class="ph-fill ph-crown" style="color: var(--warning);"></i>
+                        <span class="text-xs font-bold text-secondary">PRO PLAN</span>
+                    </div>
+                    <p class="text-xs">Tu licencia vence en 15 días.</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <main class="main-content">
+            
+            <!-- TOPBAR -->
+            <header class="topbar">
+                <div class="flex items-center gap-2 text-secondary text-sm">
+                    <span>Ejercicio 2025</span>
+                    <i class="ph ph-caret-right"></i>
+                    <span class="text-main font-bold" id="page-title">Operaciones</span>
+                </div>
+
+                <div class="flex items-center gap-4">
+                    <button class="btn-ghost" style="padding: 0.5rem;"><i class="ph ph-bell" style="font-size: 1.2rem;"></i></button>
+                    <div class="flex items-center gap-2">
+                        <div style="width: 32px; height: 32px; background: var(--brand-gradient); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600;">S</div>
+                        <span class="text-sm font-bold">Santiago</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- VIEW 1: DASHBOARD HOME -->
+            <div id="view-dashboard" class="page-scroll">
+                <h1 class="mb-2">Panel Operativo</h1>
+                <p class="mb-4">Resumen de tus activos y pasivos corrientes.</p>
+
+                <div class="dash-grid">
+                    <!-- Cards 1-3 hidden for brevity, focusing on Inversiones -->
+                     <div class="card">
+                        <div class="flex justify-between mb-4">
+                            <div class="rubro-icon" style="background: #F1F5F9; color: var(--text-secondary); margin:0;"><i class="ph ph-package"></i></div>
+                            <span class="badge badge-success">Activo</span>
+                        </div>
+                        <h3>Bienes de Cambio</h3>
+                        <p class="text-sm mt-2">Stock valuado al cierre</p>
+                        <div class="font-mono font-bold mt-2" style="font-size: 1.2rem;">$ 4.500.200</div>
+                    </div>
+
+                    <!-- Card 4: INVERSIONES (Active Target) -->
+                    <div class="card" style="border-color: var(--brand-primary); box-shadow: 0 0 0 1px var(--brand-primary); background: #EFF6FF;">
+                        <div class="flex justify-between mb-4">
+                            <div class="rubro-icon" style="margin:0;"><i class="ph ph-trend-up"></i></div>
+                            <span class="badge badge-blue">Novedad</span>
+                        </div>
+                        <h3 style="color: var(--brand-primary);">Inversiones</h3>
+                        
+                        <div class="flex justify-between items-end mt-4">
+                            <div>
+                                <p class="text-xs text-secondary">Valor Actual</p>
+                                <div class="font-mono font-bold" style="font-size: 1.3rem;">$ 16.850.000</div>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-xs text-secondary">Resultado Mes</p>
+                                <div class="font-mono font-bold text-sm" style="color: var(--success);">+$ 420.000</div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 pt-4 border-t border-blue-200">
+                            <div class="flex items-center gap-2 mb-3">
+                                <i class="ph-fill ph-warning-circle" style="color: var(--warning);"></i>
+                                <span class="text-xs font-bold text-secondary">3 alertas pendientes</span>
+                            </div>
+                            <button class="btn btn-primary w-full" onclick="navigate('investments')">
+                                Gestionar Inversiones <i class="ph-bold ph-arrow-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 2: INVESTMENTS MODULE -->
+            <div id="view-investments" class="page-scroll hidden">
+                
+                <!-- Breadcrumb -->
+                <div class="mb-4">
+                    <button class="btn-ghost btn-sm" onclick="navigate('dashboard')" style="padding-left:0;">
+                        <i class="ph ph-arrow-left"></i> Volver al Panel
+                    </button>
+                </div>
+
+                <!-- Header Area -->
+                <div class="inv-header">
+                    <div>
+                        <h1 class="mb-2">Cartera de Inversiones</h1>
+                        <p class="text-sm" style="max-width: 600px;">
+                            Gestión integral de cartera propia. Plazos fijos, Acciones, Cripto y VPP.
+                        </p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button class="btn btn-secondary" onclick="syncIntegration()"><i class="ph ph-arrows-clockwise"></i> Sincronizar</button>
+                        <button class="btn btn-secondary" onclick="window.print()">Reporte PDF</button>
+                    </div>
+                </div>
+
+                <!-- Integration Status Panel (NEW) -->
+                <div class="integration-panel">
+                    <div>
+                        <div class="int-stat-label">Última Sincronización</div>
+                        <div class="int-stat-val" id="last-sync">Hoy, 09:30 AM</div>
+                    </div>
+                    <div>
+                        <div class="int-stat-label">Valuación Contable</div>
+                        <div class="int-stat-val text-success"><i class="ph-fill ph-check-circle"></i> Cierre Enero 2025 OK</div>
+                    </div>
+                    <div>
+                        <div class="int-stat-label">Pendientes</div>
+                        <div class="int-stat-val text-warning">2 Rubros (Feb 25)</div>
+                    </div>
+                    <div>
+                        <button class="btn btn-sm btn-ghost" style="color: var(--brand-primary);">Ver Auditoría</button>
+                    </div>
+                </div>
+
+                <!-- Alert Panel -->
+                <div class="alert-panel">
+                    <h4 class="mb-2 text-sm font-bold" style="color: #92400E;">Alertas & Vencimientos</h4>
+                    
+                    <div class="alert-item">
+                        <div class="flex gap-2 items-center">
+                            <i class="ph-bold ph-clock text-warning"></i>
+                            <div>
+                                <strong>Plazo Fijo Galicia #0001</strong> vence en 5 días (31/03/2025).
+                            </div>
+                        </div>
+                        <div class="alert-actions">
+                             <button class="btn btn-sm btn-secondary" onclick="toggleAccordion('acc-pf')">Ver</button>
+                             <button class="btn btn-sm btn-primary" onclick="openWizard('Plazos Fijos', 'pf_vencimiento')">Resolver</button>
+                        </div>
+                    </div>
+
+                    <div class="alert-item">
+                        <div class="flex gap-2 items-center">
+                            <i class="ph-bold ph-warning text-error"></i>
+                            <div>
+                                <strong>Cripto:</strong> falta cargar cotización de cierre Feb 2025.
+                            </div>
+                        </div>
+                         <div class="alert-actions">
+                             <button class="btn btn-sm btn-primary" onclick="openWizard('Cripto', 'valuacion')">Valuar</button>
+                        </div>
+                    </div>
+
+                    <div class="alert-item">
+                        <div class="flex gap-2 items-center">
+                            <i class="ph-bold ph-info text-brand"></i>
+                            <div>
+                                <strong>VPP:</strong> falta cargar PN de Empresa X para cierre 2025.
+                            </div>
+                        </div>
+                         <div class="alert-actions">
+                             <button class="btn btn-sm btn-primary" onclick="openWizard('VPP', 'vpp_ajuste')">Cargar PN</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CARDS GRID -->
+                <div class="rubro-grid">
+                    
+                    <!-- 1. Acciones -->
+                    <div class="rubro-card">
+                        <div class="flex justify-between">
+                            <div class="rubro-icon"><i class="ph ph-chart-bar"></i></div>
+                            <span class="badge badge-success">Activo</span>
+                        </div>
+                        <h4>Acciones & CEDEARs</h4>
+                        <div class="mt-4">
+                            <p class="text-xs text-secondary">Valor Mercado</p>
+                            <div class="font-mono font-bold text-lg">$ 5.240.000</div>
+                        </div>
+                         <div class="result-row">
+                            <span class="text-secondary">Tenencia (NR)</span>
+                            <span class="font-mono text-success">+ $ 320k</span>
+                        </div>
+                        <div class="result-row" style="border:none; margin-top:0; padding-top:0;">
+                            <span class="text-secondary">Realizado</span>
+                            <span class="font-mono text-brand">+ $ 50k</span>
+                        </div>
+                        <div class="mt-auto flex gap-2 pt-4">
+                            <button class="btn btn-primary btn-sm w-full" onclick="openWizard('Acciones')">Gestionar</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleAccordion('acc-acciones')"><i class="ph ph-caret-down"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- 2. Bonos -->
+                    <div class="rubro-card">
+                        <div class="flex justify-between">
+                            <div class="rubro-icon"><i class="ph ph-scroll"></i></div>
+                            <span class="badge badge-success">Activo</span>
+                        </div>
+                        <h4>Renta Fija (Bonos)</h4>
+                        <div class="mt-4">
+                            <p class="text-xs text-secondary">Valor Técnico</p>
+                            <div class="font-mono font-bold text-lg">USD 4.200</div>
+                        </div>
+                        <div class="result-row">
+                            <span class="text-secondary">Tenencia (NR)</span>
+                            <span class="font-mono text-success">+ USD 120</span>
+                        </div>
+                        <div class="mt-auto flex gap-2 pt-4">
+                            <button class="btn btn-primary btn-sm w-full" onclick="openWizard('Bonos')">Gestionar</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleAccordion('acc-bonos')"><i class="ph ph-caret-down"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- 3. Plazos Fijos (NEW) -->
+                    <div class="rubro-card">
+                        <div class="flex justify-between">
+                            <div class="rubro-icon"><i class="ph ph-bank"></i></div>
+                            <span class="badge badge-warning">Vencimiento</span>
+                        </div>
+                        <h4>Plazos Fijos</h4>
+                        <div class="mt-4">
+                            <p class="text-xs text-secondary">Capital + Interés</p>
+                            <div class="font-mono font-bold text-lg">$ 2.150.000</div>
+                        </div>
+                        <div class="result-row">
+                            <span class="text-secondary">A Devengar</span>
+                            <span class="font-mono text-warning">$ 45.000</span>
+                        </div>
+                        <div class="mt-auto flex gap-2 pt-4">
+                            <button class="btn btn-primary btn-sm w-full" onclick="openWizard('Plazos Fijos', 'pf_constituir')">Gestionar</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleAccordion('acc-pf')"><i class="ph ph-caret-down"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- 4. VPP (NEW) -->
+                    <div class="rubro-card">
+                        <div class="flex justify-between">
+                            <div class="rubro-icon"><i class="ph ph-buildings"></i></div>
+                            <span class="badge badge-error">Info Pendiente</span>
+                        </div>
+                        <h4>Inv. Permanentes (VPP)</h4>
+                        <div class="mt-4">
+                            <p class="text-xs text-secondary">Valor Patrimonial</p>
+                            <div class="font-mono font-bold text-lg">$ 4.800.000</div>
+                        </div>
+                         <div class="result-row">
+                            <span class="text-secondary">Resultado VPP</span>
+                            <span class="font-mono text-secondary">--</span>
+                        </div>
+                        <div class="mt-auto flex gap-2 pt-4">
+                            <button class="btn btn-primary btn-sm w-full" onclick="openWizard('VPP', 'vpp_alta')">Gestionar</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleAccordion('acc-vpp')"><i class="ph ph-caret-down"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- 5. FCI -->
+                    <div class="rubro-card">
+                        <div class="flex justify-between">
+                            <div class="rubro-icon"><i class="ph ph-chart-pie-slice"></i></div>
+                            <span class="badge badge-success">Activo</span>
+                        </div>
+                        <h4>Fondos Comunes</h4>
+                        <div class="mt-4">
+                            <p class="text-xs text-secondary">Saldo Cuotapartes</p>
+                            <div class="font-mono font-bold text-lg">$ 1.850.000</div>
+                        </div>
+                         <div class="result-row">
+                            <span class="text-secondary">Rescate Realiz.</span>
+                            <span class="font-mono text-brand">+ $ 12k</span>
+                        </div>
+                        <div class="mt-auto flex gap-2 pt-4">
+                            <button class="btn btn-primary btn-sm w-full" onclick="openWizard('FCI')">Gestionar</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleAccordion('acc-fci')"><i class="ph ph-caret-down"></i></button>
+                        </div>
+                    </div>
+                    
+                    <!-- 6. Cripto -->
+                    <div class="rubro-card" style="border-color: var(--warning);">
+                        <div class="flex justify-between">
+                            <div class="rubro-icon" style="color: var(--warning); background: #FFFBEB;"><i class="ph ph-currency-btc"></i></div>
+                            <span class="badge badge-warning">Valuar</span>
+                        </div>
+                        <h4>Criptoactivos</h4>
+                        <div class="mt-4">
+                            <p class="text-xs text-secondary">Valor Estimado</p>
+                            <div class="font-mono font-bold text-lg">USDT 2.100</div>
+                        </div>
+                         <div class="result-row">
+                            <span class="text-secondary">Tenencia (USD)</span>
+                            <span class="font-mono text-secondary">--</span>
+                        </div>
+                        <div class="mt-auto flex gap-2 pt-4">
+                            <button class="btn btn-primary btn-sm w-full" onclick="openWizard('Cripto')">Gestionar</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleAccordion('acc-cripto')"><i class="ph ph-caret-down"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- 7. Rentas -->
+                    <div class="rubro-card">
+                        <div class="flex justify-between">
+                            <div class="rubro-icon"><i class="ph ph-house-line"></i></div>
+                            <span class="badge badge-success">Al día</span>
+                        </div>
+                        <h4>Rentas / Alquileres</h4>
+                        <div class="mt-4">
+                            <p class="text-xs text-secondary">Ingreso Mensual</p>
+                            <div class="font-mono font-bold text-lg">$ 450.000</div>
+                        </div>
+                        <div class="result-row">
+                            <span class="text-secondary">Ganancia Renta</span>
+                            <span class="font-mono text-success">$ 450.000</span>
+                        </div>
+                        <div class="mt-auto flex gap-2 pt-4">
+                            <button class="btn btn-primary btn-sm w-full" onclick="openWizard('Rentas', 'cobro_renta')">Gestionar</button>
+                            <button class="btn btn-secondary btn-sm" onclick="toggleAccordion('acc-rentas')"><i class="ph ph-caret-down"></i></button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ACCORDIONS (Tablas Detalle) -->
+                
+                <!-- Tabla Acciones -->
+                <div class="accordion-item" id="acc-acciones">
+                    <div class="accordion-header" onclick="toggleAccordion('acc-acciones')">
+                        <span class="font-bold flex items-center gap-2"><i class="ph-fill ph-caret-down"></i> Detalle: Acciones & CEDEARs</span>
+                        <span class="badge badge-blue">3 Posiciones</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Cuenta</th>
+                                        <th>Especie</th>
+                                        <th class="text-right">Cant.</th>
+                                        <th class="text-right">PPP</th>
+                                        <th class="text-right">Actual</th>
+                                        <th class="text-right">Total</th>
+                                        <th class="text-right">Tenencia (NR)</th>
+                                        <th class="text-right">Realizado</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td class="text-xs text-secondary">1.1.05.04.01</td>
+                                        <td class="font-bold">AAPL (Cedear)</td>
+                                        <td class="num">150</td>
+                                        <td class="num">$ 8.200</td>
+                                        <td class="num">$ 12.100</td>
+                                        <td class="num font-bold">$ 1.815.000</td>
+                                        <td class="num text-success">+ $ 585k</td>
+                                        <td class="num">-</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-xs text-secondary">1.1.05.04.02</td>
+                                        <td class="font-bold">MELI (Cedear)</td>
+                                        <td class="num">40</td>
+                                        <td class="num">$ 15.000</td>
+                                        <td class="num">$ 18.200</td>
+                                        <td class="num font-bold">$ 728.000</td>
+                                        <td class="num text-success">+ $ 128k</td>
+                                        <td class="num text-brand">+ $ 50k</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabla Bonos -->
+                <div class="accordion-item" id="acc-bonos">
+                    <div class="accordion-header" onclick="toggleAccordion('acc-bonos')">
+                        <span class="font-bold flex items-center gap-2"><i class="ph-fill ph-caret-down"></i> Detalle: Renta Fija (Bonos)</span>
+                        <span class="badge badge-blue">1 Posición</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Cuenta</th>
+                                        <th>Especie</th>
+                                        <th class="text-right">Nominales</th>
+                                        <th class="text-right">Valor Téc.</th>
+                                        <th class="text-right">Mercado</th>
+                                        <th class="text-right">Valuación</th>
+                                        <th class="text-right">Tenencia</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td class="text-xs text-secondary">1.1.05.05.01</td>
+                                        <td class="font-bold">AL30D</td>
+                                        <td class="num">2000</td>
+                                        <td class="num">USD 45.00</td>
+                                        <td class="num">USD 48.00</td>
+                                        <td class="num font-bold">USD 96.000</td>
+                                        <td class="num text-success">+ USD 600</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabla Plazos Fijos -->
+                <div class="accordion-item" id="acc-pf">
+                    <div class="accordion-header" onclick="toggleAccordion('acc-pf')">
+                        <span class="font-bold flex items-center gap-2"><i class="ph-fill ph-caret-down"></i> Detalle: Plazos Fijos</span>
+                        <span class="badge badge-warning">1 Vencimiento</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Cuenta</th>
+                                        <th>Entidad / ID</th>
+                                        <th class="text-right">Capital</th>
+                                        <th class="text-right">TNA</th>
+                                        <th class="text-right">Vencimiento</th>
+                                        <th class="text-right">Int. Ganado</th>
+                                        <th class="text-right">Total Cobrar</th>
+                                        <th>Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td class="text-xs text-secondary">1.1.05.01.01</td>
+                                        <td class="font-bold">Galicia #0001</td>
+                                        <td class="num">$ 2.000.000</td>
+                                        <td class="num">95%</td>
+                                        <td class="num text-warning font-bold">31/03/25</td>
+                                        <td class="num text-success">$ 158.000</td>
+                                        <td class="num font-bold">$ 2.158.000</td>
+                                        <td class="text-center">
+                                            <button class="btn btn-sm btn-primary" onclick="openWizard('Plazos Fijos', 'pf_vencimiento')">Renovar</button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabla VPP -->
+                <div class="accordion-item" id="acc-vpp">
+                    <div class="accordion-header" onclick="toggleAccordion('acc-vpp')">
+                        <span class="font-bold flex items-center gap-2"><i class="ph-fill ph-caret-down"></i> Detalle: VPP</span>
+                        <span class="badge badge-error">Falta Info</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Cuenta</th>
+                                        <th>Empresa Participada</th>
+                                        <th class="text-right">% Part.</th>
+                                        <th class="text-right">Valor Origen</th>
+                                        <th class="text-right">PN Último</th>
+                                        <th class="text-right">VPP Actual</th>
+                                        <th>Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td class="text-xs text-secondary">1.2.03.01.01</td>
+                                        <td class="font-bold">Tech Solutions SA</td>
+                                        <td class="num">30%</td>
+                                        <td class="num">$ 1.200.000</td>
+                                        <td class="num text-secondary">--</td>
+                                        <td class="num text-secondary">--</td>
+                                        <td><span class="badge badge-error">Cargar PN</span></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabla FCI -->
+                <div class="accordion-item" id="acc-fci">
+                    <div class="accordion-header" onclick="toggleAccordion('acc-fci')">
+                        <span class="font-bold flex items-center gap-2"><i class="ph-fill ph-caret-down"></i> Detalle: Fondos Comunes</span>
+                        <span class="badge badge-blue">1 Posición</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="table-wrapper">
+                             <table>
+                                <thead>
+                                    <tr>
+                                        <th>Cuenta</th>
+                                        <th>Fondo</th>
+                                        <th class="text-right">Cuotapartes</th>
+                                        <th class="text-right">Valor CP</th>
+                                        <th class="text-right">Valuación</th>
+                                        <th class="text-right">Tenencia</th>
+                                        <th class="text-right">Rescates</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td class="text-xs text-secondary">1.1.05.02.01</td>
+                                        <td class="font-bold">Fima Premium</td>
+                                        <td class="num">15000</td>
+                                        <td class="num">$ 123.33</td>
+                                        <td class="num font-bold">$ 1.850.000</td>
+                                        <td class="num text-success">+ $ 230k</td>
+                                        <td class="num text-brand">+ $ 12k</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabla Cripto -->
+                <div class="accordion-item" id="acc-cripto">
+                    <div class="accordion-header" onclick="toggleAccordion('acc-cripto')">
+                        <span class="font-bold flex items-center gap-2"><i class="ph-fill ph-caret-down"></i> Detalle: Criptoactivos</span>
+                        <span class="badge badge-warning">Requiere Acción</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="table-wrapper">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Cuenta</th>
+                                        <th>Token</th>
+                                        <th class="text-right">Cantidad</th>
+                                        <th class="text-right">Costo (USD)</th>
+                                        <th class="text-right">Valuación (USD)</th>
+                                        <th>Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td class="text-xs text-secondary">1.1.05.06.01</td>
+                                        <td class="font-bold flex items-center justify-end gap-2">BTC <i class="ph-fill ph-currency-btc text-warning"></i></td>
+                                        <td class="num">0.054</td>
+                                        <td class="num">42,000.00</td>
+                                        <td class="num text-secondary">--</td>
+                                        <td><span class="badge badge-warning">Valuar</span></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabla Rentas -->
+                <div class="accordion-item" id="acc-rentas">
+                    <div class="accordion-header" onclick="toggleAccordion('acc-rentas')">
+                        <span class="font-bold flex items-center gap-2"><i class="ph-fill ph-caret-down"></i> Detalle: Alquileres</span>
+                        <span class="badge badge-success">Al día</span>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="table-wrapper">
+                             <table>
+                                <thead>
+                                    <tr>
+                                        <th>Inmueble</th>
+                                        <th>Inquilino</th>
+                                        <th class="text-right">Mes</th>
+                                        <th class="text-right">Monto</th>
+                                        <th class="text-right">Estado</th>
+                                        <th>Cuenta Ganancia</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td class="font-bold">Depto Belgrano</td>
+                                        <td>Juan Pérez</td>
+                                        <td class="num">Feb 2025</td>
+                                        <td class="num">$ 450.000</td>
+                                        <td class="num text-success font-bold">Cobrado</td>
+                                        <td class="text-xs text-secondary text-right">4.1.03.01.01</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </main>
+    </div>
+
+    <!-- WIZARD MODAL -->
+    <div class="modal-overlay" id="wizard-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="wizard-title">Nuevo Movimiento</h3>
+                <button class="btn-ghost" onclick="closeWizard()"><i class="ph-bold ph-x"></i></button>
+            </div>
+            
+            <div class="modal-body">
+                
+                <!-- Steps UI -->
+                <div class="step-indicator">
+                    <div class="step active" id="step-bar-1"></div>
+                    <div class="step" id="step-bar-2"></div>
+                    <div class="step" id="step-bar-3"></div>
+                </div>
+
+                <!-- STEP 1: TIPO -->
+                <div id="step-1" class="wizard-step">
+                    <p class="mb-4 font-bold text-secondary">Seleccioná el tipo de operación:</p>
+                    <div class="type-grid" id="type-grid-container">
+                        <!-- Filled by JS based on Context -->
+                    </div>
+                </div>
+
+                <!-- STEP 2: FORM -->
+                <div id="step-2" class="wizard-step hidden">
+                    <!-- Common Fields -->
+                    <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="input-group">
+                            <label>Fecha</label>
+                            <input type="date" class="input" value="2025-02-04">
+                        </div>
+                        <div class="input-group">
+                            <label>Rubro</label>
+                            <input type="text" id="form-rubro" class="input" readonly value="Acciones">
+                        </div>
+                    </div>
+
+                    <!-- Dynamic Fields Containers -->
+                    
+                    <!-- COMPRA / VENTA / APERTURA -->
+                    <div id="fs-basic" class="form-section hidden">
+                        <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="input-group">
+                                <label>Instrumento</label>
+                                <select class="input">
+                                    <option>AAPL (Cedear)</option>
+                                    <option>MELI (Cedear)</option>
+                                    <option>AL30</option>
+                                    <option>+ Crear Nuevo</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label>Cantidad</label>
+                                <input type="number" class="input" value="10">
+                            </div>
+                            <div class="input-group">
+                                <label>Precio Unitario</label>
+                                <input type="number" class="input" value="1000">
+                            </div>
+                            <div class="input-group">
+                                <label>Moneda</label>
+                                <select class="input">
+                                    <option>ARS</option>
+                                    <option>USD</option>
+                                </select>
+                            </div>
+                        </div>
+                         <div class="input-group mt-4">
+                            <label>Comisiones (Gastos)</label>
+                            <div class="flex gap-2">
+                                <input type="number" class="input" value="0.00" style="width: 150px;">
+                                <div class="flex items-center gap-2 text-sm ml-4">
+                                    <input type="checkbox" id="iva" checked>
+                                    <label for="iva" style="margin:0; font-weight: normal;">Aplica IVA (21%)</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PLAZO FIJO -->
+                    <div id="fs-pf" class="form-section hidden">
+                         <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="input-group">
+                                <label>Entidad Bancaria</label>
+                                <select class="input"><option>Banco Galicia</option><option>Banco Nación</option></select>
+                            </div>
+                            <div class="input-group">
+                                <label>Capital a Invertir</label>
+                                <input type="number" class="input" value="100000">
+                            </div>
+                            <div class="input-group">
+                                <label>Plazo (Días)</label>
+                                <input type="number" class="input" value="30">
+                            </div>
+                            <div class="input-group">
+                                <label>TNA %</label>
+                                <input type="number" class="input" value="95">
+                            </div>
+                        </div>
+                        <div class="mt-4 p-3 bg-blue-50 text-brand text-sm rounded">
+                            <i class="ph-fill ph-calculator"></i> Interés estimado: <strong>$ 7,808.00</strong> (TEA 145%)
+                        </div>
+                    </div>
+
+                    <!-- VPP -->
+                    <div id="fs-vpp" class="form-section hidden">
+                         <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="input-group">
+                                <label>Empresa Participada</label>
+                                <input type="text" class="input" value="Tech Solutions SA">
+                            </div>
+                            <div class="input-group">
+                                <label>% Participación</label>
+                                <input type="number" class="input" value="30">
+                            </div>
+                            <div class="input-group">
+                                <label>PN Total al Cierre</label>
+                                <input type="number" class="input" value="16000000">
+                            </div>
+                        </div>
+                        <div class="mt-4 p-3 bg-blue-50 text-brand text-sm rounded">
+                            <i class="ph-fill ph-calculator"></i> VPP Resultante: <strong>$ 4,800,000.00</strong>
+                        </div>
+                    </div>
+                    
+                    <!-- RENTAS -->
+                    <div id="fs-rentas" class="form-section hidden">
+                         <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="input-group">
+                                <label>Inmueble / Contrato</label>
+                                <select class="input"><option>Depto Belgrano</option></select>
+                            </div>
+                             <div class="input-group">
+                                <label>Período (Mes)</label>
+                                <input type="month" class="input" value="2025-02">
+                            </div>
+                            <div class="input-group">
+                                <label>Monto Cobrado</label>
+                                <input type="number" class="input" value="450000">
+                            </div>
+                            <div class="input-group">
+                                <label>Estado</label>
+                                <select class="input"><option>Cobrado</option><option>Adelantado</option></select>
+                            </div>
+                        </div>
+                    </div>
+
+                     <!-- VALUACION -->
+                    <div id="fs-val" class="form-section hidden">
+                         <div class="input-group mb-2">
+                             <label>Instrumento</label>
+                             <select class="input"><option>BTC (Bitcoin)</option></select>
+                         </div>
+                         <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="input-group">
+                                <label>Precio Cierre (USD)</label>
+                                <input type="number" class="input" value="43500">
+                            </div>
+                             <div class="input-group">
+                                <label>Tipo Cambio Cierre</label>
+                                <input type="number" class="input" value="1150">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CONTRAPARTIDA -->
+                    <div class="form-section">
+                        <div class="input-group">
+                            <label>Cuenta Contrapartida / Origen Fondos</label>
+                            <select class="input">
+                                <option>1.1.01.02 Banco Galicia CC</option>
+                                <option>1.1.01.01 Caja</option>
+                                <option>4.1.03 Alquileres Ganados</option>
+                            </select>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- STEP 3: PREVIEW -->
+                <div id="step-3" class="wizard-step hidden">
+                    <div class="flex items-center gap-2 mb-4 p-2 bg-green-50 text-green-700 rounded border border-green-200 text-sm">
+                        <i class="ph-fill ph-check-circle"></i> Asiento generado automáticamente. Revisá antes de confirmar.
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table id="preview-table">
+                            <thead>
+                                <tr>
+                                    <th>Cuenta Contable</th>
+                                    <th>Debe</th>
+                                    <th>Haber</th>
+                                </tr>
+                            </thead>
+                            <tbody id="preview-tbody">
+                                <!-- Filled by JS -->
+                            </tbody>
+                            <tfoot style="background: #F8FAFC; font-weight: bold;">
+                                <tr>
+                                    <td>TOTALES</td>
+                                    <td class="num text-main" id="preview-total-debe">$ 0,00</td>
+                                    <td class="num text-main" id="preview-total-haber">$ 0,00</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-back" onclick="prevStep()">Cancelar</button>
+                <button class="btn btn-primary" id="btn-next" onclick="nextStep()">Siguiente <i class="ph-bold ph-caret-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOGIC -->
+    <script>
+        // --- Navigation ---
+        function navigate(viewId) {
+            document.getElementById('view-dashboard').classList.add('hidden');
+            document.getElementById('view-investments').classList.add('hidden');
+            document.getElementById('view-' + viewId).classList.remove('hidden');
+            
+            const title = document.getElementById('page-title');
+            if(viewId === 'dashboard') title.textContent = 'Operaciones';
+            if(viewId === 'investments') title.textContent = 'Inversiones';
+            
+            window.scrollTo(0,0);
+        }
+
+        // --- Accordion ---
+        function toggleAccordion(id) {
+            const content = document.querySelector(`#${id} .accordion-content`);
+            if (content) content.classList.toggle('open');
+        }
+
+        // --- Integration Logic (Demo) ---
+        function syncIntegration() {
+            const btn = document.querySelector('.inv-header .btn:first-child');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="ph ph-spinner ph-spin"></i> Sincronizando...';
+            btn.classList.add('btn-secondary'); // ensure style
+            
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                document.getElementById('last-sync').innerHTML = 'Hace un momento';
+                alert("¡Sincronización completada! Se actualizaron valores de mercado.");
+            }, 1500);
+        }
+
+        // --- Wizard Logic ---
+        let currentStep = 1;
+        let currentRubro = '';
+        let currentTypeOp = '';
+
+        // Definición de Tipos por Rubro
+        const opTypes = {
+            'Acciones': [
+                {id: 'compra', label: 'Compra / Suscripción', desc: 'Alta de activos.'},
+                {id: 'venta', label: 'Venta / Rescate', desc: 'Baja y resultado.'},
+                {id: 'valuacion', label: 'Valuación (Cierre)', desc: 'Ajuste tenencia.'}
+            ],
+            'Bonos': [
+                {id: 'compra', label: 'Compra', desc: 'Alta de bonos.'},
+                {id: 'cobro_cupon', label: 'Cobro Cupón', desc: 'Interés o amortización.'},
+                {id: 'valuacion', label: 'Valuación', desc: 'Ajuste técnico.'}
+            ],
+            'Plazos Fijos': [
+                {id: 'pf_constituir', label: 'Constituir PF', desc: 'Alta plazo fijo.'},
+                {id: 'pf_vencimiento', label: 'Vencimiento / Cobro', desc: 'Baja capital + interés.'},
+                {id: 'pf_renovar', label: 'Renovación', desc: 'Reinvierte capital + int.'}
+            ],
+            'VPP': [
+                {id: 'vpp_alta', label: 'Alta Participación', desc: 'Compra inicial.'},
+                {id: 'vpp_ajuste', label: 'Ajuste por Balance', desc: 'Carga de PN cierre.'},
+                {id: 'vpp_dividendo', label: 'Cobro Dividendos', desc: 'Baja inversión.'}
+            ],
+            'Rentas': [
+                {id: 'cobro_renta', label: 'Cobro Alquiler', desc: 'Devengado + Cobrado.'}
+            ],
+            'Cripto': [
+                {id: 'compra', label: 'Compra P2P/Exchange', desc: 'Alta token.'},
+                {id: 'valuacion', label: 'Valuación Cierre', desc: 'Ajuste USD.'}
+            ]
+        };
+
+        function openWizard(rubroName, preselectedType = null) {
+            currentRubro = rubroName;
+            document.getElementById('wizard-title').textContent = 'Nuevo Movimiento: ' + rubroName;
+            document.getElementById('form-rubro').value = rubroName;
+            document.getElementById('wizard-modal').classList.add('open');
+            
+            // Build Type Grid
+            const container = document.getElementById('type-grid-container');
+            container.innerHTML = '';
+            
+            const types = opTypes[rubroName] || opTypes['Acciones']; // fallback
+            
+            types.forEach(t => {
+                const div = document.createElement('div');
+                div.className = 'type-btn';
+                if(preselectedType && t.id === preselectedType) div.classList.add('selected');
+                div.onclick = () => selectType(div, t.id);
+                div.innerHTML = `<div class="font-bold text-main mb-1">${t.label}</div><div class="text-xs text-secondary">${t.desc}</div>`;
+                container.appendChild(div);
+                
+                if(preselectedType && t.id === preselectedType) currentTypeOp = t.id;
+            });
+            
+            // If no preselect, clear
+            if(!preselectedType) currentTypeOp = '';
+
+            resetWizard();
+            if(preselectedType) nextStep(); // Skip step 1 if preselected
+        }
+
+        function closeWizard() {
+            document.getElementById('wizard-modal').classList.remove('open');
+        }
+
+        function resetWizard() {
+            currentStep = 1;
+            updateWizardUI();
+        }
+
+        function selectType(el, typeId) {
+            document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('selected'));
+            el.classList.add('selected');
+            currentTypeOp = typeId;
+        }
+
+        function nextStep() {
+            if (currentStep === 1 && !currentTypeOp) {
+                alert("Seleccioná un tipo de operación");
+                return;
+            }
+            if (currentStep < 3) {
+                currentStep++;
+                if (currentStep === 2) showRelevantFields();
+                if (currentStep === 3) generatePreview();
+                updateWizardUI();
+            } else {
+                closeWizard();
+                alert('¡Asiento registrado con éxito! (Demo)');
+            }
+        }
+
+        function prevStep() {
+            if (currentStep > 1) {
+                currentStep--;
+                updateWizardUI();
+            } else {
+                closeWizard();
+            }
+        }
+
+        function updateWizardUI() {
+            document.querySelectorAll('.wizard-step').forEach(el => el.classList.add('hidden'));
+            document.getElementById('step-' + currentStep).classList.remove('hidden');
+            
+            document.querySelectorAll('.step').forEach((el, index) => {
+                if(index + 1 <= currentStep) el.classList.add('active');
+                else el.classList.remove('active');
+            });
+
+            const btnNext = document.getElementById('btn-next');
+            const btnBack = document.getElementById('btn-back');
+
+            if (currentStep === 1) {
+                btnBack.textContent = "Cancelar";
+                btnNext.innerHTML = 'Siguiente <i class="ph-bold ph-caret-right"></i>';
+            } else if (currentStep === 2) {
+                btnBack.textContent = "Atrás";
+                btnNext.innerHTML = 'Previsualizar <i class="ph-bold ph-eye"></i>';
+            } else if (currentStep === 3) {
+                btnBack.textContent = "Atrás";
+                btnNext.innerHTML = '<i class="ph-bold ph-check"></i> Confirmar Asiento';
+            }
+        }
+
+        function showRelevantFields() {
+            // Hide all specialized sections
+            document.querySelectorAll('.form-section').forEach(el => el.classList.add('hidden'));
+            
+            // Logic based on Type ID or Rubro
+            if (currentTypeOp.includes('pf_')) {
+                document.getElementById('fs-pf').classList.remove('hidden');
+            } else if (currentTypeOp.includes('vpp_')) {
+                document.getElementById('fs-vpp').classList.remove('hidden');
+            } else if (currentTypeOp.includes('renta')) {
+                document.getElementById('fs-rentas').classList.remove('hidden');
+            } else if (currentTypeOp.includes('valuacion')) {
+                 document.getElementById('fs-val').classList.remove('hidden');
+            } else {
+                // Default Compra/Venta
+                document.getElementById('fs-basic').classList.remove('hidden');
+            }
+        }
+
+        function generatePreview() {
+            const tbody = document.getElementById('preview-tbody');
+            tbody.innerHTML = '';
+            let rows = [];
+            let total = '$ 0,00';
+
+            // Mock Data Generator
+            if (currentTypeOp === 'compra') {
+                rows = [
+                    { acct: '1.1.05.04.01 - AAPL (Cedear)', desc: 'Alta de activo', debe: '$ 100.000', haber: '-' },
+                    { acct: '1.1.01.02 - Banco Galicia', desc: 'Egreso fondos', debe: '-', haber: '$ 100.000' }
+                ];
+                total = '$ 100.000';
+            } else if (currentTypeOp === 'pf_vencimiento') {
+                 rows = [
+                    { acct: '1.1.01.02 - Banco Galicia', desc: 'Cobro total', debe: '$ 2.158.000', haber: '-' },
+                    { acct: '1.1.05.01.01 - PF Galicia', desc: 'Baja capital', debe: '-', haber: '$ 2.000.000' },
+                    { acct: '4.1.02.01 - Intereses Ganados PF', desc: 'Interés devengado', debe: '-', haber: '$ 158.000' }
+                ];
+                total = '$ 2.158.000';
+            } else if (currentTypeOp === 'vpp_ajuste') {
+                 rows = [
+                    { acct: '1.2.03.01.01 - VPP Tech Solutions', desc: 'Ajuste valor PN', debe: '$ 1.200.000', haber: '-' },
+                    { acct: '4.6.01 - Resultado VPP', desc: 'Ganancia VPP', debe: '-', haber: '$ 1.200.000' }
+                ];
+                total = '$ 1.200.000';
+             } else if (currentTypeOp === 'cobro_renta') {
+                 rows = [
+                    { acct: '1.1.01.02 - Banco Galicia', desc: 'Cobro alquiler', debe: '$ 450.000', haber: '-' },
+                    { acct: '4.1.03 - Alquileres Ganados', desc: 'Ingreso del periodo', debe: '-', haber: '$ 450.000' }
+                ];
+                total = '$ 450.000';
+            } else {
+                // Generic Fallback
+                 rows = [
+                    { acct: '1.x.x.x - Cuenta Rubro', desc: 'Movimiento principal', debe: '$ 1.000', haber: '-' },
+                    { acct: '1.1.01.01 - Caja', desc: 'Contrapartida', debe: '-', haber: '$ 1.000' }
+                ];
+                total = '$ 1.000';
+            }
+
+            rows.forEach(r => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td><div class="font-bold">${r.acct}</div><div class="text-xs text-secondary">${r.desc}</div></td>
+                        <td class="num">${r.debe}</td>
+                        <td class="num">${r.haber}</td>
+                    </tr>
+                `;
+            });
+            document.getElementById('preview-total-debe').innerText = total;
+            document.getElementById('preview-total-haber').innerText = total;
+        }
+
+        // Close modal on outside click
+        document.getElementById('wizard-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeWizard();
+        });
+
+    </script>
+</body>
+</html>

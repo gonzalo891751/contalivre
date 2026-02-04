@@ -24,6 +24,13 @@ import type {
     TaxPaymentLink,
 } from '../core/impuestos/types'
 import type { FixedAsset, FixedAssetEvent } from '../core/fixedAssets/types'
+import type {
+    InvestmentInstrument,
+    InvestmentMovement,
+    InvestmentSettings,
+    InvestmentNotification,
+} from '../core/inversiones/types'
+import type { CompanyProfile } from '../core/companyProfile/types'
 
 /**
  * Configuración de la aplicación
@@ -74,6 +81,13 @@ class ContableDatabase extends Dexie {
     // Fixed Assets (Bienes de Uso) module
     fixedAssets!: EntityTable<FixedAsset, 'id'>
     fixedAssetEvents!: EntityTable<FixedAssetEvent, 'id'>
+    // Inversiones module
+    invInstruments!: EntityTable<InvestmentInstrument, 'id'>
+    invMovements!: EntityTable<InvestmentMovement, 'id'>
+    invSettings!: EntityTable<InvestmentSettings, 'id'>
+    invNotifications!: EntityTable<InvestmentNotification, 'id'>
+    // Company Profile (singleton)
+    companyProfile!: EntityTable<CompanyProfile, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -312,6 +326,73 @@ class ContableDatabase extends Dexie {
             taxPayments: 'id, obligationId, journalEntryId, paidAt',
             fixedAssets: 'id, periodId, category, status, accountId, contraAccountId',
             fixedAssetEvents: 'id, periodId, assetId, date, type',
+        })
+
+        // Version 13: Inversiones module (Investments)
+        this.version(13).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo, sourceModule, sourceId',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxDebts: 'id, currency, creditor, createdAt, status, periodId, accountId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
+            taxClosures: 'id, month, regime, status',
+            taxDueNotifications: 'id, obligation, month, dueDate, seen',
+            taxObligations: 'id, &uniqueKey, taxType, taxPeriod, jurisdiction, status, dueDate',
+            taxPayments: 'id, obligationId, journalEntryId, paidAt',
+            fixedAssets: 'id, periodId, category, status, accountId, contraAccountId',
+            fixedAssetEvents: 'id, periodId, assetId, date, type',
+            // Inversiones module
+            invInstruments: 'id, periodId, rubro, ticker, accountId',
+            invMovements: 'id, periodId, date, rubro, type, instrumentId',
+            invSettings: 'id',
+            invNotifications: 'id, type, instrumentId, dueDate, seen',
+        })
+
+        // Version 14: Company Profile (singleton for company data)
+        this.version(14).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup',
+            entries: 'id, date, memo, sourceModule, sourceId',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxDebts: 'id, currency, creditor, createdAt, status, periodId, accountId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
+            taxClosures: 'id, month, regime, status',
+            taxDueNotifications: 'id, obligation, month, dueDate, seen',
+            taxObligations: 'id, &uniqueKey, taxType, taxPeriod, jurisdiction, status, dueDate',
+            taxPayments: 'id, obligationId, journalEntryId, paidAt',
+            fixedAssets: 'id, periodId, category, status, accountId, contraAccountId',
+            fixedAssetEvents: 'id, periodId, assetId, date, type',
+            invInstruments: 'id, periodId, rubro, ticker, accountId',
+            invMovements: 'id, periodId, date, rubro, type, instrumentId',
+            invSettings: 'id',
+            invNotifications: 'id, type, instrumentId, dueDate, seen',
+            // Company Profile singleton
+            companyProfile: 'id',
         })
     }
 }
