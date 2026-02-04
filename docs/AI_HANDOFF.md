@@ -5347,3 +5347,198 @@ npm run lint
 3. Hover en menú: Texto e ícono legibles (blancos sobre fondo semi-transparente)
 4. Responsive móvil: Drawer funciona correctamente
 5. Click en cada tarjeta de Accesos Rápidos: Navega a ruta correcta
+
+---
+
+## CHECKPOINT #BIENES-USO-REFACTOR-001
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Refactorizar módulo Bienes de Uso para soportar Alta Contable con IVA/splits, Apertura de bienes anteriores, intangibles, y corregir bloqueos incorrectos
+
+### Resumen de Cambios
+
+#### 1. Nuevos Tipos y Campos (`src/core/fixedAssets/types.ts`)
+
+**Nuevos tipos:**
+```typescript
+export type FixedAssetOriginType = 'PURCHASE' | 'OPENING'
+export type FixedAssetType = 'TANGIBLE' | 'INTANGIBLE'
+
+export interface PaymentSplit {
+    accountId: string
+    amount: number
+    percentage?: number
+    description?: string
+}
+
+export interface AcquisitionData {
+    date: string           // Fecha del asiento de compra
+    docType: string        // Tipo comprobante (FC A, FC B, etc)
+    docNumber: string      // Numero comprobante
+    netAmount: number      // Neto gravado
+    vatRate: number        // Alicuota IVA (21, 10.5, 27, 0)
+    vatAmount: number      // Monto IVA
+    totalAmount: number    // Total factura
+    withVat: boolean       // true=discrimina IVA, false=sin IVA
+    splits: PaymentSplit[] // Contrapartidas de pago
+}
+
+export interface OpeningData {
+    initialAccumDep: number     // Amort. acum. inicial al 01/01
+    contraAccountId: string     // Cuenta contrapartida apertura
+}
+```
+
+**Campos agregados a FixedAsset:**
+- `originType?: FixedAssetOriginType` - PURCHASE (default) o OPENING
+- `assetType?: FixedAssetType` - TANGIBLE (default) o INTANGIBLE
+- `lifeMonths?: number` - Vida útil canónica en meses
+- `acquisition?: AcquisitionData` - Datos de compra
+- `opening?: OpeningData` - Datos de apertura
+- `acquisitionJournalEntryId?: string | null` - ID del asiento de compra
+
+**Categorías intangibles agregadas:**
+```typescript
+export type FixedAssetCategoryIntangible =
+    | 'Software'
+    | 'Marcas y Patentes'
+    | 'Otros Intangibles'
+```
+
+**Mapeo de cuentas intangibles (1.2.02.xx):**
+```typescript
+'Software': { asset: '1.2.02.01', contra: '1.2.02.91', assetType: 'INTANGIBLE' }
+'Marcas y Patentes': { asset: '1.2.02.02', contra: '1.2.02.92', assetType: 'INTANGIBLE' }
+'Otros Intangibles': { asset: '1.2.02.03', contra: '1.2.02.93', assetType: 'INTANGIBLE' }
+```
+
+#### 2. Funciones de Asientos (`src/storage/fixedAssets.ts`)
+
+**Nueva función `buildFixedAssetAcquisitionEntry()`:**
+- Genera asiento de compra con IVA CF y splits de pago
+- Estructura: DR Bien + DR IVA CF = CR Splits (múltiples cuentas)
+- Soporta alícuotas 21%, 10.5%, 27%, 0%
+- Valida que splits balanceen con total factura
+
+**Nueva función `syncFixedAssetAcquisitionEntry()`:**
+- Crea/actualiza el asiento de adquisición
+- Guarda `acquisitionJournalEntryId` en el asset
+
+**Modificado `buildFixedAssetOpeningEntry()`:**
+- Usa `originType` y `opening.initialAccumDep` para bienes de apertura
+- Solo genera asiento si `originType === 'OPENING'`
+- Usa `opening.contraAccountId` como contrapartida
+
+**Modificado `syncFixedAssetOpeningEntry()`:**
+- Misma lógica adaptada al nuevo modelo
+
+#### 3. Modal de Alta (`src/pages/Operaciones/BienesUsoPage.tsx`)
+
+**Selector de origen (solo para alta, no edición):**
+- Radio buttons: "Compra en el ejercicio" vs "Viene del ejercicio anterior"
+
+**Panel de adquisición (PURCHASE):**
+- Campos: docType, docNumber, vatRate, withVat toggle
+- Cálculo automático: netAmount (del originalValue), vatAmount, totalAmount
+- Tabla de splits con AccountSearchSelect + monto
+- Validación de balance de splits
+
+**Panel de apertura (OPENING):**
+- Campo: initialAccumDep (amort. acum. al inicio)
+- AccountSearchSelect para contraAccountId
+- Cálculo de valor libro inicial
+
+**Vida útil en meses:**
+- Para método lineal-month, input directo en meses
+- Para lineal-year, sincroniza automáticamente lifeMonths = lifeYears * 12
+
+**Fix AccountSearchSelect:**
+- Agregado `modalAccounts` query via `useLiveQuery`
+- Pasado `accounts` prop a todos los AccountSearchSelect
+
+#### 4. Soporte Intangibles (`src/lib/assetAccounts.ts`)
+
+**Nueva función `getStatementGroup()`:**
+```typescript
+function getStatementGroup(category: FixedAssetCategory): StatementGroup {
+    return isIntangibleCategory(category) ? 'INTANGIBLES' : 'PPE'
+}
+```
+
+**Actualizado `ensureAssetAccounts()`:**
+- Usa `getStatementGroup()` para asignar grupo correcto
+- Intangibles se crean bajo StatementGroup 'INTANGIBLES'
+
+#### 5. Planilla Amortizaciones (`src/pages/Planillas/AmortizacionesPage.tsx`)
+
+**Mapeo de categorías intangibles:**
+```typescript
+CATEGORY_TO_RUBRO = {
+    // ... tangibles existentes
+    'Software': 'Intangibles',
+    'Marcas y Patentes': 'Intangibles',
+    'Otros Intangibles': 'Intangibles',
+}
+```
+
+### Archivos Modificados
+
+| Archivo | Cambios |
+|---------|---------|
+| `src/core/fixedAssets/types.ts` | Nuevos tipos, interfaces, categorías intangibles, helpers |
+| `src/storage/fixedAssets.ts` | buildFixedAssetAcquisitionEntry, sync functions, opening logic |
+| `src/pages/Operaciones/BienesUsoPage.tsx` | AssetModal con origen/IVA/splits, modalAccounts |
+| `src/lib/assetAccounts.ts` | getStatementGroup para intangibles |
+| `src/pages/Planillas/AmortizacionesPage.tsx` | Mapeo intangibles en CATEGORY_TO_RUBRO |
+
+### Compatibilidad Hacia Atrás
+
+Todos los nuevos campos son **opcionales** con valores por defecto:
+- `originType`: default 'PURCHASE' (inferido de fecha si no existe)
+- `assetType`: default 'TANGIBLE' (inferido de categoría)
+- `lifeMonths`: default `lifeYears * 12`
+- `acquisition`, `opening`: undefined para bienes existentes
+
+**Lógica de inferencia legacy:**
+- Si `originType` no existe y `acquisitionDate < fiscalYearStart` → se trata como OPENING
+- Si `originType` no existe y `acquisitionDate >= fiscalYearStart` → se trata como PURCHASE
+
+### Validación
+
+```bash
+npm run build  # ✅ PASS (built in ~19s)
+```
+
+### Criterios de Aceptación Cumplidos
+
+- [x] Alta Contable genera asiento con IVA CF y múltiples splits
+- [x] Bienes de apertura capturan amort. acum. inicial y contrapartida
+- [x] Selector de origen distingue PURCHASE vs OPENING
+- [x] Input de vida útil en meses para método lineal-month
+- [x] Categorías intangibles (Software, Marcas y Patentes) disponibles
+- [x] StatementGroup correcto (INTANGIBLES) para activos intangibles
+- [x] Planilla de amortizaciones muestra intangibles en rubro "Intangibles"
+- [x] Campos opcionales mantienen compatibilidad con bienes existentes
+- [x] Build sin errores
+
+### Pruebas Manuales Recomendadas
+
+1. **Alta PURCHASE:**
+   - Crear bien tangible con IVA 21%
+   - Agregar 2 splits (ej: Banco 70%, Proveedores 30%)
+   - Verificar asiento generado: DR Bien + DR IVA CF = CR splits
+
+2. **Alta OPENING:**
+   - Crear bien con amort. acum. inicial $5000
+   - Seleccionar cuenta contrapartida (ej: Capital Social)
+   - Verificar asiento de apertura: DR Bien = CR Amort.Acum. + CR Contra
+
+3. **Intangibles:**
+   - Crear Software con vida útil 3 años
+   - Verificar cuenta creada bajo 1.2.02.01.xx
+   - Ver en planilla bajo rubro "Intangibles"
+
+4. **Edición:**
+   - Editar bien existente
+   - Verificar que selector de origen no aparece (solo para alta)
+   - Campos de valor y vida útil editables

@@ -7,15 +7,23 @@
 
 import { db } from '../storage/db'
 import { createAccount, generateNextCode, getAccountByCode } from '../storage/accounts'
-import type { Account } from '../core/models'
+import type { Account, StatementGroup } from '../core/models'
 import {
     CATEGORY_ACCOUNT_CODES,
     type FixedAssetCategory,
+    isIntangibleCategory,
 } from '../core/fixedAssets/types'
 
 export interface AssetAccountPair {
     assetAccountId: string
     contraAccountId: string
+}
+
+/**
+ * Get statement group for a category
+ */
+function getStatementGroup(category: FixedAssetCategory): StatementGroup {
+    return isIntangibleCategory(category) ? 'INTANGIBLES' : 'PPE'
 }
 
 /**
@@ -43,6 +51,8 @@ export async function ensureAssetAccounts(
     const assetCode = await generateNextCode(assetParent.id)
     const contraCode = await generateNextCode(contraParent.id)
 
+    const statementGroup = getStatementGroup(category)
+
     // Create asset account
     const assetAccount = await createAccount({
         code: assetCode,
@@ -50,21 +60,21 @@ export async function ensureAssetAccounts(
         kind: 'ASSET',
         section: 'NON_CURRENT',
         group: codes.name,
-        statementGroup: 'PPE',
+        statementGroup,
         parentId: assetParent.id,
         normalSide: 'DEBIT',
         isContra: false,
         isHeader: false,
     })
 
-    // Create contra account (accumulated depreciation)
+    // Create contra account (accumulated depreciation/amortization)
     const contraAccount = await createAccount({
         code: contraCode,
         name: `Amort. Acum. ${assetName}`,
         kind: 'ASSET',
         section: 'NON_CURRENT',
         group: codes.contraName,
-        statementGroup: 'PPE',
+        statementGroup,
         parentId: contraParent.id,
         normalSide: 'CREDIT',
         isContra: true,

@@ -33,9 +33,14 @@ const DAMAGE_EXPENSE_ACCOUNT_NAMES = ['Obsolescencia bienes de uso', 'Deterioro 
 const REVALUATION_RESERVE_CODE = '3.2.05'
 const REVALUATION_RESERVE_NAMES = ['Reserva por revaluo', 'Reserva por revalúo']
 const RECPAM_ACCOUNT_CODE = '4.6.05'
+const IVA_CF_CODE = '1.1.03.01'
+const IVA_CF_NAMES = ['IVA Credito Fiscal', 'IVA Crédito Fiscal']
 
 const buildFixedAssetOpeningExternalId = (fiscalYear: number, assetId: string) =>
     `FA_OPENING:${fiscalYear}:${assetId}`
+
+const buildFixedAssetAcquisitionExternalId = (assetId: string) =>
+    `FA_ACQUISITION:${assetId}`
 
 const normalizeText = (value: string) =>
     value
@@ -179,6 +184,16 @@ function resolveRecpamAccount(accounts: Account[]): Account | null {
         findAccountByCodeOrName(accounts, {
             codes: [RECPAM_ACCOUNT_CODE],
             nameIncludes: ['recpam', 'resultado por exposicion', 'inflacion'],
+        }) || null
+    )
+}
+
+function resolveIvaCFAccount(accounts: Account[]): Account | null {
+    return (
+        findAccountByCodeOrName(accounts, {
+            codes: [IVA_CF_CODE],
+            names: IVA_CF_NAMES,
+            nameIncludes: ['iva credito', 'iva cf'],
         }) || null
     )
 }
@@ -730,6 +745,187 @@ function calculateCostWithImprovements(
 }
 
 // ========================================
+// Acquisition Entry (Purchase)
+// ========================================
+
+async function findAcquisitionEntryByMeta(
+    assetId: string
+): Promise<JournalEntry | undefined> {
+    const entries = await db.entries.toArray()
+    return entries.find(e => {
+        const meta = e.metadata?.meta
+        return (
+            e.sourceModule === 'fixed-assets' &&
+            e.sourceType === 'acquisition' &&
+            meta?.source === 'fixedAssets' &&
+            meta?.kind === 'acquisition' &&
+            meta?.assetId === assetId
+        )
+    })
+}
+
+/**
+ * Build acquisition (purchase) journal entry for a fixed asset
+ *
+ * Typical entry with VAT:
+ *   Debit: Asset account (net amount)
+ *   Debit: IVA Credito Fiscal (VAT amount)
+ *   Credit: Payment accounts (splits - Bancos, Proveedores, etc.)
+ *
+ * Without VAT (IVA as cost):
+ *   Debit: Asset account (total amount)
+ *   Credit: Payment accounts (splits)
+ */
+export async function buildFixedAssetAcquisitionEntry(
+    asset: FixedAsset
+): Promise<JournalBuildResult> {
+    if (!asset.acquisition) {
+        return { entry: null, error: 'No hay datos de adquisicion.' }
+    }
+
+    const acq = asset.acquisition
+    if (!acq.splits || acq.splits.length === 0) {
+        return { entry: null, error: 'Debe agregar al menos una contrapartida de pago.' }
+    }
+
+    const accounts = await db.accounts.toArray()
+    const assetAccount = accounts.find(a => a.id === asset.accountId)
+    const ivaCFAccount = resolveIvaCFAccount(accounts)
+
+    if (!assetAccount) {
+        return { entry: null, error: 'Falta cuenta del activo vinculada al bien.' }
+    }
+
+    // Validate splits sum
+    const splitsTotal = round2(acq.splits.reduce((sum, s) => sum + s.amount, 0))
+    if (Math.abs(splitsTotal - acq.totalAmount) > 0.01) {
+        return {
+            entry: null,
+            error: `Las contrapartidas (${splitsTotal.toFixed(2)}) no suman el total (${acq.totalAmount.toFixed(2)}).`
+        }
+    }
+
+    // Validate split accounts exist
+    for (const split of acq.splits) {
+        const splitAccount = accounts.find(a => a.id === split.accountId)
+        if (!splitAccount) {
+            return { entry: null, error: `Cuenta de contrapartida no encontrada: ${split.accountId}` }
+        }
+    }
+
+    const lines: EntryLine[] = []
+
+    if (acq.withVat && acq.vatAmount > 0) {
+        // With VAT discrimination
+        if (!ivaCFAccount) {
+            return { entry: null, error: 'Falta cuenta IVA Credito Fiscal (1.1.03.01) en Plan de Cuentas.' }
+        }
+
+        // Debit: Asset (net)
+        lines.push({
+            accountId: assetAccount.id,
+            debit: round2(acq.netAmount),
+            credit: 0,
+            description: `Alta ${asset.name}`,
+        })
+
+        // Debit: IVA CF
+        lines.push({
+            accountId: ivaCFAccount.id,
+            debit: round2(acq.vatAmount),
+            credit: 0,
+            description: 'IVA Credito Fiscal',
+        })
+    } else {
+        // Without VAT (IVA as cost) or no VAT
+        lines.push({
+            accountId: assetAccount.id,
+            debit: round2(acq.totalAmount),
+            credit: 0,
+            description: `Alta ${asset.name}`,
+        })
+    }
+
+    // Credit: Payment splits
+    for (const split of acq.splits) {
+        lines.push({
+            accountId: split.accountId,
+            debit: 0,
+            credit: round2(split.amount),
+            description: split.description || 'Pago adquisicion',
+        })
+    }
+
+    const docRef = acq.docType && acq.docNumber
+        ? ` - ${acq.docType} ${acq.docNumber}`
+        : ''
+
+    return {
+        entry: {
+            date: acq.date,
+            memo: `Alta Bien de Uso - ${asset.name}${docRef}`,
+            lines,
+            sourceModule: 'fixed-assets',
+            sourceId: asset.id,
+            sourceType: 'acquisition',
+            createdAt: new Date().toISOString(),
+            metadata: {
+                journalRole: 'acquisition',
+                assetId: asset.id,
+                assetName: asset.name,
+                externalId: buildFixedAssetAcquisitionExternalId(asset.id),
+                meta: {
+                    source: 'fixedAssets',
+                    kind: 'acquisition',
+                    assetId: asset.id,
+                    periodId: asset.periodId,
+                },
+            },
+        },
+    }
+}
+
+/**
+ * Sync (create or update) acquisition journal entry for a fixed asset
+ */
+export async function syncFixedAssetAcquisitionEntry(
+    asset: FixedAsset
+): Promise<{ success: boolean; entryId?: string; error?: string; status?: 'generated' | 'updated' | 'skipped' }> {
+    if (asset.originType === 'OPENING') {
+        return { success: false, status: 'skipped', error: 'Este bien es de apertura, no tiene asiento de compra.' }
+    }
+
+    if (!asset.acquisition) {
+        return { success: false, status: 'skipped', error: 'No hay datos de adquisicion.' }
+    }
+
+    const { entry, error } = await buildFixedAssetAcquisitionEntry(asset)
+    if (!entry) {
+        return { success: false, error: error || 'No se pudo generar el asiento de adquisicion.' }
+    }
+
+    let existing: JournalEntry | undefined
+    if (asset.acquisitionJournalEntryId) {
+        existing = await db.entries.get(asset.acquisitionJournalEntryId)
+    }
+    if (!existing) {
+        existing = await findAcquisitionEntryByMeta(asset.id)
+    }
+
+    if (existing) {
+        await updateEntry(existing.id, entry)
+        if (asset.acquisitionJournalEntryId !== existing.id) {
+            await updateFixedAsset(asset.id, { acquisitionJournalEntryId: existing.id })
+        }
+        return { success: true, entryId: existing.id, status: 'updated' }
+    }
+
+    const created = await createEntry(entry)
+    await updateFixedAsset(asset.id, { acquisitionJournalEntryId: created.id })
+    return { success: true, entryId: created.id, status: 'generated' }
+}
+
+// ========================================
 // Opening Entry
 // ========================================
 
@@ -753,33 +949,67 @@ async function findOpeningEntryByMeta(
     })
 }
 
+/**
+ * Build opening entry for a fixed asset
+ *
+ * Logic:
+ * - originType=PURCHASE + acquisitionDate in current year → no opening (use acquisition entry)
+ * - originType=OPENING → always generate opening with opening.initialAccumDep
+ * - No originType (legacy) → use date-based logic for backwards compatibility
+ */
 export async function buildFixedAssetOpeningEntry(
     asset: FixedAsset,
     fiscalYear: number
 ): Promise<JournalBuildResult> {
     const fiscalYearStart = new Date(fiscalYear, 0, 1)
-    if (new Date(asset.acquisitionDate) >= fiscalYearStart) {
-        return { entry: null, error: 'El bien es del ejercicio actual; no requiere apertura.' }
+    const acquisitionDate = new Date(asset.acquisitionDate)
+    const isCurrentYearAsset = acquisitionDate >= fiscalYearStart
+
+    // Determine if this asset needs an opening entry
+    const originType = asset.originType || (isCurrentYearAsset ? 'PURCHASE' : 'OPENING')
+
+    if (originType === 'PURCHASE' && isCurrentYearAsset) {
+        return { entry: null, error: 'Este bien es una compra del ejercicio; ver asiento de adquisicion.' }
     }
 
-    const calcPrev = calculateFixedAssetDepreciation(asset, fiscalYear - 1)
-    const amortAcumulada = round2(calcPrev.acumuladaCierre)
+    // For OPENING assets or legacy assets from previous years
     const valorOrigen = round2(asset.originalValue)
+
+    // Calculate accumulated depreciation
+    let amortAcumulada: number
+    if (asset.opening?.initialAccumDep !== undefined && asset.opening.initialAccumDep > 0) {
+        // Use explicitly provided initial accumulated depreciation
+        amortAcumulada = round2(asset.opening.initialAccumDep)
+    } else {
+        // Calculate based on previous year depreciation
+        const calcPrev = calculateFixedAssetDepreciation(asset, fiscalYear - 1)
+        amortAcumulada = round2(calcPrev.acumuladaCierre)
+    }
+
     const valorNeto = round2(Math.max(0, valorOrigen - amortAcumulada))
 
     const accounts = await db.accounts.toArray()
     const assetAccount = accounts.find(a => a.id === asset.accountId)
     const contraAccount = accounts.find(a => a.id === asset.contraAccountId)
-    const openingResult = await ensureOpeningBalanceAccount(accounts)
+
+    // Determine contrapartida account
+    let openingContraAccount: Account | undefined
+    if (asset.opening?.contraAccountId) {
+        openingContraAccount = accounts.find(a => a.id === asset.opening!.contraAccountId)
+    }
+    if (!openingContraAccount) {
+        const openingResult = await ensureOpeningBalanceAccount(accounts)
+        if (!openingResult.account) {
+            return { entry: null, error: openingResult.error || 'Falta cuenta de Apertura.' }
+        }
+        openingContraAccount = openingResult.account
+    }
 
     if (!assetAccount) {
         return { entry: null, error: 'Falta cuenta del activo vinculada al bien.' }
     }
     if (!contraAccount) {
-        return { entry: null, error: 'Falta cuenta de amortización acumulada vinculada al bien.' }
-    }
-    if (!openingResult.account) {
-        return { entry: null, error: openingResult.error || 'Falta cuenta de Apertura.' }
+        return { entry: null, error: 'Falta cuenta de amortizacion acumulada vinculada al bien.' }
     }
 
     const lines: EntryLine[] = [
@@ -802,7 +1032,7 @@ export async function buildFixedAssetOpeningEntry(
 
     if (valorNeto > 0) {
         lines.push({
-            accountId: openingResult.account.id,
+            accountId: openingContraAccount.id,
             debit: 0,
             credit: valorNeto,
             description: 'Contrapartida apertura',
@@ -843,8 +1073,12 @@ export async function syncFixedAssetOpeningEntry(
     fiscalYear: number
 ): Promise<{ success: boolean; entryId?: string; error?: string; status?: 'generated' | 'updated' | 'skipped' }> {
     const fiscalYearStart = new Date(fiscalYear, 0, 1)
-    if (new Date(asset.acquisitionDate) >= fiscalYearStart) {
-        return { success: false, status: 'skipped', error: 'No aplica apertura en este ejercicio.' }
+    const isCurrentYearAsset = new Date(asset.acquisitionDate) >= fiscalYearStart
+    const originType = asset.originType || (isCurrentYearAsset ? 'PURCHASE' : 'OPENING')
+
+    // PURCHASE assets from current year don't need opening entry
+    if (originType === 'PURCHASE' && isCurrentYearAsset) {
+        return { success: false, status: 'skipped', error: 'Este bien es una compra del ejercicio.' }
     }
 
     const { entry, error } = await buildFixedAssetOpeningEntry(asset, fiscalYear)

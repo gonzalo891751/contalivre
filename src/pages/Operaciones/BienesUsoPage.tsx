@@ -31,6 +31,8 @@ import {
     Receipt,
     CalendarPlus,
     CurrencyCircleDollar,
+    Code,
+    Stamp,
 } from '@phosphor-icons/react'
 import { db } from '../../storage/db'
 import type { JournalEntry } from '../../core/models'
@@ -44,6 +46,7 @@ import {
     generateDepreciationSchedule,
     buildFixedAssetOpeningEntry,
     syncFixedAssetOpeningEntry,
+    syncFixedAssetAcquisitionEntry,
     buildFixedAssetEventJournalEntry,
     createFixedAssetEvent,
     syncFixedAssetEventJournalEntry,
@@ -60,9 +63,18 @@ import {
     type FixedAssetStatus,
     type FixedAssetEvent,
     type FixedAssetEventType,
+    type FixedAssetOriginType,
+    type AcquisitionData,
+    type OpeningData,
+    type PaymentSplit,
     FIXED_ASSET_CATEGORIES,
+    TANGIBLE_CATEGORIES,
+    INTANGIBLE_CATEGORIES,
     STATUS_LABELS,
     METHOD_LABELS,
+    getAssetTypeFromCategory,
+    createDefaultAcquisition,
+    createDefaultOpening,
 } from '../../core/fixedAssets/types'
 import AccountSearchSelect from '../../ui/AccountSearchSelect'
 
@@ -78,6 +90,7 @@ type EventFormState = {
 
 // Category to icon mapping
 const CATEGORY_ICONS: Record<FixedAssetCategory, typeof Car> = {
+    // Tangibles
     'Rodados': Car,
     'Inmuebles': Buildings,
     'Instalaciones': Buildings,
@@ -86,6 +99,10 @@ const CATEGORY_ICONS: Record<FixedAssetCategory, typeof Car> = {
     'Muebles y Utiles': Armchair,
     'Terrenos': MapPin,
     'Otros': Package,
+    // Intangibles
+    'Software': Code,
+    'Marcas y Patentes': Stamp,
+    'Otros Intangibles': Package,
 }
 
 // Status to badge style mapping
@@ -248,11 +265,29 @@ export default function BienesUsoPage() {
             .sort((a, b) => a.date.localeCompare(b.date))
     }, [events, selectedAssetId])
 
-    const openingApplicable = useMemo(() => {
+    // Determine if asset is PURCHASE or OPENING type
+    const assetOriginType = useMemo(() => {
+        if (!selectedAsset) return 'PURCHASE'
+        if (selectedAsset.originType) return selectedAsset.originType
+        // Backwards compatibility: infer from date
+        const fiscalYearStart = new Date(periodYear, 0, 1)
+        return new Date(selectedAsset.acquisitionDate) < fiscalYearStart ? 'OPENING' : 'PURCHASE'
+    }, [selectedAsset, periodYear])
+
+    const isPurchaseAsset = assetOriginType === 'PURCHASE'
+    const isCurrentYearPurchase = useMemo(() => {
         if (!selectedAsset) return false
         const fiscalYearStart = new Date(periodYear, 0, 1)
-        return new Date(selectedAsset.acquisitionDate) < fiscalYearStart
-    }, [selectedAsset, periodYear])
+        return isPurchaseAsset && new Date(selectedAsset.acquisitionDate) >= fiscalYearStart
+    }, [selectedAsset, periodYear, isPurchaseAsset])
+
+    const openingApplicable = useMemo(() => {
+        if (!selectedAsset) return false
+        // PURCHASE assets from current year don't need opening
+        if (isCurrentYearPurchase) return false
+        // OPENING assets or legacy assets from previous years need opening
+        return true
+    }, [selectedAsset, isCurrentYearPurchase])
 
     const openingStatus = useMemo(() => {
         if (!selectedAsset) return 'pending' as const
@@ -261,6 +296,23 @@ export default function BienesUsoPage() {
         if (selectedAsset.openingJournalEntryId && !openingEntry) return 'error' as const
         return 'pending' as const
     }, [openingApplicable, openingEntry, selectedAsset])
+
+    // Acquisition entry (for PURCHASE assets)
+    const acquisitionEntry = useLiveQuery(
+        async () => {
+            if (!selectedAsset?.acquisitionJournalEntryId) return null
+            return db.entries.get(selectedAsset.acquisitionJournalEntryId)
+        },
+        [selectedAsset?.acquisitionJournalEntryId]
+    )
+
+    const acquisitionStatus = useMemo(() => {
+        if (!selectedAsset) return 'pending' as const
+        if (!isCurrentYearPurchase) return 'pending' as const
+        if (acquisitionEntry) return 'generated' as const
+        if (selectedAsset.acquisitionJournalEntryId && !acquisitionEntry) return 'error' as const
+        return 'pending' as const
+    }, [isCurrentYearPurchase, acquisitionEntry, selectedAsset])
 
     const rt6Status = useMemo(() => {
         if (!selectedAsset) return 'pending' as const
@@ -880,6 +932,63 @@ export default function BienesUsoPage() {
 
                 {activeTab === 'asiento' && (
                     <div className="space-y-6">
+                        {/* Acquisition Entry (for PURCHASE assets from current year) */}
+                        {isCurrentYearPurchase && (
+                            <div className="bg-white rounded-xl border border-blue-200 p-6 space-y-4">
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                    <div>
+                                        <h3 className="font-semibold text-blue-900">Asiento de Adquisicion</h3>
+                                        <p className="text-sm text-blue-600">
+                                            Registra la compra del bien en el ejercicio {periodYear}.
+                                        </p>
+                                    </div>
+                                    <span
+                                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${ENTRY_STATUS_STYLES[acquisitionStatus]}`}
+                                    >
+                                        Compra: {ENTRY_STATUS_LABELS[acquisitionStatus]}
+                                    </span>
+                                </div>
+
+                                {acquisitionEntry ? (
+                                    renderEntryPreview(acquisitionEntry)
+                                ) : selectedAsset?.acquisition ? (
+                                    <div className="text-sm text-blue-600 bg-blue-50 p-3 rounded-lg">
+                                        <div className="font-medium mb-1">Datos de compra registrados:</div>
+                                        <div className="text-xs space-y-0.5">
+                                            <div>Neto: ${selectedAsset.acquisition.netAmount.toFixed(2)}</div>
+                                            {selectedAsset.acquisition.withVat && (
+                                                <div>IVA ({selectedAsset.acquisition.vatRate}%): ${selectedAsset.acquisition.vatAmount.toFixed(2)}</div>
+                                            )}
+                                            <div>Total: ${selectedAsset.acquisition.totalAmount.toFixed(2)}</div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-sm text-slate-500">
+                                        No hay datos de adquisicion. Edite el bien para agregarlos.
+                                    </div>
+                                )}
+
+                                <div className="flex justify-end">
+                                    <button
+                                        onClick={async () => {
+                                            if (!selectedAsset) return
+                                            const result = await syncFixedAssetAcquisitionEntry(selectedAsset)
+                                            if (result.success) {
+                                                showToast('Asiento de adquisicion generado', 'success')
+                                            } else {
+                                                showToast(result.error || 'Error al generar asiento', 'error')
+                                            }
+                                        }}
+                                        disabled={!selectedAsset?.acquisition}
+                                        className="px-4 py-2 text-sm font-medium text-blue-700 bg-white border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Regenerar Asiento Compra
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Opening Entry (for OPENING assets or legacy assets) */}
                         <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
                             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                                 <div>
@@ -887,7 +996,9 @@ export default function BienesUsoPage() {
                                     <p className="text-sm text-slate-500">
                                         {openingApplicable
                                             ? 'Registra el saldo inicial del bien al inicio del ejercicio.'
-                                            : 'Este bien es del ejercicio actual y no requiere apertura.'}
+                                            : isCurrentYearPurchase
+                                                ? 'Este bien es una compra del ejercicio; ver asiento de adquisicion arriba.'
+                                                : 'Este bien no requiere asiento de apertura.'}
                                     </p>
                                 </div>
                                 <span
@@ -906,8 +1017,10 @@ export default function BienesUsoPage() {
                                     </div>
                                 )
                             ) : (
-                                <div className="text-sm text-slate-500">
-                                    No aplica para bienes incorporados en {periodYear}.
+                                <div className="text-sm text-slate-400 italic">
+                                    {isCurrentYearPurchase
+                                        ? 'Ver asiento de adquisicion.'
+                                        : 'No aplica.'}
                                 </div>
                             )}
 
@@ -1450,6 +1563,9 @@ export default function BienesUsoPage() {
 // Asset Modal Component
 // ========================================
 
+const VAT_RATES = [21, 10.5, 27, 0] as const
+const DOC_TYPES = ['FC A', 'FC B', 'FC C', 'FC E', 'Ticket', 'Otro'] as const
+
 interface AssetModalProps {
     asset: FixedAsset | null
     periodId: string
@@ -1463,7 +1579,11 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
     const [loading, setLoading] = useState(false)
     const [autoCreateAccounts, setAutoCreateAccounts] = useState(true)
 
-    // Form state
+    // Load accounts for AccountSearchSelect
+    const modalAccounts = useLiveQuery(() => db.accounts.toArray(), []) || []
+    const fiscalYear = Number(periodId)
+
+    // Form state - basic info
     const [formData, setFormData] = useState({
         name: asset?.name || '',
         category: asset?.category || ('Muebles y Utiles' as FixedAssetCategory),
@@ -1473,10 +1593,86 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
         residualValuePct: asset?.residualValuePct || 0,
         method: asset?.method || ('lineal-year' as FixedAssetMethod),
         lifeYears: asset?.lifeYears || 5,
+        lifeMonths: asset?.lifeMonths || 60,
         lifeUnits: asset?.lifeUnits || 0,
         rt6Enabled: asset?.rt6Enabled || false,
         notes: asset?.notes || '',
     })
+
+    // Origin type (only for new assets)
+    const [originType, setOriginType] = useState<FixedAssetOriginType>(
+        asset?.originType || 'PURCHASE'
+    )
+
+    // Acquisition data (for PURCHASE origin)
+    const [acquisition, setAcquisition] = useState<AcquisitionData>(
+        asset?.acquisition || createDefaultAcquisition()
+    )
+
+    // Opening data (for OPENING origin)
+    const [opening, setOpening] = useState<OpeningData>(
+        asset?.opening || createDefaultOpening()
+    )
+
+    // Update lifeMonths when lifeYears changes
+    useEffect(() => {
+        if (formData.method === 'lineal-year') {
+            setFormData(prev => ({ ...prev, lifeMonths: prev.lifeYears * 12 }))
+        }
+    }, [formData.lifeYears, formData.method])
+
+    // Update acquisition amounts when values change
+    useEffect(() => {
+        if (originType === 'PURCHASE') {
+            const net = formData.originalValue
+            const vatAmount = acquisition.withVat
+                ? Math.round((net * acquisition.vatRate / 100) * 100) / 100
+                : 0
+            const total = net + vatAmount
+            setAcquisition(prev => ({
+                ...prev,
+                netAmount: net,
+                vatAmount,
+                totalAmount: total,
+            }))
+        }
+    }, [formData.originalValue, acquisition.vatRate, acquisition.withVat, originType])
+
+    // Handle adding a payment split
+    const handleAddSplit = () => {
+        setAcquisition(prev => ({
+            ...prev,
+            splits: [...prev.splits, { accountId: '', amount: 0 }],
+        }))
+    }
+
+    // Handle removing a split
+    const handleRemoveSplit = (index: number) => {
+        setAcquisition(prev => ({
+            ...prev,
+            splits: prev.splits.filter((_, i) => i !== index),
+        }))
+    }
+
+    // Handle updating a split
+    const handleUpdateSplit = (index: number, field: keyof PaymentSplit, value: string | number) => {
+        setAcquisition(prev => ({
+            ...prev,
+            splits: prev.splits.map((s, i) =>
+                i === index ? { ...s, [field]: value } : s
+            ),
+        }))
+    }
+
+    // Auto-distribute remaining amount to first split
+    const handleDistributeRemaining = () => {
+        const total = acquisition.totalAmount
+        const currentSum = acquisition.splits.reduce((sum, s) => sum + s.amount, 0)
+        const remaining = Math.round((total - currentSum) * 100) / 100
+        if (remaining > 0 && acquisition.splits.length > 0) {
+            handleUpdateSplit(0, 'amount', acquisition.splits[0].amount + remaining)
+        }
+    }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -1495,14 +1691,47 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
             return
         }
 
+        // Validate acquisition data for PURCHASE
+        if (!isEditing && originType === 'PURCHASE') {
+            if (acquisition.splits.length === 0) {
+                onError('Debe agregar al menos una contrapartida de pago')
+                return
+            }
+            const splitsTotal = acquisition.splits.reduce((sum, s) => sum + s.amount, 0)
+            if (Math.abs(splitsTotal - acquisition.totalAmount) > 0.01) {
+                onError(`Las contrapartidas (${splitsTotal.toFixed(2)}) no suman el total (${acquisition.totalAmount.toFixed(2)})`)
+                return
+            }
+            for (const split of acquisition.splits) {
+                if (!split.accountId) {
+                    onError('Todas las contrapartidas deben tener una cuenta seleccionada')
+                    return
+                }
+            }
+        }
+
+        // Validate opening data for OPENING
+        if (!isEditing && originType === 'OPENING') {
+            if (!opening.contraAccountId) {
+                onError('Debe seleccionar una cuenta de contrapartida para la apertura')
+                return
+            }
+        }
+
         setLoading(true)
 
         try {
             let savedAsset: FixedAsset | null = null
+            const assetType = getAssetTypeFromCategory(formData.category)
+
             if (isEditing && asset) {
                 // Update existing
                 savedAsset = await updateFixedAsset(asset.id, {
                     ...formData,
+                    assetType,
+                    lifeMonths: formData.method === 'lineal-month'
+                        ? formData.lifeMonths
+                        : formData.lifeYears * 12,
                 })
             } else {
                 // Create new
@@ -1526,8 +1755,6 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                     accountId = accounts.assetAccountId
                     contraAccountId = accounts.contraAccountId
                 } else {
-                    // For manual mode, we'd need account selection UI
-                    // For now, require auto-create
                     onError('La seleccion manual de cuentas no esta implementada. Use auto-crear.')
                     setLoading(false)
                     return
@@ -1538,14 +1765,34 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                     periodId,
                     accountId,
                     contraAccountId,
+                    assetType,
+                    originType,
+                    lifeMonths: formData.method === 'lineal-month'
+                        ? formData.lifeMonths
+                        : formData.lifeYears * 12,
+                    acquisition: originType === 'PURCHASE' ? {
+                        ...acquisition,
+                        date: formData.acquisitionDate,
+                    } : undefined,
+                    opening: originType === 'OPENING' ? opening : undefined,
                 })
             }
 
-            const fiscalYear = Number(periodId)
+            // Generate appropriate journal entry
             if (savedAsset && Number.isFinite(fiscalYear)) {
-                const openingResult = await syncFixedAssetOpeningEntry(savedAsset, fiscalYear)
-                if (!openingResult.success && openingResult.status !== 'skipped') {
-                    onError(openingResult.error || 'No se pudo generar el asiento de apertura')
+                if (originType === 'PURCHASE' && !isEditing) {
+                    // Generate acquisition entry
+                    const acqResult = await syncFixedAssetAcquisitionEntry(savedAsset)
+                    if (!acqResult.success && acqResult.status !== 'skipped') {
+                        onError(acqResult.error || 'No se pudo generar el asiento de adquisicion')
+                    }
+                } else {
+                    // Generate opening entry (for OPENING origin or editing)
+                    const openingResult = await syncFixedAssetOpeningEntry(savedAsset, fiscalYear)
+                    if (!openingResult.success && openingResult.status !== 'skipped') {
+                        // Not critical - just log
+                        console.warn('Opening entry:', openingResult.error)
+                    }
                 }
             }
 
@@ -1557,12 +1804,16 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
         }
     }
 
+    // Calculate splits total for display
+    const splitsTotal = acquisition.splits.reduce((sum, s) => sum + s.amount, 0)
+    const splitsRemaining = Math.round((acquisition.totalAmount - splitsTotal) * 100) / 100
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-4 flex justify-between items-center">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-4 flex justify-between items-center z-10">
                     <h2 className="font-display font-bold text-lg text-slate-900">
-                        {isEditing ? 'Editar Bien' : 'Nuevo Bien de Uso'}
+                        {isEditing ? 'Editar Bien' : 'Nuevo Bien de Uso / Intangible'}
                     </h2>
                     <button
                         onClick={onClose}
@@ -1572,7 +1823,50 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                <form onSubmit={handleSubmit} className="p-6 space-y-5">
+                    {/* Origin Type Selector (only for new assets) */}
+                    {!isEditing && (
+                        <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                            <label className="block text-xs font-semibold text-slate-500 mb-2">
+                                Origen del Alta
+                            </label>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setOriginType('PURCHASE')}
+                                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                                        originType === 'PURCHASE'
+                                            ? 'border-blue-500 bg-blue-50'
+                                            : 'border-slate-200 hover:border-slate-300'
+                                    }`}
+                                >
+                                    <div className="font-semibold text-sm text-slate-800">
+                                        Compra en el ejercicio
+                                    </div>
+                                    <div className="text-xs text-slate-500 mt-0.5">
+                                        Nuevo bien adquirido en {fiscalYear}
+                                    </div>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setOriginType('OPENING')}
+                                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                                        originType === 'OPENING'
+                                            ? 'border-emerald-500 bg-emerald-50'
+                                            : 'border-slate-200 hover:border-slate-300'
+                                    }`}
+                                >
+                                    <div className="font-semibold text-sm text-slate-800">
+                                        Viene del ejercicio anterior
+                                    </div>
+                                    <div className="text-xs text-slate-500 mt-0.5">
+                                        Bien ya en uso (saldos iniciales)
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Name */}
                     <div>
                         <label className="block text-xs font-semibold text-slate-500 mb-1.5">
@@ -1603,11 +1897,16 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                                 }
                                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                             >
-                                {FIXED_ASSET_CATEGORIES.map(cat => (
-                                    <option key={cat} value={cat}>
-                                        {cat}
-                                    </option>
-                                ))}
+                                <optgroup label="Bienes de Uso (Tangibles)">
+                                    {TANGIBLE_CATEGORIES.map(cat => (
+                                        <option key={cat} value={cat}>{cat}</option>
+                                    ))}
+                                </optgroup>
+                                <optgroup label="Bienes Intangibles">
+                                    {INTANGIBLE_CATEGORIES.map(cat => (
+                                        <option key={cat} value={cat}>{cat}</option>
+                                    ))}
+                                </optgroup>
                             </select>
                         </div>
                         <div>
@@ -1634,7 +1933,7 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-xs font-semibold text-slate-500 mb-1.5">
-                                Fecha de Alta
+                                Fecha de Alta / Origen
                             </label>
                             <input
                                 type="date"
@@ -1647,7 +1946,9 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-slate-500 mb-1.5">
-                                Valor de Origen *
+                                {originType === 'PURCHASE' && acquisition.withVat
+                                    ? 'Valor Neto (sin IVA) *'
+                                    : 'Valor de Origen *'}
                             </label>
                             <input
                                 type="number"
@@ -1665,6 +1966,224 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                             />
                         </div>
                     </div>
+
+                    {/* PURCHASE: IVA and Document fields */}
+                    {!isEditing && originType === 'PURCHASE' && (
+                        <div className="bg-blue-50 rounded-xl p-4 border border-blue-100 space-y-4">
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm font-semibold text-blue-800">Datos de la Compra</span>
+                                <label className="flex items-center gap-2 text-sm">
+                                    <input
+                                        type="checkbox"
+                                        checked={acquisition.withVat}
+                                        onChange={e => setAcquisition({
+                                            ...acquisition,
+                                            withVat: e.target.checked,
+                                        })}
+                                        className="w-4 h-4 text-blue-600 rounded"
+                                    />
+                                    <span className="text-blue-700">Discrimina IVA</span>
+                                </label>
+                            </div>
+
+                            {acquisition.withVat && (
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-medium text-blue-700 mb-1">
+                                            Alicuota IVA
+                                        </label>
+                                        <select
+                                            value={acquisition.vatRate}
+                                            onChange={e => setAcquisition({
+                                                ...acquisition,
+                                                vatRate: parseFloat(e.target.value),
+                                            })}
+                                            className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm"
+                                        >
+                                            {VAT_RATES.map(rate => (
+                                                <option key={rate} value={rate}>{rate}%</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-blue-700 mb-1">
+                                            IVA
+                                        </label>
+                                        <div className="px-3 py-2 bg-blue-100 border border-blue-200 rounded-lg text-sm font-mono">
+                                            ${acquisition.vatAmount.toFixed(2)}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-blue-700 mb-1">
+                                            Total
+                                        </label>
+                                        <div className="px-3 py-2 bg-blue-100 border border-blue-200 rounded-lg text-sm font-mono font-semibold">
+                                            ${acquisition.totalAmount.toFixed(2)}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-blue-700 mb-1">
+                                        Tipo Comprobante
+                                    </label>
+                                    <select
+                                        value={acquisition.docType}
+                                        onChange={e => setAcquisition({
+                                            ...acquisition,
+                                            docType: e.target.value,
+                                        })}
+                                        className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm"
+                                    >
+                                        {DOC_TYPES.map(type => (
+                                            <option key={type} value={type}>{type}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-blue-700 mb-1">
+                                        Numero
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={acquisition.docNumber}
+                                        onChange={e => setAcquisition({
+                                            ...acquisition,
+                                            docNumber: e.target.value,
+                                        })}
+                                        placeholder="0001-00000001"
+                                        className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Payment Splits */}
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="text-xs font-medium text-blue-700">
+                                        Contrapartidas de Pago
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={handleAddSplit}
+                                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                                    >
+                                        + Agregar
+                                    </button>
+                                </div>
+
+                                {acquisition.splits.length === 0 ? (
+                                    <div className="text-xs text-blue-600 bg-blue-100 rounded-lg p-3 text-center">
+                                        Agrega al menos una cuenta de pago (ej: Bancos, Proveedores)
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {acquisition.splits.map((split, idx) => (
+                                            <div key={idx} className="flex gap-2 items-center">
+                                                <div className="flex-1">
+                                                    <AccountSearchSelect
+                                                        accounts={modalAccounts}
+                                                        value={split.accountId}
+                                                        onChange={id => handleUpdateSplit(idx, 'accountId', id)}
+                                                        placeholder="Buscar cuenta..."
+                                                    />
+                                                </div>
+                                                <input
+                                                    type="number"
+                                                    value={split.amount || ''}
+                                                    onChange={e => handleUpdateSplit(idx, 'amount', parseFloat(e.target.value) || 0)}
+                                                    placeholder="Monto"
+                                                    className="w-28 px-2 py-1.5 bg-white border border-blue-200 rounded text-sm"
+                                                    step="0.01"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveSplit(idx)}
+                                                    className="p-1 text-red-400 hover:text-red-600"
+                                                >
+                                                    <X size={16} />
+                                                </button>
+                                            </div>
+                                        ))}
+
+                                        {/* Splits summary */}
+                                        <div className="flex justify-between text-xs pt-2 border-t border-blue-200">
+                                            <span className="text-blue-700">
+                                                Total contrapartidas: <span className="font-mono">${splitsTotal.toFixed(2)}</span>
+                                            </span>
+                                            {Math.abs(splitsRemaining) > 0.01 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleDistributeRemaining}
+                                                    className={`font-medium ${splitsRemaining > 0 ? 'text-amber-600' : 'text-red-600'}`}
+                                                >
+                                                    {splitsRemaining > 0
+                                                        ? `Faltan $${splitsRemaining.toFixed(2)} - Completar`
+                                                        : `Exceso $${Math.abs(splitsRemaining).toFixed(2)}`
+                                                    }
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* OPENING: Initial accumulated depreciation */}
+                    {!isEditing && originType === 'OPENING' && (
+                        <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100 space-y-4">
+                            <span className="text-sm font-semibold text-emerald-800">Datos de Apertura</span>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-emerald-700 mb-1">
+                                        Amort. Acum. Inicial
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={opening.initialAccumDep || ''}
+                                        onChange={e => setOpening({
+                                            ...opening,
+                                            initialAccumDep: parseFloat(e.target.value) || 0,
+                                        })}
+                                        placeholder="0"
+                                        min="0"
+                                        step="0.01"
+                                        className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-lg text-sm"
+                                    />
+                                    <p className="text-xs text-emerald-600 mt-1">
+                                        Amortizacion acumulada al 01/01/{fiscalYear}
+                                    </p>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-emerald-700 mb-1">
+                                        Valor Libro Inicial
+                                    </label>
+                                    <div className="px-3 py-2 bg-emerald-100 border border-emerald-200 rounded-lg text-sm font-mono">
+                                        ${(formData.originalValue - (opening.initialAccumDep || 0)).toFixed(2)}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-emerald-700 mb-1">
+                                    Cuenta Contrapartida
+                                </label>
+                                <AccountSearchSelect
+                                    accounts={modalAccounts}
+                                    value={opening.contraAccountId}
+                                    onChange={id => setOpening({ ...opening, contraAccountId: id })}
+                                    placeholder="Ej: Capital Social, Apertura..."
+                                />
+                                <p className="text-xs text-emerald-600 mt-1">
+                                    Cuenta que balancea el asiento de apertura
+                                </p>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Method */}
                     <div>
@@ -1685,22 +2204,35 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                         </select>
                     </div>
 
-                    {/* Conditional fields based on method */}
+                    {/* Life years/months based on method */}
                     {formData.method !== 'none' && formData.method !== 'units' && (
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-xs font-semibold text-slate-500 mb-1.5">
-                                    Vida Util (Años)
+                                    {formData.method === 'lineal-month' ? 'Vida Util (Meses)' : 'Vida Util (Años)'}
                                 </label>
                                 <input
                                     type="number"
-                                    value={formData.lifeYears || ''}
-                                    onChange={e =>
-                                        setFormData({
-                                            ...formData,
-                                            lifeYears: parseInt(e.target.value) || 0,
-                                        })
+                                    value={formData.method === 'lineal-month'
+                                        ? formData.lifeMonths || ''
+                                        : formData.lifeYears || ''
                                     }
+                                    onChange={e => {
+                                        const val = parseInt(e.target.value) || 0
+                                        if (formData.method === 'lineal-month') {
+                                            setFormData({
+                                                ...formData,
+                                                lifeMonths: val,
+                                                lifeYears: Math.ceil(val / 12),
+                                            })
+                                        } else {
+                                            setFormData({
+                                                ...formData,
+                                                lifeYears: val,
+                                                lifeMonths: val * 12,
+                                            })
+                                        }
+                                    }}
                                     min="1"
                                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                                 />
@@ -1749,14 +2281,13 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
 
                     {formData.method === 'none' && (
                         <div className="bg-slate-50 rounded-lg p-4 text-sm text-slate-600">
-                            Los bienes no amortizables (como terrenos) mantienen su valor de origen sin
-                            desgaste.
+                            Los bienes no amortizables (como terrenos) mantienen su valor de origen sin desgaste.
                         </div>
                     )}
 
                     {/* Auto-create accounts toggle (only for new assets) */}
                     {!isEditing && (
-                        <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                        <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
                             <input
                                 type="checkbox"
                                 id="autoCreateAccounts"
@@ -1764,10 +2295,10 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                                 onChange={e => setAutoCreateAccounts(e.target.checked)}
                                 className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                             />
-                            <label htmlFor="autoCreateAccounts" className="text-sm text-blue-800">
+                            <label htmlFor="autoCreateAccounts" className="text-sm text-slate-700">
                                 <span className="font-medium">Auto-crear cuentas contables</span>
                                 <br />
-                                <span className="text-xs text-blue-600">
+                                <span className="text-xs text-slate-500">
                                     Crea automaticamente la cuenta del activo y su amortizacion acumulada
                                 </span>
                             </label>

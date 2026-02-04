@@ -61,6 +61,7 @@ const RUBRO_ALIASES: Record<string, string> = {
 }
 
 const CATEGORY_TO_RUBRO: Record<FixedAssetCategory, string> = {
+    // Tangibles
     'Muebles y Utiles': DEFAULT_RUBRO,
     'Equipos de Computacion': 'Eq. Computación',
     'Rodados': 'Rodados',
@@ -69,6 +70,10 @@ const CATEGORY_TO_RUBRO: Record<FixedAssetCategory, string> = {
     'Inmuebles': 'Inmuebles',
     'Terrenos': 'Terrenos',
     'Otros': 'Otros Bienes',
+    // Intangibles
+    'Software': 'Intangibles',
+    'Marcas y Patentes': 'Intangibles',
+    'Otros Intangibles': 'Intangibles',
 }
 
 const LEGACY_RUBRO_TO_CATEGORY: Record<string, FixedAssetCategory> = {
