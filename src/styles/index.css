@@ -136,8 +136,10 @@
   /* Layout */
   --sidebar-width: 260px;
   --sidebar-collapsed-width: 80px;
-  --header-height: 84px;
+  --header-height-expanded: 84px;
+  --header-height: var(--header-height-expanded);
   --header-height-compact: 56px;
+  --sidebar-content-top: var(--header-height-expanded);
   --max-content-width: 1200px;
   --transition-speed: 0.3s;
 
@@ -849,12 +851,13 @@ textarea {
   /* Slate-900 */
   color: rgba(255, 255, 255, 0.92);
   padding: var(--space-lg);
+  padding-top: calc(var(--sidebar-content-top) + var(--space-lg));
   display: flex;
   flex-direction: column;
   position: fixed;
-  top: var(--header-height);
+  top: 0;
   left: 0;
-  height: calc(100vh - var(--header-height));
+  height: 100vh;
   z-index: 40;
   overflow-y: auto;
   overflow-x: hidden;
@@ -867,6 +870,7 @@ textarea {
 /* Collapsed Sidebar overrides */
 :where(.cl-ui) .layout.collapsed .sidebar {
   padding: var(--space-lg) var(--space-xs);
+  padding-top: calc(var(--sidebar-content-top) + var(--space-lg));
   overflow: visible;
 }
 

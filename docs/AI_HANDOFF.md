@@ -2,6 +2,30 @@
 
 ---
 
+## [CHECKPOINT #UI-SIDEBAR-RAIL-FIX-001]
+**Fecha:** 2026-02-04
+**Estado:** COMPLETADO - Sidebar rail sin gap + íconos estables
+
+### Objetivo:
+- Eliminar el gap blanco del rail del sidebar con header compacto sin mover íconos.
+
+### Archivos tocados:
+- src/styles/index.css
+- docs/AI_HANDOFF.md
+
+### Cambios realizados:
+- Sidebar desktop pasa a `top: 0` + `height: 100vh` para que el rail oscuro pinte hasta arriba siempre.
+- Contenido del sidebar usa `padding-top` fijo con `--sidebar-content-top` (constante) para que los íconos no se muevan con `header-compact` ni al colapsar/expandir.
+
+### Pendientes:
+- [ ] QA manual en Home: scroll (header compacto) + collapse/expand sidebar, verificar 0 gap y 0 saltos.
+
+### Validación:
+- `npm run build` ✅
+- `npm run lint` ❌ (falla con errores preexistentes en múltiples archivos fuera del scope de este fix)
+
+---
+
 ## CHECKPOINT #IMPUESTOS-ARRASTRE-IVA-2026-02-03
 **Fecha:** 2026-02-03
 **Estado:** COMPLETADO - Arrastre IVA
