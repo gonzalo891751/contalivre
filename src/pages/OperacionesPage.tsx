@@ -14,7 +14,6 @@ import {
     CaretRight,
     Warning,
     CheckCircle,
-    LockKey,
     Info,
     Clock,
     Armchair,
@@ -22,6 +21,7 @@ import {
 import { db } from '../storage/db'
 import { calculateAllValuations } from '../core/inventario/costing'
 import { getFixedAssetsMetrics } from '../storage/fixedAssets'
+import { getInvestmentMetrics } from '../storage/inversiones'
 import { useIndicatorsMetrics } from '../hooks/useIndicatorsMetrics'
 import { usePeriodYear } from '../hooks/usePeriodYear'
 import { useTaxClosure } from '../hooks/useTaxClosure'
@@ -56,6 +56,12 @@ export default function OperacionesPage() {
     const fixedAssetsMetrics = useLiveQuery(
         () => getFixedAssetsMetrics(periodId, periodYear),
         [periodId, periodYear]
+    )
+
+    // Investments metrics
+    const investmentsMetrics = useLiveQuery(
+        () => getInvestmentMetrics(periodId),
+        [periodId]
     )
 
     // Tax data for Fiscal/Impuestos card
@@ -516,19 +522,42 @@ export default function OperacionesPage() {
                     </div>
                 </div>
 
-                {/* Placeholder: Inversiones */}
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col opacity-90 hover:opacity-100 transition-opacity">
+                {/* Inversiones */}
+                <div
+                    className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col hover:shadow-md hover:border-blue-400 transition-all cursor-pointer group"
+                    onClick={() => navigate('/operaciones/inversiones')}
+                >
                     <div className="flex justify-between items-start mb-4">
-                        <div className="w-10 h-10 rounded-lg bg-slate-50 text-slate-500 flex items-center justify-center text-xl">
+                        <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl group-hover:bg-emerald-100 transition-colors">
                             <ChartLineUp weight="duotone" size={24} />
                         </div>
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500">Proximamente</span>
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-600 border border-emerald-100">Activo</span>
                     </div>
                     <h3 className="font-display font-semibold text-lg text-slate-900 mb-1">Inversiones</h3>
-                    <p className="text-sm text-slate-500 mb-4">Plazos fijos, Fondos Comunes y Titulos. Devengamiento automatico.</p>
+                    <p className="text-sm text-slate-500 mb-4">Plazos fijos, Fondos Comunes, Acciones y VPP.</p>
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                        <div>
+                            <div className="text-xs text-slate-500">Valor Total</div>
+                            <div className="font-mono font-semibold text-slate-900">
+                                {investmentsMetrics?.hasData ? formatCurrency(investmentsMetrics.totalValue) : '—'}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-slate-500">Resultado</div>
+                            <div className={`font-mono font-semibold ${investmentsMetrics?.totalGainLoss && investmentsMetrics.totalGainLoss >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                {investmentsMetrics?.hasData ? (investmentsMetrics.totalGainLoss >= 0 ? '+' : '') + formatCurrency(investmentsMetrics.totalGainLoss) : '—'}
+                            </div>
+                        </div>
+                    </div>
                     <div className="mt-auto pt-4 border-t border-slate-50">
-                        <button className="text-sm font-medium text-slate-400 cursor-not-allowed flex items-center gap-2" disabled>
-                            Conectar cuenta <LockKey size={14} />
+                        {investmentsMetrics?.pendingAlerts && investmentsMetrics.pendingAlerts > 0 ? (
+                            <div className="text-xs text-amber-600 flex items-center gap-1 mb-2">
+                                <Warning weight="fill" size={14} />
+                                {investmentsMetrics.pendingAlerts} alerta(s) pendiente(s)
+                            </div>
+                        ) : null}
+                        <button className="text-sm font-medium text-blue-600 flex items-center gap-2 group-hover:text-blue-700">
+                            Gestionar <CaretRight size={14} weight="bold" />
                         </button>
                     </div>
                 </div>
