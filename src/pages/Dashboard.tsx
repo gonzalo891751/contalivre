@@ -30,6 +30,7 @@ import { usePeriodYear } from '../hooks/usePeriodYear'
 import { loadSeedDataIfNeeded } from '../storage/seed'
 import IndicatorsDashboard from '../components/Indicators/IndicatorsDashboard'
 import MappingWizardModal from '../components/mapping/MappingWizardModal'
+import QuickActionsGrid from '../components/dashboard/QuickActionsGrid'
 
 // ============================================================================
 // Formatters
@@ -127,7 +128,7 @@ export default function Dashboard() {
                         <h1 className="dashboard-greeting">¡Bienvenido!</h1>
                         <p className="dashboard-subtitle">
                             {isSetupComplete
-                                ? 'Resumen financiero en tiempo real.'
+                                ? 'Tu panel de finanzas, patrimonio y gestión contable.'
                                 : 'Vamos a poner en orden tu contabilidad.'}
                         </p>
                     </div>
@@ -165,6 +166,9 @@ export default function Dashboard() {
             </header>
 
             <main className="dashboard-main">
+                {/* QUICK ACTIONS */}
+                <QuickActionsGrid />
+
                 {/* ONBOARDING SECTION */}
                 {showOnboarding && (
                     <section className="dashboard-onboarding">

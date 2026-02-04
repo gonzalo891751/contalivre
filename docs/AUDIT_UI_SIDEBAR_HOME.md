@@ -1,102 +1,446 @@
 # Auditoría Técnica: UI Sidebar & Home
 
+**Fecha:** 2026-02-03
+**Auditor:** Claude Opus 4.5
+**Prototipo de referencia:** `docs/prototypes/menues.html`
+
+---
+
 ## 1. Resumen Ejecutivo
-*   **Estado Actual:** El layout presenta conflictos de superposición (stacking) entre el Header y el Sidebar, causando que el Sidebar colapsado se oculte parcialmente o se visualice incorrectamente. Los estilos de hover en el menú provocan problemas de contraste (texto invisible).
-*   **Prototipo (`menues.html`):** Propone un modelo estricto donde el Sidebar comienza *debajo* del Header (`top: var(--header-height)`), eliminando la necesidad de `padding-top` compensatorio y resolviendo el overlap.
-*   **Solución Propuesta:** Refactorizar CSS global (`index.css`) para alinear el layout al modelo del prototipo y limpiar los estados de interacción (hover/active) de los links del menú.
-*   **Nueva Feature:** Se identificó la ubicación exacta en `Dashboard.tsx` para insertar la sección de "Accesos Rápidos" solicitada.
+
+| Item | Estado | Severidad |
+|------|--------|-----------|
+| Solapamiento Sidebar/Header | ⚠️ Bug activo | Alta |
+| Hover/Contraste en menú | ✅ Correcto en CSS, posible issue en iconos | Media |
+| Accesos Rápidos en Dashboard | 📋 Pendiente de implementar | Feature |
+
+**Diagnóstico principal:** El sidebar usa `top: 0` con `padding-top` compensatorio, en lugar del modelo del prototipo que define `top: var(--header-height)`. Esto causa que la caja del sidebar comience en `y=0`, quedando físicamente "detrás" del header en los primeros ~84px, lo cual afecta scroll y áreas de click.
+
+**Solución recomendada:** Migrar el sidebar al modelo del prototipo (`top: var(--header-height)` + `height: calc(100vh - var(--header-height))`).
+
+---
 
 ## 2. Evidencia y Hallazgos
 
-| Elemento | Archivo | Línea/Snippet | Observación |
-| :--- | :--- | :--- | :--- |
-| **Sidebar Layout** | `src/styles/index.css` | `.sidebar { top: 0; padding-top: calc(...); }` | El sidebar ocupa toda la altura (`top: 0`), confiando en z-index y padding para "bajar" el contenido. Esto causa conflictos de scroll y click-through con el header. |
-| **Header Layout** | `src/styles/index.css` | `.top-header { position: fixed; z-index: 50; }` | Correcto z-index (50), pero al estar el sidebar en z-index 40 y top 0, compiten en el espacio visual superior. |
-| **Hover Issue** | `src/styles/index.css` | `.sidebar-link:hover { color: white; }` | Al hacer hover, el texto se fuerza a blanco. Si el fondo del ítem o del sidebar no tiene el contraste suficiente en ese estado (o si hay estilos inline conflictivos), el contenido "desaparece". |
-| **Dashboard** | `src/pages/Dashboard.tsx` | `<main className="dashboard-main">` | Estructura clara. Falta la sección de "Accesos Rápidos" entre el Header y los Indicadores. |
+### 2.1 Tokens del Prototipo (`docs/prototypes/menues.html`)
+
+| Token | Valor | Uso |
+|-------|-------|-----|
+| `--header-height` | `70px` | Altura fija del header |
+| `--sidebar-width-open` | `260px` | Ancho sidebar expandido |
+| `--sidebar-width-closed` | `72px` | Ancho sidebar colapsado |
+| `--nav-bg` | `#0F172A` | Fondo sidebar (Slate 900) |
+| `--nav-hover` | `rgba(255, 255, 255, 0.1)` | Fondo hover |
+| `--nav-text` | `#94A3B8` | Texto inactivo (Slate 400) |
+| `--nav-text-active` | `#F8FAFC` | Texto hover/activo |
+
+**Modelo de layout del prototipo (líneas 89-103):**
+```css
+.app-sidebar {
+    position: fixed;
+    top: var(--header-height); /* ← Empieza DEBAJO del header */
+    left: 0;
+    height: calc(100vh - var(--header-height)); /* ← Altura descontando header */
+    width: var(--sidebar-current-width);
+    z-index: 40;
+    overflow-y: visible; /* Permite popovers */
+}
+```
+
+### 2.2 Código Real vs Prototipo
+
+| Elemento | Archivo | Línea | Código Real | Prototipo | Observación |
+|----------|---------|-------|-------------|-----------|-------------|
+| Header height | `src/styles/index.css` | 139 | `--header-height: 84px` | `70px` | Diferencia menor, OK |
+| Sidebar top | `src/styles/index.css` | 856 | `top: 0` | `top: var(--header-height)` | **ROOT CAUSE BUG #1** |
+| Sidebar height | `src/styles/index.css` | 857 | `bottom: 0` | `height: calc(100vh - var(--header-height))` | Usa bottom:0 en lugar de height calculada |
+| Sidebar padding-top | `src/styles/index.css` | 852 | `padding-top: calc(var(--header-height) + var(--space-lg))` | padding interno normal | Compensación que no resuelve overlap |
+| Header z-index | `src/styles/index.css` | 175 | `z-index: 50` | `z-index: 50` | ✅ Correcto |
+| Sidebar z-index | `src/styles/index.css` | 859 | `z-index: 40` | `z-index: 40` | ✅ Correcto |
+| Hover background | `src/styles/index.css` | 967 | `rgba(255, 255, 255, 0.08)` | `rgba(255, 255, 255, 0.1)` | Similar, OK |
+| Hover color | `src/styles/index.css` | 969 | `color: white` | `color: white` | ✅ Correcto |
+
+### 2.3 Snippets de Código Relevantes
+
+**Sidebar actual (`src/styles/index.css:846-866`):**
+```css
+:where(.cl-ui) .sidebar {
+  width: var(--sidebar-width);
+  background: #0F172A;
+  color: rgba(255, 255, 255, 0.92);
+  padding: var(--space-lg);
+  padding-top: calc(var(--header-height) + var(--space-lg)); /* ← Compensación */
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;        /* ← PROBLEMA: debería ser var(--header-height) */
+  left: 0;
+  bottom: 0;     /* ← PROBLEMA: debería ser height: calc(100vh - var(--header-height)) */
+  z-index: 40;
+  overflow-y: auto;
+  overflow-x: hidden;
+  ...
+}
+```
+
+**Hover states (`src/styles/index.css:966-971, 1107-1121`):**
+```css
+:where(.cl-ui) .sidebar-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  text-decoration: none;
+}
+
+:where(.cl-ui) .sidebar:not(.collapsed) .sidebar-link:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-text-strong);
+  transform: translateX(4px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+```
+
+**Tooltip (`src/styles/index.css:1340-1370`):**
+```css
+.nav-tooltip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1E293B;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 60;
+}
+
+body.sidebar-is-collapsed :where(.cl-ui) .sidebar-link:hover .nav-tooltip {
+  opacity: 1;
+  transform: translateY(-50%) translateX(12px);
+}
+```
+
+---
 
 ## 3. Diagnóstico Bug #1: Solapamiento Sidebar/Header
 
-*   **Root Cause:** El Sidebar tiene `top: 0`. Esto hace que físicamente el elemento HTML del sidebar esté "detrás" del header en los primeros 70px-80px. Aunque el padding interno baja el contenido, la barra de scroll del sidebar y el área de clicks pueden quedar obstruidas por el header.
-*   **Confirmación:** Inspeccionar el elemento `<aside class="sidebar">` y ver que su caja empieza en `y=0`.
-*   **Fix Recomendado (Opción B del prompt):**
-    *   Cambiar `.sidebar` a `top: var(--header-height)`.
-    *   Cambiar `.sidebar` a `height: calc(100vh - var(--header-height))`.
-    *   Eliminar el `padding-top` calculado (usar padding interno normal).
-    *   Esto garantiza que el sidebar *empiece* donde termina el header, eliminando cualquier posibilidad de superposición.
+### Root Cause
+El sidebar tiene `top: 0` y `bottom: 0`, ocupando toda la altura del viewport. Se usa `padding-top: calc(var(--header-height) + var(--space-lg))` para "bajar" el contenido interno, pero la **caja del elemento** sigue empezando en `y=0`.
 
-## 4. Diagnóstico Bug #2: Invisibilidad en Hover
+**Consecuencias:**
+1. Los primeros ~84px del sidebar están físicamente detrás del header
+2. La barra de scroll del sidebar queda parcialmente oculta bajo el header
+3. El área de click de ítems cercanos al top puede quedar obstruida
+4. En modo colapsado, el contenedor puede interferir con elementos del header
 
-*   **Causa:** Reglas CSS en `src/styles/index.css` para `.sidebar-link:hover` fuerzan `color: white`.
-*   **Conflicto:** Si el estado activo o el tema (light/dark) tiene un fondo claro o similar al blanco en hover, el contraste se pierde. Además, los íconos (SVG) pueden no estar heredando `currentColor` correctamente si tienen rellenos hardcoded.
-*   **Solución:**
-    *   Asegurar un `background-color` oscuro/contrastante en el estado `:hover` del link (ej: `rgba(255, 255, 255, 0.1)` sobre fondo oscuro).
-    *   Verificar que `Sidebar.tsx` use clases consistentes (`sidebar-link`, `active`) y no estilos inline que pisen el CSS.
-
-## 5. Plan de Implementación (Mínimo)
-
-### Archivos a modificar
-*   `src/styles/index.css`:
-    *   Refactorizar variables CSS: asegurar `--header-height` consistente.
-    *   Actualizar `.sidebar`: ajustar `top`, `height`, `padding-top`.
-    *   Actualizar `.sidebar-link`: corregir estados `:hover` y `.active` para garantizar contraste AA+.
-    *   Ajustar `z-index` si es necesario (Header 50, Sidebar 40).
-*   `src/ui/Layout/Sidebar.tsx`:
-    *   Revisar estructura de clases para asegurar que coincidan con el nuevo CSS.
-    *   Verificar implementación de Tooltips (para estado colapsado) y Popovers (submenús).
-
-### Componentes a crear
-*   `src/components/dashboard/QuickActionsGrid.tsx`:
-    *   Componente aislado para los "Accesos Rápidos".
-    *   Grid responsive (grid-cols-2 md:grid-cols-3 lg:grid-cols-6).
-    *   Cards simples con Ícono + Label + Link.
-
-### Archivos a integrar
-*   `src/pages/Dashboard.tsx`:
-    *   Importar `QuickActionsGrid`.
-    *   Insertar `<QuickActionsGrid />` justo después de `<header className="dashboard-header">` y antes de la sección de onboarding/indicadores.
-
-## 6. Dashboard: Accesos Rápidos
-
-**Ubicación:** `src/pages/Dashboard.tsx`
-**Estructura:**
-```tsx
-// Pseudocódigo
-<div className="quick-actions-grid">
-  <Card to="/operaciones/inventario" icon="Package" label="Inventario" />
-  <Card to="/operaciones/bienes-uso" icon="Armchair" label="Bienes Uso" />
-  <Card to="/operaciones/impuestos" icon="Receipt" label="Impuestos" />
-  <Card to="/asientos" icon="Notebook" label="Libro Diario" />
-  <Card to="/mayor" icon="BookBookmark" label="Libro Mayor" />
-  <Card to="/estados" icon="ChartLineUp" label="Estados" />
-</div>
+### Evidencia Visual
 ```
+┌─────────────────────────────────────────────────────┐
+│  HEADER (z-index: 50, height: 84px)                 │
+├───────┬─────────────────────────────────────────────┤
+│░░░░░░░│  MAIN CONTENT                               │
+│░SIDE░░│  (margen izquierdo respeta sidebar)         │
+│░░BAR░░│                                             │
+│░░░░░░░│                                             │
+│(z:40) │                                             │
+│top:0  │                                             │
+│       │                                             │
+└───────┴─────────────────────────────────────────────┘
+
+Área sombreada (░): El sidebar empieza en y=0, pero el header
+lo tapa. El padding-top empuja el contenido pero no la caja.
+```
+
+### Fix Recomendado (Opción A - Alineado al prototipo)
+
+**Archivo:** `src/styles/index.css`
+**Cambios en `.sidebar` (líneas 846-866):**
+
+```css
+:where(.cl-ui) .sidebar {
+  width: var(--sidebar-width);
+  background: #0F172A;
+  color: rgba(255, 255, 255, 0.92);
+  padding: var(--space-lg);
+  /* padding-top: calc(var(--header-height) + var(--space-lg)); ← ELIMINAR */
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: var(--header-height);  /* ← CAMBIAR de 0 */
+  left: 0;
+  height: calc(100vh - var(--header-height));  /* ← CAMBIAR de bottom:0 */
+  /* bottom: 0; ← ELIMINAR */
+  z-index: 40;
+  overflow-y: auto;
+  overflow-x: hidden;
+  ...
+}
+```
+
+**Pros:**
+- Modelo idéntico al prototipo aprobado
+- Elimina el hack de padding-top compensatorio
+- La caja del sidebar empieza exactamente donde termina el header
+- Scroll y clicks funcionan correctamente
+
+**Contras:**
+- Requiere verificar que no haya estilos inline en `Sidebar.tsx` que dependan del modelo actual
+- Puede requerir ajuste en media queries para mobile drawer
+
+---
+
+## 4. Diagnóstico Bug #2: Hover/Contraste
+
+### Análisis
+
+El CSS base para hover parece **correcto**:
+- `background: rgba(255, 255, 255, 0.08)` sobre fondo `#0F172A` ✅
+- `color: white` para texto ✅
+- Variables de tema definidas correctamente (líneas 1012-1033) ✅
+
+### Posibles Causas de Issues Visuales
+
+1. **Iconos SVG no heredan color:**
+   - Los iconos Phosphor en `Sidebar.tsx` usan `className="sidebar-icon"`
+   - El CSS define transición de color (línea 1103): `transition: color 0.2s`
+   - Pero si el ícono tiene `fill` o `stroke` hardcoded, no respetará `currentColor`
+
+2. **Estado `.active` puede conflictuar con hover:**
+   - `.active` usa `color: #60A5FA` (azul claro)
+   - Hover podría estar pisando este color en algunos estados
+
+3. **Body class `sidebar-is-collapsed`:**
+   - El código usa dos patrones: `.sidebar.collapsed` y `body.sidebar-is-collapsed`
+   - Si hay inconsistencia entre ambos, los estilos pueden no aplicarse
+
+### Verificación en `Sidebar.tsx`
+
+**Línea 115:** Clase dinámica correcta
+```tsx
+<aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
+```
+
+**Línea 142-145:** Íconos usando className
+```tsx
+<IconComponent
+    size={20}
+    className="sidebar-icon"
+/>
+```
+
+**Observación:** Los íconos Phosphor deberían heredar `currentColor` por defecto, pero conviene verificar que no haya estilos inline en el componente.
+
+### Fix Recomendado
+
+1. **Asegurar herencia de color en íconos:**
+```css
+:where(.cl-ui) .sidebar-link:hover .sidebar-icon {
+  color: inherit; /* O white explícito */
+}
+```
+
+2. **Verificar consistencia de clases:**
+   - Unificar uso de `.sidebar.collapsed` vs `body.sidebar-is-collapsed`
+   - Preferir `.layout.collapsed .sidebar` como en el CSS actual
+
+---
+
+## 5. Dashboard: Ubicación para "Accesos Rápidos"
+
+### Archivo: `src/pages/Dashboard.tsx`
+
+**Estructura actual:**
+```
+línea 121: <div className="dashboard">
+línea 124:   <header className="dashboard-header">...</header>  (líneas 124-165)
+línea 167:   <main className="dashboard-main">
+línea 168-246:     {showOnboarding && <section>...</section>}
+línea 248-251:     <section><IndicatorsDashboard /></section>
+línea 253-544:     <section className="dashboard-patrimonio">...</section>
+línea 546-582:     <section className="dashboard-activity">...</section>
+línea 583:   </main>
+```
+
+### Punto de Inserción Recomendado
+
+**Opción A (Preferida):** Después del header, antes de onboarding
+- **Línea 167** (después de `</header>`, antes de `<main>`)
+- O **Línea 168** (dentro de `<main>`, como primera sección)
+
+**Opción B:** Después de onboarding, antes de indicadores
+- **Línea 247** (después del cierre de onboarding)
+
+### Componente Sugerido
+
+**Archivo a crear:** `src/components/dashboard/QuickActionsGrid.tsx`
+
+**Estructura basada en prototipo (líneas 584-636 de `menues.html`):**
+```tsx
+// Pseudocódigo - NO IMPLEMENTAR AÚN
+const quickActions = [
+  { to: '/operaciones', label: 'Operaciones', icon: Cube, desc: 'Inventario y activos fijos' },
+  { to: '/asientos', label: 'Libro Diario', icon: Notebook, desc: 'Carga de asientos' },
+  { to: '/mayor', label: 'Libro Mayor', icon: BookBookmark, desc: 'Saldos por cuenta' },
+  { to: '/estados', label: 'Estados Contables', icon: ChartLineUp, desc: 'Balance y reportes' },
+  { to: '/cuentas', label: 'Plan de Cuentas', icon: TreeStructure, desc: 'Editar jerarquía' },
+  { to: '/planillas', label: 'Planillas', icon: Table, desc: 'Cálculos auxiliares' },
+];
+
+export function QuickActionsGrid() {
+  return (
+    <section className="quick-actions">
+      <h3 className="section-title">
+        <Lightning weight="duotone" /> Accesos Rápidos
+      </h3>
+      <div className="quick-grid">
+        {quickActions.map(action => (
+          <Link to={action.to} className="quick-card">
+            <div className="quick-icon"><action.icon /></div>
+            <div className="quick-label">{action.label}</div>
+            <div className="quick-desc">{action.desc}</div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+```
+
+---
+
+## 6. Plan de Implementación (Mínimo)
+
+### Archivos a Modificar
+
+| Archivo | Cambio | Líneas Afectadas |
+|---------|--------|------------------|
+| `src/styles/index.css` | Fix sidebar position | ~846-866 |
+| `src/styles/index.css` | (Opcional) Verificar hover íconos | ~966-1000, 1100-1150 |
+| `src/ui/Layout/MainLayout.tsx` | (Si aplica) Verificar clase body | — |
+
+### Archivos a Crear
+
+| Archivo | Propósito |
+|---------|-----------|
+| `src/components/dashboard/QuickActionsGrid.tsx` | Componente accesos rápidos |
+
+### Archivos a Integrar
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/pages/Dashboard.tsx` | Importar e insertar `<QuickActionsGrid />` |
+
+---
 
 ## 7. Criterios de Aceptación (QA)
 
-- [ ] **Layout:** El Sidebar comienza visualmente *debajo* del Header. No hay solapamiento de la barra de scroll.
-- [ ] **Colapsado:** Al colapsar, el sidebar mantiene su posición correcta (top ajustado).
-- [ ] **Hover:** Al pasar el mouse por los ítems del menú, el texto e íconos son claramente legibles (blanco sobre fondo semitransparente oscuro).
-- [ ] **Accesos Rápidos:** Se visualizan 6 tarjetas en el Dashboard, arriba de los indicadores. Todos los links funcionan.
-- [ ] **Responsive:** En móvil, el comportamiento del Drawer (que reemplaza al sidebar) no se ve afectado negativamente.
+### Bug #1: Solapamiento
+- [ ] El sidebar comienza visualmente debajo del header (inspeccionar: `top` debe ser `84px` o `var(--header-height)`)
+- [ ] La barra de scroll del sidebar no queda oculta bajo el header
+- [ ] Al colapsar/expandir, el sidebar mantiene su posición correcta
+- [ ] No hay salto visual al hacer scroll
+
+### Bug #2: Hover/Contraste
+- [ ] Al hacer hover sobre cualquier ítem del menú, texto e ícono son legibles (blanco sobre fondo semi-transparente)
+- [ ] El estado activo (`.active`) muestra el color azul (#60A5FA) correctamente
+- [ ] Los íconos cambian de color junto con el texto en hover
+- [ ] Tooltips en modo colapsado aparecen con fondo oscuro y texto blanco
+
+### Feature: Accesos Rápidos
+- [ ] Se visualizan 6 tarjetas en grid responsive (2 cols mobile, 3 cols tablet, 6 cols desktop)
+- [ ] Cada tarjeta tiene ícono, label y descripción
+- [ ] Los links navegan correctamente a las rutas correspondientes
+- [ ] Hover en tarjetas muestra efecto visual (elevación/borde)
+
+---
 
 ## 8. Validación y Comandos
 
-1.  **Ejecución:**
-    ```bash
-    npm run dev
-    ```
-2.  **QA Manual:**
-    *   Navegar a `/`.
-    *   Verificar posición del Sidebar respecto al Header.
-    *   Hacer hover en menú lateral.
-    *   Probar click en tarjetas de "Accesos Rápidos".
-    *   Colapsar/Expandir menú lateral.
-3.  **Build Check:**
-    ```bash
-    npm run build
-    ```
+### Comandos de Desarrollo
+```bash
+# Iniciar servidor de desarrollo
+npm run dev
+
+# Verificar tipos TypeScript
+npx tsc --noEmit
+
+# Lint
+npm run lint
+
+# Build de producción
+npm run build
+```
+
+### Pruebas Manuales
+
+1. **Layout Sidebar/Header:**
+   - Navegar a `/`
+   - Inspeccionar elemento `.sidebar` en DevTools
+   - Verificar que `top` sea `84px` (o `var(--header-height)`)
+   - Verificar que `height` sea `calc(100vh - 84px)`
+
+2. **Colapsar/Expandir:**
+   - Click en botón de colapso (flecha en footer del sidebar)
+   - Verificar que el sidebar no "salta" verticalmente
+   - Verificar que el header no se mueve
+
+3. **Hover Menú:**
+   - Pasar mouse sobre cada ítem del menú
+   - Verificar fondo semi-transparente visible
+   - Verificar texto e ícono en blanco
+   - Verificar que íconos Phosphor cambien de color
+
+4. **Submenú Operaciones:**
+   - Click en "Operaciones"
+   - Verificar que el submenú se expande sin tapar header
+   - En modo colapsado: hover sobre Operaciones
+   - Verificar que el flyout aparece a la derecha, no debajo del header
+
+5. **Responsive (DevTools):**
+   - Simular viewport móvil (375px)
+   - Verificar que el sidebar se oculta
+   - Verificar que el botón hamburguesa aparece en header
+   - Click en hamburguesa: verificar drawer desde la izquierda
+
+---
 
 ## 9. Supuestos y Riesgos
-*   **Supuesto:** `src/styles/index.css` es la única fuente de verdad para el layout (sin estilos pisados por Tailwind arbitrario en componentes).
-*   **Riesgo:** El componente `MobileDrawer` podría compartir clases con `Sidebar` y romperse al cambiar el posicionamiento global. Se debe verificar con `isMobile` flag o media queries.
+
+### Supuestos
+1. `src/styles/index.css` es la fuente de verdad para estilos del layout (no hay CSS-in-JS ni Tailwind inline que lo pise)
+2. El prototipo `menues.html` está aprobado y es el target de diseño
+3. Los íconos Phosphor heredan `currentColor` por defecto
+
+### Riesgos
+
+| Riesgo | Probabilidad | Impacto | Mitigación |
+|--------|--------------|---------|------------|
+| Mobile drawer usa mismas clases que sidebar desktop | Media | Alto | Verificar media query `@media (max-width: 768px)` antes de cambiar |
+| Estilos inline en Sidebar.tsx pisan CSS | Baja | Medio | Buscar `style=` en componente |
+| Componentes usan `body.sidebar-is-collapsed` | Media | Medio | Buscar en codebase y unificar con `.layout.collapsed` |
+| Cambio de height afecta scroll interno | Baja | Bajo | Verificar `overflow-y: auto` sigue funcionando |
+
+### Búsqueda de Dependencias
+```bash
+# Verificar uso de clases de sidebar en otros archivos
+rg -n "sidebar-is-collapsed|\.sidebar\.collapsed|layout\.collapsed" src/
+```
+
+---
+
+## 10. Referencias
+
+- **Prototipo UI:** `docs/prototypes/menues.html`
+- **CSS Global:** `src/styles/index.css`
+- **Componente Sidebar:** `src/ui/Layout/Sidebar.tsx`
+- **Componente Header:** `src/ui/Layout/TopHeader/TopHeader.tsx`
+- **Dashboard:** `src/pages/Dashboard.tsx`
+- **Layout Principal:** `src/ui/Layout/MainLayout.tsx`
+
+---
+
+*Documento generado automáticamente. Última actualización: 2026-02-03*

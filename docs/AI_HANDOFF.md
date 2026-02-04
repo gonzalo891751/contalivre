@@ -5218,3 +5218,132 @@ Se implementó una nueva versión del componente de Estado de Situación Patrimo
 - [x] Reporte Oficial fuerza comparativo ON
 - [x] npm run build PASS
 
+
+
+---
+
+## CHECKPOINT #UI-AUDIT-001
+**Fecha:** 2026-02-03
+**Estado:** AUDITORÍA COMPLETADA - Pendiente implementación
+**Objetivo:** Auditar Sidebar/Header y Home para alinear con prototipo `docs/prototypes/menues.html`
+
+### Archivos Tocados (Solo Docs)
+- `docs/AUDIT_UI_SIDEBAR_HOME.md` - Reporte completo de auditoría
+- `docs/AI_HANDOFF.md` - Este checkpoint
+
+### Hallazgos Principales
+
+**Bug #1: Solapamiento Sidebar/Header**
+- **Root cause:** `src/styles/index.css:856` usa `top: 0` en lugar de `top: var(--header-height)`
+- **Efecto:** La caja del sidebar empieza en y=0, quedando detrás del header
+- **Fix:** Cambiar a `top: var(--header-height)` + `height: calc(100vh - var(--header-height))`
+
+**Bug #2: Hover/Contraste**
+- CSS base es correcto (`rgba(255,255,255,0.08)` + `color: white`)
+- Posible issue con íconos SVG que no heredan `currentColor`
+- Verificar consistencia entre `.sidebar.collapsed` y `body.sidebar-is-collapsed`
+
+**Feature: Accesos Rápidos**
+- Ubicación: `src/pages/Dashboard.tsx` línea 167-168 (después de header, antes de onboarding)
+- Componente a crear: `src/components/dashboard/QuickActionsGrid.tsx`
+
+### Archivos a Modificar en Implementación
+1. `src/styles/index.css` - Fix sidebar position (líneas 846-866)
+2. `src/pages/Dashboard.tsx` - Insertar QuickActionsGrid
+3. `src/components/dashboard/QuickActionsGrid.tsx` - Crear componente nuevo
+
+### Pendientes para Implementación
+- [ ] Modificar `.sidebar` con `top: var(--header-height)` y `height: calc(100vh - var(--header-height))`
+- [ ] Eliminar `padding-top` compensatorio del sidebar
+- [ ] Verificar que mobile drawer no se rompa con el cambio
+- [ ] Crear componente QuickActionsGrid basado en prototipo
+- [ ] Integrar QuickActionsGrid en Dashboard
+- [ ] Ejecutar QA manual (colapsar/expandir, hover, responsive)
+
+### Validación Post-Implementación
+```bash
+npm run dev
+npm run build
+npm run lint
+```
+
+### Criterios de Aceptación
+- [ ] Sidebar visualmente debajo del header (inspeccionar: top = 84px)
+- [ ] Sin solapamiento de scroll/clicks
+- [ ] Hover legible (texto blanco sobre fondo semi-transparente)
+- [ ] Accesos Rápidos renderizados en Dashboard
+- [ ] Build sin errores
+
+---
+
+## CHECKPOINT #UI-SIDEBAR-QUICKACTIONS-IMPL
+**Fecha:** 2026-02-03
+**Estado:** COMPLETADO - Build PASS
+**Objetivo:** Implementar fix de Sidebar (no solapar Header) + Accesos Rápidos en Dashboard, alineado al prototipo `docs/prototypes/menues.html`
+
+### Archivos Modificados
+
+**src/styles/index.css**
+- Fix Bug #1 (Sidebar/Header overlap):
+  - Línea ~846: `top: 0` → `top: var(--header-height)`
+  - Línea ~847: `bottom: 0` → `height: calc(100vh - var(--header-height))`
+  - Eliminado `padding-top: calc(var(--header-height) + var(--space-lg))` (hack compensatorio)
+  - Removido `padding-top` de la transición (evita animar propiedades pesadas)
+- Fix Bug #2 (Hover/contraste):
+  - Línea ~1101: Añadido `color: inherit` a `.sidebar-icon` para herencia de color en hover
+- Feature (Quick Actions):
+  - Añadidas ~80 líneas de CSS para `.quick-actions`, `.quick-actions-grid`, `.quick-action-card`, etc.
+  - Grid responsive: 2 cols mobile, 3 cols tablet, 6 cols desktop
+
+**src/components/dashboard/QuickActionsGrid.tsx**
+- Actualizado para usar Phosphor icons (consistencia con el resto del proyecto)
+- 6 tarjetas: Operaciones, Libro Diario, Libro Mayor, Estados Contables, Plan de Cuentas, Planillas
+- Links a rutas reales confirmadas
+
+**src/pages/Dashboard.tsx**
+- Import de QuickActionsGrid
+- Inserción de `<QuickActionsGrid />` justo después de `<main className="dashboard-main">` y antes del onboarding
+- Copy de bienvenida actualizado: "Tu panel de finanzas, patrimonio y gestión contable."
+
+### Cambios Técnicos
+
+**Modelo de layout (antes → después):**
+```css
+/* ANTES (problemático) */
+.sidebar {
+  top: 0;
+  bottom: 0;
+  padding-top: calc(var(--header-height) + var(--space-lg));
+}
+
+/* DESPUÉS (alineado al prototipo) */
+.sidebar {
+  top: var(--header-height);
+  height: calc(100vh - var(--header-height));
+  padding: var(--space-lg);
+}
+```
+
+**MobileDrawer:** No afectado (usa clases `.mobile-drawer-*` independientes)
+
+### Validación
+- `npm run build`: ✅ PASS (built in ~22s)
+- `npm run lint`: ⚠️ Errores pre-existentes en otros archivos (no introducidos por estos cambios)
+- Archivos modificados sin nuevos errores de lint
+
+### Criterios de Aceptación Cumplidos
+- [x] Sidebar arranca visualmente debajo del header (top: var(--header-height))
+- [x] Sin padding-top compensatorio (eliminado el hack)
+- [x] Transición suave solo en width (sin animar top/height)
+- [x] MobileDrawer no afectado (clases independientes)
+- [x] Íconos heredan color en hover (color: inherit)
+- [x] QuickActionsGrid visible en Dashboard con 6 tarjetas
+- [x] Copy de bienvenida actualizado
+- [x] Build sin errores
+
+### Pruebas Manuales Recomendadas
+1. Home `/`: Verificar sidebar debajo del header, sin gaps
+2. Colapsar/expandir sidebar: Sin saltos verticales
+3. Hover en menú: Texto e ícono legibles (blancos sobre fondo semi-transparente)
+4. Responsive móvil: Drawer funciona correctamente
+5. Click en cada tarjeta de Accesos Rápidos: Navega a ruta correcta
