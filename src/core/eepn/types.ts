@@ -24,6 +24,7 @@ export interface EEPNColumnDef {
  */
 export type EEPNRowType =
     | 'SALDO_INICIO'
+    | 'RECPAM'
     | 'AREA'
     | 'SALDO_INICIO_AJUSTADO'
     | 'SECTION_HEADER'

@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EEPN | ContaLivre Prototipo</title>
+    
+    <!-- FUENTES (Brand Book) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- ICONOS (Phosphor) -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        /* =========================================
+           1. TOKENS & RESET (Brand Book Base)
+           ========================================= */
+        :root {
+            /* Colores Core */
+            --brand-primary: #3B82F6;
+            --brand-secondary: #10B981;
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            
+            /* Neutros (Light) */
+            --bg-app: #F6F8FC;
+            --bg-surface: #FFFFFF;
+            --bg-sidebar: #0F172A; /* Azul noche */
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            --border-light: #E2E8F0;
+            --border-hover: #CBD5E1;
+
+            /* Semánticos */
+            --success: #10B981;
+            --success-bg: #ECFDF5;
+            --warning: #F59E0B;
+            --warning-bg: #FFFBEB;
+            --error: #EF4444;
+            --error-bg: #FEF2F2;
+
+            /* UI Utils */
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-card: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+            
+            /* Fuentes */
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            
+            /* Layout Específico EEPN */
+            --sidebar-width: 80px; /* Colapsado visualmente */
+            --topbar-height: 64px;
+            --col-concept-width: 280px;
+            --col-number-width: 130px;
+        }
+
+        /* DARK MODE OVERRIDES */
+        [data-theme="dark"] {
+            --bg-app: #0B1120; /* Slate 950 */
+            --bg-surface: #1E293B; /* Slate 800 */
+            --text-main: #F1F5F9;
+            --text-secondary: #94A3B8;
+            --border-light: #334155;
+            --border-hover: #475569;
+            --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+            --success-bg: rgba(16, 185, 129, 0.1);
+            --warning-bg: rgba(245, 158, 11, 0.1);
+            --error-bg: rgba(239, 68, 68, 0.1);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: var(--font-body);
+            background-color: var(--bg-app);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden; /* Scroll interno en content */
+            display: flex;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        /* =========================================
+           2. LAYOUT: SIDEBAR & TOPBAR
+           ========================================= */
+        .sidebar {
+            width: var(--sidebar-width);
+            background-color: var(--bg-sidebar);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1.5rem 0;
+            z-index: 50;
+            flex-shrink: 0;
+        }
+        
+        .logo-icon {
+            font-size: 2rem;
+            color: var(--brand-primary);
+            margin-bottom: 2rem;
+        }
+
+        .nav-item {
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-tertiary);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 0.5rem;
+            font-size: 1.5rem;
+        }
+        .nav-item:hover { color: #FFF; background: rgba(255,255,255,0.1); }
+        .nav-item.active { color: var(--brand-primary); background: rgba(59, 130, 246, 0.15); }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .topbar {
+            height: var(--topbar-height);
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-light);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2rem;
+            flex-shrink: 0;
+        }
+
+        .company-selector {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .company-badge {
+            background: #EFF6FF;
+            color: var(--brand-primary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+        [data-theme="dark"] .company-badge { background: rgba(59, 130, 246, 0.2); }
+
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            font-size: 0.9rem;
+        }
+
+        /* =========================================
+           3. PAGE CONTENT & CONTROLS
+           ========================================= */
+        .scrollable-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 2rem;
+            padding-bottom: 4rem;
+        }
+
+        .page-header {
+            margin-bottom: 1.5rem;
+        }
+        .page-title {
+            font-family: var(--font-display);
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 0.25rem;
+        }
+        .page-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .controls-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-surface);
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 1.5rem;
+        }
+        
+        .toggles-group { display: flex; gap: 1.5rem; align-items: center; }
+        
+        /* Custom Toggle Switch */
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+        }
+        .switch-track {
+            width: 36px; height: 20px; background: var(--border-light);
+            border-radius: 20px; position: relative; transition: 0.3s;
+        }
+        .switch-knob {
+            width: 16px; height: 16px; background: white; border-radius: 50%;
+            position: absolute; top: 2px; left: 2px; transition: 0.3s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        .toggle-switch input { display: none; }
+        .toggle-switch input:checked + .switch-track { background: var(--brand-secondary); }
+        .toggle-switch input:checked + .switch-track .switch-knob { transform: translateX(16px); }
+
+        .btn {
+            padding: 0.6rem 1rem;
+            border-radius: var(--radius-sm);
+            font-weight: 500;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border: 1px solid transparent;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+            font-family: var(--font-body);
+        }
+        .btn-primary { background: var(--brand-gradient); color: white; }
+        .btn-primary:hover { opacity: 0.95; transform: translateY(-1px); }
+        .btn-secondary { background: var(--bg-surface); border-color: var(--border-light); color: var(--text-main); }
+        .btn-secondary:hover { border-color: var(--brand-primary); color: var(--brand-primary); }
+
+        /* KPI Cards */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .kpi-card {
+            background: var(--bg-surface);
+            padding: 1rem 1.25rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            box-shadow: var(--shadow-sm);
+        }
+        .kpi-label { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .kpi-value { font-family: var(--font-mono); font-size: 1.25rem; font-weight: 600; color: var(--text-main); }
+        
+        /* Banner de Reconciliación */
+        .recon-banner {
+            background: var(--warning-bg);
+            border: 1px solid #FCD34D;
+            color: #92400E;
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius-sm);
+            margin-bottom: 1.5rem;
+            display: none; /* Oculto por defecto */
+            align-items: flex-start;
+            gap: 0.75rem;
+            font-size: 0.9rem;
+            animation: slideDown 0.3s ease-out;
+        }
+        [data-theme="dark"] .recon-banner { border-color: rgba(245, 158, 11, 0.3); color: #FCD34D; }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* =========================================
+           4. DATA TABLE (THE CORE)
+           ========================================= */
+        .table-wrapper {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-card);
+            overflow: auto; /* Scroll en ambas direcciones */
+            max-height: calc(100vh - 350px);
+            position: relative;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.9rem;
+            min-width: 1400px; /* Forzar scroll horizontal */
+        }
+
+        /* Headers */
+        thead {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background: var(--bg-surface);
+        }
+        
+        th {
+            padding: 0.75rem 1rem;
+            text-align: right;
+            border-bottom: 1px solid var(--border-light);
+            border-right: 1px solid var(--border-light);
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            background: var(--bg-surface); /* Importante para sticky */
+            white-space: nowrap;
+        }
+        
+        /* Group Headers */
+        th.group-header {
+            text-align: center;
+            border-bottom: 1px solid var(--border-light);
+            background: var(--bg-app); /* Color ligeramente diferente */
+            color: var(--brand-primary);
+        }
+        [data-theme="dark"] th.group-header { background: #151e32; }
+
+        /* Primera Columna Sticky */
+        th:first-child, td:first-child {
+            position: sticky;
+            left: 0;
+            z-index: 21; /* Encima de otros td */
+            background: var(--bg-surface);
+            border-right: 2px solid var(--border-light); /* Separador visual */
+            text-align: left;
+            min-width: var(--col-concept-width);
+            max-width: var(--col-concept-width);
+        }
+        thead th:first-child { z-index: 25; } /* La esquina top-left */
+
+        /* Body Cells */
+        td {
+            padding: 0.5rem 1rem;
+            border-bottom: 1px solid var(--border-light);
+            border-right: 1px solid var(--border-light); /* Grid lines verticales sutiles */
+            text-align: right;
+            font-family: var(--font-mono);
+            color: var(--text-main);
+            height: 40px;
+            position: relative; /* Para indicador de edición */
+        }
+
+        /* Row Types */
+        tr.row-total td {
+            background-color: rgba(59, 130, 246, 0.03);
+            font-weight: 700;
+            border-top: 1px solid var(--border-light);
+        }
+        tr.row-main td:first-child { font-weight: 600; color: var(--text-main); }
+        tr.row-sub td:first-child { padding-left: 2rem; color: var(--text-secondary); font-size: 0.85rem; }
+        
+        /* Numbers colors */
+        .val-negative { color: var(--error); }
+        .val-zero { color: var(--border-light); }
+        [data-theme="dark"] .val-zero { color: #334155; }
+
+        /* EDIT MODE STYLES */
+        td.editable { cursor: cell; transition: background 0.1s; }
+        td.editable:hover { background-color: rgba(59, 130, 246, 0.05); }
+        
+        td input.cell-input {
+            width: 100%; height: 100%;
+            border: 2px solid var(--brand-primary);
+            padding: 0 0.5rem;
+            text-align: right;
+            font-family: var(--font-mono);
+            outline: none;
+            position: absolute; top: 0; left: 0;
+            background: var(--bg-surface);
+            color: var(--text-main);
+            z-index: 10;
+        }
+
+        /* Indicador de edición manual */
+        td.manual-override::after {
+            content: '';
+            position: absolute;
+            top: 0; right: 0;
+            width: 0; height: 0;
+            border-left: 6px solid transparent;
+            border-top: 6px solid var(--warning);
+        }
+        /* Tooltip para override (CSS puro simple) */
+        td.manual-override:hover::before {
+            content: 'Editado manual';
+            position: absolute;
+            bottom: 100%; right: 0;
+            background: #0F172A; color: white;
+            padding: 4px 8px; font-size: 10px; font-family: var(--font-body);
+            border-radius: 4px; pointer-events: none; white-space: nowrap; z-index: 30;
+        }
+
+        /* Hide logic */
+        .hide-column { display: none; }
+        
+        /* Footer de Notas */
+        .doc-footer {
+            margin-top: 2rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border-light);
+            padding-top: 1rem;
+        }
+
+        /* =========================================
+           5. PRINT MEDIA QUERY (Reporte Oficial)
+           ========================================= */
+        @media print {
+            @page { size: A4 landscape; margin: 10mm; }
+            body { background: white; height: auto; overflow: visible; display: block; color: black; }
+            .sidebar, .topbar, .controls-bar, .kpi-grid, #recon-banner { display: none !important; }
+            .table-wrapper { box-shadow: none; border: none; max-height: none; overflow: visible; }
+            .main-content { height: auto; overflow: visible; }
+            .scrollable-area { padding: 0; overflow: visible; }
+            
+            /* Print specific typography */
+            .page-title { font-size: 1.5rem; color: black; margin-bottom: 0.5rem; }
+            table { font-size: 8pt; border: 1px solid #000; width: 100%; min-width: 0; }
+            th { background: #eee !important; color: black !important; border-color: #000; font-weight: bold; }
+            td { border-color: #ccc; color: black !important; }
+            td.manual-override::after { display: none; } /* Ocultar indicadores de edición */
+            th:first-child, td:first-child { position: static; border-right: 1px solid #000; }
+            thead { position: static; }
+            
+            /* Force show zeros in official report usually */
+            .val-zero { color: transparent !important; } 
+        }
+
+    </style>
+</head>
+<body data-theme="light">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <div class="logo-icon"><i class="ph-duotone ph-robot"></i></div>
+        <div class="nav-item" title="Dashboard"><i class="ph ph-squares-four"></i></div>
+        <div class="nav-item active" title="Contabilidad"><i class="ph-fill ph-notebook"></i></div>
+        <div class="nav-item" title="Reportes"><i class="ph ph-chart-line-up"></i></div>
+        <div class="nav-item" title="Configuración" style="margin-top: auto;"><i class="ph ph-gear"></i></div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        
+        <!-- TOPBAR -->
+        <header class="topbar">
+            <div class="company-selector">
+                <!-- // TODO: Conectar con selector real de empresas -->
+                <span class="company-badge">Tomates SANTA LUCIA S.A.</span>
+                <span style="color: var(--text-secondary); font-size: 0.9rem;">Ejercicio 2025</span>
+            </div>
+            
+            <div class="user-menu">
+                <!-- Toggle Dark Mode -->
+                <button class="btn btn-secondary" onclick="toggleTheme()" style="padding: 0.4rem;" title="Cambiar Tema">
+                    <i class="ph-bold ph-moon"></i>
+                </button>
+                <span>Contador Demo</span>
+                <div style="width: 32px; height: 32px; background: var(--brand-primary); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold;">C</div>
+            </div>
+        </header>
+
+        <!-- CONTENT AREA -->
+        <div class="scrollable-area">
+            
+            <div class="page-header">
+                <h1 class="page-title">Estado de Evolución del Patrimonio Neto</h1>
+                <p class="page-subtitle">Por el ejercicio finalizado el 31/01/2025 comparativo con el ejercicio anterior</p>
+                <p style="font-size: 0.8rem; color: var(--text-tertiary); margin-top: 0.25rem;">Cifras expresadas en moneda homogénea (Nota 1.3)</p>
+            </div>
+
+            <!-- KPI CARDS -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-label">PN al Cierre</div>
+                    <div class="kpi-value" id="kpi-pn-close">Cargando...</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">Resultado Ejercicio</div>
+                    <div class="kpi-value val-negative" id="kpi-result">- 14.800,00</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">Variación Neta</div>
+                    <div class="kpi-value" style="color: var(--warning);" id="kpi-variation">- 14.800,00</div>
+                </div>
+                <div class="kpi-card" style="border-left: 4px solid var(--brand-secondary);">
+                    <div class="kpi-label">Control Balance</div>
+                    <!-- // TODO: Traer saldo real del Balance General para reconciliación -->
+                    <div class="kpi-value" style="color: var(--success);" id="kpi-target">2.635.200,00</div>
+                </div>
+            </div>
+
+            <!-- BANNER DE RECONCILIACIÓN -->
+            <div id="recon-banner" class="recon-banner">
+                <i class="ph-fill ph-warning-circle" style="font-size: 1.5rem; margin-top: 2px;"></i>
+                <div>
+                    <strong>Diferencia detectada con el Balance General</strong>
+                    <p style="margin-top: 0.25rem;">El total del PN según EEPN (<span id="warn-actual"></span>) no coincide con el Balance (<span id="warn-target"></span>). <br>Diferencia: <span id="warn-diff" style="font-weight: 700;"></span>.</p>
+                    <button class="btn btn-secondary" style="margin-top: 0.5rem; padding: 0.25rem 0.75rem; font-size: 0.8rem;">Ver Sugerencias</button>
+                </div>
+            </div>
+
+            <!-- CONTROLS -->
+            <div class="controls-bar">
+                <div class="toggles-group">
+                    <label class="toggle-switch" title="Mostrar columna del año anterior">
+                        <input type="checkbox" id="toggle-comp" onchange="toggleColumn('col-comparative')">
+                        <div class="switch-track"><div class="switch-knob"></div></div>
+                        <span>Comparativo</span>
+                    </label>
+                    
+                    <label class="toggle-switch" title="Ocultar filas donde todo es cero">
+                        <input type="checkbox" id="toggle-zeros" checked onchange="toggleZeros()">
+                        <div class="switch-track"><div class="switch-knob"></div></div>
+                        <span>Ocultar ceros</span>
+                    </label>
+                </div>
+
+                <div style="display: flex; gap: 0.75rem;">
+                    <button class="btn btn-secondary" onclick="alert('Recalculando matriz completa...')">
+                        <i class="ph-bold ph-arrows-clockwise"></i> Recalcular
+                    </button>
+                    <!-- // TODO: Implementar subida de archivo real -->
+                    <button class="btn btn-secondary" onclick="alert('Abrir modal de importación de Excel')">
+                        <i class="ph-bold ph-upload-simple"></i> Importar
+                    </button>
+                    <button class="btn btn-primary" onclick="window.print()">
+                        <i class="ph-bold ph-printer"></i> Imprimir Oficial
+                    </button>
+                </div>
+            </div>
+
+            <!-- MATRIX TABLE -->
+            <div class="table-wrapper">
+                <table id="eepn-table">
+                    <thead>
+                        <!-- Row 1: Group Headers -->
+                        <tr>
+                            <th rowspan="2" style="z-index: 25; min-width: 250px;">Concepto</th>
+                            <th colspan="4" class="group-header">Aportes de los Propietarios</th>
+                            <th colspan="4" class="group-header">Resultados Acumulados</th>
+                            <th colspan="2" class="group-header" style="background: var(--bg-surface); border-left: 2px solid var(--border-light);">Totales</th>
+                        </tr>
+                        <!-- Row 2: Specific Headers -->
+                        <tr>
+                            <!-- Aportes -->
+                            <th>Capital Suscripto</th>
+                            <th>Ajuste Capital</th>
+                            <th>Aportes Irrev.</th>
+                            <th>Prima Emisión</th>
+                            <!-- Resultados -->
+                            <th>Reserva Legal</th>
+                            <th>Otras Reservas</th>
+                            <th>Res. No Asig.</th>
+                            <th>Res. Diferidos</th>
+                            <!-- Totales -->
+                            <th style="border-left: 2px solid var(--border-light);">Total Ejercicio</th>
+                            <th class="col-comparative hide-column" style="color: var(--text-tertiary);">Comparativo</th>
+                        </tr>
+                    </thead>
+                    <tbody id="eepn-body">
+                        <!-- FILAS GENERADAS POR JS -->
+                    </tbody>
+                    <tfoot>
+                        <!-- Totales Footer -->
+                        <tr class="row-total" id="footer-totals" style="position: sticky; bottom: 0; background: var(--bg-surface); z-index: 21; box-shadow: 0 -2px 10px rgba(0,0,0,0.05);">
+                            <td>Saldos al Cierre</td>
+                            <td class="t-cap">0,00</td>
+                            <td class="t-ajuste">0,00</td>
+                            <td class="t-irrev">0,00</td>
+                            <td class="t-prima">0,00</td>
+                            <td class="t-legal">0,00</td>
+                            <td class="t-otras">0,00</td>
+                            <td class="t-rna">0,00</td>
+                            <td class="t-dif">0,00</td>
+                            <td class="t-total" style="border-left: 2px solid var(--border-light); color: var(--brand-primary); font-size: 1rem;">0,00</td>
+                            <td class="t-comp col-comparative hide-column">0,00</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <div class="doc-footer">
+                <p>Las notas adjuntas 1 a 15 son parte integrante de estos estados contables.</p>
+                <p>Firmado a efectos de su identificación con nuestro informe de fecha 15/02/2026.</p>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- LOGIC -->
+    <script>
+        // ==========================================
+        // 1. DATA MODEL (Initial State)
+        // ==========================================
+        // Estructura: filas con identificador único y valores por columna
+        const initialData = [
+            { id: 'saldo_ini', label: 'Saldos al inicio del ejercicio', type: 'main', vals: { cap: 2650000, ajuste: 0, irrev: 0, prima: 0, legal: 50000, otras: 0, rna: 0, dif: 0, comp: 2500000 } },
+            { id: 'area', label: 'Modificación saldo inicio (AREA)', type: 'sub', vals: { cap: 0, ajuste: 0, irrev: 0, prima: 0, legal: 0, otras: 0, rna: 0, dif: 0, comp: 0 } },
+            { id: 'saldo_adj', label: 'Saldo al inicio ajustado', type: 'total', isCalculated: true }, // Se calcula en runtime
+            
+            // Variaciones
+            { id: 'subs', label: 'Suscripción de capital', type: 'sub', vals: { cap: 0, ajuste: 0, irrev: 0, prima: 0, legal: 0, otras: 0, rna: 0, dif: 0, comp: 0 } },
+            { id: 'const_res', label: 'Constitución de Reserva Legal', type: 'sub', vals: { cap: 0, ajuste: 0, irrev: 0, prima: 0, legal: 10000, otras: 0, rna: -10000, dif: 0, comp: 0 } },
+            { id: 'div_efec', label: 'Dividendos en efectivo', type: 'sub', vals: { cap: 0, ajuste: 0, irrev: 0, prima: 0, legal: 0, otras: 0, rna: 0, dif: 0, comp: 0 } },
+            { id: 'res_eje', label: 'Resultado del ejercicio', type: 'sub', vals: { cap: 0, ajuste: 0, irrev: 0, prima: 0, legal: 0, otras: 0, rna: -14800, dif: 0, comp: 120000 } },
+            
+            { id: 'total_var', label: 'Total variaciones del ejercicio', type: 'total', isCalculated: true } // Se calcula en runtime
+        ];
+
+        const columns = ['cap', 'ajuste', 'irrev', 'prima', 'legal', 'otras', 'rna', 'dif', 'comp'];
+        const targetBalance = 2635200; // Valor objetivo para reconciliación
+
+        // Estado en memoria
+        let tableData = JSON.parse(JSON.stringify(initialData));
+
+        // ==========================================
+        // 2. RENDERING ENGINE
+        // ==========================================
+        const tbody = document.getElementById('eepn-body');
+
+        function renderTable() {
+            tbody.innerHTML = '';
+            
+            // 1. Recalcular filas totales (Saldo Ajustado y Total Var)
+            recalculateRows();
+
+            // 2. Renderizar filas
+            tableData.forEach((row, index) => {
+                const tr = document.createElement('tr');
+                tr.className = row.type === 'total' ? 'row-total' : (row.type === 'main' ? 'row-main' : 'row-sub');
+                tr.dataset.id = row.id;
+
+                // Columna Concepto
+                const tdConcept = document.createElement('td');
+                tdConcept.textContent = row.label;
+                tr.appendChild(tdConcept);
+
+                // Columnas de Datos
+                let rowSum = 0;
+                let isZeroRow = true;
+
+                columns.forEach(col => {
+                    // Si es una fila calculada, sumar las anteriores (simplificación para demo)
+                    // En app real esto es más complejo. Aquí 'saldo_adj' suma los dos primeros.
+                    
+                    let val = row.vals[col] || 0;
+                    if(col !== 'comp') rowSum += val;
+                    if(val !== 0) isZeroRow = false;
+
+                    const td = document.createElement('td');
+                    td.className = 'editable';
+                    if (row.type === 'total') td.className = ''; // Totales no editables directos en este demo
+                    
+                    // Comprobación de comparativo oculto
+                    if (col === 'comp') td.classList.add('col-comparative');
+                    if (col === 'comp' && !document.getElementById('toggle-comp').checked) {
+                        td.classList.add('hide-column');
+                    }
+
+                    td.dataset.col = col;
+                    td.dataset.rowId = row.id;
+                    td.innerHTML = formatMoney(val);
+                    
+                    // Colorear negativos/ceros
+                    applyColorClass(td, val);
+
+                    // Si fue editado manual
+                    if(row.overrides && row.overrides[col]) {
+                        td.classList.add('manual-override');
+                        td.title = "Editado manualmente";
+                    }
+
+                    // Evento Doble Click para editar
+                    if (row.type !== 'total' && col !== 'comp') { // Comparativo bloqueado en demo
+                        td.ondblclick = () => makeEditable(td, val);
+                    }
+
+                    tr.appendChild(td);
+                });
+
+                // Columna Total Horizontal
+                const tdTotal = document.createElement('td');
+                tdTotal.style.borderLeft = "2px solid var(--border-light)";
+                tdTotal.style.fontWeight = "600";
+                tdTotal.innerHTML = formatMoney(rowSum);
+                applyColorClass(tdTotal, rowSum);
+                tr.appendChild(tdTotal);
+
+                // Lógica de Ocultar Ceros
+                if (isZeroRow && document.getElementById('toggle-zeros').checked && row.type !== 'total') {
+                    tr.style.display = 'none';
+                }
+
+                tbody.appendChild(tr);
+            });
+
+            updateFooterTotals();
+            updateKPIs();
+        }
+
+        // ==========================================
+        // 3. CALCULATION LOGIC
+        // ==========================================
+        function recalculateRows() {
+            // Lógica específica para este reporte:
+            // Saldo Ajustado = Saldo Ini + Area
+            // Total Variaciones = Suma de todas las variaciones
+            // Saldos Cierre (Footer) = Saldo Adj + Total Variaciones
+            
+            // 1. Saldo Ajustado
+            const ini = tableData.find(r => r.id === 'saldo_ini');
+            const area = tableData.find(r => r.id === 'area');
+            const adj = tableData.find(r => r.id === 'saldo_adj');
+            
+            adj.vals = {};
+            columns.forEach(col => {
+                adj.vals[col] = (ini.vals[col] || 0) + (area.vals[col] || 0);
+            });
+
+            // 2. Total Variaciones (filas entre saldo_adj y total_var)
+            const varRows = tableData.filter(r => ['subs','const_res','div_efec','res_eje'].includes(r.id));
+            const totalVar = tableData.find(r => r.id === 'total_var');
+            
+            totalVar.vals = {};
+            columns.forEach(col => {
+                let sum = 0;
+                varRows.forEach(r => sum += (r.vals[col] || 0));
+                totalVar.vals[col] = sum;
+            });
+        }
+
+        function updateFooterTotals() {
+            // Saldo Cierre = Saldo Ajustado + Total Variaciones
+            const adj = tableData.find(r => r.id === 'saldo_adj');
+            const vars = tableData.find(r => r.id === 'total_var');
+            
+            let grandTotal = 0;
+
+            columns.forEach(col => {
+                const totalVal = (adj.vals[col] || 0) + (vars.vals[col] || 0);
+                
+                // Actualizar celda footer DOM directamente
+                const footerCell = document.querySelector(`.row-total .t-${col}`);
+                if(footerCell) {
+                    footerCell.textContent = formatMoney(totalVal);
+                    applyColorClass(footerCell, totalVal);
+                }
+
+                if(col !== 'comp') grandTotal += totalVal;
+            });
+
+            // Footer Grand Total
+            const ft = document.querySelector('.row-total .t-total');
+            ft.textContent = formatMoney(grandTotal);
+            
+            checkReconciliation(grandTotal);
+        }
+
+        function updateKPIs() {
+            // PN Actual (Grand Total calculado arriba)
+            const ftText = document.querySelector('.row-total .t-total').textContent;
+            document.getElementById('kpi-pn-close').textContent = ftText;
+            
+            // Variación neta (Total de variaciones)
+            const varRow = tableData.find(r => r.id === 'total_var');
+            let varNet = 0;
+            columns.forEach(c => { if(c!=='comp') varNet += (varRow.vals[c]||0) });
+            document.getElementById('kpi-variation').textContent = formatMoney(varNet);
+            applyColorClass(document.getElementById('kpi-variation'), varNet);
+        }
+
+        function checkReconciliation(currentTotal) {
+            const banner = document.getElementById('recon-banner');
+            const diff = currentTotal - targetBalance;
+            
+            // Umbral de tolerancia muy bajo para punto flotante
+            if (Math.abs(diff) > 0.01) {
+                banner.style.display = 'flex';
+                document.getElementById('warn-actual').textContent = formatMoney(currentTotal);
+                document.getElementById('warn-target').textContent = formatMoney(targetBalance);
+                document.getElementById('warn-diff').textContent = formatMoney(diff);
+                document.getElementById('warn-diff').style.color = varColor(diff);
+            } else {
+                banner.style.display = 'none';
+            }
+        }
+
+        // ==========================================
+        // 4. INTERACTION & EDITING
+        // ==========================================
+        function makeEditable(td, currentVal) {
+            if (td.querySelector('input')) return; // Ya en edición
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentVal.toFixed(2); // Valor crudo para editar
+            input.className = 'cell-input';
+            
+            // Guardar al salir
+            const save = () => {
+                const newVal = parseFloat(input.value.replace(',', '.')); // Soporte básico coma/punto
+                
+                if (!isNaN(newVal)) {
+                    // Update Model
+                    const rowId = td.dataset.rowId;
+                    const col = td.dataset.col;
+                    const row = tableData.find(r => r.id === rowId);
+                    
+                    row.vals[col] = newVal;
+                    
+                    // Mark as manual override
+                    if(!row.overrides) row.overrides = {};
+                    row.overrides[col] = true;
+
+                    // Re-render
+                    renderTable();
+                } else {
+                    // Cancel if invalid
+                    td.innerHTML = formatMoney(currentVal);
+                    applyColorClass(td, currentVal);
+                }
+            };
+
+            input.addEventListener('blur', save);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { input.blur(); }
+                if (e.key === 'Escape') { td.innerHTML = formatMoney(currentVal); applyColorClass(td, currentVal); }
+            });
+
+            td.innerHTML = '';
+            td.appendChild(input);
+            input.focus();
+            input.select();
+        }
+
+        // ==========================================
+        // 5. UTILS
+        // ==========================================
+        const moneyFormatter = new Intl.NumberFormat('es-AR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+
+        function formatMoney(amount) {
+            if (amount === 0) return '0,00'; // Estética tabular
+            return moneyFormatter.format(amount);
+        }
+
+        function applyColorClass(element, value) {
+            element.classList.remove('val-negative', 'val-zero');
+            if (value < 0) element.classList.add('val-negative');
+            if (value === 0) element.classList.add('val-zero');
+        }
+        
+        function varColor(val) {
+            if(val < 0) return 'var(--error)';
+            return 'var(--text-main)';
+        }
+
+        // Toggles
+        function toggleColumn(className) {
+            const els = document.querySelectorAll('.' + className);
+            const isChecked = document.getElementById('toggle-comp').checked;
+            els.forEach(el => {
+                if (isChecked) el.classList.remove('hide-column');
+                else el.classList.add('hide-column');
+            });
+        }
+
+        function toggleZeros() {
+            renderTable(); // Re-render to apply logic
+        }
+
+        function toggleTheme() {
+            const body = document.body;
+            const current = body.getAttribute('data-theme');
+            body.setAttribute('data-theme', current === 'light' ? 'dark' : 'light');
+        }
+
+        // INIT
+        window.onload = () => {
+            renderTable();
+        };
+
+    </script>
+</body>
+</html>

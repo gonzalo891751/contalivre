@@ -2,6 +2,180 @@
 
 ---
 
+## CHECKPOINT #EEPN-UX-POLISH
+**Fecha:** 2026-02-05
+**Estado:** COMPLETADO - UX polish + features implementados
+
+### Objetivo
+Pulir el EEPN para cumplir mínimos formales visibles, mejorar legibilidad (ceros, totales, calculados), sumar acciones UX (agregar fila, deshacer visible), sin romper cálculos ni interconexión.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/components/Estados/EvolucionPNTab.tsx` | Todo el UX polish (header, ceros, custom rows, undo, estilos) |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Implementados
+
+**A) Encabezado formal visible en pantalla + print**
+- Título: "Estado de Evolución del Patrimonio Neto"
+- Subtítulo dinámico: "Por el ejercicio finalizado el DD/MM/AAAA, comparativo con el ejercicio anterior" (fecha del período seleccionado)
+- Moneda: "Cifras expresadas en Pesos Argentinos (ARS)"
+- Estilos consistentes con brand (Outfit para títulos, colores del design system)
+
+**B) Ceros atenuados**
+- Celdas editables con valor 0: muestran "0,00" en gris atenuado (clase `eepn-zero-muted`) + tooltip "Doble clic para editar"
+- Celdas calculadas/no editables con valor 0: muestran "—" (em-dash) en gris (clase `eepn-zero-dash`) + tooltip "Calculado por el sistema"
+- Subtotales y totales con 0: muestran "—"
+- Al entrar en modo edición (doble clic), se muestra valor numérico normal
+
+**C) Totales y calculados diferenciados**
+- Celdas calculadas (SALDO_INICIO_AJUSTADO, TOTAL_VARIACIONES, SALDO_CIERRE): fondo sutil (`eepn-calculated`)
+- Columnas subtotales (T. Aportes, T. Result.) ya tenían fondo diferenciado
+- Filas total y cierre ya tenían `eepn-row-total` / `eepn-row-cierre` con negrita y fondo
+
+**D) Tabla sin scroll horizontal en >= 1366px**
+- Reducido min-width/max-width de columna concepto (140px/180px vs 160px/200px)
+- Padding de celdas compact: 4px vs 5px
+- Headers font-size: 0.65rem vs 0.67rem
+
+**E) Deshacer siempre visible**
+- Botón "Deshacer" siempre presente en toolbar (antes: oculto si undoStack vacío)
+- Cuando no hay acciones: `disabled` + tooltip "No hay cambios para deshacer"
+- Undo stack ahora captura `UndoSnapshot` (overrides + customRows) en lugar de solo overrides
+
+**F) Agregar fila personalizada**
+- Botón "Agregar fila" en toolbar
+- Click abre inline input (nombre del concepto) con Enter/Crear y Escape/Cancelar
+- Crea fila tipo `OTROS_MOVIMIENTOS` insertada antes de TOTAL_VARIACIONES
+- Todas las celdas en 0 (mostrando "0,00" atenuado, editables con doble clic)
+- Botón papelera para eliminar fila custom
+- Estilo diferenciado: fondo amarillo claro (`eepn-row-custom`)
+- Impacto en totales: TOTAL_VARIACIONES y SALDO_CIERRE se recalculan en `mergedRows` memo
+
+**G) Recalcular resetea todo**
+- "Recalcular" ahora pide confirmación si hay overrides o custom rows
+- Limpia overrides + custom rows con undo previo
+- Si no hay cambios: force re-render (comportamiento original)
+
+### Decisiones Técnicas
+- **"—" vs "0,00" atenuado:** Se usan ambos — "0,00" gris para editables (invita a cargar), "—" para calculados (no se puede tocar)
+- **Custom rows en memoria:** No se persisten (in-memory state). Se pierden al recargar. Undo/redo las incluye.
+- **Recálculo de totales con custom rows:** Se hace en `useMemo` (`mergedRows`) — recalcula TOTAL_VARIACIONES y SALDO_CIERRE sumando verticalmente sobre el array merged. No toca `compute.ts`.
+- **UndoSnapshot:** Cambio de tipo de `Map<string,number>[]` a `UndoSnapshot[]` para capturar ambos estados (overrides + customRows) en cada paso.
+- **No se tocó `compute.ts`:** Los totales con custom rows se recalculan en el componente UI sin modificar el motor.
+
+### Validación
+- `npx tsc --noEmit` — 0 errores en componente (errores pre-existentes en `tests/repro_eepn.test.ts` no relacionados)
+- `npx vite build` — build exitoso
+
+### Cómo Validar Manualmente
+1. `npm run dev` → `/estados` → tab "Evolución PN"
+2. Ver encabezado formal con título, fecha fin dinámica, y moneda
+3. Confirmar que la tabla entra sin scroll horizontal en ventana normal (>=1366px)
+4. Observar ceros: "0,00" gris en editables, "—" en calculados
+5. Doble click en celda editable con 0 → cargar número → ver que cambia total
+6. Click "Deshacer" → vuelve al valor anterior. Si no hay cambios: botón disabled
+7. Click "Agregar fila" → poner nombre → editar valor → verificar impacto en totales
+8. Click papelera en fila custom → se elimina → totales vuelven
+9. Click "Recalcular" → confirmar → vuelve todo a estado motor puro (sin custom rows ni overrides)
+10. Imprimir → header formal visible en print, filas custom incluidas, botón papelera oculto
+
+### Pendientes (fuera de alcance)
+- [ ] Ctrl+Z / Ctrl+Y para undo/redo dentro del EEPN (nice-to-have)
+- [ ] Persistencia de custom rows en localStorage
+- [ ] Fix pre-existente: `tests/repro_eepn.test.ts` tiene error de tipo (`isActive` not in JournalEntry) que bloquea `tsc -b`
+
+---
+
+## CHECKPOINT #EEPN-V2-IMPLEMENTACION
+**Fecha:** 2026-02-05
+**Estado:** COMPLETADO - Motor corregido + UI v2 implementada
+
+### Objetivo
+Implementar EEPN v2: corregir motor de cálculo (conciliación + no "tragarse" movimientos), sumar columnas de totales por secciones, mejorar UX (fit en pantalla, filas dinámicas/ocultables, undo/recalcular).
+
+### Hallazgos Corregidos
+1. **Swallowed Entry (FIX):** Movimientos contra `3.3.02` con contrapartida no-PN (pasivo/caja) ahora se clasifican como `OTROS_MOVIMIENTOS` en vez de `RESULTADO_EJERCICIO`. Solo asientos de refundición (contrapartidas 4.*/5.*) se clasifican como `RESULTADO_EJERCICIO`.
+2. **Saldo Cierre (FIX):** `SALDO_CIERRE` ahora se calcula como suma vertical (`SALDO_INICIO_AJUSTADO + TOTAL_VARIACIONES`) en lugar de usar `closingBalances` del Mayor. Esto garantiza conciliación en pre-cierre.
+3. **RECPAM:** Nueva fila `RECPAM (ajuste saldos al inicio)` entre Saldo Inicio y AREA, editable, default 0.
+
+### Cambios en Motor (`src/core/eepn/`)
+| Archivo | Cambio |
+|:--------|:-------|
+| `types.ts` | Agregado `'RECPAM'` a `EEPNRowType` |
+| `compute.ts` | `classifyEntry` Rule 6: distingue refundición vs aplicación de resultado |
+| `compute.ts` | `classifyMovements`: computa `touchesResultadoEjercicio` + `isRefundicion` |
+| `compute.ts` | `buildRows`: agrega fila RECPAM; SALDO_INICIO_AJUSTADO suma inicio+recpam+area |
+| `compute.ts` | `buildRows`: SALDO_CIERRE usa `createCalculatedRow` (suma vertical) en vez de `closingBalances` |
+
+### Cambios en UI (`src/components/Estados/EvolucionPNTab.tsx`)
+| Feature | Detalle |
+|:--------|:--------|
+| Columnas subtotales | `T. Aportes` y `T. Result.` dentro de cada grupo, no editables, estilo diferenciado |
+| Modo compacto | Default, font-size reducido, headers 2 líneas, padding compacto |
+| Concepto sticky | Columna concepto fija a la izquierda con `position: sticky` |
+| Ocultar ceros | Toggle "Ver completo" oculta filas core en cero (default: ocultas). Print muestra todas. |
+| Deshacer | Botón "Deshacer" con undo stack; revierte último override sin afectar los demás |
+| Celdas bloqueadas | Filas calculadas (inicio ajustado, total variaciones, cierre) y columnas subtotales no editables |
+| RECPAM | Fila visible y editable arriba de AREA |
+| Fila Cierre | Estilo reforzado con borde superior doble y font-weight 800 |
+
+### Tests (`tests/repro_eepn.test.ts`)
+4 tests:
+1. `should NOT swallow fee payment against 3.3.02` — EEPN cierre = 2500 ✅
+2. `should reconcile in pre-cierre scenario` — vertical sum matches balance ✅
+3. `should include RECPAM row in output` ✅
+4. `should classify refundición entry as RESULTADO_EJERCICIO` ✅
+
+### Validación
+- `npx tsc --noEmit` ✅
+- `npm run build` ✅
+- `npm test` — 74/74 tests pass ✅
+
+### Cómo Validar Manualmente
+1. `npm run dev` → `/estados` → tab "Evolución PN"
+2. Verificar tabla con columnas T. Aportes y T. Result. diferenciadas
+3. Doble click en celda editable → badge "M" → click Deshacer → revierte
+4. Toggle "Ver completo" → muestra/oculta filas en cero
+5. Imprimir → formato formal completo con todas las filas
+6. Si hay datos: verificar que el warning de conciliación desaparece cuando corresponde
+
+### Decisiones Técnicas
+- **Clasificación 3.3.02:** Se usa heurística: si TODAS las contrapartidas no-PN son cuentas 4.*/5.* → refundición. Cualquier otro caso → OTROS_MOVIMIENTOS.
+- **Saldo Cierre:** Vertical sum (`inicio_ajustado + total_variaciones`) como fuente de verdad. `closingBalances` del Mayor se mantiene computado pero no se usa para la fila.
+- **Undo:** Stack simple en memoria (no persistido). Se limpia al recargar la página.
+- **Compact mode:** Siempre activo (clase `eepn-compact`). No se agregó toggle Compacto/Cómodo para simplificar.
+
+### Pendientes (fuera de alcance)
+- [ ] Ctrl+Z / Ctrl+Y para undo/redo (nice-to-have)
+- [ ] Persistencia de overrides en IndexedDB
+- [ ] Integración automática de RECPAM con módulo cierre-valuación
+- [ ] Comparativo real (año anterior) — actualmente usa placeholder
+
+---
+
+## CHECKPOINT #EEPN-AUDIT-DIAGNOSTICO-V1
+**Fecha:** 2026-02-06
+**Estado:** COMPLETADO - Diagnóstico Finalizado
+
+### Objetivo
+Diagnosticar discrepancias de conciliación entre EEPN y Balance General, e identificar causas de pérdida de movimientos.
+
+### Hallazgos Críticos
+1. **Movements Swallowed:** Movimientos directos contra `3.3.02` (Resultado Ejercicio) son sobrescritos por el resultado del ER, perdiéndose ajustes manuales o pagos de honorarios.
+2. **Saldo Cierre Desconectado:** En periodos sin asiento de refundición, el EEPN Cierre ignora el resultado del ejercicio corriente, causando discrepancia con Balance.
+
+### Entregables
+- `docs/audits/EEPN_AUDIT_DIAGNOSTICO.md`: Reporte detallado con prueba de concepto y plan de corrección.
+
+### Próximos Pasos (Correction Plan)
+1. Refinar reglas de `classifyMovements` para no atrapar aplicaciones en `RESULTADO_EJERCICIO`.
+2. Modificar `createResultadoRow` para no sobrescribir, o asegurar input limpio.
+3. Unificar cálculo de `SALDO_CIERRE` con suma vertical (Inicio + Variaciones).
+
+---
+
 ## CHECKPOINT #COMPANY-PROFILE-V1
 **Fecha:** 2026-02-04  
 **Estado:** COMPLETADO - Build pasa, feature implementado

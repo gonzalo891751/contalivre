@@ -1,0 +1,48 @@
+
+> entrenador-contable@0.1.0 test
+> vitest run tests/repro_eepn.test.ts
+
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/Git/ContaLivre[39m
+
+[90mstdout[2m | tests/repro_eepn.test.ts[2m > [22m[2mEEPN Diagnosis[2m > [22m[2mshould reproduce discrepancy when 3.3.02 has movements against non-PN accounts (e.g. Fees)
+[22m[39mDEBUG: Overriding result with ER [33m2000[39m
+DEBUG: pnInicio [33m1000[39m
+DEBUG: netIncomeFromER passed [33m2000[39m
+---------------------------------------------------
+DIAGNOSIS 3 (Swallowed Movement):
+PN From Balance (Expected): 2500
+PN Cierre (Calculated): 500
+Diff: -2000
+---------------------------------------------------
+
+ [31m❯[39m tests/repro_eepn.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[90m 38[2mms[22m[39m
+[31m   [31m×[31m EEPN Diagnosis[2m > [22mshould reproduce discrepancy when 3.3.02 has movements against non-PN accounts (e.g. Fees)[90m 37[2mms[22m[31m[39m
+[31m     → expected -2000 to be 500 // Object.is equality[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[1m[7m Failed Tests 1 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/repro_eepn.test.ts[2m > [22mEEPN Diagnosis[2m > [22mshould reproduce discrepancy when 3.3.02 has movements against non-PN accounts (e.g. Fees)
+[31m[1mAssertionError[22m: expected -2000 to be 500 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 500[39m
+[31m+ -2000[39m
+
+[36m [2m❯[22m tests/repro_eepn.test.ts:[2m86:49[22m[39m
+    [90m 84| [39m        [90m// We expect a discrepancy here[39m
+    [90m 85| [39m        [34mexpect[39m(result[33m.[39mpnCierre)[33m.[39mnot[33m.[39m[34mtoBe[39m(pnFromBalance)[33m;[39m
+    [90m 86| [39m        [34mexpect[39m(result[33m.[39mpnCierre [33m-[39m pnFromBalance)[33m.[39m[34mtoBe[39m([34m500[39m)[33m;[39m
+    [90m   | [39m                                                [31m^[39m
+    [90m 87| [39m    })[33m;[39m
+    [90m 88| [39m})[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m   Start at [22m 21:16:53
+[2m   Duration [22m 4.20s[2m (transform 124ms, setup 314ms, collect 101ms, tests 38ms, environment 2.08s, prepare 304ms)[22m
+
