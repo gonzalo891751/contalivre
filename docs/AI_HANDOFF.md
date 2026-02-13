@@ -2,6 +2,197 @@
 
 ---
 
+## CHECKPOINT #LIBRO-DIARIO-DISPLAY-MAPPING
+**Fecha:** 2026-02-13
+**Estado:** COMPLETADO - Libro Diario muestra cuenta control + tercero como detalle; Perfeccionar solo instrumentos
+
+### Objetivo
+1. Mejorar la presentacion del Libro Diario para mostrar la cuenta control formal ("Proveedores", "Deudores por Ventas") con el tercero como detalle, en vez de mostrar solo el nombre del tercero como si fuera la cuenta.
+2. Consolidar que Perfeccionar = solo instrumentacion (RECLASS) y Cobrar/Pagar = Pagos (PAYMENT).
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/core/displayAccount.ts` | **NUEVO** - Helper `resolveAccountDisplay()` para display mapping cuenta control + tercero |
+| `src/components/journal/EntryCard.tsx` | Usa `resolveAccountDisplay` para mostrar cuenta control + tercero detail |
+| `src/ui/MobileAsientosRegistrados.tsx` | Idem para mobile (detalle expandido + CSV export) |
+| `src/pdf/journalPdf.ts` | Idem para export PDF |
+| `src/pages/AsientosDesktop.tsx` | Search filter mejorado para buscar por cuenta control Y tercero |
+| `src/pages/Operaciones/PerfeccionarModal.tsx` | (del checkpoint anterior) Whitelist destinos, helper text, boton "Ir a Pagos" |
+| `src/pages/Operaciones/ClientesDeudoresPage.tsx` | (del checkpoint anterior) `onGoToPagos`, `destControlCodes` actualizado |
+| `src/pages/Operaciones/ProveedoresAcreedoresPage.tsx` | (del checkpoint anterior) `onGoToPagos` |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+
+**displayAccount.ts (nuevo helper)**
+- Constante `CONTROL_CODES_WITH_TERCEROS`: set de codigos de cuentas control que tienen subcuentas per-tercero (Deudores por Ventas, Documentos a cobrar, Proveedores, Documentos a pagar, Valores, Acreedores, etc.)
+- Funcion `resolveAccountDisplay(accountId, accounts)`:
+  - Si la cuenta es hija de un control code conocido → retorna `{ name: parentName, code: parentCode, terceroDetail: childName }`
+  - Si no → retorna `{ name: accName, code: accCode, terceroDetail: null }`
+- Solo afecta presentacion. NO modifica entries, accountId, ni logica de mayor.
+
+**EntryCard.tsx (Desktop Libro Diario)**
+- Import `resolveAccountDisplay`
+- Cada linea del asiento: muestra `display.name` como nombre principal de cuenta
+- Si hay `terceroDetail`: lo muestra como detalle debajo (clase `journal-entry-card-account-detail`)
+- Si no hay terceroDetail pero hay `line.description`: muestra eso como detalle (fallback)
+- Eliminado `getAccountName` local (reemplazado por helper)
+
+**MobileAsientosRegistrados.tsx**
+- Import `resolveAccountDisplay`
+- Detalle expandido: muestra `display.code` + `display.name` + `display.terceroDetail` (con estilo reducido)
+- CSV export: formato "Cuenta Control / Tercero" cuando aplica
+- Eliminados `getAccountName` y `getAccountCode` locales
+
+**journalPdf.ts**
+- Import `resolveAccountDisplay`
+- Cada linea del PDF: si hay terceroDetail, muestra "Cuenta Control\n   → Tercero"; si no, fallback a line.description
+
+**AsientosDesktop.tsx**
+- Import `resolveAccountDisplay`
+- Search filter mejorado: busca en nombre de cuenta original (subcuenta) Y en nombre de cuenta control Y en tercero detail
+
+### Ejemplo visual resultante
+
+Antes:
+```
+Cuenta / Detalle         Debe        Haber
+Carlos Gomez             $50.000      -
+Ventas                    -          $50.000
+```
+
+Despues:
+```
+Cuenta / Detalle         Debe        Haber
+Deudores por Ventas      $50.000      -
+  Carlos Gomez
+Ventas                    -          $50.000
+```
+
+### Decisiones Tecnicas
+
+1. **Helper separado, no inline**: Se creo `displayAccount.ts` (~50 lineas) para evitar triplicar la logica en 3 archivos. Justificado por el prompt ("helper muy chico y justificado").
+
+2. **Solo display, nunca escritura**: El helper SOLO se usa en rendering y search. No modifica entries, no reescribe accountId, no toca el mayor.
+
+3. **Amplio set de control codes**: Se incluyen no solo Deudores/Proveedores sino tambien Documentos a cobrar/pagar, Valores, Acreedores, etc. Cualquier cuenta que tenga subcuentas per-tercero se beneficia del display mapping.
+
+4. **Search bidireccional**: El filtro de busqueda en AsientosDesktop ahora matchea tanto "Carlos Gomez" (tercero) como "Deudores por Ventas" (cuenta control). Mejora UX sin romper nada.
+
+### Validacion
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/)
+- `npx vite build`: OK en ~21s (warning chunk size pre-existente)
+
+### QA Manual Sugerido
+- [ ] Crear venta CTA_CTE a "Carlos Gomez" → en Libro Diario ver: "Deudores por Ventas" (cuenta) + "Carlos Gomez" (detalle)
+- [ ] Crear compra a "Marito Baracus" → en Libro Diario ver: "Proveedores" (cuenta) + "Marito Baracus" (detalle)
+- [ ] Buscar "Deudores" en Libro Diario → debe encontrar asientos de clientes
+- [ ] Buscar "Carlos" → debe encontrar asientos de ese tercero
+- [ ] Expandir asiento en mobile → ver cuenta control + tercero
+- [ ] Descargar CSV desde mobile → verificar formato "Cuenta / Tercero"
+- [ ] Descargar PDF → verificar formato "Cuenta\n→ Tercero"
+- [ ] Asiento manual (no auto) con cuentas normales → no debe mostrar detalle extra
+- [ ] PerfeccionarModal: solo muestra cuentas de instrumentos (no Caja/Bancos)
+- [ ] Cobrar/Pagar navega a tab Pagos con prefill correcto
+
+### Pendientes / Riesgos
+- **Multi-moneda**: No implementado
+- **Incobrables**: Sin flujo de provision/castigo
+- **Edit mode en AsientosDesktop**: El inline edit sigue mostrando AccountSearchSelect con la cuenta real (subcuenta). Esto es correcto para edicion (se edita la cuenta real), pero visualmente no muestra el mapping. Aceptado: el edit mode necesita la cuenta real.
+- **Cuentas fuera del set**: Si se crean subcuentas bajo cuentas control NO incluidas en `CONTROL_CODES_WITH_TERCEROS`, no se aplica el mapping. Se puede extender el set en el futuro.
+
+---
+
+## CHECKPOINT #PERFECCIONAR-SOLO-INSTRUMENTOS
+**Fecha:** 2026-02-13
+**Estado:** COMPLETADO - Perfeccionar = solo instrumentacion; Cobrar/Pagar = Pagos
+
+### Objetivo
+Corregir la logica UX/contable para que "Perfeccionar" sea SOLO instrumentacion (cheque/pagare/valores/documentos) y todo lo que sea dinero real (Caja/Bancos/QR/Transferencia/Tarjeta) vaya por el flujo "Pagos (Cobro/Pago)" en MovementModalV3.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/Operaciones/PerfeccionarModal.tsx` | Whitelist de cuentas destino por lado (ALLOWED_DEST_CODES), helper text, boton "Ir a Pagos", nota caso mixto, nueva prop `onGoToPagos` |
+| `src/pages/Operaciones/ClientesDeudoresPage.tsx` | Pasar `onGoToPagos` callback, actualizar `destControlCodes` a `['1.1.02.02', '1.1.01.04', '1.1.01.05']` |
+| `src/pages/Operaciones/ProveedoresAcreedoresPage.tsx` | Pasar `onGoToPagos` callback |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+
+**PerfeccionarModal - Whitelist de cuentas destino**
+- Constante `ALLOWED_DEST_CODES` por lado:
+  - Clientes: `1.1.02.02` (Documentos a cobrar), `1.1.01.04` (Valores a depositar), `1.1.01.05` (Valores a depositar diferidos)
+  - Proveedores/Acreedores: `2.1.01.02` (Documentos a pagar), `2.1.01.04` (Valores a pagar), `2.1.01.05` (Valores a pagar diferidos)
+- Filtro `allowedDestFilter` memoizado: permite solo las cuentas control listadas o sus hijas (subcuentas per tercero)
+- Se pasa como prop `accountFilter` a `SplitRowEditor` y de ahi al `AccountSearchSelect.filter`
+- Resultado: el usuario NO puede seleccionar Caja/Bancos/Moneda Extranjera/Tarjeta/Transferencia como destino en Perfeccionar
+
+**PerfeccionarModal - Helper text y CTA**
+- Banner informativo azul arriba de destinos: "Perfeccionar es para documentar... Si cobras/pagas en Caja/Bancos/QR, usa Pagos"
+- Link inline clicable "Pagos (Cobrar/Pagar)" dentro del banner que cierra modal y redirige
+- Boton secundario en footer: "Ir a Pagos (Cobrar/Pagar)" con icono CurrencyCircleDollar
+- Nota caso mixto debajo de notas: "Si una parte es al contado y otra documentada: registra primero el cobro/pago en Pagos..."
+
+**PerfeccionarModal - Nueva prop `onGoToPagos`**
+- Signature: `onGoToPagos?: (data: { counterpartyName: string; suggestedAmount: number }) => void`
+- Al clickear "Ir a Pagos": cierra modal + invoca callback con nombre del tercero y monto sugerido
+- ClientesDeudoresPage: `onGoToPagos` invoca `handleCobrar(data.counterpartyName)` que navega a `/operaciones/inventario` con `prefillTab: 'pagos'` y `prefillPaymentDirection: 'COBRO'`
+- ProveedoresAcreedoresPage: `onGoToPagos` invoca `handlePay(data.counterpartyName)` con `prefillPaymentDirection: 'PAGO'`
+
+**ClientesDeudoresPage - destControlCodes actualizado**
+- Anterior: `['1.1.02.02', '1.1.02.03']` (Documentos a cobrar + Deudores con tarjeta)
+- Nuevo: `['1.1.02.02', '1.1.01.04', '1.1.01.05']` (Documentos a cobrar + Valores a depositar + Valores a depositar diferidos)
+- Motivo: "Deudores con tarjeta" (1.1.02.03) no es un instrumento documentable. Los Valores a depositar/diferidos si lo son (cheques recibidos).
+
+**Cobrar/Pagar - Ya funcionaba correctamente**
+- `handleCobrar` (Clientes) y `handlePay` (Proveedores) ya navegaban a MovementModalV3 tab Pagos con deep-link correcto
+- InventarioBienesPage lee `location.state` y prefill type=PAYMENT + direction + counterparty
+- No se requirio cambio adicional en estas rutas
+
+### Decisiones Tecnicas
+
+1. **Whitelist por codigo, no por rubro/grupo**: Se filtran cuentas por codigo exacto (o parentId). Esto es mas seguro que filtrar por grupo contable y evita incluir cuentas no deseadas.
+
+2. **Filter en AccountSearchSelect, no en prop accounts**: Se usa la prop `filter` existente del componente en vez de pre-filtrar el array `accounts`. Esto mantiene la referencia estable y no requiere cambios en el componente.
+
+3. **No se toco bienes.ts ni MovementModalV3**: El flujo RECLASS con paymentSplits ya soportaba cualquier cuenta destino. Solo se restringe la seleccion en UI.
+
+4. **onGoToPagos opcional**: Prop opcional para backward compat. Si no se pasa, el boton "Ir a Pagos" no se muestra.
+
+### Validacion
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/)
+- `npx vite build`: OK (warning chunk size pre-existente)
+
+### QA Manual Sugerido
+CLIENTES
+- [ ] Click "Perfeccionar" → verificar que NO aparecen Caja/Bancos en destinos
+- [ ] Solo aparecen: Documentos a cobrar, Valores a depositar, Valores a depositar diferidos (y sus subcuentas)
+- [ ] Helper text azul visible arriba de destinos
+- [ ] Click "Ir a Pagos (Cobrar)" → cierra modal → navega a Pagos con cliente preseleccionado en modo COBRO
+- [ ] Nota caso mixto visible debajo de notas
+- [ ] Multi-split sigue funcionando con cuentas whitelisted
+- [ ] Preview asiento sigue balanceando correctamente
+
+PROVEEDORES
+- [ ] Click "Perfeccionar" → solo Documentos a pagar, Valores a pagar, Valores a pagar diferidos
+- [ ] Click "Ir a Pagos (Pagar)" → navega a Pagos con proveedor preseleccionado en modo PAGO
+
+FLUJO COMPLETO
+- [ ] Crear venta a CTA_CTE → saldo en Clientes
+- [ ] Click "Cobrar" → abre Pagos (COBRO) con cliente preseleccionado
+- [ ] Registrar cobro en Caja → saldo baja
+- [ ] Click "Perfeccionar" → NO aparecen Caja/Bancos
+- [ ] Perfeccionar con pagare → asiento RECLASS correcto
+
+### Pendientes / Riesgos
+- **Multi-moneda**: No implementado. Si se agregan cuentas en moneda extranjera a la whitelist, habria que resolver conversion.
+- **Incobrables**: No hay flujo de "marcar incobrable" ni provision. Pendiente para futuro.
+- **suggestedAmount no se usa en deep-link**: El callback `onGoToPagos` pasa `suggestedAmount` pero `handleCobrar`/`handlePay` no lo propagan al prefill de monto. El usuario debe ingresarlo manualmente en Pagos. Mejora menor pendiente.
+
+---
+
 ## CHECKPOINT #PERFECCIONAR-MULTI-DESTINO-SPLIT
 **Fecha:** 2026-02-13
 **Estado:** COMPLETADO - Multi-destino (split) en Perfeccionar + Vista previa asiento + Consumidor Final
