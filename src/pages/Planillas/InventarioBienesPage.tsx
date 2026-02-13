@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
     Package,
@@ -236,6 +237,16 @@ const OPTIONAL_BIENES_RULES = BIENES_ACCOUNT_RULES.filter(rule => rule.optional)
  * Follows the prototype at docs/prototypes/Inventario.html
  */
 export default function InventarioBienesPage() {
+    // Deep-link: read prefill from location state (e.g., from Proveedores page)
+    const location = useLocation()
+    const locationState = location.state as {
+        prefillTab?: string
+        prefillPaymentDirection?: string
+        prefillCounterparty?: string
+        prefillSourceMovementId?: string
+        openModal?: boolean
+    } | null
+
     // State
     const { year: periodYear, start: periodStart, end: periodEnd } = usePeriodYear()
     const periodId = String(periodYear)
@@ -355,6 +366,28 @@ export default function InventarioBienesPage() {
     useEffect(() => {
         loadData()
     }, [loadData])
+
+    // Deep-link: open modal with prefill from Proveedores/Acreedores page
+    useEffect(() => {
+        if (!locationState?.prefillTab || !settings) return
+        if (locationState.prefillTab === 'pagos' || locationState.prefillTab === 'compra') {
+            const prefill: Partial<BienesMovement> = {}
+            if (locationState.prefillTab === 'pagos') {
+                prefill.type = 'PAYMENT'
+                prefill.paymentDirection = (locationState.prefillPaymentDirection as any) || 'PAGO'
+            }
+            if (locationState.prefillCounterparty) {
+                prefill.counterparty = locationState.prefillCounterparty
+            }
+            if (locationState.prefillSourceMovementId) {
+                prefill.sourceMovementId = locationState.prefillSourceMovementId
+            }
+            setMovementPrefill(prefill)
+            setMovementModalOpen(true)
+            // Clear location state to prevent re-opening on re-render
+            window.history.replaceState({}, '')
+        }
+    }, [locationState, settings])
 
     // Load FACPCE indices from cierre-valuacion module
     useEffect(() => {

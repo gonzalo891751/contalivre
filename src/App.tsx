@@ -15,6 +15,8 @@ import MonedaExtranjeraPage from './pages/Operaciones/MonedaExtranjeraPage'
 import ImpuestosPage from './pages/Operaciones/ImpuestosPage'
 import BienesUsoPage from './pages/Operaciones/BienesUsoPage'
 import InversionesPage from './pages/Operaciones/InversionesPage'
+import ProveedoresAcreedoresPage from './pages/Operaciones/ProveedoresAcreedoresPage'
+import ClientesDeudoresPage from './pages/Operaciones/ClientesDeudoresPage'
 import ConciliacionesPage from './pages/Planillas/Conciliaciones/ConciliacionesPage'
 import CierreValuacionPage from './pages/Planillas/CierreValuacionPage'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
@@ -47,6 +49,8 @@ function App() {
                 <Route path="/operaciones/impuestos" element={<ImpuestosPage />} />
                 <Route path="/operaciones/bienes-uso" element={<BienesUsoPage />} />
                 <Route path="/operaciones/inversiones" element={<InversionesPage />} />
+                <Route path="/operaciones/proveedores" element={<ProveedoresAcreedoresPage />} />
+                <Route path="/operaciones/clientes" element={<ClientesDeudoresPage />} />
                 <Route path="/cuentas" element={<Cuentas />} />
                 <Route path="/asientos" element={<Asientos />} />
                 <Route path="/mayor" element={<Mayor />} />

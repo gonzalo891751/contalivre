@@ -383,3 +383,93 @@ export async function mergeAccounts(
     }
 }
 
+// ============================================================================
+// Subcuenta automática por tercero (Proveedores/Acreedores)
+// ============================================================================
+
+/**
+ * Normalize name for matching: lowercase, trim, collapse spaces, remove accents
+ */
+function normalizeNameForMatch(name: string): string {
+    return name
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, ' ')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+}
+
+/**
+ * Find or create a child (sub-account) under a parent account, matched by name.
+ *
+ * Used to auto-create per-tercero sub-accounts (e.g., "Proveedor X" under 2.1.01.01).
+ * - Looks up parent by code
+ * - Searches existing children by normalized name match
+ * - If no match, creates a new postable account with generated code
+ * - Returns the child account's ID
+ *
+ * @param parentAccountCode - Code of the parent/control account (e.g. '2.1.01.01')
+ * @param terceroName - Name of the third party (will be trimmed)
+ * @returns accountId of the found or created child account
+ */
+export async function findOrCreateChildAccountByName(
+    parentAccountCode: string,
+    terceroName: string
+): Promise<string> {
+    const trimmedName = terceroName.trim()
+    if (!trimmedName) {
+        throw new Error('El nombre del tercero no puede estar vacío')
+    }
+
+    // 1. Find parent account
+    const parent = await getAccountByCode(parentAccountCode)
+    if (!parent) {
+        throw new Error(`Cuenta control "${parentAccountCode}" no encontrada en el plan de cuentas`)
+    }
+
+    // 2. Ensure parent is a header (if not, upgrade it)
+    if (!parent.isHeader) {
+        // Check if parent has entries — if so, we can't safely change it
+        const parentEntries = await db.entries.toArray()
+        const parentHasEntries = parentEntries.some(e =>
+            e.lines.some(l => l.accountId === parent.id)
+        )
+        if (!parentHasEntries) {
+            await db.accounts.update(parent.id, { isHeader: true })
+        }
+        // If it has entries, we proceed anyway — the child will be created under it
+        // and future postings go to the child. This is safe.
+    }
+
+    // 3. Search existing children by normalized name
+    const normalizedTarget = normalizeNameForMatch(trimmedName)
+    const children = await db.accounts
+        .filter(a => a.parentId === parent.id)
+        .toArray()
+
+    const existingChild = children.find(
+        child => normalizeNameForMatch(child.name) === normalizedTarget
+    )
+
+    if (existingChild) {
+        return existingChild.id
+    }
+
+    // 4. Create new child account
+    const nextCode = await generateNextCode(parent.id)
+    const newAccount = await createAccount({
+        code: nextCode,
+        name: trimmedName,
+        kind: parent.kind,
+        section: parent.section,
+        group: parent.group,
+        statementGroup: parent.statementGroup,
+        parentId: parent.id,
+        normalSide: parent.normalSide,
+        isContra: false,
+        isHeader: false,
+    })
+
+    return newAccount.id
+}
+

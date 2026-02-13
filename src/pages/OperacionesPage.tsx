@@ -563,6 +563,45 @@ export default function OperacionesPage() {
                 </div>
             </section>
 
+            {/* Creditos Comerciales Section */}
+            <div className="mt-8">
+                <h2 className="font-display font-semibold text-2xl text-slate-900 mb-1">Creditos Comerciales</h2>
+                <p className="text-slate-500 mb-6">Controla lo que te deben tus clientes.</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Clientes / Deudores */}
+                    <div
+                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-emerald-400 transition-all group cursor-pointer"
+                        onClick={() => navigate('/operaciones/clientes')}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/clientes')}
+                        aria-label="Ir a modulo de Clientes"
+                    >
+                        <div className="flex justify-between items-start mb-3">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl group-hover:bg-emerald-100 transition-colors">
+                                    <UsersThree weight="duotone" size={24} />
+                                </div>
+                                <span className="font-semibold text-slate-900">Clientes</span>
+                            </div>
+                            <span className="bg-emerald-50 text-emerald-600 text-xs px-2 py-1 rounded-full font-bold border border-emerald-100">
+                                Activo
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-end">
+                            <div>
+                                <div className="text-xs text-slate-500">Saldo a cobrar</div>
+                                <div className="font-mono text-lg font-bold text-slate-900">—</div>
+                            </div>
+                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-all">
+                                <CaretRight weight="bold" size={16} />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {/* Pasivos Section */}
             <div className="mt-8">
                 <h2 className="font-display font-semibold text-2xl text-slate-900 mb-1">Pasivos y Deudas</h2>
@@ -570,7 +609,14 @@ export default function OperacionesPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Proveedores */}
-                    <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-amber-400 transition-all group cursor-pointer">
+                    <div
+                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-amber-400 transition-all group cursor-pointer"
+                        onClick={() => navigate('/operaciones/proveedores')}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/proveedores')}
+                        aria-label="Ir a modulo de Proveedores"
+                    >
                         <div className="flex justify-between items-start mb-3">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-xl group-hover:bg-amber-100 transition-colors">

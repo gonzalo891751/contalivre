@@ -26,6 +26,7 @@ import {
 } from '../core/inventario/costing'
 import { createEntry, updateEntry } from './entries'
 import { resolveOpeningEquityAccountId } from './openingEquity'
+import { findOrCreateChildAccountByName } from './accounts'
 
 export const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }> = {
     mercaderias: { code: '1.1.04.01', names: ['Mercaderias'] },
@@ -47,6 +48,12 @@ export const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }
     banco: { code: '1.1.01.02', names: ['Bancos cuenta corriente', 'Banco cuenta corriente', 'Bancos'] },
     proveedores: { code: '2.1.01.01', names: ['Proveedores'] },
     deudores: { code: '1.1.02.01', names: ['Deudores por ventas'] },
+    documentosAPagar: { code: '2.1.01.02', names: ['Documentos a pagar'] },
+    valoresAPagar: { code: '2.1.01.04', names: ['Valores a pagar'] },
+    valoresAPagarDiferidos: { code: '2.1.01.05', names: ['Valores a pagar diferidos'] },
+    acreedores: { code: '2.1.06.01', names: ['Acreedores varios'] },
+    documentosACobrar: { code: '1.1.02.02', names: ['Documentos a cobrar'] },
+    deudoresConTarjeta: { code: '1.1.02.03', names: ['Deudores con tarjeta de credito', 'Deudores con tarjeta'] },
     // Percepciones / Retenciones
     percepcionIVASufrida: { code: '1.1.03.08', names: ['Percepciones IVA de terceros'] },
     percepcionIVAPracticada: { code: '2.1.03.06', names: ['Percepciones IVA a terceros'] },
@@ -564,8 +571,32 @@ const buildJournalEntriesForMovement = async (
         ? resolveMappedAccountId(accounts, settings, 'compras', 'compras')
         : null
     const diferenciaId = resolveMappedAccountId(accounts, settings, 'diferenciaInventario', 'diferenciaInventario')
-    const contraId = resolveCounterpartyAccountId(accounts, movement)
+    let contraId = resolveCounterpartyAccountId(accounts, movement)
     const hasSplits = movement.paymentSplits && movement.paymentSplits.length > 0
+
+    // ---- Subcuenta automática por tercero ----
+    // If the movement has a counterparty and the resolved contra account is the generic
+    // proveedores/deudores control, resolve to a per-tercero sub-account instead.
+    const genericProveedoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores)
+    const genericDeudoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.deudores)
+
+    if (movement.counterparty?.trim() && contraId) {
+        const isProveedoresControl = contraId === genericProveedoresId
+        const isDeudoresControl = contraId === genericDeudoresId
+        if (isProveedoresControl) {
+            try {
+                contraId = await findOrCreateChildAccountByName(ACCOUNT_FALLBACKS.proveedores.code, movement.counterparty)
+            } catch (e) {
+                console.warn(`[bienes] Subcuenta tercero fallback: ${e}`)
+            }
+        } else if (isDeudoresControl) {
+            try {
+                contraId = await findOrCreateChildAccountByName(ACCOUNT_FALLBACKS.deudores.code, movement.counterparty)
+            } catch (e) {
+                console.warn(`[bienes] Subcuenta tercero fallback: ${e}`)
+            }
+        }
+    }
 
     // Determine which account receives the purchase debit
     const purchaseDebitAccountId = isPeriodic ? (comprasId || mercaderiasId) : mercaderiasId
@@ -703,9 +734,22 @@ const buildJournalEntriesForMovement = async (
             }
 
             if (hasSplits) {
-                movement.paymentSplits!.forEach(split => {
-                    lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: 'Pago / Contrapartida' })
-                })
+                // Resolve per-tercero subcuentas for splits pointing to control accounts
+                const provControlCodes = new Set(['2.1.01.01', '2.1.06.01', '2.1.01.02', '2.1.01.04', '2.1.01.05'])
+                for (const split of movement.paymentSplits!) {
+                    let splitAccountId = split.accountId
+                    if (movement.counterparty?.trim()) {
+                        const splitAcc = accounts.find(a => a.id === splitAccountId)
+                        if (splitAcc && provControlCodes.has(splitAcc.code)) {
+                            try {
+                                splitAccountId = await findOrCreateChildAccountByName(splitAcc.code, movement.counterparty)
+                            } catch (e) {
+                                console.warn(`[bienes] Subcuenta PURCHASE split fallback: ${e}`)
+                            }
+                        }
+                    }
+                    lines.push({ accountId: splitAccountId, debit: 0, credit: split.amount, description: 'Pago / Contrapartida' })
+                }
             } else {
                 lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Pago / Proveedores' })
             }
@@ -760,9 +804,22 @@ const buildJournalEntriesForMovement = async (
 
             const saleLines: EntryLine[] = []
             if (hasSplits) {
-                movement.paymentSplits!.forEach(split => {
-                    saleLines.push({ accountId: split.accountId, debit: split.amount, credit: 0, description: 'Cobro / Contrapartida' })
-                })
+                // Resolve per-tercero subcuentas for splits pointing to control accounts
+                const deudoresControlCodes = new Set(['1.1.02.01', '1.1.02.02', '1.1.02.03'])
+                for (const split of movement.paymentSplits!) {
+                    let splitAccountId = split.accountId
+                    if (movement.counterparty?.trim()) {
+                        const splitAcc = accounts.find(a => a.id === splitAccountId)
+                        if (splitAcc && deudoresControlCodes.has(splitAcc.code)) {
+                            try {
+                                splitAccountId = await findOrCreateChildAccountByName(splitAcc.code, movement.counterparty)
+                            } catch (e) {
+                                console.warn(`[bienes] Subcuenta SALE split fallback: ${e}`)
+                            }
+                        }
+                    }
+                    saleLines.push({ accountId: splitAccountId, debit: split.amount, credit: 0, description: 'Cobro / Contrapartida' })
+                }
             } else {
                 saleLines.push({ accountId: contraId!, debit: total, credit: 0, description: 'Cobro / Deudores' })
             }
@@ -886,7 +943,17 @@ const buildJournalEntriesForMovement = async (
         const isCobro = movement.paymentDirection === 'COBRO'
         const deudoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.deudores)
         const proveedoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores)
-        const cuentaCorrienteId = isCobro ? deudoresId : proveedoresId
+        let cuentaCorrienteId = isCobro ? deudoresId : proveedoresId
+
+        // Resolve to per-tercero sub-account if counterparty exists
+        if (movement.counterparty?.trim() && cuentaCorrienteId) {
+            const parentCode = isCobro ? ACCOUNT_FALLBACKS.deudores.code : ACCOUNT_FALLBACKS.proveedores.code
+            try {
+                cuentaCorrienteId = await findOrCreateChildAccountByName(parentCode, movement.counterparty)
+            } catch (e) {
+                console.warn(`[bienes] Subcuenta PAYMENT fallback: ${e}`)
+            }
+        }
 
         if (!cuentaCorrienteId) {
             return { entries: [], error: `Falta cuenta contable: ${isCobro ? 'Deudores por ventas' : 'Proveedores'}` }
@@ -913,6 +980,114 @@ const buildJournalEntriesForMovement = async (
             : `Pago${movement.counterparty ? ` a ${movement.counterparty}` : ''}`
 
         pushEntry(memo, lines, { journalRole: isCobro ? 'collection' : 'payment' })
+    }
+
+    // RECLASS: Perfeccionamiento de pasivo/crédito
+    // Proveedores → Documentos/Valores a Pagar (paymentMethod = 'proveedores'|'acreedores')
+    // Deudores por Ventas → Documentos a Cobrar (paymentMethod = 'clientes')
+    if (movement.type === 'RECLASS') {
+        const reclassTotal = movement.total || 0
+        if (reclassTotal <= 0) {
+            return { entries: [], error: 'El perfeccionamiento no tiene importe.' }
+        }
+        if (!hasSplits || movement.paymentSplits!.length === 0) {
+            return { entries: [], error: 'El perfeccionamiento debe indicar la cuenta destino.' }
+        }
+
+        const isClientesSide = movement.paymentMethod === 'clientes'
+
+        // Source: determine based on side
+        let sourceAccountId: string | null = null
+        if (isClientesSide) {
+            sourceAccountId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.deudores)
+        } else {
+            const proveedoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores)
+            const acreedoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.acreedores)
+            sourceAccountId = proveedoresId
+            if (movement.paymentMethod === 'acreedores' && acreedoresId) {
+                sourceAccountId = acreedoresId
+            }
+        }
+
+        // Resolve to per-tercero sub-account
+        if (movement.counterparty?.trim() && sourceAccountId) {
+            let parentCode: string
+            if (isClientesSide) {
+                parentCode = ACCOUNT_FALLBACKS.deudores.code
+            } else if (movement.paymentMethod === 'acreedores') {
+                parentCode = ACCOUNT_FALLBACKS.acreedores.code
+            } else {
+                parentCode = ACCOUNT_FALLBACKS.proveedores.code
+            }
+            try {
+                sourceAccountId = await findOrCreateChildAccountByName(parentCode, movement.counterparty)
+            } catch (e) {
+                console.warn(`[bienes] Subcuenta RECLASS source fallback: ${e}`)
+            }
+        }
+
+        if (!sourceAccountId) {
+            return { entries: [], error: isClientesSide ? 'Falta cuenta contable: Deudores por ventas' : 'Falta cuenta contable: Proveedores/Acreedores' }
+        }
+
+        // Destination control codes that get per-tercero subcuentas
+        const destControlCodes = isClientesSide
+            ? ['1.1.02.02', '1.1.02.03'] // Documentos a Cobrar, Deudores con Tarjeta
+            : ['2.1.01.02', '2.1.01.04', '2.1.01.05'] // Documentos/Valores a Pagar
+
+        // Resolve destination sub-accounts per tercero
+        const destLines: EntryLine[] = []
+        for (const split of movement.paymentSplits!) {
+            let destAccountId = split.accountId
+            if (movement.counterparty?.trim()) {
+                const destAccount = accounts.find(a => a.id === destAccountId)
+                if (destAccount && destControlCodes.includes(destAccount.code)) {
+                    try {
+                        destAccountId = await findOrCreateChildAccountByName(destAccount.code, movement.counterparty)
+                    } catch (e) {
+                        console.warn(`[bienes] Subcuenta RECLASS dest fallback: ${e}`)
+                    }
+                }
+            }
+
+            if (isClientesSide) {
+                // Clientes: D Documentos a Cobrar / H Deudores por Ventas
+                destLines.push({
+                    accountId: destAccountId,
+                    debit: split.amount,
+                    credit: 0,
+                    description: `Perfeccionamiento credito - ${split.method || 'Documento'}`,
+                })
+            } else {
+                // Proveedores: D Proveedores / H Documentos a Pagar
+                destLines.push({
+                    accountId: destAccountId,
+                    debit: 0,
+                    credit: split.amount,
+                    description: `Perfeccionamiento - ${split.method || 'Documento/Valor'}`,
+                })
+            }
+        }
+
+        let reclassLines: EntryLine[]
+        if (isClientesSide) {
+            // Clientes: D Documentos a Cobrar / H Deudores por Ventas (subcuenta)
+            reclassLines = [
+                ...destLines,
+                { accountId: sourceAccountId, debit: 0, credit: reclassTotal, description: 'Perfeccionamiento credito - baja deudores' },
+            ]
+        } else {
+            // Proveedores: D Proveedores (subcuenta) / H Documentos a Pagar
+            reclassLines = [
+                { accountId: sourceAccountId, debit: reclassTotal, credit: 0, description: 'Perfeccionamiento pasivo - baja cta cte' },
+                ...destLines,
+            ]
+        }
+
+        const reclassMemo = isClientesSide
+            ? `Perfeccionamiento credito${movement.counterparty ? ` - ${movement.counterparty}` : ''}`
+            : `Perfeccionamiento${movement.counterparty ? ` - ${movement.counterparty}` : ''}`
+        pushEntry(reclassMemo, reclassLines, { journalRole: 'reclassification' })
     }
 
     return { entries }
