@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Gestión de Proveedores</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Configuración de Tailwind extendida -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',
+                            secondary: '#10B981',
+                            dark: '#0F172A',
+                            surface: '#F8FAFC'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+                        'card': '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        :root {
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+        }
+
+        body { background-color: #F8FAFC; color: #0F172A; }
+        
+        .font-display { font-family: 'Outfit', sans-serif; }
+        .font-mono-num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+        
+        .btn-primary {
+            background: var(--brand-gradient);
+            color: white;
+            transition: all 0.2s;
+        }
+        .btn-primary:hover {
+            opacity: 0.95;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+
+        .btn-secondary {
+            background: white;
+            border: 1px solid #E2E8F0;
+            color: #475569;
+            transition: all 0.2s;
+        }
+        .btn-secondary:hover {
+            background: #F8FAFC;
+            color: #1E293B;
+            border-color: #CBD5E1;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+        /* Animations */
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Badges */
+        .badge-success { background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; }
+        .badge-warning { background: #FFFBEB; color: #D97706; border: 1px solid #FDE68A; }
+        .badge-error { background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; }
+        .badge-info { background: #EFF6FF; color: #2563EB; border: 1px solid #BFDBFE; }
+        .badge-neutral { background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0; }
+
+        /* Tabs */
+        .tab-active {
+            color: #3B82F6;
+            border-bottom: 2px solid #3B82F6;
+            font-weight: 600;
+        }
+
+        /* Segmented Toggle */
+        .toggle-btn-active {
+            background: white;
+            color: #3B82F6;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            font-weight: 600;
+        }
+        .toggle-btn-inactive {
+            color: #64748B;
+            font-weight: 500;
+        }
+        .toggle-btn-inactive:hover {
+            color: #334155;
+            background: rgba(255,255,255,0.5);
+        }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden text-sm">
+
+    <!-- SIDEBAR -->
+    <aside class="w-64 bg-white border-r border-gray-200 flex flex-col z-20 shadow-sm hidden md:flex">
+        <div class="p-6 flex items-center gap-3 cursor-pointer" onclick="app.goToOperations()">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-lg" style="background: var(--brand-gradient);">
+                <i class="ph-bold ph-robot"></i>
+            </div>
+            <span class="font-display font-bold text-xl tracking-tight text-gray-900">ContaLivre</span>
+        </div>
+
+        <nav class="flex-1 px-4 space-y-1 overflow-y-auto">
+            <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2 mb-2 mt-4">Operaciones</div>
+            
+            <a href="#" onclick="app.enterModule('proveedores')" id="nav-proveedores" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-brand-primary bg-blue-50 font-medium transition-colors">
+                <i class="ph ph-truck text-lg"></i>
+                Proveedores
+            </a>
+            
+            <a href="#" onclick="app.enterModule('acreedores')" id="nav-acreedores" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors">
+                <i class="ph ph-briefcase text-lg"></i>
+                Acreedores Varios
+            </a>
+
+            <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2 mb-2 mt-6">Contabilidad</div>
+            <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-gray-600 hover:bg-gray-50 transition-colors">
+                <i class="ph ph-books text-lg"></i>
+                Libro Diario
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-gray-600 hover:bg-gray-50 transition-colors">
+                <i class="ph ph-chart-pie-slice text-lg"></i>
+                Informes
+            </a>
+        </nav>
+
+        <div class="p-4 border-t border-gray-200">
+            <div class="flex items-center gap-3 p-2 rounded-md hover:bg-gray-50 cursor-pointer">
+                <div class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500">
+                    <i class="ph-fill ph-user"></i>
+                </div>
+                <div>
+                    <div class="text-xs font-medium text-gray-900">Santiago M.</div>
+                    <div class="text-[10px] text-gray-500">Admin</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 flex flex-col overflow-hidden relative">
+        
+        <!-- HEADER -->
+        <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0 z-10">
+            <div class="flex items-center gap-4">
+                <button class="md:hidden text-gray-500 text-2xl"><i class="ph ph-list"></i></button>
+                
+                <!-- Back Button Logic -->
+                <div id="header-back-btn" class="hidden md:flex">
+                    <button onclick="app.goToOperations()" class="btn-secondary px-3 py-1.5 rounded-md flex items-center gap-2 text-xs font-medium shadow-sm">
+                        <i class="ph-bold ph-arrow-left"></i> Volver a Operaciones
+                    </button>
+                </div>
+
+                <nav class="hidden md:flex text-gray-500 text-xs items-center gap-2">
+                    <span class="text-gray-400">|</span>
+                    <span>Operaciones</span>
+                    <i class="ph ph-caret-right text-gray-400"></i>
+                    <span id="breadcrumb-module" class="font-medium text-gray-900">Proveedores</span>
+                </nav>
+            </div>
+
+            <div class="flex items-center gap-4">
+                
+                <!-- HEADER TOGGLE (Nuevo) -->
+                <div id="module-toggle" class="bg-gray-100 p-1 rounded-lg flex items-center">
+                    <button onclick="app.enterModule('proveedores')" id="toggle-prov" class="toggle-btn-active px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all">
+                        <i class="ph-bold ph-truck"></i> Proveedores
+                    </button>
+                    <button onclick="app.enterModule('acreedores')" id="toggle-acre" class="toggle-btn-inactive px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all">
+                        <i class="ph-bold ph-briefcase"></i> Acreedores
+                    </button>
+                </div>
+
+                <div class="h-6 w-px bg-gray-200"></div>
+
+                <button class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 relative">
+                    <i class="ph ph-bell text-lg"></i>
+                    <span class="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
+                </button>
+                
+                <button onclick="app.openModal('modal-compra')" class="btn-primary px-4 py-2 rounded-md font-medium text-xs flex items-center gap-2 shadow-sm">
+                    <i class="ph-bold ph-plus"></i>
+                    <span id="btn-add-label">Registrar Compra</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- CONTENT AREA -->
+        <div class="flex-1 overflow-auto bg-brand-surface p-6 md:p-8 relative">
+            
+            <!-- VISTA: OPERACIONES (HOME) SIMULADA -->
+            <div id="view-operaciones-menu" class="hidden max-w-5xl mx-auto fade-in">
+                <div class="mb-8">
+                    <h1 class="font-display font-bold text-3xl text-gray-900">Operaciones</h1>
+                    <p class="text-gray-500 mt-1">Acceso rápido a los módulos de gestión diaria.</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Card Proveedores -->
+                    <div onclick="app.enterModule('proveedores')" class="bg-white p-6 rounded-xl border border-gray-200 shadow-card hover:shadow-lg hover:border-brand-primary transition-all cursor-pointer group">
+                        <div class="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center text-brand-primary text-2xl mb-4 group-hover:scale-110 transition-transform">
+                            <i class="ph-duotone ph-truck"></i>
+                        </div>
+                        <h3 class="font-display font-bold text-lg text-gray-900">Proveedores</h3>
+                        <p class="text-xs text-gray-500 mt-2 mb-4">Gestión de compras, cuentas corrientes comerciales y pagos a proveedores habituales.</p>
+                        <span class="text-xs font-semibold text-brand-primary group-hover:underline">Entrar &rarr;</span>
+                    </div>
+
+                    <!-- Card Acreedores -->
+                    <div onclick="app.enterModule('acreedores')" class="bg-white p-6 rounded-xl border border-gray-200 shadow-card hover:shadow-lg hover:border-gray-400 transition-all cursor-pointer group">
+                        <div class="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center text-gray-600 text-2xl mb-4 group-hover:scale-110 transition-transform">
+                            <i class="ph-duotone ph-briefcase"></i>
+                        </div>
+                        <h3 class="font-display font-bold text-lg text-gray-900">Acreedores Varios</h3>
+                        <p class="text-xs text-gray-500 mt-2 mb-4">Préstamos, gastos no operativos, alquileres y otras deudas financieras.</p>
+                        <span class="text-xs font-semibold text-gray-700 group-hover:underline">Entrar &rarr;</span>
+                    </div>
+
+                    <!-- Card Placeholder -->
+                    <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-card opacity-60">
+                        <div class="w-12 h-12 bg-gray-50 rounded-lg flex items-center justify-center text-gray-400 text-2xl mb-4">
+                            <i class="ph-duotone ph-bank"></i>
+                        </div>
+                        <h3 class="font-display font-bold text-lg text-gray-900">Tesorería</h3>
+                        <p class="text-xs text-gray-500 mt-2 mb-4">Cajas, Bancos y Conciliaciones bancarias.</p>
+                        <span class="text-[10px] uppercase font-bold bg-gray-100 px-2 py-1 rounded text-gray-500">Próximamente</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VISTA: MODULO (PROVEEDORES/ACREEDORES) -->
+            <div id="view-module-content" class="max-w-7xl mx-auto space-y-6 fade-in">
+                
+                <!-- HEADER & TABS -->
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h1 id="module-title" class="font-display font-bold text-3xl text-gray-900">Proveedores</h1>
+                        <p id="module-desc" class="text-gray-500 mt-1">Gestioná tus compras, cuentas corrientes y vencimientos.</p>
+                    </div>
+                    
+                    <!-- KPI SUMMARY -->
+                    <div class="flex gap-4">
+                        <div class="bg-white px-4 py-2 rounded-lg border border-gray-200 shadow-sm">
+                            <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wide">Deuda Total <span class="text-[9px] text-gray-300 ml-1">(Mayor)</span></div>
+                            <div class="font-mono-num font-bold text-lg text-gray-900" id="kpi-total-debt">$ 0,00</div>
+                        </div>
+                        <div class="bg-white px-4 py-2 rounded-lg border border-gray-200 shadow-sm border-l-4 border-l-orange-400">
+                            <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wide">Vence esta semana</div>
+                            <div class="font-mono-num font-bold text-lg text-orange-600" id="kpi-week-debt">$ 0,00</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TABS NAVIGATION -->
+                <div class="border-b border-gray-200 flex gap-6 overflow-x-auto">
+                    <button onclick="app.switchTab('dashboard')" class="tab-btn tab-active pb-3 text-gray-500 hover:text-gray-800 font-medium transition-colors whitespace-nowrap" data-tab="dashboard">Dashboard</button>
+                    <button onclick="app.switchTab('listado')" class="tab-btn pb-3 text-gray-500 hover:text-gray-800 font-medium transition-colors whitespace-nowrap" data-tab="listado">Listado</button>
+                    <button onclick="app.switchTab('movimientos')" class="tab-btn pb-3 text-gray-500 hover:text-gray-800 font-medium transition-colors whitespace-nowrap" data-tab="movimientos">Movimientos</button>
+                    <button onclick="app.switchTab('vencimientos')" class="tab-btn pb-3 text-gray-500 hover:text-gray-800 font-medium transition-colors whitespace-nowrap" data-tab="vencimientos">Vencimientos</button>
+                    <button disabled class="pb-3 text-gray-300 cursor-not-allowed font-medium flex items-center gap-2">
+                        Conciliación <span class="bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold">Pro</span>
+                    </button>
+                </div>
+
+                <!-- SUB-VIEW: DASHBOARD -->
+                <div id="view-dashboard" class="fade-in space-y-6">
+                    <!-- Cards Grid -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <!-- Card 1 -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-card">
+                            <div class="flex justify-between items-start mb-4">
+                                <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-brand-primary text-xl">
+                                    <i class="ph-duotone ph-invoice"></i>
+                                </div>
+                                <span class="badge-neutral px-2 py-1 rounded text-xs font-semibold">Mensual</span>
+                            </div>
+                            <div class="text-gray-500 text-sm font-medium">Documentos a Pagar</div>
+                            <div class="flex items-baseline gap-2 mt-1">
+                                <span class="font-mono-num text-2xl font-bold text-gray-900" id="dash-docs-count">0</span>
+                                <span class="text-xs text-gray-400">pendientes</span>
+                            </div>
+                        </div>
+
+                        <!-- Card 2 -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-card">
+                            <div class="flex justify-between items-start mb-4">
+                                <div class="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center text-green-600 text-xl">
+                                    <i class="ph-duotone ph-money"></i>
+                                </div>
+                                <span class="badge-neutral px-2 py-1 rounded text-xs font-semibold">Total</span>
+                            </div>
+                            <div class="text-gray-500 text-sm font-medium">Saldo Global <span class="text-[10px] text-gray-400 font-normal">(Mayor)</span></div>
+                            <div class="font-mono-num text-2xl font-bold text-gray-900 mt-1" id="dash-global-balance">$ 0,00</div>
+                        </div>
+
+                        <!-- Card 3 -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-card">
+                            <div class="flex justify-between items-start mb-4">
+                                <div class="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center text-orange-500 text-xl">
+                                    <i class="ph-duotone ph-clock-countdown"></i>
+                                </div>
+                                <span class="badge-warning px-2 py-1 rounded text-xs font-semibold">Crítico</span>
+                            </div>
+                            <div class="text-gray-500 text-sm font-medium">Vencido (+90 días)</div>
+                            <div class="font-mono-num text-2xl font-bold text-gray-900 mt-1" id="dash-overdue">$ 0,00</div>
+                        </div>
+                    </div>
+
+                    <!-- Aging Chart Mock -->
+                    <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-card">
+                        <h3 class="font-display font-semibold text-lg mb-6">Antigüedad de Deuda (Aging)</h3>
+                        <div class="flex flex-col gap-4">
+                            <div class="flex items-center gap-4 text-xs">
+                                <span class="w-12 font-mono text-gray-500 text-right">0-30d</span>
+                                <div class="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-blue-500 rounded-full" style="width: 65%"></div></div>
+                                <span class="w-20 font-mono-num font-medium text-right">$ 850k</span>
+                            </div>
+                             <div class="flex items-center gap-4 text-xs">
+                                <span class="w-12 font-mono text-gray-500 text-right">31-60d</span>
+                                <div class="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-blue-300 rounded-full" style="width: 25%"></div></div>
+                                <span class="w-20 font-mono-num font-medium text-right">$ 320k</span>
+                            </div>
+                             <div class="flex items-center gap-4 text-xs">
+                                <span class="w-12 font-mono text-gray-500 text-right">61-90d</span>
+                                <div class="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-orange-300 rounded-full" style="width: 10%"></div></div>
+                                <span class="w-20 font-mono-num font-medium text-right">$ 120k</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUB-VIEW: LISTADO -->
+                <div id="view-listado" class="hidden fade-in space-y-4">
+                    <!-- CTA & Info -->
+                    <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start gap-3">
+                        <i class="ph-fill ph-info text-brand-primary text-lg mt-0.5"></i>
+                        <div class="flex-1">
+                            <p class="text-xs text-blue-900">
+                                <strong>Importante:</strong> Los terceros se crean desde Compras/Pagos. Los saldos se calculan automáticamente desde el Libro Mayor (cuenta control).
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Filters & Main Action -->
+                    <div class="flex flex-col md:flex-row justify-between gap-4">
+                        <div class="relative w-full md:w-80">
+                            <i class="ph ph-magnifying-glass absolute left-3 top-2.5 text-gray-400 text-lg"></i>
+                            <input type="text" id="search-input" onkeyup="app.filterList()" placeholder="Buscar por nombre, CUIT..." class="w-full pl-10 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-brand-primary shadow-sm">
+                        </div>
+                        <div class="flex gap-2">
+                            <select id="filter-status" onchange="app.filterList()" class="bg-white border border-gray-300 text-gray-700 text-sm rounded-lg focus:border-brand-primary block p-2 px-3 shadow-sm cursor-pointer">
+                                <option value="all">Todos los estados</option>
+                                <option value="ok">Al día</option>
+                                <option value="pending">Con vencimientos</option>
+                                <option value="overdue">Atrasado</option>
+                            </select>
+                            
+                            <!-- Botón "Nuevo" Contextualizado -->
+                            <button onclick="app.openModal('modal-compra')" class="btn-primary px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2">
+                                <i class="ph-bold ph-plus"></i> <span id="btn-new-provider-list">Nuevo Proveedor (desde Compras)</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Table Container -->
+                    <div class="bg-white rounded-xl border border-gray-200 shadow-card overflow-hidden">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wider font-semibold">
+                                        <th class="px-6 py-4">Entidad / Razón Social</th>
+                                        <th class="px-6 py-4 text-center">Estado</th>
+                                        <th class="px-6 py-4">Próx. Vencimiento</th>
+                                        <th class="px-6 py-4 text-right">Saldo (Mayor)</th>
+                                        <th class="px-6 py-4 text-right">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table-body" class="divide-y divide-gray-100 text-sm">
+                                    <!-- JS render content -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="empty-state" class="hidden py-12 flex flex-col items-center justify-center text-center">
+                            <div class="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+                                <i class="ph-duotone ph-magnifying-glass text-3xl text-gray-400"></i>
+                            </div>
+                            <h3 class="text-gray-900 font-medium mb-1">No encontramos resultados</h3>
+                            <p class="text-gray-500 text-xs">Probá con otro término de búsqueda.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUB-VIEW: VENCIMIENTOS -->
+                <div id="view-vencimientos" class="hidden fade-in space-y-6">
+                    <div class="flex justify-between items-center">
+                        <h2 class="font-display font-semibold text-lg">Agenda de Pagos</h2>
+                        <div class="flex gap-2 text-xs">
+                             <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> Vencido</span>
+                             <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-orange-400"></span> Esta semana</span>
+                        </div>
+                    </div>
+                    <div id="maturity-timeline" class="space-y-4"></div>
+                </div>
+
+                <!-- SUB-VIEW: MOVIMIENTOS -->
+                <div id="view-movimientos" class="hidden fade-in">
+                    <div class="bg-white p-12 text-center rounded-xl border border-gray-200 shadow-sm">
+                        <i class="ph-duotone ph-list-dashes text-4xl text-brand-primary mb-4"></i>
+                        <h3 class="font-display font-semibold text-lg text-gray-900">Historial de Movimientos</h3>
+                        <p class="text-gray-500 max-w-md mx-auto mt-2">Acá vas a ver todas las facturas, notas de crédito, pagos y ajustes realizados históricamente.</p>
+                        <button class="mt-6 text-brand-primary font-medium hover:underline text-xs">Ver últimos 30 días</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- ================= MODALES ================= -->
+
+    <!-- MODAL: REGISTRAR COMPRA -->
+    <div id="modal-compra" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true">
+        <div class="absolute inset-0 bg-gray-900/50 backdrop-blur-sm transition-opacity" onclick="app.closeModal('modal-compra')"></div>
+        <div class="absolute inset-y-0 right-0 w-full max-w-2xl bg-white shadow-2xl flex flex-col transform transition-transform duration-300 translate-x-full" id="modal-compra-panel">
+            
+            <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+                <div>
+                    <h2 class="font-display font-bold text-lg text-gray-900">Registrar Compra / Gasto</h2>
+                    <p class="text-xs text-gray-500">Se generará el asiento en el Libro Diario y se actualizará el stock.</p>
+                </div>
+                <button onclick="app.closeModal('modal-compra')" class="text-gray-400 hover:text-gray-600 p-2 rounded-md hover:bg-gray-200"><i class="ph-bold ph-x text-lg"></i></button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                <!-- 1. Proveedor -->
+                <div class="space-y-1 relative">
+                    <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide">Proveedor / Acreedor</label>
+                    <div class="flex gap-2">
+                        <select id="compra-proveedor" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary outline-none">
+                            <option value="">Buscar proveedor...</option>
+                        </select>
+                        <button onclick="app.toggleNewProviderInline()" class="px-3 py-2 border border-brand-primary text-brand-primary rounded-lg hover:bg-blue-50 transition-colors" title="Crear Nuevo">
+                            <i class="ph-bold ph-plus"></i>
+                        </button>
+                    </div>
+
+                    <!-- INLINE NEW PROVIDER FORM -->
+                    <div id="inline-new-provider" class="hidden mt-3 p-4 bg-blue-50 rounded-lg border border-blue-100 space-y-3 animate-in fade-in zoom-in-95 duration-200">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs font-bold text-brand-primary uppercase">Nuevo Proveedor Rápido</span>
+                            <button onclick="app.toggleNewProviderInline()" class="text-blue-400 hover:text-blue-600"><i class="ph-bold ph-x"></i></button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="col-span-2">
+                                <input type="text" id="new-prov-name" placeholder="Razón Social *" class="w-full text-sm border-gray-300 rounded-md px-3 py-2 focus:ring-brand-primary focus:border-brand-primary">
+                            </div>
+                            <input type="text" placeholder="CUIT (Opcional)" class="w-full text-sm border-gray-300 rounded-md px-3 py-2">
+                            <select class="w-full text-sm border-gray-300 rounded-md px-3 py-2">
+                                <option>Resp. Inscripto</option>
+                                <option>Monotributo</option>
+                            </select>
+                        </div>
+                        <div class="flex justify-end">
+                            <button onclick="app.saveNewProvider()" class="text-xs bg-brand-primary text-white px-3 py-1.5 rounded font-medium shadow-sm hover:opacity-90">Guardar y Seleccionar</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Datos Comprobante -->
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="col-span-1 space-y-1">
+                        <label class="block text-xs font-medium text-gray-600">Fecha Emisión</label>
+                        <input type="date" class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div class="col-span-2 space-y-1">
+                        <label class="block text-xs font-medium text-gray-600">Tipo & Número</label>
+                        <div class="flex gap-2">
+                            <select class="w-20 bg-white border border-gray-300 rounded-lg px-2 py-2 text-sm"><option>FC A</option><option>FC B</option><option>FC C</option></select>
+                            <input type="text" placeholder="0001-00001234" class="flex-1 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Condición de Pago -->
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-3">Condición de Pago</label>
+                    <div class="flex bg-white p-1 rounded-lg border border-gray-200 mb-4 shadow-sm">
+                        <button onclick="app.setPurchaseCondition('contado')" id="cond-contado" class="flex-1 py-1.5 text-xs font-medium rounded text-center transition-all bg-brand-primary text-white shadow-sm">Contado</button>
+                        <button onclick="app.setPurchaseCondition('ctacte')" id="cond-ctacte" class="flex-1 py-1.5 text-xs font-medium rounded text-center transition-all text-gray-600 hover:text-gray-900">Cta. Cte.</button>
+                        <button onclick="app.setPurchaseCondition('doc')" id="cond-doc" class="flex-1 py-1.5 text-xs font-medium rounded text-center transition-all text-gray-600 hover:text-gray-900">Documentado</button>
+                    </div>
+                    <div id="fields-contado" class="text-xs text-gray-500 flex items-center gap-2"><i class="ph-fill ph-info text-brand-primary"></i> Se habilitará la selección de caja/banco en el siguiente paso.</div>
+                    <div id="fields-ctacte" class="hidden space-y-3 animate-in fade-in slide-in-from-top-2">
+                        <div class="flex items-center gap-4">
+                            <div class="w-1/3"><label class="text-xs font-medium block mb-1">Días Plazo</label><select class="w-full text-sm border-gray-300 rounded-md px-2 py-1.5 bg-white"><option>30 Días</option></select></div>
+                            <div class="flex-1"><label class="text-xs font-medium block mb-1">Vencimiento</label><input type="date" class="w-full text-sm border-gray-300 bg-gray-100 text-gray-500 rounded-md px-2 py-1.5"></div>
+                        </div>
+                    </div>
+                    <div id="fields-doc" class="hidden space-y-3 animate-in fade-in slide-in-from-top-2">
+                         <div><label class="text-xs font-medium block mb-1">Tipo de Documento</label><select class="w-full text-sm border-gray-300 rounded-md px-2 py-2 bg-white"><option>Pagaré</option><option>Echeq</option></select></div>
+                    </div>
+                </div>
+
+                <!-- 4. Totales -->
+                <div class="border-t border-gray-200 pt-4 grid grid-cols-2 gap-6">
+                    <div class="space-y-3"><label class="block text-xs font-medium text-gray-600">Neto Gravado</label><div class="relative"><span class="absolute left-3 top-2 text-gray-400">$</span><input type="number" class="w-full pl-6 pr-3 py-2 border border-gray-300 rounded-lg font-mono text-sm text-right" placeholder="0.00"></div></div>
+                    <div class="space-y-3"><label class="block text-xs font-bold text-gray-800">TOTAL</label><div class="relative"><span class="absolute left-3 top-2 text-gray-900 font-bold">$</span><input type="number" class="w-full pl-6 pr-3 py-2 border border-brand-primary/50 bg-blue-50/30 rounded-lg font-mono font-bold text-lg text-brand-primary text-right" placeholder="0.00"></div></div>
+                </div>
+            </div>
+
+            <div class="p-6 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
+                <button onclick="app.closeModal('modal-compra')" class="px-5 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium text-sm hover:bg-gray-50">Cancelar</button>
+                <button class="btn-primary px-6 py-2.5 rounded-lg font-medium text-sm shadow-md flex items-center gap-2"><i class="ph-bold ph-check"></i> Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: PAGOS (Contextual Bienes de Cambio) -->
+    <div id="modal-pago" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true">
+        <div class="absolute inset-0 bg-gray-900/50 backdrop-blur-sm transition-opacity" onclick="app.closeModal('modal-pago')"></div>
+        <div class="absolute flex items-center justify-center inset-0 pointer-events-none">
+            <div class="w-full max-w-3xl bg-white shadow-2xl rounded-xl pointer-events-auto transform transition-all scale-100" id="modal-pago-panel">
+                
+                <!-- HEADER MODIFICADO -->
+                <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-blue-50/50">
+                    <div>
+                        <div class="flex items-center gap-2 mb-1">
+                            <h2 class="font-display font-bold text-lg text-gray-900">Pagos — Bienes de Cambio</h2>
+                            <span class="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase">Tesorería</span>
+                        </div>
+                        <p class="text-xs text-gray-500">Este pago se registra en Inventario/Bienes de Cambio y actualiza el saldo del tercero.</p>
+                    </div>
+                    <button onclick="app.closeModal('modal-pago')" class="text-gray-400 hover:text-gray-600"><i class="ph-bold ph-x text-lg"></i></button>
+                </div>
+
+                <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                    
+                    <!-- Left: Selección -->
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Beneficiario</label>
+                            <input type="text" id="pago-proveedor-display" readonly class="w-full bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-gray-700">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-2">Comprobantes Pendientes</label>
+                            <div class="border border-gray-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                                <table class="w-full text-xs text-left">
+                                    <thead class="bg-gray-50 text-gray-500 font-medium">
+                                        <tr><th class="px-3 py-2 w-8"><input type="checkbox"></th><th class="px-3 py-2">Documento</th><th class="px-3 py-2">Vence</th><th class="px-3 py-2 text-right">Saldo</th></tr>
+                                    </thead>
+                                    <tbody id="pago-docs-list" class="divide-y divide-gray-100 text-gray-700"></tbody>
+                                </table>
+                            </div>
+                            <div class="mt-2 text-right">
+                                <span class="text-xs text-gray-500">Total seleccionado:</span>
+                                <span class="font-mono font-bold text-brand-primary text-sm ml-2">$ 0,00</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Formas de Pago -->
+                    <div class="bg-gray-50 p-5 rounded-xl border border-gray-200 flex flex-col">
+                        <h4 class="text-xs font-bold text-gray-700 uppercase mb-3">Medios de Pago</h4>
+                        <div class="space-y-3 flex-1">
+                            <div class="flex items-center gap-3">
+                                <select class="w-1/3 text-xs border-gray-300 rounded px-2 py-1.5"><option>Caja / Efvo</option></select>
+                                <input type="text" placeholder="$ 0,00" class="flex-1 text-xs border-gray-300 rounded px-2 py-1.5 text-right font-mono">
+                                <button class="text-red-400 hover:text-red-600"><i class="ph-bold ph-trash"></i></button>
+                            </div>
+                            <button class="text-xs text-brand-primary font-medium flex items-center gap-1 hover:underline"><i class="ph-bold ph-plus"></i> Agregar medio de pago</button>
+                        </div>
+                        <div class="mt-6 pt-4 border-t border-gray-200">
+                            <button class="w-full btn-primary py-2 rounded-lg text-sm font-medium shadow-sm">Generar Pago (Bienes de Cambio)</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- JAVASCRIPT APP LOGIC -->
+    <script>
+        const app = {
+            // STATE
+            data: {
+                currentModule: 'proveedores', // 'proveedores' or 'acreedores'
+                currentTab: 'dashboard',
+                currentView: 'module', // 'module' or 'operations-menu'
+                providers: [
+                    { id: 1, name: "Distribuidora Corrientes S.A.", cuit: "30-71223445-9", balance: 320000, status: "pending", nextDue: "2026-02-18", type: "proveedor" },
+                    { id: 2, name: "Yerba El Litoral", cuit: "30-55889922-1", balance: 0, status: "ok", nextDue: null, type: "proveedor" },
+                    { id: 3, name: "Envases del Paraná", cuit: "30-66778899-4", balance: 85500, status: "overdue", nextDue: "2026-02-10", type: "proveedor" },
+                    { id: 4, name: "Logística Santa Lucía", cuit: "33-11223344-9", balance: 45200, status: "docs", nextDue: "2026-03-01", type: "proveedor" },
+                    { id: 5, name: "Alquileres Norte", cuit: "27-33445566-1", balance: 150000, status: "pending", nextDue: "2026-02-20", type: "acreedor" }
+                ],
+                documents: [
+                    { id: 101, providerId: 1, type: "FC A", number: "0001-00002342", date: "2026-01-18", due: "2026-02-18", amount: 320000, balance: 320000, status: "pending" },
+                    { id: 102, providerId: 3, type: "FC A", number: "0002-00005678", date: "2026-01-10", due: "2026-02-10", amount: 85500, balance: 85500, status: "overdue" },
+                    { id: 103, providerId: 4, type: "Pagaré", number: "#7841", date: "2026-01-15", due: "2026-03-01", amount: 45200, balance: 45200, status: "pending" },
+                    { id: 104, providerId: 5, type: "Recibo", number: "Alquiler Feb", date: "2026-02-01", due: "2026-02-20", amount: 150000, balance: 150000, status: "pending" }
+                ]
+            },
+
+            init() {
+                this.enterModule('proveedores');
+                this.renderProviderSelect();
+                document.getElementById('modal-compra-panel').classList.add('translate-x-full');
+            },
+
+            // NAVIGATION LOGIC
+            goToOperations() {
+                // Show Operations Menu, Hide Module
+                document.getElementById('view-operaciones-menu').classList.remove('hidden');
+                document.getElementById('view-module-content').classList.add('hidden');
+                document.getElementById('header-back-btn').classList.add('hidden');
+                
+                // Update Breadcrumb
+                document.getElementById('breadcrumb-module').innerText = "Menú Principal";
+
+                // Update Sidebar highlight (none active)
+                document.getElementById('nav-proveedores').className = "flex items-center gap-3 px-3 py-2.5 rounded-md text-gray-600 hover:bg-gray-50 transition-colors";
+                document.getElementById('nav-proveedores').querySelector('i').className = "ph ph-truck text-lg";
+                document.getElementById('nav-acreedores').className = "flex items-center gap-3 px-3 py-2.5 rounded-md text-gray-600 hover:bg-gray-50 transition-colors";
+                document.getElementById('nav-acreedores').querySelector('i').className = "ph ph-briefcase text-lg";
+            },
+
+            enterModule(moduleName) {
+                this.data.currentModule = moduleName;
+                
+                // UI Updates
+                document.getElementById('view-operaciones-menu').classList.add('hidden');
+                document.getElementById('view-module-content').classList.remove('hidden');
+                document.getElementById('header-back-btn').classList.remove('hidden'); // Show back button
+                
+                const title = moduleName === 'proveedores' ? 'Proveedores' : 'Acreedores Varios';
+                const desc = moduleName === 'proveedores' ? 'Gestioná tus compras y cuentas corrientes.' : 'Gestioná deudas varias y gastos no operativos.';
+                const btnLabel = moduleName === 'proveedores' ? 'Registrar Compra' : 'Registrar Gasto';
+                const btnNewList = moduleName === 'proveedores' ? 'Nuevo Proveedor (desde Compras)' : 'Nuevo Acreedor (desde Compras)';
+
+                document.getElementById('module-title').innerText = title;
+                document.getElementById('module-desc').innerText = desc;
+                document.getElementById('breadcrumb-module').innerText = title;
+                document.getElementById('btn-add-label').innerText = btnLabel;
+                document.getElementById('btn-new-provider-list').innerText = btnNewList;
+
+                // Update Sidebar & Toggle
+                const navProv = document.getElementById('nav-proveedores');
+                const navAcre = document.getElementById('nav-acreedores');
+                const toggleProv = document.getElementById('toggle-prov');
+                const toggleAcre = document.getElementById('toggle-acre');
+
+                if(moduleName === 'proveedores') {
+                    navProv.className = "flex items-center gap-3 px-3 py-2.5 rounded-md text-brand-primary bg-blue-50 font-medium transition-colors";
+                    navProv.querySelector('i').className = "ph-fill ph-truck text-lg";
+                    navAcre.className = "flex items-center gap-3 px-3 py-2.5 rounded-md text-gray-600 hover:bg-gray-50 transition-colors";
+                    navAcre.querySelector('i').className = "ph ph-briefcase text-lg";
+
+                    toggleProv.className = "toggle-btn-active px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all";
+                    toggleAcre.className = "toggle-btn-inactive px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all";
+                } else {
+                    navAcre.className = "flex items-center gap-3 px-3 py-2.5 rounded-md text-brand-primary bg-blue-50 font-medium transition-colors";
+                    navAcre.querySelector('i').className = "ph-fill ph-briefcase text-lg";
+                    navProv.className = "flex items-center gap-3 px-3 py-2.5 rounded-md text-gray-600 hover:bg-gray-50 transition-colors";
+                    navProv.querySelector('i').className = "ph ph-truck text-lg";
+
+                    toggleAcre.className = "toggle-btn-active px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all";
+                    toggleProv.className = "toggle-btn-inactive px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all";
+                }
+
+                this.renderDashboard();
+                this.renderList();
+                this.renderMaturities();
+            },
+
+            switchTab(tabName) {
+                this.data.currentTab = tabName;
+                document.querySelectorAll('.tab-btn').forEach(btn => {
+                    if (btn.dataset.tab === tabName) {
+                        btn.classList.add('tab-active');
+                        btn.classList.remove('text-gray-500');
+                    } else {
+                        btn.classList.remove('tab-active');
+                        btn.classList.add('text-gray-500');
+                    }
+                });
+                ['dashboard', 'listado', 'movimientos', 'vencimientos'].forEach(v => {
+                    document.getElementById('view-' + v).classList.add('hidden');
+                });
+                document.getElementById('view-' + tabName).classList.remove('hidden');
+            },
+
+            formatCurrency(value) { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value); },
+            formatDate(dateString) {
+                if(!dateString) return "-";
+                const date = new Date(dateString);
+                const diffDays = Math.ceil((date - new Date()) / (1000 * 60 * 60 * 24)); 
+                let text = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short' }).format(date);
+                if (diffDays < 0) return `<span class="text-red-500 font-medium">${text} (Hace ${Math.abs(diffDays)}d)</span>`;
+                if (diffDays <= 7) return `<span class="text-orange-500 font-medium">${text} (En ${diffDays}d)</span>`;
+                return `<span class="text-gray-600">${text}</span>`;
+            },
+
+            getFilteredProviders() {
+                const type = this.data.currentModule === 'proveedores' ? 'proveedor' : 'acreedor';
+                return this.data.providers.filter(p => p.type === type);
+            },
+
+            renderDashboard() {
+                const providers = this.getFilteredProviders();
+                const totalDebt = providers.reduce((sum, p) => sum + p.balance, 0);
+                const today = new Date().toISOString().split('T')[0];
+                const overdueAmount = this.data.documents
+                    .filter(d => providers.some(p => p.id === d.providerId) && d.balance > 0 && d.due < today)
+                    .reduce((sum, d) => sum + d.balance, 0);
+                const openDocs = this.data.documents.filter(d => providers.some(p => p.id === d.providerId) && d.balance > 0).length;
+
+                document.getElementById('kpi-total-debt').innerText = this.formatCurrency(totalDebt);
+                document.getElementById('dash-global-balance').innerText = this.formatCurrency(totalDebt);
+                document.getElementById('dash-overdue').innerText = this.formatCurrency(overdueAmount);
+                document.getElementById('dash-docs-count').innerText = openDocs;
+                document.getElementById('kpi-week-debt').innerText = this.formatCurrency(totalDebt * 0.15);
+            },
+
+            renderList() {
+                const search = document.getElementById('search-input').value.toLowerCase();
+                const statusFilter = document.getElementById('filter-status').value;
+                const tbody = document.getElementById('table-body');
+                tbody.innerHTML = '';
+                let list = this.getFilteredProviders().filter(p => {
+                    const matchName = p.name.toLowerCase().includes(search) || p.cuit.includes(search);
+                    const matchStatus = statusFilter === 'all' || p.status === statusFilter;
+                    return matchName && matchStatus;
+                });
+
+                if (list.length === 0) {
+                    document.getElementById('empty-state').classList.remove('hidden'); return;
+                } else {
+                    document.getElementById('empty-state').classList.add('hidden');
+                }
+
+                list.forEach(p => {
+                    let badgeClass = 'badge-neutral', badgeText = 'Desconocido';
+                    switch(p.status) {
+                        case 'ok': badgeClass = 'badge-success'; badgeText = 'Al Día'; break;
+                        case 'pending': badgeClass = 'badge-warning'; badgeText = 'Vencimientos'; break;
+                        case 'overdue': badgeClass = 'badge-error'; badgeText = 'Atrasado'; break;
+                    }
+                    const row = `
+                        <tr class="hover:bg-gray-50 transition-colors group">
+                            <td class="px-6 py-4">
+                                <div class="flex items-center">
+                                    <div class="h-8 w-8 rounded bg-gray-100 flex items-center justify-center text-gray-500 font-bold mr-3 text-xs">${p.name.substring(0,2).toUpperCase()}</div>
+                                    <div><div class="font-medium text-gray-900">${p.name}</div><div class="text-xs text-gray-500 font-mono">${p.cuit}</div></div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 text-center"><span class="${badgeClass} px-2.5 py-0.5 rounded text-xs font-semibold border">${badgeText}</span></td>
+                            <td class="px-6 py-4 text-sm">${this.formatDate(p.nextDue)}</td>
+                            <td class="px-6 py-4 text-right"><span class="font-mono-num font-medium ${p.balance > 0 ? 'text-gray-900' : 'text-gray-400'}">${p.balance > 0 ? this.formatCurrency(p.balance) : '—'}</span></td>
+                            <td class="px-6 py-4 text-right">
+                                <button onclick="app.openPaymentModalFor(${p.id})" class="bg-white border border-gray-200 text-brand-primary text-xs font-semibold px-3 py-1.5 rounded hover:bg-blue-50 hover:border-blue-200 transition-colors">Pagar</button>
+                            </td>
+                        </tr>`;
+                    tbody.innerHTML += row;
+                });
+            },
+
+            renderMaturities() {
+                const container = document.getElementById('maturity-timeline');
+                container.innerHTML = '';
+                const providers = this.getFilteredProviders();
+                const docs = this.data.documents.filter(d => providers.some(p => p.id === d.providerId) && d.balance > 0).sort((a,b) => new Date(a.due) - new Date(b.due));
+
+                if(docs.length === 0) { container.innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">No hay vencimientos pendientes.</div>'; return; }
+
+                docs.forEach(d => {
+                    const provider = this.data.providers.find(p => p.id === d.providerId);
+                    const today = new Date().toISOString().split('T')[0];
+                    const isOverdue = d.due < today;
+                    const borderClass = isOverdue ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-gray-300';
+                    const icon = d.type === 'Pagaré' ? 'ph-scroll' : (d.type.includes('Cheque') ? 'ph-bank' : 'ph-receipt');
+                    const card = `
+                        <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200 ${borderClass} flex items-center justify-between hover:shadow-md transition-shadow">
+                            <div class="flex items-center gap-4">
+                                <div class="flex flex-col items-center justify-center w-12 h-12 bg-gray-50 rounded border border-gray-100">
+                                    <span class="text-[10px] text-gray-500 uppercase font-bold">${new Intl.DateTimeFormat('es-AR', { month: 'short' }).format(new Date(d.due))}</span>
+                                    <span class="text-lg font-bold text-gray-900 font-mono leading-none">${new Date(d.due).getDate()}</span>
+                                </div>
+                                <div>
+                                    <div class="font-bold text-gray-900 text-sm">${provider.name}</div>
+                                    <div class="text-xs text-gray-500 flex items-center gap-1"><i class="ph ${icon}"></i> ${d.type} ${d.number}</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-mono-num font-bold ${isOverdue ? 'text-red-600' : 'text-gray-900'}">${this.formatCurrency(d.balance)}</div>
+                                <button onclick="app.openPaymentModalFor(${provider.id})" class="text-[10px] font-medium text-brand-primary hover:underline mt-1">Registrar Pago</button>
+                            </div>
+                        </div>`;
+                    container.innerHTML += card;
+                });
+            },
+
+            renderProviderSelect() {
+                const select = document.getElementById('compra-proveedor');
+                const providers = this.getFilteredProviders();
+                select.innerHTML = '<option value="">Buscar proveedor...</option>';
+                providers.forEach(p => select.innerHTML += `<option value="${p.id}">${p.name}</option>`);
+            },
+
+            filterList() { this.renderList(); },
+            
+            openModal(id) { 
+                document.getElementById(id).classList.remove('hidden');
+                setTimeout(() => { if(id === 'modal-compra') document.getElementById(id + '-panel').classList.remove('translate-x-full'); else document.getElementById(id + '-panel').classList.remove('scale-95', 'opacity-0'); }, 10);
+            },
+            closeModal(id) {
+                if(id === 'modal-compra') document.getElementById(id + '-panel').classList.add('translate-x-full'); else document.getElementById(id + '-panel').classList.add('scale-95', 'opacity-0');
+                setTimeout(() => document.getElementById(id).classList.add('hidden'), 300);
+            },
+            
+            setPurchaseCondition(type) {
+                ['contado', 'ctacte', 'doc'].forEach(id => {
+                    const btn = document.getElementById('cond-' + id);
+                    if(type === id) { btn.classList.remove('bg-white', 'text-gray-600'); btn.classList.add('bg-brand-primary', 'text-white', 'shadow-sm'); } 
+                    else { btn.classList.add('bg-white', 'text-gray-600'); btn.classList.remove('bg-brand-primary', 'text-white', 'shadow-sm'); }
+                });
+                ['fields-contado', 'fields-ctacte', 'fields-doc'].forEach(f => document.getElementById(f).classList.add('hidden'));
+                document.getElementById('fields-' + type).classList.remove('hidden');
+            },
+
+            toggleNewProviderInline() {
+                const el = document.getElementById('inline-new-provider');
+                if(el.classList.contains('hidden')) el.classList.remove('hidden'); else el.classList.add('hidden');
+            },
+            
+            saveNewProvider() {
+                const name = document.getElementById('new-prov-name').value;
+                if(!name) return alert('Chequeá el nombre');
+                const newId = this.data.providers.length + 5;
+                this.data.providers.push({ id: newId, name: name, cuit: "00-00000000-0", balance: 0, status: "ok", nextDue: null, type: this.data.currentModule === 'proveedores' ? 'proveedor' : 'acreedor' });
+                this.renderProviderSelect(); document.getElementById('compra-proveedor').value = newId; this.toggleNewProviderInline(); this.renderList();
+            },
+
+            openPaymentModalFor(providerId) {
+                const provider = this.data.providers.find(p => p.id === providerId);
+                if(!provider) return;
+                document.getElementById('pago-proveedor-display').value = provider.name;
+                const docs = this.data.documents.filter(d => d.providerId === providerId && d.balance > 0);
+                const list = document.getElementById('pago-docs-list');
+                list.innerHTML = '';
+                if(docs.length === 0) list.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-xs text-gray-500">No hay comprobantes pendientes. Se generará un anticipo.</td></tr>';
+                else docs.forEach(d => { list.innerHTML += `<tr class="hover:bg-blue-50"><td class="px-3 py-2"><input type="checkbox" class="rounded text-brand-primary"></td><td class="px-3 py-2 font-medium">${d.type} <br><span class="text-[10px] text-gray-500">${d.number}</span></td><td class="px-3 py-2">${this.formatDate(d.due)}</td><td class="px-3 py-2 text-right font-mono-num">${this.formatCurrency(d.balance)}</td></tr>`; });
+                this.openModal('modal-pago');
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => { app.init(); });
+    </script>
+</body>
+</html>

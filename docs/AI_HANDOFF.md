@@ -2,6 +2,583 @@
 
 ---
 
+## CHECKPOINT #PERFECCIONAR-MULTI-DESTINO-SPLIT
+**Fecha:** 2026-02-13
+**Estado:** COMPLETADO - Multi-destino (split) en Perfeccionar + Vista previa asiento + Consumidor Final
+
+### Objetivo
+Reemplazar el modal de Perfeccionar (single-destino) por uno multi-destino con splits, vista previa de asiento en vivo, combobox buscable de cuentas, y campos de instrumento condicionales. Aplicado tanto a Clientes (Deudores por Ventas) como Proveedores/Acreedores.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/Operaciones/PerfeccionarModal.tsx` | **NUEVO** - Componente reutilizable: multi-split editor + journal preview + override flags + instrument fields condicionales |
+| `src/pages/Operaciones/ClientesDeudoresPage.tsx` | Reemplazo modal inline por PerfeccionarModal; simplificacion handler save; eliminado import X |
+| `src/pages/Operaciones/ProveedoresAcreedoresPage.tsx` | Idem: reemplazo modal inline por PerfeccionarModal; simplificacion handler save; eliminado import X |
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Consumidor Final: si SALE sin counterparty, usa "Consumidor Final" como tercero generico |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+
+**PerfeccionarModal (nuevo componente reutilizable)**
+- Layout: desktop 2 columnas (form izq + preview der), mobile apilado
+- Multi-split: "+ Agregar destino", "Eliminar" por fila, minimo 1
+- Cada split: AccountSearchSelect (combobox buscable), importe, campos instrumento condicionales
+- Campos instrumento (tipo, numero, banco, plazo, vencimiento): se muestran solo si la cuenta destino es control (Documentos/Valores)
+- Auto-calc dueDate = date + termDays (si se ingresa plazo)
+- Vista previa asiento en vivo: tabla Debe/Haber con totales y badge "Balanceado" / "Diferencia"
+- Boton Perfeccionar deshabilitado si no balancea
+- Override flags: userOverrodeDate, userOverrodeAmount — comprobante origen no pisa ediciones manuales
+- Acento configurable: emerald (Clientes) o amber (Proveedores)
+- Props: side, sourceLabel, destControlCodes — parametriza la logica contable
+
+**Regla contable preservada**
+- Clientes: D destinos (sumados) / H Deudores por Ventas (subcuenta tercero)
+- Proveedores: D Proveedores (subcuenta tercero) / H destinos (sumados)
+- Validacion: sum(splits) == total para balanceo
+
+**Compatibilidad RECLASS existente**
+- bienes.ts ya iteraba paymentSplits[] — soporta N destinos sin cambios
+- Un split = funciona identico al modal anterior
+- Backward-compatible: movements viejos con 1 split siguen funcionando
+
+**Consumidor Final**
+- MovementModalV3: si mainTab === 'venta' y counterparty vacio, se usa "Consumidor Final"
+- No requiere creacion previa del tercero (findOrCreateChildAccountByName lo crea bajo Deudores por Ventas)
+
+### Decisiones Tecnicas
+
+1. **Componente extraido**: PerfeccionarModal es un .tsx separado, no inline. Ambas paginas lo importan con props distintas (side, accentColor, sourceLabel, destControlCodes).
+
+2. **No se toco bienes.ts**: El bloque RECLASS ya soportaba N splits via `for (const split of movement.paymentSplits!)`. Solo se generan mas splits desde el UI.
+
+3. **Override flags locales**: Los flags `userOverrodeDate` y `userOverrodeAmount` son estado local del modal, no se persisten. Evitan pisar ediciones manuales al cambiar comprobante origen.
+
+4. **Instrument fields condicionales**: Se muestran solo si la cuenta destino tiene code en `destControlCodes`. Ej: Caja (1.1.01.01) no muestra campos instrumento; Documentos a Cobrar (1.1.02.02) si.
+
+5. **Consumidor Final string literal**: Se usa el string "Consumidor Final" directamente. `findOrCreateChildAccountByName` crea la subcuenta si no existe. No se agrego logica especial de lookup.
+
+### QA
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/)
+- `npx vite build`: OK (warning chunk size pre-existente)
+
+### QA Manual Sugerido
+CLIENTES
+- [ ] Abrir "Perfeccionar Credito" desde listado de clientes
+- [ ] Agregar 2+ destinos con importes que sumen el total
+- [ ] Verificar preview: D destinos / H Deudores por Ventas (subcuenta)
+- [ ] Si no balancea, boton deshabilitado y badge "Diferencia"
+- [ ] Elegir comprobante origen -> prefill fecha e importe
+- [ ] Editar fecha/importe manual -> cambiar comprobante -> verificar que no se pisa
+- [ ] Destino Caja/Bancos: sin campos instrumento
+- [ ] Destino Documentos a Cobrar: con campos instrumento
+- [ ] Guardar -> verificar RECLASS con N splits en movements
+- [ ] Verificar asiento generado con N lineas destino
+
+PROVEEDORES
+- [ ] Abrir "Perfeccionar" desde listado de proveedores
+- [ ] 2+ destinos: Documentos a Pagar + Valores a Pagar
+- [ ] Preview: D Proveedores (subcuenta) / H destinos
+- [ ] 1 destino sigue funcionando (backward compat)
+
+CONSUMIDOR FINAL
+- [ ] Registrar Venta sin especificar cliente
+- [ ] Verificar que counterparty = "Consumidor Final" en el movement guardado
+- [ ] Verificar que se crea subcuenta "Consumidor Final" bajo Deudores por Ventas
+
+GENERAL
+- [ ] `npx tsc --noEmit` pasa
+- [ ] `npx vite build` pasa
+
+### TODOs / Riesgos
+- **Multi-moneda**: No implementado.
+- **Validacion parcial vs total**: El modal no valida que sum(splits) <= saldoPendiente del comprobante. El usuario puede perfeccionar mas de lo pendiente (ej: error manual).
+- **reclassSplits en meta**: No se agrego campo meta.reclassSplits separado. Los splits se guardan como paymentSplits[] en el movement (ya existente). Si se necesita metadata extra por split en futuro, agregar campo dedicado.
+
+---
+
+## CHECKPOINT #LISTADO-EXPANDIBLE-PERFECCIONAR-POR-COMPROBANTE
+**Fecha:** 2026-02-13
+**Estado:** COMPLETADO - Listado expandible por tercero + Perfeccionar por comprobante (Clientes y Proveedores)
+
+### Objetivo
+Implementar listado jerarquico (tercero -> comprobantes -> instrumentos) y Perfeccionar vinculado a un comprobante origen especifico, en ambos modulos Clientes y Proveedores.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/Operaciones/ClientesDeudoresPage.tsx` | Toggle "Documentos" eliminado; ListadoTab expandible con subfilas comprobante + instrumentos; Perfeccionar acepta comprobante origen; RECLASS reduce saldo comprobante |
+| `src/pages/Operaciones/ProveedoresAcreedoresPage.tsx` | ListadoTab expandible (mismo patron); Perfeccionar por comprobante; RECLASS reduce saldo comprobante |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios por Fase
+
+**FASE 1A - Eliminar toggle "Documentos" en Clientes**
+- Removido toggle Deudores/Documentos del header
+- `mode` ya no es un state, siempre es `'deudores'`
+- Removidos imports no usados (`FileText`, `useLocation`)
+- Breadcrumb simplificado
+
+**FASE 1B - Subledger: RECLASS reduce saldo de comprobante**
+- En `pendingDocs` de ambas paginas: se computan `reclassBySource` (Map de RECLASS amounts por sourceMovementId)
+- `saldoPendiente = total - cobros - reclassed`
+- Comprobante totalmente perfeccionado + cobrado desaparece de pendientes
+
+**FASE 1C/1D - Listado expandible (Clientes y Proveedores)**
+- Nuevo interface `ReclassInstrument` para instrumentos nacidos de RECLASS
+- `reclassInstruments` useMemo filtra movimientos RECLASS del modulo
+- ListadoTab recibe `pendingDocs` + `reclassInstruments`
+- Estado `expanded: Set<string>` para expand/collapse por tercero
+- Subfilas: comprobantes pendientes con estado (al dia/vencido/+90d), saldo, acciones
+- Sub-subfilas: instrumentos documentados (Pagare/Echeq/Cheque) con banco, vencimiento, importe
+- Chevron CaretRight/CaretDown toggle
+- Colores: emerald para Clientes, amber/blue para Proveedores
+
+**FASE 2A/2B - Perfeccionar por comprobante**
+- `perfeccionarForm` ampliado con `sourceMovementId`
+- `handleOpenPerfeccionar` acepta `sourceMovementId?` y `defaultAmount?`
+- Modal: nuevo selector "Comprobante origen" (dropdown de pendingDocs filtrado por tercero)
+- Al elegir comprobante: auto-fill amount = saldoPendiente (editable para parcial)
+- `createBienesMovement` recibe `sourceMovementId` (usa campo existente en BienesMovement)
+- Boton "Perfeccionar" en subfila pasa movementId + saldoPendiente
+
+**FASE 3 - Deep-links desde subfilas**
+- "Cobrar" en subfila: `onCobrar(terceroName, doc.movementId)` (deep-link a Pagos COBRO con comprobante preseleccionado)
+- "Pagar" en subfila (Proveedores): `onPay(terceroName, doc.movementId)` (deep-link a Pagos PAGO)
+- "Perfeccionar" en subfila: `onPerfeccionar(terceroName, doc.movementId, doc.saldoPendiente)` (modal con comprobante preseleccionado)
+
+### Decisiones Tecnicas
+
+1. **`sourceMovementId` reutilizado**: Campo existente en `BienesMovement`. El RECLASS ahora apunta al comprobante origen (SALE o PURCHASE). No se creo campo nuevo `reclassOfMovementId`.
+
+2. **Subledger dual**: El saldo por comprobante descuenta tanto cobros/pagos como RECLASS. El saldo Mayor (encabezado tercero) sigue viniendo del Libro Mayor (source of truth contable).
+
+3. **Instrumentos sin vincular**: RECLASS creados antes de este cambio (sin sourceMovementId) se muestran como "unlinked" a nivel tercero, no bajo ningun comprobante.
+
+4. **Toggle eliminado (Clientes)**: Ya no hay modo "Documentos a Cobrar" separado. Los instrumentos documentados se ven como subfilas dentro del listado expandido del cliente.
+
+### QA
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/)
+- `npx vite build`: OK (warning chunk size pre-existente)
+
+### QA Manual Sugerido
+- [ ] Navegar a /operaciones/clientes -> verificar que no hay toggle "Documentos"
+- [ ] Listado: ver chevron en cada cliente con comprobantes pendientes
+- [ ] Expandir cliente -> ver comprobantes con saldo, estado, acciones
+- [ ] Expandir comprobante -> ver instrumentos documentados (si existen RECLASS)
+- [ ] Click "Perfeccionar" en subfila -> verificar modal con comprobante preseleccionado y monto = saldo
+- [ ] Guardar perfeccionamiento -> verificar saldo reducido en comprobante
+- [ ] Verificar que instrumento aparece como subfila bajo el comprobante
+- [ ] Asiento RECLASS correcto: D Documentos a Cobrar (subcuenta) / H Deudores por Ventas (subcuenta)
+- [ ] Navegar a /operaciones/proveedores -> verificar expand funciona igual
+- [ ] Click "Pagar" desde subfila -> verificar deep-link a Pagos con comprobante
+- [ ] Verificar build: `npx tsc --noEmit` y `npx vite build`
+
+### TODOs / Riesgos
+- **Multi-moneda**: No implementado. Los saldos y RECLASS operan en ARS.
+- **Incobrables**: No implementado. Puerta abierta para futura cuenta "Prevision para deudores incobrables".
+- **Adjuntos PDF**: No implementado. Se puede agregar campo "URL/Referencia" en futuro sin refactor grande.
+- **Nota de credito / Nota de debito**: Los comprobantes tipo NC/ND no tienen tipo diferenciado en el subledger actual. Se muestran como SALE/PURCHASE con total +/-.
+
+---
+
+## CHECKPOINT #CLIENTES-UX-PERFECCIONAR-INTEGRACION
+**Fecha:** 2026-02-13
+**Estado:** COMPLETADO - Modulo Clientes/Deudores por Ventas implementado (Fases 0-5)
+
+### Objetivo
+Implementar el "lado espejo" de Proveedores/Acreedores para CLIENTES (Creditos por Ventas), con:
+- Pagina dedicada con Dashboard, Listado, Movimientos, Vencimientos
+- Integracion con Inventario (Venta a Cta Cte + Cobros)
+- Perfeccionar credito (RECLASS: Deudores por Ventas -> Documentos a Cobrar)
+- Condicion de cobro en tab Venta (auto-inference + override flags)
+- Subcuentas automaticas por cliente bajo cuentas control
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/Operaciones/ClientesDeudoresPage.tsx` | **NUEVO** - Pagina completa espejo de ProveedoresAcreedoresPage. Toggle Deudores/Documentos a Cobrar. 4 tabs. KPIs. Perfeccionar credito. |
+| `src/App.tsx` | Agregada ruta `/operaciones/clientes` + import ClientesDeudoresPage |
+| `src/ui/Layout/Sidebar.tsx` | Agregado nav item "Clientes" con icono ShoppingCart bajo Operaciones |
+| `src/ui/Layout/MobileDrawer.tsx` | Idem para mobile |
+| `src/pages/OperacionesPage.tsx` | Nueva seccion "Creditos Comerciales" con card Clientes clickable |
+| `src/storage/bienes.ts` | Agregados fallbacks `documentosACobrar` y `deudoresConTarjeta`; RECLASS generalizado para lado Clientes (`paymentMethod='clientes'`); subcuenta auto-resolution en splits SALE y PURCHASE |
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Condicion de cobro habilitada en tab Venta; auto-inference para cuentas Deudores/Documentos a Cobrar; boton "Vender en Cta Cte"; tooltip explicativo |
+
+### Cambios por Fase
+
+**FASE 0 - Auditoria**
+- Mapeadas cuentas control: Deudores por Ventas (1.1.02.01), Documentos a Cobrar (1.1.02.02), Deudores con Tarjeta (1.1.02.03)
+- Confirmado que `findOrCreateChildAccountByName` es generico (funciona con cualquier parent code)
+
+**FASE 1 - Pagina ClientesDeudoresPage**
+- Estructura identica a ProveedoresAcreedoresPage con adaptaciones:
+  - Toggle: Deudores por Ventas / Documentos a Cobrar
+  - Color scheme: emerald (en lugar de blue/amber de Proveedores)
+  - KPIs: Saldo a Cobrar, Vence esta Semana, Vencido +90d
+  - Acciones: Cobrar (deep-link a Pagos COBRO), Perfeccionar
+  - Pending docs: basados en SALE movements (no PURCHASE)
+
+**FASE 2 - Modelo contable**
+- `ACCOUNT_FALLBACKS` ampliado con `documentosACobrar` (1.1.02.02) y `deudoresConTarjeta` (1.1.02.03)
+- RECLASS generalizado: `paymentMethod === 'clientes'` -> source = Deudores por Ventas, dest control codes = `[1.1.02.02, 1.1.02.03]`
+- Asiento RECLASS Clientes: D Documentos a Cobrar (subcuenta) / H Deudores por Ventas (subcuenta)
+- Subcuenta auto-resolution en splits: tanto SALE (deudores codes) como PURCHASE (proveedores codes)
+
+**FASE 3 - Integracion con Inventario**
+- Condicion de cobro habilitada para tab Venta en MovementModalV3
+- Auto-inference generalizada:
+  - Deudores por Ventas (1.1.02.01) -> CTA_CTE
+  - Documentos a Cobrar / Deudores con Tarjeta (1.1.02.02, 1.1.02.03) -> DOCUMENTADO
+  - Solo Caja/Banco -> CONTADO
+- Boton "Vender en Cta Cte": autocompleta split con cuenta Deudores por Ventas + total
+- Tooltip: "Si vendes a cuenta corriente, imputa a Deudores por Ventas. El cobro real se registra despues en Pagos/Cobros."
+- Renombrado seccion a "Imputacion del cobro" en tab Venta (era "Cobro / Contrapartidas")
+
+**FASE 4 - Perfeccionar credito (RECLASS Clientes)**
+- PerfeccionarModal en ClientesDeudoresPage:
+  - Origen: Deudores por Ventas (1.1.02.01) - subcuenta del cliente
+  - Destino: Documentos a Cobrar (1.1.02.02) o Deudores con Tarjeta (1.1.02.03)
+  - Campos: instrumento (Pagare/Echeq/Cheque), numero, plazo, vencimiento, banco, notas
+- `createBienesMovement` con `paymentMethod: 'clientes'` para señalizar lado
+
+**FASE 5 - Navegacion**
+- Ruta `/operaciones/clientes` en App.tsx
+- Nav items en Sidebar (icon ShoppingCart) y MobileDrawer
+- Card "Clientes" en OperacionesPage bajo nueva seccion "Creditos Comerciales"
+
+### Decisiones Tecnicas
+
+1. **`paymentMethod` como hint de lado**: Reutilizado campo existente. `'clientes'` indica que RECLASS opera sobre lado activo (Deudores), no pasivo (Proveedores).
+
+2. **Subcuenta resolution en splits**: Agregada resolucion automatica de subcuentas para splits que apuntan a cuentas control tanto en SALE (deudores) como PURCHASE (proveedores). Antes solo funcionaba para `contraId` single.
+
+3. **Seccion separada en OperacionesPage**: Clientes va en "Creditos Comerciales" (activo), no en "Pasivos y Deudas", para mantener coherencia contable.
+
+4. **Color scheme emerald**: Diferenciado del amber/blue de Proveedores para distinguir visualmente modulos.
+
+### QA
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/)
+- `npx vite build`: OK (warning chunk size pre-existente)
+
+### QA Manual Sugerido
+- [ ] Navegar a /operaciones/clientes → verificar pagina carga con tabs y toggle
+- [ ] Registrar Venta con cliente "Test SA" en Cta Cte → verificar subcuenta creada bajo 1.1.02.01
+- [ ] Verificar condicion de cobro aparece en tab Venta con CTA_CTE auto-detectado
+- [ ] Click "Vender en Cta Cte" → verificar split autocompleta con Deudores por Ventas
+- [ ] Registrar Cobro desde pagina Clientes (boton "Cobrar") → verificar deep-link a Pagos COBRO
+- [ ] Perfeccionar: click boton → verificar modal, destino Documentos a Cobrar, guardar
+- [ ] Verificar asiento RECLASS: D Documentos a Cobrar/cliente, H Deudores por Ventas/cliente
+- [ ] Verificar saldo en pagina Clientes cambia despues de venta/cobro/perfeccionar
+- [ ] Verificar build pasa: `npx tsc --noEmit` y `npx vite build`
+
+### TODOs / Riesgos
+- **Multi-moneda**: No implementado. Dejar TODO donde corresponda (tipo de cambio / cuentas USD).
+- **Incobrables**: No implementado. Puerta abierta para futura cuenta "Prevision para deudores incobrables" (4.x.xx).
+- **Pasivos contingentes**: No implementado.
+- **Comisiones bancarias**: Mencionado en spec pero no implementado por falta de cuenta fallback. Agregar cuenta "Comisiones y gastos bancarios" en seed.ts si se requiere.
+- **Consumidor Final**: Se puede usar como nombre de cliente generico. No requiere logica especial.
+
+---
+
+## CHECKPOINT #PROVEEDORES-ACREEDORES-UX-PERFECCIONAR
+**Fecha:** 2026-02-13
+**Estado:** COMPLETADO - UX Proveedores mejorado + Perfeccionar pasivo + Imputación por tercero (Fases 1-3)
+
+### Objetivo
+Mejorar la experiencia de usuario del módulo Proveedores/Acreedores: combobox buscable de tercero con preview de saldo, auto-detección de condición de pago, plazo libre, reclasificación de pasivos ("Perfeccionar"), e inferencia/filtrado por tercero en devoluciones y pagos.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/core/inventario/types.ts` | Agregado `'RECLASS'` a `BienesMovementType` |
+| `src/storage/bienes.ts` | Account fallbacks para Documentos/Valores a Pagar; bloque RECLASS en `buildJournalEntriesForMovement` |
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Combobox tercero con dropdown + saldo preview; auto-infer paymentCondition desde splits; input numérico termDays con chips; auto-infer tercero en devoluciones; filtrado pendingDocs por tercero en Pagos |
+| `src/pages/Operaciones/ProveedoresAcreedoresPage.tsx` | Botón "Perfeccionar" en listado; PerfeccionarModal completo (fecha, monto, destino, instrumento, plazo, banco, notas); handler `createBienesMovement` RECLASS |
+
+### Cambios por Fase
+
+**FASE 1A - Combobox buscable de tercero + preview saldo**
+- `existingTerceros` useMemo: deriva terceros de subcuentas bajo Proveedores/Acreedores/Deudores
+- Input text → combobox con dropdown filtrado + click-to-select
+- Panel preview: saldo actual + cantidad de comprobantes pendientes del tercero seleccionado
+- Aplica tanto al campo `counterparty` (Compra/Venta) como `pagoCobro.tercero` (Pagos)
+
+**FASE 1B - Auto paymentCondition desde splits**
+- useEffect que observa `formData.splits[]` y detecta cuentas:
+  - Proveedores/Acreedores (2.1.01.01, 2.1.06.01) → `CTA_CTE`
+  - Documentos/Valores a Pagar (2.1.01.02, 2.1.01.04, 2.1.01.05) → `DOCUMENTADO`
+  - Solo Caja/Banco → `CONTADO`
+- Flag `userOverrodePaymentCondition`: si el usuario clickea manualmente un botón de condición, no se pisa más
+
+**FASE 1C - Plazo libre + override flags**
+- `termDays`: reemplazado `<select>` por `<input type="number">` + chips rápidos `[7, 15, 30, 45, 60, 90]`
+- Flag `userOverrodeDueDate`: si el usuario edita fecha manualmente, no se recalcula desde termDays
+
+**FASE 2 - Perfeccionar pasivo (RECLASS)**
+- Nuevo tipo `'RECLASS'` en BienesMovementType
+- `buildJournalEntriesForMovement` RECLASS: D: cuenta origen (subcuenta Proveedores/Acreedores del tercero) / H: cuenta destino (subcuenta Documentos/Valores a Pagar del tercero)
+- `paymentMethod` lleva hint de módulo origen (`'proveedores'` | `'acreedores'`)
+- Account fallbacks en bienes.ts: `documentosAPagar`, `valoresAPagar`, `valoresAPagarDiferidos`, `acreedores`
+- PerfeccionarModal en ProveedoresAcreedoresPage: selector destino, campos instrumento, plazo, banco
+- Botón amber "Perfeccionar" con icono ArrowsLeftRight en tabla de listado
+
+**FASE 3 - Imputación por tercero**
+- `availableMovementsForReturn` ahora incluye `counterparty` del movimiento original
+- useEffect auto-infer: al seleccionar devolucion de movimiento original, setea `counterparty` automáticamente
+- `allPendingDocs` → `pendingDocs` filtrado: en Pagos, si hay tercero seleccionado solo muestra docs de ese tercero
+
+### Decisiones Técnicas
+
+1. **RECLASS como tipo separado**: No reutilizar PAYMENT (tiene semántica COBRO/PAGO). RECLASS es conceptualmente distinto: reclasifica un pasivo de cuenta corriente a documentado.
+
+2. **`paymentMethod` como hint de módulo**: Campo existente reutilizado para indicar si el RECLASS viene de Proveedores o Acreedores, evitando agregar campos nuevos.
+
+3. **Override flags**: `userOverrodePaymentCondition` y `userOverrodeDueDate` evitan que la auto-detección pise decisiones manuales del usuario. Se resetean al cambiar de tab.
+
+4. **Filtrado de pendingDocs**: Se mantiene `allPendingDocs` del hook y se filtra en el componente por tercero, sin modificar el hook subyacente.
+
+### QA
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en `tests/repro_eepn.test.ts` - `isActive` no existe en `JournalEntry`)
+- `npx vite build`: OK (warning chunk size pre-existente en `index-*.js > 500 kB`)
+
+### QA Manual Sugerido
+- [ ] Compra: escribir tercero → verificar dropdown aparece con terceros existentes
+- [ ] Seleccionar tercero → verificar preview muestra saldo y pendientes
+- [ ] Agregar split con cuenta Proveedores → verificar condición cambia a CTA_CTE
+- [ ] Click manual en CONTADO → verificar no se pisa al cambiar splits después
+- [ ] Cambiar termDays con input numérico y chips → verificar dueDate se recalcula
+- [ ] Perfeccionar: click botón → verificar modal, seleccionar destino Documentos a Pagar, guardar
+- [ ] Verificar asiento RECLASS: D Proveedores/tercero, H Documentos a Pagar/tercero
+- [ ] Devolución: seleccionar movimiento original → verificar tercero se auto-completa
+- [ ] Pagos: seleccionar tercero → verificar solo muestra docs de ese tercero
+
+---
+
+## CHECKPOINT #PROVEEDORES-ACREEDORES
+**Fecha:** 2026-02-13
+**Estado:** COMPLETADO - Módulo Proveedores/Acreedores implementado (Fases 0-5)
+
+### Objetivo
+Implementar pantalla dedicada de Proveedores/Acreedores con saldos reales, vencimientos, subcuentas automáticas por tercero, flujo "Pagar" con deep-link, y condiciones de pago persistentes.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/Operaciones/ProveedoresAcreedoresPage.tsx` | **NUEVO** - Página completa con 4 tabs (Dashboard, Listado, Movimientos, Vencimientos), toggle Proveedores/Acreedores, KPIs, aging, CTA "Pagar" |
+| `src/App.tsx` | Agregada ruta `/operaciones/proveedores` |
+| `src/ui/Layout/Sidebar.tsx` | Agregado nav item "Proveedores" con icono Truck bajo Operaciones |
+| `src/ui/Layout/MobileDrawer.tsx` | Ídem para mobile |
+| `src/pages/OperacionesPage.tsx` | Card Proveedores clickable con navegación |
+| `src/storage/accounts.ts` | Agregada `findOrCreateChildAccountByName()` + helper `normalizeNameForMatch()` |
+| `src/storage/bienes.ts` | Resolución subcuenta automática en `buildJournalEntriesForMovement` para PURCHASE/SALE contraId y PAYMENT cuentaCorrienteId |
+| `src/ui/AccountSearchSelectWithBalance.tsx` | `usePendingDocuments` refactorizado: match primario por `sourceMovementId`, fallback legacy por `notes` |
+| `src/pages/Planillas/InventarioBienesPage.tsx` | Deep-link: lee `location.state`, abre MovementModalV3 con prefill, limpia state |
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Prefill PAYMENT desde deep-link; campos condición de pago (CONTADO/CTA_CTE/DOCUMENTADO) en UI + payload `onSave` + init desde `initialData` |
+| `src/core/inventario/types.ts` | Extendido `BienesMovement` con `paymentCondition`, `termDays`, `dueDate`, `instrumentType`, `instrumentNumber`, `instrumentBank` |
+
+### Decisiones Arquitectónicas
+
+1. **Subcuentas bajo cuenta control**: Las compras/pagos con `counterparty` no vacío crean automáticamente subcuentas bajo `2.1.01.01` (Proveedores) o `2.1.06.01` (Acreedores). La cuenta padre se marca `isHeader=true` si no tiene asientos propios.
+
+2. **Match de pagos**: Se usa `sourceMovementId` como vínculo formal entre PAYMENT y PURCHASE. Se mantiene fallback por `notes` para datos legacy.
+
+3. **Deep-link Pagar**: Desde ProveedoresAcreedoresPage → `/operaciones/inventario` via `location.state` con prefill de tab, dirección, tercero, y sourceMovementId. Se limpia state tras consumo con `replaceState`.
+
+4. **Condiciones de pago**: Campos opcionales en BienesMovement (no requiere migración Dexie). Se persisten en onSave de PURCHASE. Tab Vencimientos los lee directamente.
+
+5. **No se tocó Dexie schema**: Los campos nuevos son opcionales en la interfaz TS, Dexie los almacena sin necesidad de cambio de versión.
+
+### QA Manual Sugerido
+- [ ] Crear compra con tercero nuevo → verificar subcuenta creada bajo 2.1.01.01
+- [ ] Verificar saldo en Listado de Proveedores
+- [ ] Click "Pagar" → verificar modal se abre con prefill correcto
+- [ ] Registrar pago parcial → verificar saldo pendiente se reduce
+- [ ] Toggle a Acreedores → verificar muestra cuentas bajo 2.1.06.01
+- [ ] Crear compra con condición CTA_CTE 30 días → verificar dueDate calculado
+- [ ] Tab Vencimientos muestra documento con fecha correcta
+- [ ] Build production: `npx vite build` → OK sin errores nuevos
+
+### Build Status
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en `tests/repro_eepn.test.ts`)
+- `npx vite build`: OK (warning chunk size pre-existente)
+
+---
+
+## CHECKPOINT #EEPN-UX-POLISH
+**Fecha:** 2026-02-05
+**Estado:** COMPLETADO - UX polish + features implementados
+
+### Objetivo
+Pulir el EEPN para cumplir mínimos formales visibles, mejorar legibilidad (ceros, totales, calculados), sumar acciones UX (agregar fila, deshacer visible), sin romper cálculos ni interconexión.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/components/Estados/EvolucionPNTab.tsx` | Todo el UX polish (header, ceros, custom rows, undo, estilos) |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Implementados
+
+**A) Encabezado formal visible en pantalla + print**
+- Título: "Estado de Evolución del Patrimonio Neto"
+- Subtítulo dinámico: "Por el ejercicio finalizado el DD/MM/AAAA, comparativo con el ejercicio anterior" (fecha del período seleccionado)
+- Moneda: "Cifras expresadas en Pesos Argentinos (ARS)"
+- Estilos consistentes con brand (Outfit para títulos, colores del design system)
+
+**B) Ceros atenuados**
+- Celdas editables con valor 0: muestran "0,00" en gris atenuado (clase `eepn-zero-muted`) + tooltip "Doble clic para editar"
+- Celdas calculadas/no editables con valor 0: muestran "—" (em-dash) en gris (clase `eepn-zero-dash`) + tooltip "Calculado por el sistema"
+- Subtotales y totales con 0: muestran "—"
+- Al entrar en modo edición (doble clic), se muestra valor numérico normal
+
+**C) Totales y calculados diferenciados**
+- Celdas calculadas (SALDO_INICIO_AJUSTADO, TOTAL_VARIACIONES, SALDO_CIERRE): fondo sutil (`eepn-calculated`)
+- Columnas subtotales (T. Aportes, T. Result.) ya tenían fondo diferenciado
+- Filas total y cierre ya tenían `eepn-row-total` / `eepn-row-cierre` con negrita y fondo
+
+**D) Tabla sin scroll horizontal en >= 1366px**
+- Reducido min-width/max-width de columna concepto (140px/180px vs 160px/200px)
+- Padding de celdas compact: 4px vs 5px
+- Headers font-size: 0.65rem vs 0.67rem
+
+**E) Deshacer siempre visible**
+- Botón "Deshacer" siempre presente en toolbar (antes: oculto si undoStack vacío)
+- Cuando no hay acciones: `disabled` + tooltip "No hay cambios para deshacer"
+- Undo stack ahora captura `UndoSnapshot` (overrides + customRows) en lugar de solo overrides
+
+**F) Agregar fila personalizada**
+- Botón "Agregar fila" en toolbar
+- Click abre inline input (nombre del concepto) con Enter/Crear y Escape/Cancelar
+- Crea fila tipo `OTROS_MOVIMIENTOS` insertada antes de TOTAL_VARIACIONES
+- Todas las celdas en 0 (mostrando "0,00" atenuado, editables con doble clic)
+- Botón papelera para eliminar fila custom
+- Estilo diferenciado: fondo amarillo claro (`eepn-row-custom`)
+- Impacto en totales: TOTAL_VARIACIONES y SALDO_CIERRE se recalculan en `mergedRows` memo
+
+**G) Recalcular resetea todo**
+- "Recalcular" ahora pide confirmación si hay overrides o custom rows
+- Limpia overrides + custom rows con undo previo
+- Si no hay cambios: force re-render (comportamiento original)
+
+### Decisiones Técnicas
+- **"—" vs "0,00" atenuado:** Se usan ambos — "0,00" gris para editables (invita a cargar), "—" para calculados (no se puede tocar)
+- **Custom rows en memoria:** No se persisten (in-memory state). Se pierden al recargar. Undo/redo las incluye.
+- **Recálculo de totales con custom rows:** Se hace en `useMemo` (`mergedRows`) — recalcula TOTAL_VARIACIONES y SALDO_CIERRE sumando verticalmente sobre el array merged. No toca `compute.ts`.
+- **UndoSnapshot:** Cambio de tipo de `Map<string,number>[]` a `UndoSnapshot[]` para capturar ambos estados (overrides + customRows) en cada paso.
+- **No se tocó `compute.ts`:** Los totales con custom rows se recalculan en el componente UI sin modificar el motor.
+
+### Validación
+- `npx tsc --noEmit` — 0 errores en componente (errores pre-existentes en `tests/repro_eepn.test.ts` no relacionados)
+- `npx vite build` — build exitoso
+
+### Cómo Validar Manualmente
+1. `npm run dev` → `/estados` → tab "Evolución PN"
+2. Ver encabezado formal con título, fecha fin dinámica, y moneda
+3. Confirmar que la tabla entra sin scroll horizontal en ventana normal (>=1366px)
+4. Observar ceros: "0,00" gris en editables, "—" en calculados
+5. Doble click en celda editable con 0 → cargar número → ver que cambia total
+6. Click "Deshacer" → vuelve al valor anterior. Si no hay cambios: botón disabled
+7. Click "Agregar fila" → poner nombre → editar valor → verificar impacto en totales
+8. Click papelera en fila custom → se elimina → totales vuelven
+9. Click "Recalcular" → confirmar → vuelve todo a estado motor puro (sin custom rows ni overrides)
+10. Imprimir → header formal visible en print, filas custom incluidas, botón papelera oculto
+
+### Pendientes (fuera de alcance)
+- [ ] Ctrl+Z / Ctrl+Y para undo/redo dentro del EEPN (nice-to-have)
+- [ ] Persistencia de custom rows en localStorage
+- [ ] Fix pre-existente: `tests/repro_eepn.test.ts` tiene error de tipo (`isActive` not in JournalEntry) que bloquea `tsc -b`
+
+---
+
+## CHECKPOINT #EEPN-V2-IMPLEMENTACION
+**Fecha:** 2026-02-05
+**Estado:** COMPLETADO - Motor corregido + UI v2 implementada
+
+### Objetivo
+Implementar EEPN v2: corregir motor de cálculo (conciliación + no "tragarse" movimientos), sumar columnas de totales por secciones, mejorar UX (fit en pantalla, filas dinámicas/ocultables, undo/recalcular).
+
+### Hallazgos Corregidos
+1. **Swallowed Entry (FIX):** Movimientos contra `3.3.02` con contrapartida no-PN (pasivo/caja) ahora se clasifican como `OTROS_MOVIMIENTOS` en vez de `RESULTADO_EJERCICIO`. Solo asientos de refundición (contrapartidas 4.*/5.*) se clasifican como `RESULTADO_EJERCICIO`.
+2. **Saldo Cierre (FIX):** `SALDO_CIERRE` ahora se calcula como suma vertical (`SALDO_INICIO_AJUSTADO + TOTAL_VARIACIONES`) en lugar de usar `closingBalances` del Mayor. Esto garantiza conciliación en pre-cierre.
+3. **RECPAM:** Nueva fila `RECPAM (ajuste saldos al inicio)` entre Saldo Inicio y AREA, editable, default 0.
+
+### Cambios en Motor (`src/core/eepn/`)
+| Archivo | Cambio |
+|:--------|:-------|
+| `types.ts` | Agregado `'RECPAM'` a `EEPNRowType` |
+| `compute.ts` | `classifyEntry` Rule 6: distingue refundición vs aplicación de resultado |
+| `compute.ts` | `classifyMovements`: computa `touchesResultadoEjercicio` + `isRefundicion` |
+| `compute.ts` | `buildRows`: agrega fila RECPAM; SALDO_INICIO_AJUSTADO suma inicio+recpam+area |
+| `compute.ts` | `buildRows`: SALDO_CIERRE usa `createCalculatedRow` (suma vertical) en vez de `closingBalances` |
+
+### Cambios en UI (`src/components/Estados/EvolucionPNTab.tsx`)
+| Feature | Detalle |
+|:--------|:--------|
+| Columnas subtotales | `T. Aportes` y `T. Result.` dentro de cada grupo, no editables, estilo diferenciado |
+| Modo compacto | Default, font-size reducido, headers 2 líneas, padding compacto |
+| Concepto sticky | Columna concepto fija a la izquierda con `position: sticky` |
+| Ocultar ceros | Toggle "Ver completo" oculta filas core en cero (default: ocultas). Print muestra todas. |
+| Deshacer | Botón "Deshacer" con undo stack; revierte último override sin afectar los demás |
+| Celdas bloqueadas | Filas calculadas (inicio ajustado, total variaciones, cierre) y columnas subtotales no editables |
+| RECPAM | Fila visible y editable arriba de AREA |
+| Fila Cierre | Estilo reforzado con borde superior doble y font-weight 800 |
+
+### Tests (`tests/repro_eepn.test.ts`)
+4 tests:
+1. `should NOT swallow fee payment against 3.3.02` — EEPN cierre = 2500 ✅
+2. `should reconcile in pre-cierre scenario` — vertical sum matches balance ✅
+3. `should include RECPAM row in output` ✅
+4. `should classify refundición entry as RESULTADO_EJERCICIO` ✅
+
+### Validación
+- `npx tsc --noEmit` ✅
+- `npm run build` ✅
+- `npm test` — 74/74 tests pass ✅
+
+### Cómo Validar Manualmente
+1. `npm run dev` → `/estados` → tab "Evolución PN"
+2. Verificar tabla con columnas T. Aportes y T. Result. diferenciadas
+3. Doble click en celda editable → badge "M" → click Deshacer → revierte
+4. Toggle "Ver completo" → muestra/oculta filas en cero
+5. Imprimir → formato formal completo con todas las filas
+6. Si hay datos: verificar que el warning de conciliación desaparece cuando corresponde
+
+### Decisiones Técnicas
+- **Clasificación 3.3.02:** Se usa heurística: si TODAS las contrapartidas no-PN son cuentas 4.*/5.* → refundición. Cualquier otro caso → OTROS_MOVIMIENTOS.
+- **Saldo Cierre:** Vertical sum (`inicio_ajustado + total_variaciones`) como fuente de verdad. `closingBalances` del Mayor se mantiene computado pero no se usa para la fila.
+- **Undo:** Stack simple en memoria (no persistido). Se limpia al recargar la página.
+- **Compact mode:** Siempre activo (clase `eepn-compact`). No se agregó toggle Compacto/Cómodo para simplificar.
+
+### Pendientes (fuera de alcance)
+- [ ] Ctrl+Z / Ctrl+Y para undo/redo (nice-to-have)
+- [ ] Persistencia de overrides en IndexedDB
+- [ ] Integración automática de RECPAM con módulo cierre-valuación
+- [ ] Comparativo real (año anterior) — actualmente usa placeholder
+
+---
+
+## CHECKPOINT #EEPN-AUDIT-DIAGNOSTICO-V1
+**Fecha:** 2026-02-06
+**Estado:** COMPLETADO - Diagnóstico Finalizado
+
+### Objetivo
+Diagnosticar discrepancias de conciliación entre EEPN y Balance General, e identificar causas de pérdida de movimientos.
+
+### Hallazgos Críticos
+1. **Movements Swallowed:** Movimientos directos contra `3.3.02` (Resultado Ejercicio) son sobrescritos por el resultado del ER, perdiéndose ajustes manuales o pagos de honorarios.
+2. **Saldo Cierre Desconectado:** En periodos sin asiento de refundición, el EEPN Cierre ignora el resultado del ejercicio corriente, causando discrepancia con Balance.
+
+### Entregables
+- `docs/audits/EEPN_AUDIT_DIAGNOSTICO.md`: Reporte detallado con prueba de concepto y plan de corrección.
+
+### Próximos Pasos (Correction Plan)
+1. Refinar reglas de `classifyMovements` para no atrapar aplicaciones en `RESULTADO_EJERCICIO`.
+2. Modificar `createResultadoRow` para no sobrescribir, o asegurar input limpio.
+3. Unificar cálculo de `SALDO_CIERRE` con suma vertical (Inicio + Variaciones).
+
+---
+
 ## CHECKPOINT #COMPANY-PROFILE-V1
 **Fecha:** 2026-02-04  
 **Estado:** COMPLETADO - Build pasa, feature implementado
@@ -5820,3 +6397,31 @@ npm run build  # ✅ PASS (built in ~19s)
    - Editar bien existente
    - Verificar que selector de origen no aparece (solo para alta)
    - Campos de valor y vida útil editables
+
+---
+
+## CHECKPOINT 2026-02-13 - AUDITORIA PROVEEDORES/ACREEDORES INTERCONEXION
+
+### Objetivo
+Auditar end-to-end la interconexion entre Proveedores/Acreedores, Bienes de Cambio, Libro Diario y Plan de Cuentas, identificando cableado real, gaps y plan minimo de implementacion sin tocar features/migrations/UI productiva.
+
+### Archivos tocados
+- `docs/audits/AUDIT_PROVEEDORES_ACREEDORES__INTERCONEXION.md` (nuevo)
+- `docs/AI_HANDOFF.md` (este checkpoint)
+
+### Comandos usados (resumen)
+- `git status --short --branch`
+- `git rev-parse --abbrev-ref HEAD`
+- `git log -n 5 --oneline`
+- `Get-Location`
+- `Get-ChildItem -Force` / `Get-ChildItem -Recurse`
+- `rg -n ...` (rutas, contratos, flujos, prototipos)
+- `Get-Content ...` (App, storage, modal, mayor, cuentas, prototipos)
+
+### Validacion
+- Esta tarea no implemento features ni refactors.
+- No se tocaron DB/migrations/endpoints.
+- Los cambios esperados son solo en `docs/`.
+- Validar con:
+  - `git diff --stat` (solo docs)
+  - `git status` (solo archivos docs nuevos/modificados)

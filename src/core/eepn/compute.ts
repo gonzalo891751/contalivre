@@ -185,6 +185,7 @@ function classifyMovements(
         let touchesRNA = false
         let touchesCapital = false
         let touchesCaja = false
+        let touchesResultadoEjercicio = false
 
         for (const line of entry.lines) {
             const account = accountMap.get(line.accountId)
@@ -200,6 +201,7 @@ function classifyMovements(
                 if (account.code.startsWith('3.3.04')) touchesDividendos = true
                 if (account.code.startsWith('3.2')) touchesReservas = true
                 if (account.code.startsWith('3.3.01')) touchesRNA = true
+                if (account.code.startsWith('3.3.02')) touchesResultadoEjercicio = true
                 if (account.code.startsWith('3.1')) touchesCapital = true
             } else {
                 hasNonPNLines = true
@@ -213,6 +215,17 @@ function classifyMovements(
         // Skip if no PN lines
         if (pnLines.length === 0) continue
 
+        // Determine if entry touching 3.3.02 is a refundición/cierre
+        let isRefundicion = false
+        if (touchesResultadoEjercicio && hasNonPNLines) {
+            const nonPNAccounts = entry.lines
+                .map(l => accountMap.get(l.accountId))
+                .filter((acc): acc is Account => acc != null && !isPNAccount(acc.code))
+            isRefundicion = nonPNAccounts.length > 0 && nonPNAccounts.every(
+                acc => acc.code.startsWith('4.') || acc.code.startsWith('5.')
+            )
+        }
+
         // Classify based on heuristics
         const classification = classifyEntry(
             entry,
@@ -223,7 +236,9 @@ function classifyMovements(
             touchesReservas,
             touchesRNA,
             touchesCapital,
-            touchesCaja
+            touchesCaja,
+            touchesResultadoEjercicio,
+            isRefundicion
         )
 
         result.push({ entry, classification, pnLines })
@@ -244,7 +259,9 @@ function classifyEntry(
     touchesReservas: boolean,
     touchesRNA: boolean,
     touchesCapital: boolean,
-    touchesCaja: boolean
+    touchesCaja: boolean,
+    touchesResultadoEjercicio: boolean,
+    isRefundicion: boolean
 ): MovementClassification {
     // Rule 1: If touches AREA accounts -> AREA
     if (touchesAREA) {
@@ -284,9 +301,15 @@ function classifyEntry(
         }
     }
 
-    // Rule 6: Check for Resultado del ejercicio movements
-    if (pnLines.some(pl => pl.account.code.startsWith('3.3.02'))) {
-        return { rowType: 'RESULTADO_EJERCICIO', reason: 'Movimiento en resultado del ejercicio' }
+    // Rule 6: Check for Resultado del ejercicio movements (3.3.02)
+    // Only classify as RESULTADO_EJERCICIO if it's a refundición/cierre entry
+    // (counterparts are all 4.*/5.* accounts). Otherwise, it's an application
+    // of result (e.g., fee payment, distribution) -> OTROS_MOVIMIENTOS.
+    if (touchesResultadoEjercicio) {
+        if (isRefundicion) {
+            return { rowType: 'RESULTADO_EJERCICIO', reason: 'Asiento de cierre/refundición' }
+        }
+        return { rowType: 'OTROS_MOVIMIENTOS', reason: 'Aplicación de resultado del ejercicio' }
     }
 
     // Fallback
@@ -302,7 +325,7 @@ function classifyEntry(
  */
 function buildRows(
     openingBalances: Map<string, ColumnBalance>,
-    closingBalances: Map<string, ColumnBalance>,
+    _closingBalances: Map<string, ColumnBalance>,
     classifiedMovements: ClassifiedMovement[],
     _accountByCode: Map<string, Account>,
     overrides: Map<string, number>,
@@ -313,16 +336,19 @@ function buildRows(
     // 1. Saldos al inicio
     rows.push(createBalanceRow('inicio', 'SALDO_INICIO', 'Saldos al inicio', openingBalances, overrides, true))
 
-    // 2. AREA
+    // 2. RECPAM (ajuste saldos al inicio) - editable, defaults to 0
+    rows.push(createMovementRow('recpam', 'RECPAM', 'RECPAM (ajuste saldos al inicio)', [], overrides))
+
+    // 3. AREA
     const areaMovements = classifiedMovements.filter(m => m.classification.rowType === 'AREA')
     rows.push(createMovementRow('area', 'AREA', 'Modificación saldo inicio (AREA)', areaMovements, overrides))
 
-    // 3. Saldo inicio ajustado (calculated)
+    // 4. Saldo inicio ajustado (calculated: inicio + recpam + area)
     rows.push(createCalculatedRow(
         'inicio_ajustado',
         'SALDO_INICIO_AJUSTADO',
         'Saldo al inicio ajustado',
-        [rows[0], rows[1]],
+        [rows[0], rows[1], rows[2]],
         overrides,
         true
     ))
@@ -373,8 +399,17 @@ function buildRows(
         true
     ))
 
-    // 12. Saldos al cierre
-    rows.push(createBalanceRow('cierre', 'SALDO_CIERRE', 'SALDOS AL CIERRE', closingBalances, overrides, true))
+    // 13. Saldos al cierre = inicio ajustado + variaciones (vertical sum)
+    const inicioAjustadoRow = rows.find(r => r.type === 'SALDO_INICIO_AJUSTADO')!
+    const totalVariacionesRow = rows.find(r => r.type === 'TOTAL_VARIACIONES')!
+    rows.push(createCalculatedRow(
+        'cierre',
+        'SALDO_CIERRE',
+        'SALDOS AL CIERRE',
+        [inicioAjustadoRow, totalVariacionesRow],
+        overrides,
+        true
+    ))
 
     return rows
 }

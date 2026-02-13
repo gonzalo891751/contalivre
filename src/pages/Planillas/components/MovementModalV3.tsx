@@ -126,6 +126,25 @@ export default function MovementModalV3({
     // Compute ledger balances for account selectors
     const { byAccount: ledgerBalances } = useLedgerBalances(entries, accounts)
 
+    // Existing terceros (derived from child accounts under Proveedores/Acreedores/Deudores)
+    const existingTerceros = useMemo(() => {
+        if (!accounts || !ledgerBalances) return []
+        const controlCodes = ['2.1.01.01', '2.1.06.01', '1.1.02.01'] // Proveedores, Acreedores, Deudores
+        const controlAccounts = accounts.filter(a => controlCodes.includes(a.code))
+        const controlIds = new Set(controlAccounts.map(a => a.id))
+        const children = accounts.filter(a => a.parentId && controlIds.has(a.parentId) && !a.isHeader)
+        const seen = new Set<string>()
+        return children
+            .map(a => {
+                const bal = ledgerBalances.get(a.id)
+                const normalizedName = a.name.toLowerCase().trim()
+                if (seen.has(normalizedName)) return null
+                seen.add(normalizedName)
+                return { name: a.name, balance: bal?.balance || 0, accountId: a.id }
+            })
+            .filter(Boolean) as { name: string; balance: number; accountId: string }[]
+    }, [accounts, ledgerBalances])
+
     // Main tab state
     const [mainTab, setMainTab] = useState<MainTab>('compra')
     const [ajusteSubTab, setAjusteSubTab] = useState<AjusteSubTab>('devoluciones')
@@ -149,6 +168,13 @@ export default function MovementModalV3({
         // Solo Gasto mode
         isSoloGasto: false,
         sourceMovementId: '',
+        // Payment condition (Proveedores/Acreedores)
+        paymentCondition: '' as '' | 'CONTADO' | 'CTA_CTE' | 'DOCUMENTADO',
+        termDays: 0,
+        dueDate: '',
+        instrumentType: '' as '' | 'PAGARE' | 'ECHEQ' | 'CHEQUE',
+        instrumentNumber: '',
+        instrumentBank: '',
     })
 
     // Gastos accesorios (solo compra)
@@ -246,16 +272,69 @@ export default function MovementModalV3({
     })
 
     // Pending documents for payment/collection selection
-    const pendingDocs = usePendingDocuments(movements, movements, pagoCobroMode)
+    const allPendingDocs = usePendingDocuments(movements, movements, pagoCobroMode)
+
+    // Filter pending docs by selected tercero (FASE 3B)
+    const pendingDocs = useMemo(() => {
+        if (!pagoCobro.tercero?.trim()) return allPendingDocs
+        const normTercero = pagoCobro.tercero.toLowerCase().trim()
+        return allPendingDocs.filter(d =>
+            d.counterparty.toLowerCase().trim() === normTercero ||
+            d.counterparty.toLowerCase().trim().includes(normTercero) ||
+            normTercero.includes(d.counterparty.toLowerCase().trim())
+        )
+    }, [allPendingDocs, pagoCobro.tercero])
 
     // Selected pending document for payment/collection
     const selectedPendingDoc = useMemo<PendingDocument | null>(() => {
         if (!pagoCobro.originMovementId) return null
-        return pendingDocs.find(d => d.movementId === pagoCobro.originMovementId) || null
-    }, [pendingDocs, pagoCobro.originMovementId])
+        return allPendingDocs.find(d => d.movementId === pagoCobro.originMovementId) || null
+    }, [allPendingDocs, pagoCobro.originMovementId])
+
+    // Override flags: prevent auto-overwriting user manual choices
+    const [userOverrodePaymentCondition, setUserOverrodePaymentCondition] = useState(false)
+    const [userOverrodeDueDate, setUserOverrodeDueDate] = useState(false)
+
+    // Tercero combobox state
+    const [showTerceroDropdown, setShowTerceroDropdown] = useState(false)
+    const [showPagoTerceroDropdown, setShowPagoTerceroDropdown] = useState(false)
 
     const [isSaving, setIsSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
+
+    // Tercero preview: saldo + pending docs for selected counterparty
+    const terceroPreview = useMemo(() => {
+        const name = mainTab === 'pagos' ? pagoCobro.tercero : formData.counterparty
+        if (!name?.trim() || !movements) return null
+        const normName = name.toLowerCase().trim()
+        const tercero = existingTerceros.find(t => t.name.toLowerCase().trim() === normName)
+        if (!tercero) return null
+
+        const pending = (movements || [])
+            .filter(m =>
+                m.type === 'PURCHASE' && !m.isDevolucion && m.total > 0 &&
+                m.counterparty?.toLowerCase().trim() === normName
+            )
+            .slice(0, 5)
+            .map(m => {
+                const paid = (movements || [])
+                    .filter(p => p.type === 'PAYMENT' && p.sourceMovementId === m.id)
+                    .reduce((s, p) => s + p.total, 0)
+                const saldo = m.total - paid
+                return saldo > 0.01 ? { ref: m.reference || m.id.slice(0, 8), date: m.date, dueDate: (m as any).dueDate, saldo } : null
+            })
+            .filter(Boolean) as { ref: string; date: string; dueDate?: string; saldo: number }[]
+
+        return { balance: tercero.balance, pending }
+    }, [mainTab, pagoCobro.tercero, formData.counterparty, existingTerceros, movements])
+
+    // Filtered terceros for combobox dropdown
+    const filteredTerceros = useMemo(() => {
+        const query = mainTab === 'pagos' ? pagoCobro.tercero : formData.counterparty
+        if (!query?.trim()) return existingTerceros
+        const q = query.toLowerCase().trim()
+        return existingTerceros.filter(t => t.name.toLowerCase().includes(q))
+    }, [mainTab, pagoCobro.tercero, formData.counterparty, existingTerceros])
 
     // Sync pagoCobro amount when selecting a pending document
     useEffect(() => {
@@ -294,6 +373,55 @@ export default function MovementModalV3({
         setPagoCobroRetencion(prev => ({ ...prev, amount: calculated }))
     }, [pagoCobroRetencion.enabled, pagoCobroRetencion.calcMode, pagoCobroRetencion.rate, pagoCobroRetencion.base, selectedPendingDoc?.movementId])
 
+    // Auto-infer paymentCondition from selected split accounts (Compra AND Venta)
+    useEffect(() => {
+        if (userOverrodePaymentCondition || (mainTab !== 'compra' && mainTab !== 'venta') || formData.isSoloGasto) return
+        if (!accounts || splits.length === 0) return
+
+        const isVenta = mainTab === 'venta'
+
+        // Compra side: Proveedores/Acreedores → CTA_CTE, Documentos a Pagar → DOCUMENTADO
+        // Venta side: Deudores por Ventas → CTA_CTE, Documentos a Cobrar → DOCUMENTADO
+        const ctaCteControlCodes = isVenta
+            ? new Set(['1.1.02.01']) // Deudores por ventas
+            : new Set(['2.1.01.01', '2.1.06.01']) // Proveedores, Acreedores
+        const documentosControlCodes = isVenta
+            ? new Set(['1.1.02.02', '1.1.02.03']) // Documentos a cobrar, Deudores con tarjeta
+            : new Set(['2.1.01.02', '2.1.01.04', '2.1.01.05']) // Documentos/Valores a pagar
+        const cajaControlCodes = new Set(['1.1.01.01', '1.1.01.02', '1.1.01.03', '1.1.01.04'])
+
+        let hasCtaCte = false
+        let hasDocumentos = false
+        let hasCaja = false
+
+        for (const split of splits) {
+            if (!split.accountId) continue
+            const acc = accounts.find(a => a.id === split.accountId)
+            if (!acc) continue
+
+            const code = acc.code
+            if (ctaCteControlCodes.has(code)) hasCtaCte = true
+            if (documentosControlCodes.has(code)) hasDocumentos = true
+            if (cajaControlCodes.has(code)) hasCaja = true
+
+            const parent = acc.parentId ? accounts.find(a => a.id === acc.parentId) : null
+            if (parent) {
+                if (ctaCteControlCodes.has(parent.code)) hasCtaCte = true
+                if (documentosControlCodes.has(parent.code)) hasDocumentos = true
+                if (cajaControlCodes.has(parent.code)) hasCaja = true
+            }
+        }
+
+        let inferred: '' | 'CONTADO' | 'CTA_CTE' | 'DOCUMENTADO' = ''
+        if (hasDocumentos) inferred = 'DOCUMENTADO'
+        else if (hasCtaCte) inferred = 'CTA_CTE'
+        else if (hasCaja && !hasCtaCte && !hasDocumentos) inferred = 'CONTADO'
+
+        if (inferred && inferred !== formData.paymentCondition) {
+            setFormData(prev => ({ ...prev, paymentCondition: inferred }))
+        }
+    }, [splits, accounts, mainTab, formData.isSoloGasto, userOverrodePaymentCondition])
+
     // Initialize from initialData
     useEffect(() => {
         if (!initialData) return
@@ -301,8 +429,22 @@ export default function MovementModalV3({
         let tab: MainTab = 'compra'
         if (initialData.type === 'SALE') tab = 'venta'
         else if (initialData.type === 'ADJUSTMENT' || initialData.type === 'VALUE_ADJUSTMENT') tab = 'ajuste'
+        else if (initialData.type === 'PAYMENT') tab = 'pagos'
 
         setMainTab(tab)
+
+        // Prefill payment direction and tercero for PAYMENT type (from deep-link)
+        if (initialData.type === 'PAYMENT') {
+            if (initialData.paymentDirection) {
+                setPagoCobroMode(initialData.paymentDirection as PagoCobroMode)
+            }
+            // Prefill pagoCobro state for tercero and source movement
+            setPagoCobro(prev => ({
+                ...prev,
+                tercero: initialData.counterparty || prev.tercero,
+                originMovementId: initialData.sourceMovementId || prev.originMovementId,
+            }))
+        }
 
         if (initialData.paymentSplits && initialData.paymentSplits.length > 0) {
             setSplits(initialData.paymentSplits.map((s, i) => ({
@@ -335,6 +477,13 @@ export default function MovementModalV3({
             bonificacionPct: initialData.bonificacionPct ?? 0,
             descuentoFinancieroPct: initialData.descuentoFinancieroPct ?? 0,
             sourceMovementId: initialData.sourceMovementId || '',
+            // Payment condition fields
+            paymentCondition: initialData.paymentCondition || prev.paymentCondition,
+            termDays: initialData.termDays ?? prev.termDays,
+            dueDate: initialData.dueDate || prev.dueDate,
+            instrumentType: initialData.instrumentType || prev.instrumentType,
+            instrumentNumber: initialData.instrumentNumber || prev.instrumentNumber,
+            instrumentBank: initialData.instrumentBank || prev.instrumentBank,
         }))
     }, [initialData, products])
 
@@ -459,6 +608,7 @@ export default function MovementModalV3({
             .map(m => ({
                 id: m.id,
                 label: `${m.date} - ${m.reference || m.id.slice(0, 8)} - ${m.counterparty || 'Sin tercero'} - Qty: ${m.quantity}`,
+                counterparty: m.counterparty || '',
                 quantity: m.quantity,
                 unitCost: m.unitCost || 0,
                 unitPrice: m.unitPrice || 0,
@@ -524,6 +674,15 @@ export default function MovementModalV3({
     const selectedOriginalMovement = useMemo(() => {
         return availableMovementsForReturn.find(m => m.id === devolucion.originalMovementId)
     }, [availableMovementsForReturn, devolucion.originalMovementId])
+
+    // FASE 3A: Auto-infer tercero from devolución original movement
+    useEffect(() => {
+        if (!selectedOriginalMovement?.counterparty) return
+        // Only auto-set if counterparty is empty (don't override manual entry)
+        if (!formData.counterparty) {
+            setFormData(prev => ({ ...prev, counterparty: selectedOriginalMovement.counterparty }))
+        }
+    }, [selectedOriginalMovement?.id])
 
     const selectedPostMovement = useMemo(() => {
         return availableMovementsForPostAdjust.find(m => m.id === postAdjust.originalMovementId)
@@ -1284,6 +1443,10 @@ export default function MovementModalV3({
                 ? (priceInputMode === 'FINAL' ? calculations.derivedNetUnitCost : formData.unitCost)
                 : undefined
 
+            // Consumidor Final: if SALE with no counterparty, use generic tercero
+            const effectiveCounterparty = formData.counterparty?.trim()
+                || (mainTab === 'venta' ? 'Consumidor Final' : undefined)
+
             await onSave({
                 type: movementType,
                 productId: formData.productId,
@@ -1297,7 +1460,7 @@ export default function MovementModalV3({
                 subtotal: calculations.netoAfterBonif,
                 total: calculations.totalFinal,
                 costMethod,
-                counterparty: formData.counterparty || undefined,
+                counterparty: effectiveCounterparty,
                 paymentMethod: 'MIXTO',
                 paymentSplits: validSplits.map(s => ({ accountId: s.accountId, amount: s.amount, method: 'MIXTO' })),
                 notes: formData.notes || undefined,
@@ -1318,6 +1481,13 @@ export default function MovementModalV3({
                 rt6Period: undefined,
                 rt6SourceEntryId: undefined,
                 sourceMovementId: formData.isSoloGasto && formData.sourceMovementId ? formData.sourceMovementId : undefined,
+                // Payment condition & maturity (Proveedores/Acreedores)
+                paymentCondition: formData.paymentCondition || undefined,
+                termDays: formData.termDays || undefined,
+                dueDate: formData.dueDate || undefined,
+                instrumentType: formData.instrumentType || undefined,
+                instrumentNumber: formData.instrumentNumber || undefined,
+                instrumentBank: formData.instrumentBank || undefined,
             })
             onClose()
         } catch (e) {
@@ -2429,17 +2599,72 @@ export default function MovementModalV3({
                                                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
                                             />
                                         </div>
-                                        <div className="col-span-8">
+                                        <div className="col-span-8 relative">
                                             <label className="block text-xs font-semibold text-slate-700 mb-1">
                                                 {pagoCobroMode === 'COBRO' ? 'Cliente' : 'Proveedor'}
                                             </label>
                                             <input
                                                 type="text"
                                                 value={pagoCobro.tercero}
-                                                onChange={(e) => setPagoCobro(prev => ({ ...prev, tercero: e.target.value }))}
-                                                placeholder={pagoCobroMode === 'COBRO' ? 'Nombre del cliente' : 'Nombre del proveedor'}
+                                                onChange={(e) => {
+                                                    setPagoCobro(prev => ({ ...prev, tercero: e.target.value }))
+                                                    setShowPagoTerceroDropdown(true)
+                                                }}
+                                                onFocus={() => setShowPagoTerceroDropdown(true)}
+                                                onBlur={() => setTimeout(() => setShowPagoTerceroDropdown(false), 200)}
+                                                placeholder={pagoCobroMode === 'COBRO' ? 'Buscar o crear cliente...' : 'Buscar o crear proveedor...'}
                                                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
+                                                autoComplete="off"
                                             />
+                                            {showPagoTerceroDropdown && filteredTerceros.length > 0 && (
+                                                <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+                                                    {filteredTerceros.map(t => (
+                                                        <button
+                                                            key={t.accountId}
+                                                            type="button"
+                                                            onMouseDown={(e) => {
+                                                                e.preventDefault()
+                                                                setPagoCobro(prev => ({ ...prev, tercero: t.name }))
+                                                                setShowPagoTerceroDropdown(false)
+                                                            }}
+                                                            className="w-full text-left px-3 py-2 text-sm hover:bg-violet-50 flex justify-between items-center"
+                                                        >
+                                                            <span className="font-medium text-slate-700">{t.name}</span>
+                                                            <span className={`font-mono text-xs ${t.balance > 0 ? 'text-rose-500' : 'text-slate-400'}`}>
+                                                                {t.balance !== 0 ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(t.balance) : ''}
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                    {pagoCobro.tercero.trim() && !filteredTerceros.some(t => t.name.toLowerCase() === pagoCobro.tercero.toLowerCase().trim()) && (
+                                                        <div className="px-3 py-2 text-xs text-violet-600 border-t border-slate-100">
+                                                            <Plus size={12} weight="bold" className="inline mr-1" />
+                                                            Crear nuevo: &quot;{pagoCobro.tercero.trim()}&quot;
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {/* Mini-panel: tercero saldo + pendientes */}
+                                            {terceroPreview && mainTab === 'pagos' && (
+                                                <div className="mt-2 p-2.5 bg-violet-50 border border-violet-200 rounded-lg text-xs">
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="font-semibold text-violet-700">Saldo actual</span>
+                                                        <span className={`font-mono font-bold ${terceroPreview.balance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                                            {new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(terceroPreview.balance)}
+                                                        </span>
+                                                    </div>
+                                                    {terceroPreview.pending.length > 0 && (
+                                                        <div className="mt-1.5 pt-1.5 border-t border-violet-200 space-y-1">
+                                                            <span className="text-[10px] uppercase font-bold text-violet-500">Pendientes</span>
+                                                            {terceroPreview.pending.map((p, i) => (
+                                                                <div key={i} className="flex justify-between text-violet-700">
+                                                                    <span>{p.ref} ({p.date}){p.dueDate ? ` → Vto: ${p.dueDate}` : ''}</span>
+                                                                    <span className="font-mono">{new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p.saldo)}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                     <div className="mt-4">
@@ -3139,13 +3364,41 @@ export default function MovementModalV3({
                                         <Wallet size={64} weight="duotone" className="text-blue-600" />
                                     </div>
 
-                                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
-                                        {mainTab === 'compra' ? (
-                                            <><Wallet size={16} weight="duotone" className="text-blue-600" /> Pago / Contrapartidas</>
-                                        ) : (
-                                            <><HandCoins size={16} weight="duotone" className="text-emerald-600" /> Cobro / Contrapartidas</>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                                            {mainTab === 'compra' ? (
+                                                <><Wallet size={16} weight="duotone" className="text-blue-600" /> Pago / Contrapartidas</>
+                                            ) : (
+                                                <><HandCoins size={16} weight="duotone" className="text-emerald-600" /> Imputacion del cobro</>
+                                            )}
+                                        </h3>
+                                        {mainTab === 'venta' && formData.counterparty?.trim() && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    // Find Deudores por ventas account (1.1.02.01) or a child for the counterparty
+                                                    const deudoresAcc = (accounts || []).find(a => a.code === '1.1.02.01')
+                                                    if (!deudoresAcc) return
+                                                    const total = formData.ivaRate > 0
+                                                        ? round2(formData.quantity * formData.unitPrice * (1 + formData.ivaRate / 100))
+                                                        : round2(formData.quantity * formData.unitPrice)
+                                                    setSplits([{ id: `split-ctacte-${Date.now()}`, accountId: deudoresAcc.id, amount: total }])
+                                                    if (!userOverrodePaymentCondition) {
+                                                        handleChange('paymentCondition', 'CTA_CTE')
+                                                    }
+                                                }}
+                                                className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded hover:bg-emerald-100 transition-colors"
+                                                title="Imputa el total a Deudores por Ventas (cliente). El cobro real se registra despues en Pagos/Cobros."
+                                            >
+                                                Vender en Cta. Cte.
+                                            </button>
                                         )}
-                                    </h3>
+                                    </div>
+                                    {mainTab === 'venta' && (
+                                        <p className="text-[10px] text-slate-400 mb-3 -mt-2">
+                                            Si vendes a cuenta corriente, imputa a Deudores por Ventas. El cobro real se registra despues en Pagos/Cobros.
+                                        </p>
+                                    )}
 
                                     {/* Payment Rows Container */}
                                     <div className="space-y-3">
@@ -3327,15 +3580,70 @@ export default function MovementModalV3({
                                         <Files size={16} weight="duotone" className="text-slate-500" /> Comprobante
                                     </h3>
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div>
+                                        <div className="relative">
                                             <label className="block text-xs font-semibold text-slate-700 mb-1">Entidad / Tercero</label>
                                             <input
                                                 type="text"
                                                 value={formData.counterparty}
-                                                onChange={(e) => handleChange('counterparty', e.target.value)}
-                                                placeholder={mainTab === 'compra' ? 'Nombre del proveedor' : 'Nombre del cliente'}
+                                                onChange={(e) => {
+                                                    handleChange('counterparty', e.target.value)
+                                                    setShowTerceroDropdown(true)
+                                                }}
+                                                onFocus={() => setShowTerceroDropdown(true)}
+                                                onBlur={() => setTimeout(() => setShowTerceroDropdown(false), 200)}
+                                                placeholder={mainTab === 'compra' ? 'Buscar o crear proveedor...' : 'Buscar o crear cliente...'}
                                                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                                                autoComplete="off"
                                             />
+                                            {showTerceroDropdown && filteredTerceros.length > 0 && (
+                                                <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+                                                    {filteredTerceros.map(t => (
+                                                        <button
+                                                            key={t.accountId}
+                                                            type="button"
+                                                            onMouseDown={(e) => {
+                                                                e.preventDefault()
+                                                                handleChange('counterparty', t.name)
+                                                                setShowTerceroDropdown(false)
+                                                            }}
+                                                            className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex justify-between items-center"
+                                                        >
+                                                            <span className="font-medium text-slate-700">{t.name}</span>
+                                                            <span className={`font-mono text-xs ${t.balance > 0 ? 'text-rose-500' : 'text-slate-400'}`}>
+                                                                {t.balance !== 0 ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(t.balance) : ''}
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                    {formData.counterparty.trim() && !filteredTerceros.some(t => t.name.toLowerCase() === formData.counterparty.toLowerCase().trim()) && (
+                                                        <div className="px-3 py-2 text-xs text-blue-600 border-t border-slate-100">
+                                                            <Plus size={12} weight="bold" className="inline mr-1" />
+                                                            Crear nuevo: &quot;{formData.counterparty.trim()}&quot;
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {/* Mini-panel: tercero saldo + pendientes */}
+                                            {terceroPreview && (mainTab === 'compra' || mainTab === 'venta') && (
+                                                <div className="mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs">
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="font-semibold text-blue-700">Saldo actual</span>
+                                                        <span className={`font-mono font-bold ${terceroPreview.balance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                                            {new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(terceroPreview.balance)}
+                                                        </span>
+                                                    </div>
+                                                    {terceroPreview.pending.length > 0 && (
+                                                        <div className="mt-1.5 pt-1.5 border-t border-blue-200 space-y-1">
+                                                            <span className="text-[10px] uppercase font-bold text-blue-500">Pendientes</span>
+                                                            {terceroPreview.pending.map((p, i) => (
+                                                                <div key={i} className="flex justify-between text-blue-700">
+                                                                    <span>{p.ref} ({p.date}){p.dueDate ? ` → Vto: ${p.dueDate}` : ''}</span>
+                                                                    <span className="font-mono">{new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p.saldo)}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="flex gap-2">
                                             <div className="w-1/3">
@@ -3365,6 +3673,153 @@ export default function MovementModalV3({
                                         </div>
                                     </div>
                                 </section>
+
+                                {/* CONDICIÓN DE PAGO (compra y venta) */}
+                                {(mainTab === 'compra' || mainTab === 'venta') && !formData.isSoloGasto && (
+                                    <section className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-6">
+                                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-3">
+                                            {mainTab === 'venta' ? 'Condición de Cobro' : 'Condición de Pago'}
+                                        </label>
+                                        <div className="flex bg-white p-1 rounded-lg border border-slate-200 mb-4 shadow-sm">
+                                            {(['CONTADO', 'CTA_CTE', 'DOCUMENTADO'] as const).map(cond => (
+                                                <button
+                                                    key={cond}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setUserOverrodePaymentCondition(true)
+                                                        handleChange('paymentCondition', cond)
+                                                        if ((cond === 'CTA_CTE' || cond === 'DOCUMENTADO') && formData.termDays > 0 && formData.date && !userOverrodeDueDate) {
+                                                            const due = new Date(formData.date + 'T12:00:00')
+                                                            due.setDate(due.getDate() + formData.termDays)
+                                                            handleChange('dueDate', due.toISOString().split('T')[0])
+                                                        }
+                                                    }}
+                                                    className={`flex-1 py-1.5 text-xs font-medium rounded text-center transition-all ${formData.paymentCondition === cond
+                                                        ? 'bg-blue-600 text-white shadow-sm'
+                                                        : 'text-slate-600 hover:text-slate-900'}`}
+                                                >
+                                                    {cond === 'CONTADO' ? 'Contado' : cond === 'CTA_CTE' ? 'Cta. Cte.' : 'Documentado'}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {formData.paymentCondition === 'CONTADO' && (
+                                            <div className="text-xs text-slate-500 flex items-center gap-2">
+                                                <span className="text-blue-500">ℹ</span> Se registra el pago en la contrapartida seleccionada.
+                                            </div>
+                                        )}
+
+                                        {formData.paymentCondition === 'CTA_CTE' && (
+                                            <div className="space-y-3">
+                                                <div className="flex items-end gap-3">
+                                                    <div className="w-28">
+                                                        <label className="text-xs font-medium block mb-1">Días Plazo</label>
+                                                        <input
+                                                            type="number"
+                                                            min={0}
+                                                            value={formData.termDays || ''}
+                                                            onChange={(e) => {
+                                                                const days = parseInt(e.target.value) || 0
+                                                                handleChange('termDays', days)
+                                                                if (formData.date && days > 0 && !userOverrodeDueDate) {
+                                                                    const due = new Date(formData.date + 'T12:00:00')
+                                                                    due.setDate(due.getDate() + days)
+                                                                    handleChange('dueDate', due.toISOString().split('T')[0])
+                                                                }
+                                                            }}
+                                                            placeholder="0"
+                                                            className="w-full text-sm border-slate-300 rounded-md px-2 py-1.5 bg-white border font-mono text-center"
+                                                        />
+                                                    </div>
+                                                    <div className="flex gap-1 mb-0.5">
+                                                        {[7, 15, 30, 45, 60, 90].map(d => (
+                                                            <button
+                                                                key={d}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    handleChange('termDays', d)
+                                                                    if (formData.date && !userOverrodeDueDate) {
+                                                                        const due = new Date(formData.date + 'T12:00:00')
+                                                                        due.setDate(due.getDate() + d)
+                                                                        handleChange('dueDate', due.toISOString().split('T')[0])
+                                                                    }
+                                                                }}
+                                                                className={`px-2 py-1 text-[10px] font-bold rounded transition-all ${formData.termDays === d
+                                                                    ? 'bg-blue-600 text-white'
+                                                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                                            >
+                                                                {d}d
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs font-medium block mb-1">Vencimiento</label>
+                                                    <input
+                                                        type="date"
+                                                        value={formData.dueDate}
+                                                        onChange={(e) => {
+                                                            setUserOverrodeDueDate(true)
+                                                            handleChange('dueDate', e.target.value)
+                                                        }}
+                                                        className="w-full text-sm border-slate-300 rounded-md px-2 py-1.5 bg-white border"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {formData.paymentCondition === 'DOCUMENTADO' && (
+                                            <div className="space-y-3">
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="text-xs font-medium block mb-1">Tipo de Documento</label>
+                                                        <select
+                                                            value={formData.instrumentType}
+                                                            onChange={(e) => handleChange('instrumentType', e.target.value)}
+                                                            className="w-full text-sm border-slate-300 rounded-md px-2 py-2 bg-white border"
+                                                        >
+                                                            <option value="">Seleccionar...</option>
+                                                            <option value="PAGARE">Pagaré</option>
+                                                            <option value="ECHEQ">Echeq</option>
+                                                            <option value="CHEQUE">Cheque</option>
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs font-medium block mb-1">Número</label>
+                                                        <input
+                                                            type="text"
+                                                            value={formData.instrumentNumber}
+                                                            onChange={(e) => handleChange('instrumentNumber', e.target.value)}
+                                                            placeholder="Nro. documento"
+                                                            className="w-full text-sm border-slate-300 rounded-md px-2 py-2 bg-white border"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="text-xs font-medium block mb-1">Vencimiento</label>
+                                                        <input
+                                                            type="date"
+                                                            value={formData.dueDate}
+                                                            onChange={(e) => handleChange('dueDate', e.target.value)}
+                                                            className="w-full text-sm border-slate-300 rounded-md px-2 py-2 bg-white border"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs font-medium block mb-1">Banco (opcional)</label>
+                                                        <input
+                                                            type="text"
+                                                            value={formData.instrumentBank}
+                                                            onChange={(e) => handleChange('instrumentBank', e.target.value)}
+                                                            placeholder="Banco emisor"
+                                                            className="w-full text-sm border-slate-300 rounded-md px-2 py-2 bg-white border"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </section>
+                                )}
 
                                 <div className="h-10"></div>
                             </form>

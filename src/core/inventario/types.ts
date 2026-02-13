@@ -312,7 +312,7 @@ export type CostingMethod = 'FIFO' | 'LIFO' | 'PPP'
 /**
  * Movement type for bienes de cambio (extended)
  */
-export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT' | 'VALUE_ADJUSTMENT' | 'INITIAL_STOCK' | 'PAYMENT'
+export type BienesMovementType = 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'COUNT' | 'VALUE_ADJUSTMENT' | 'INITIAL_STOCK' | 'PAYMENT' | 'RECLASS'
 
 /**
  * Payment direction for PAYMENT movements (cobro/pago posteriores)
@@ -483,6 +483,13 @@ export interface BienesMovement {
     }[]
     notes?: string
     reference?: string             // Invoice number, receipt, etc.
+    // Payment condition & maturity (Proveedores/Acreedores)
+    paymentCondition?: 'CONTADO' | 'CTA_CTE' | 'DOCUMENTADO'
+    termDays?: number              // Days until maturity (e.g., 30, 60, 90)
+    dueDate?: string               // ISO date (YYYY-MM-DD) — calculated or manual
+    instrumentType?: 'PAGARE' | 'ECHEQ' | 'CHEQUE'
+    instrumentNumber?: string      // Document/instrument number
+    instrumentBank?: string        // Bank name (for checks)
     // For Etapa 2: Journal integration
     autoJournal: boolean           // Flag: should generate journal entry
     linkedJournalEntryIds: string[] // References to generated entries (Etapa 2)

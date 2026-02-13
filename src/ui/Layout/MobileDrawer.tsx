@@ -10,6 +10,8 @@ import {
     ChartLineUp,
     Table,
     Package,
+    Truck,
+    ShoppingCart,
     Robot,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
@@ -29,6 +31,8 @@ const navItems: NavItem[] = [
         icon: RocketLaunch,
         children: [
             { path: '/operaciones/inventario', label: 'Inventario', icon: Package },
+            { path: '/operaciones/proveedores', label: 'Proveedores', icon: Truck },
+            { path: '/operaciones/clientes', label: 'Clientes', icon: ShoppingCart },
         ],
     },
     { path: '/cuentas', label: 'Plan de Cuentas', icon: TreeStructure },

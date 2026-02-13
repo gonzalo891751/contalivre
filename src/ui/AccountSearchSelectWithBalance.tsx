@@ -120,6 +120,7 @@ export function usePendingDocuments(
         taxes?: { kind: string; taxType: string; amount: number }[]
         isDevolucion?: boolean
         paymentDirection?: string
+        sourceMovementId?: string
     }[] | undefined,
     payments: {
         id: string
@@ -127,6 +128,7 @@ export function usePendingDocuments(
         paymentDirection?: string
         total: number
         notes?: string
+        sourceMovementId?: string
     }[] | undefined,
     direction: 'COBRO' | 'PAGO'
 ): PendingDocument[] {
@@ -142,29 +144,37 @@ export function usePendingDocuments(
             m.total > 0
         )
 
-        // Calculate payments received/made for each document
-        // For now, simplified: sum all PAYMENT movements for the direction
+        // Calculate payments by formal link (sourceMovementId) — primary path
+        const paymentsBySourceId = new Map<string, number>()
+        // Legacy fallback: payments matched by notes/reference (for backward compat)
         const paymentsByRef = new Map<string, number>()
+
         if (payments) {
             payments
                 .filter(p => p.type === 'PAYMENT' && p.paymentDirection === direction)
                 .forEach(p => {
-                    // Try to match by reference in notes
-                    const ref = p.notes || ''
-                    const current = paymentsByRef.get(ref) || 0
-                    paymentsByRef.set(ref, current + p.total)
+                    if (p.sourceMovementId) {
+                        // Formal link: payment explicitly references the purchase/sale
+                        const current = paymentsBySourceId.get(p.sourceMovementId) || 0
+                        paymentsBySourceId.set(p.sourceMovementId, current + p.total)
+                    } else if (p.notes) {
+                        // Legacy fallback: match by notes
+                        const current = paymentsByRef.get(p.notes) || 0
+                        paymentsByRef.set(p.notes, current + p.total)
+                    }
                 })
         }
 
         // Build pending documents list
         const pending: PendingDocument[] = []
         for (const doc of originalDocs) {
-            // Simple heuristic: check if there's a payment that cancels this doc
-            // In a full implementation, we'd have explicit linking
-            const paid = paymentsByRef.get(doc.reference || doc.id) || 0
-            const saldoPendiente = doc.total - paid
+            // Primary: sum payments linked by sourceMovementId
+            const paidByLink = paymentsBySourceId.get(doc.id) || 0
+            // Legacy fallback: sum payments matched by reference
+            const paidByRef = paymentsByRef.get(doc.reference || doc.id) || 0
+            const saldoPendiente = doc.total - paidByLink - paidByRef
 
-            if (saldoPendiente <= 0) continue
+            if (saldoPendiente <= 0.01) continue // fully paid (epsilon for FP)
 
             pending.push({
                 id: doc.id,
