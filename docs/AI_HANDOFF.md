@@ -2,6 +2,64 @@
 
 ---
 
+## CHECKPOINT #INVENTARIO-BIENES-FIXES
+**Fecha:** 2026-02-14
+**Estado:** COMPLETADO - 4 issues corregidos (onboarding wizard, stock display, CTA button, back arrow)
+
+### Objetivo
+Corregir 4 issues del modulo Bienes de Cambio (Mercaderias): onboarding obligatorio, bug de stock en Productos, boton CTA invisible en Cierre, y falta de flecha volver a Operaciones.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/core/inventario/types.ts` | Agrega `configCompleted?: boolean` a `BienesSettings`. Cambia `DEFAULT_ACCOUNT_CODES.aperturaInventario` de `3.2.01` a `3.1.01` (Capital Social). |
+| `src/core/inventario/costing.ts` | **ISSUE 2 FIX**: Agrega handling de `INITIAL_STOCK` en `calculateProductValuation` stock loop. |
+| `src/storage/bienes.ts` | Corrige `ACCOUNT_FALLBACKS.aperturaInventario` para priorizar Capital Social (`3.1.01`) sobre Reserva Legal (`3.2.01`). |
+| `src/pages/Planillas/InventarioBienesPage.tsx` | **ISSUE 4 FIX**: Back arrow `ArrowLeft → Operaciones`. **ISSUE 1**: Import wizard, auto-open on first visit, config banner, guard product/movement creation. Corrige regla de sugerencia `aperturaInventario`. |
+| `src/pages/Planillas/components/CierreInventarioTab.tsx` | **ISSUE 3 FIX**: Reemplaza `bg-brand-gradient` con `bg-gradient-to-r from-blue-600 to-emerald-500` y fix estado disabled. |
+| `src/pages/Planillas/components/InventarioOnboardingWizard.tsx` | **NUEVO** - Wizard de 3 pasos: modo contable, metodo valuacion, mapeo cuentas con auto-configurar. |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+
+**ISSUE 1 - Onboarding Wizard**
+- Nuevo componente `InventarioOnboardingWizard.tsx` con 3 pasos:
+  - Paso 1: Elegir modo contable (Permanente vs Diferencias) con explicacion
+  - Paso 2: Elegir metodo de valuacion (PPP/FIFO/LIFO) con explicacion
+  - Paso 3: Mapear cuentas contables, con boton "Auto-configurar" que busca cuentas por codigo y nombre
+- Se abre automaticamente si `settings.configCompleted !== true`
+- Banner de advertencia visible cuando falta configurar
+- Botones de "Nuevo Producto", "Nuevo Movimiento" y "Crear primer producto" abren el wizard si no esta configurado
+- Cuentas mostradas filtradas por modo (Permanente = menos cuentas, Diferencias = todas)
+- Correccion de sugerencia de "Apertura Inventario": ahora busca Capital Social (3.1.01) primero, luego Resultados Acumulados (3.2.01), NUNCA sugiere Reserva Legal
+
+**ISSUE 2 - Stock display 0 en Productos**
+- Causa raiz: `calculateProductValuation` (costing.ts) calcula stock empezando con `product.openingQty`, pero `createBienesProduct` guarda `openingQty: 0` cuando genera journal (para evitar doble conteo). El movimiento INITIAL_STOCK se creaba pero NO se procesaba en el loop de calculo de stock.
+- Fix: Se agrega `else if (mov.type === 'INITIAL_STOCK') { currentStock += mov.quantity }` en el loop de stock de `calculateProductValuation`.
+
+**ISSUE 3 - Boton CTA blanco en Cierre**
+- Causa raiz: `bg-brand-gradient` (Tailwind backgroundImage utility) podia no aplicarse correctamente. El estado disabled usaba `disabled:bg-none disabled:bg-slate-200` con posible conflicto de cascada.
+- Fix: Se reemplaza por logica condicional de className: enabled usa `bg-gradient-to-r from-blue-600 to-emerald-500` (como otros botones del sistema), disabled usa `bg-slate-200 border border-slate-300 text-slate-500`.
+
+**ISSUE 4 - Flecha volver a Operaciones**
+- Se agrega breadcrumb `ArrowLeft → Operaciones / Bienes de Cambio` en el header, con `useNavigate('/operaciones')`.
+- Mismo patron que MonedaExtranjeraPage.
+
+### Validacion
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/repro_eepn.test.ts)
+
+### QA Manual
+- [ ] Entrar a /operaciones/inventario en empresa nueva → wizard debe abrirse automaticamente
+- [ ] Completar wizard (modo + metodo + auto-configurar cuentas) → banner desaparece, acciones habilitadas
+- [ ] Intentar crear producto sin config → wizard se abre
+- [ ] Crear producto con existencia inicial (ej: 50u x $15000) → tab Movimientos muestra +50, tab Productos muestra Stock: 50
+- [ ] En tab Cierre, boton "Generar Asientos de Cierre" visible con gradiente azul-verde (enabled) o gris (disabled)
+- [ ] Click en "← Operaciones" en header → navega a /operaciones
+- [ ] Apertura Inventario sugiere "Capital Social" (no "Reserva Legal")
+- [ ] Re-abrir config (icono engranaje) → valores guardados persisten
+
+---
+
 ## CHECKPOINT #LIBRO-DIARIO-DISPLAY-MAPPING
 **Fecha:** 2026-02-13
 **Estado:** COMPLETADO - Libro Diario muestra cuenta control + tercero como detalle; Perfeccionar solo instrumentos

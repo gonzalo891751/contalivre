@@ -1107,6 +1107,7 @@ export default function InventarioBienesPage() {
     }
 
     const openNewMovementModal = () => {
+        if (!isConfigured) { setWizardOpen(true); return }
         setMovementPrefill(null)
         setPendingLinkEntryId(null)
         setEditingMovement(null)
@@ -2435,7 +2436,10 @@ export default function InventarioBienesPage() {
                                 <h3 className="text-lg font-semibold text-slate-900 mb-2">Sin productos todavia</h3>
                                 <p className="text-slate-500 mb-6">Comenza creando tu primer producto de inventario.</p>
                                 <button
-                                    onClick={() => setProductModalOpen(true)}
+                                    onClick={() => {
+                                        if (!isConfigured) { setWizardOpen(true); return }
+                                        setProductModalOpen(true)
+                                    }}
                                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
                                 >
                                     Crear primer producto
