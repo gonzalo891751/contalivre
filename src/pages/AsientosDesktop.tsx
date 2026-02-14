@@ -12,6 +12,7 @@ import ImportAsientosUX from '../components/ImportAsientosUX'
 import { HeroSection, JournalToolbar, EntryCard, NewEntryModal } from '../components/journal'
 import { downloadJournalPdf } from '../pdf/journalPdf'
 import AccountSearchSelect from '../ui/AccountSearchSelect'
+import { resolveAccountDisplay } from '../core/displayAccount'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Number formatting utilities for Argentine format (miles con punto)
@@ -159,10 +160,16 @@ export default function AsientosDesktop() {
         // Search in memo
         if (entry.memo.toLowerCase().includes(q)) return true
 
-        // Search in account names
+        // Search in account names (both subcuenta and resolved display name)
         const accountMatches = entry.lines.some(line => {
             const accName = getAccountName(line.accountId).toLowerCase()
-            return accName.includes(q)
+            if (accName.includes(q)) return true
+            if (accounts) {
+                const display = resolveAccountDisplay(line.accountId, accounts)
+                if (display.name.toLowerCase().includes(q)) return true
+                if (display.terceroDetail?.toLowerCase().includes(q)) return true
+            }
+            return false
         })
         if (accountMatches) return true
 

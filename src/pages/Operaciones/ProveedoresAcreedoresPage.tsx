@@ -597,6 +597,7 @@ export default function ProveedoresAcreedoresPage() {
                 accentColor="amber"
                 sourceLabel={mode === 'proveedores' ? 'Proveedores (2.1.01.01)' : 'Acreedores Varios (2.1.06.01)'}
                 destControlCodes={['2.1.01.02', '2.1.01.04', '2.1.01.05']}
+                onGoToPagos={(data) => handlePay(data.counterpartyName)}
             />
         </div>
     )

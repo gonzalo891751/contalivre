@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
     Package,
     Notebook,
+    ArrowLeft,
     ArrowsLeftRight,
     WarningCircle,
     Coins,
@@ -87,6 +88,7 @@ import { AccountAutocomplete } from './components/AccountAutocomplete'
 import ProductValuationCard from './components/ProductValuationCard'
 import ProductLotsDrawer from './components/ProductLotsDrawer'
 import CierreInventarioTab from './components/CierreInventarioTab'
+import InventarioOnboardingWizard from './components/InventarioOnboardingWizard'
 
 type TabId = 'dashboard' | 'productos' | 'movimientos' | 'conciliacion' | 'cierre'
 type ConciliationFilter = 'all' | 'compras' | 'ventas' | 'rt6'
@@ -181,8 +183,8 @@ const BIENES_ACCOUNT_RULES: InventoryAccountRule[] = [
         key: 'aperturaInventario',
         label: 'Apertura Inventario',
         category: 'mercaderias',
-        codes: [DEFAULT_ACCOUNT_CODES.aperturaInventario, '3.2.01'],
-        nameAny: ['apertura', 'resultados acumulados'],
+        codes: ['3.1.01', DEFAULT_ACCOUNT_CODES.aperturaInventario, '3.2.01'],
+        nameAny: ['capital social', 'capital suscripto', 'resultados acumulados', 'resultados no asignados', 'apertura'],
         optional: true,
     },
     {
@@ -237,6 +239,7 @@ const OPTIONAL_BIENES_RULES = BIENES_ACCOUNT_RULES.filter(rule => rule.optional)
  * Follows the prototype at docs/prototypes/Inventario.html
  */
 export default function InventarioBienesPage() {
+    const navigate = useNavigate()
     // Deep-link: read prefill from location state (e.g., from Proveedores page)
     const location = useLocation()
     const locationState = location.state as {
@@ -327,6 +330,10 @@ export default function InventarioBienesPage() {
         try { localStorage.setItem('inventario.dashboard.rangeMode', mode) } catch { /* ignore */ }
     }, [])
 
+    // Onboarding wizard
+    const [wizardOpen, setWizardOpen] = useState(false)
+    const isConfigured = settings?.configCompleted === true
+
     // Configuracion de cuentas Bienes de Cambio (conciliacion)
     const [accountMappingsDraft, setAccountMappingsDraft] = useState<Partial<Record<AccountMappingKey, string>>>({})
     const [accountMappingsSaving, setAccountMappingsSaving] = useState(false)
@@ -366,6 +373,27 @@ export default function InventarioBienesPage() {
     useEffect(() => {
         loadData()
     }, [loadData])
+
+    // Auto-open onboarding wizard when config is missing
+    useEffect(() => {
+        if (settings && !settings.configCompleted && !isLoading) {
+            setWizardOpen(true)
+        }
+    }, [settings, isLoading])
+
+    const handleOnboardingComplete = async (patch: Partial<BienesSettings>) => {
+        if (!settings) return
+        const updated: BienesSettings = {
+            ...settings,
+            ...patch,
+            lastUpdated: new Date().toISOString(),
+        }
+        await saveBienesSettings(updated)
+        setSettings(updated)
+        setAccountMappingsDraft(updated.accountMappings || {})
+        setWizardOpen(false)
+        showToast('Inventario configurado correctamente', 'success')
+    }
 
     // Deep-link: open modal with prefill from Proveedores/Acreedores page
     useEffect(() => {
@@ -1079,6 +1107,7 @@ export default function InventarioBienesPage() {
     }
 
     const openNewMovementModal = () => {
+        if (!isConfigured) { setWizardOpen(true); return }
         setMovementPrefill(null)
         setPendingLinkEntryId(null)
         setEditingMovement(null)
@@ -2098,6 +2127,14 @@ export default function InventarioBienesPage() {
             {/* Header */}
             <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shadow-sm shrink-0">
                 <div className="flex items-center gap-4">
+                    <button
+                        type="button"
+                        className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors"
+                        onClick={() => navigate('/operaciones')}
+                    >
+                        <ArrowLeft size={14} /> Operaciones
+                    </button>
+                    <span className="text-slate-300">/</span>
                     <h2 className="text-lg font-display font-semibold text-slate-900">
                         Bienes de Cambio (Mercaderias)
                     </h2>
@@ -2193,6 +2230,29 @@ export default function InventarioBienesPage() {
 
             {/* Content Area */}
             <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
+                {/* Configuration Banner */}
+                {!isConfigured && !isLoading && (
+                    <div className="mb-4 p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <WarningCircle size={20} weight="fill" className="text-amber-500 shrink-0" />
+                            <div>
+                                <div className="text-sm font-semibold text-amber-800">
+                                    Configuracion pendiente
+                                </div>
+                                <p className="text-xs text-amber-600">
+                                    Configura el modo contable, metodo de valuacion y cuentas antes de operar.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setWizardOpen(true)}
+                            className="px-4 py-2 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 transition-colors whitespace-nowrap"
+                        >
+                            Configurar ahora
+                        </button>
+                    </div>
+                )}
                 {/* DASHBOARD TAB */}
                 {activeTab === 'dashboard' && (
                     <div className="space-y-6 animate-fade-in">
@@ -2376,7 +2436,10 @@ export default function InventarioBienesPage() {
                                 <h3 className="text-lg font-semibold text-slate-900 mb-2">Sin productos todavia</h3>
                                 <p className="text-slate-500 mb-6">Comenza creando tu primer producto de inventario.</p>
                                 <button
-                                    onClick={() => setProductModalOpen(true)}
+                                    onClick={() => {
+                                        if (!isConfigured) { setWizardOpen(true); return }
+                                        setProductModalOpen(true)
+                                    }}
                                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
                                 >
                                     Crear primer producto
@@ -2405,6 +2468,7 @@ export default function InventarioBienesPage() {
                             </div>
                             <button
                                 onClick={() => {
+                                    if (!isConfigured) { setWizardOpen(true); return }
                                     setEditingProduct(null)
                                     setProductModalOpen(true)
                                 }}
@@ -2493,7 +2557,10 @@ export default function InventarioBienesPage() {
                                 </p>
                                 {!productSearch && (
                                     <button
-                                        onClick={() => setProductModalOpen(true)}
+                                        onClick={() => {
+                                            if (!isConfigured) { setWizardOpen(true); return }
+                                            setProductModalOpen(true)
+                                        }}
                                         className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
                                     >
                                         Crear producto
@@ -4233,6 +4300,16 @@ export default function InventarioBienesPage() {
                     animation: slide-in-right 0.3s ease-out;
                 }
             `}</style>
+
+            {/* Onboarding Wizard */}
+            {wizardOpen && settings && accounts && (
+                <InventarioOnboardingWizard
+                    settings={settings}
+                    accounts={accounts}
+                    onComplete={handleOnboardingComplete}
+                    onCancel={isConfigured ? () => setWizardOpen(false) : undefined}
+                />
+            )}
         </div>
     )
 }

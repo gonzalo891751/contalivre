@@ -1,4 +1,5 @@
 import { JournalEntry, Account } from '../core/models'
+import { resolveAccountDisplay } from '../core/displayAccount'
 
 interface PdfMeta {
     entityName?: string
@@ -183,9 +184,13 @@ export const downloadJournalPdf = async (
         // Prepare Table Body
         // Use 'any' type to bypass strict autoTable RowInput check for objects
         const tableBody: any[] = entry.lines.map(line => {
-            const accName = accounts.find(a => a.id === line.accountId)?.name || 'Cuenta desconocida'
+            const display = resolveAccountDisplay(line.accountId, accounts)
+            const primaryName = display.name
+            const detail = display.terceroDetail
+                ? display.terceroDetail
+                : line.description || null
             return [
-                line.description ? `${accName}\n   → ${line.description}` : accName,
+                detail ? `${primaryName}\n   → ${detail}` : primaryName,
                 line.debit > 0 ? formatNumber(line.debit) : '',
                 line.credit > 0 ? formatNumber(line.credit) : ''
             ]

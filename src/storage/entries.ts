@@ -63,10 +63,30 @@ export async function updateEntry(
 }
 
 /**
- * Elimina un asiento
+ * Elimina un asiento.
+ * Si el asiento fue generado por un módulo (sourceModule='fx'),
+ * se desvincula del movimiento origen para mantener consistencia bidireccional.
  */
 export async function deleteEntry(id: string): Promise<void> {
+    const entry = await db.entries.get(id)
     await db.entries.delete(id)
+
+    if (entry?.sourceModule === 'fx' && entry.sourceId) {
+        try {
+            const movement = await db.fxMovements.get(entry.sourceId)
+            if (movement) {
+                const remaining = (movement.linkedJournalEntryIds || []).filter(eid => eid !== id)
+                await db.fxMovements.update(movement.id, {
+                    linkedJournalEntryIds: remaining,
+                    journalStatus: remaining.length === 0 ? 'missing' : movement.journalStatus,
+                    journalMissingReason: remaining.length === 0 ? 'entry_deleted' : undefined,
+                    updatedAt: new Date().toISOString(),
+                })
+            }
+        } catch {
+            // Non-critical: if fx cleanup fails, the reconciliation tab will catch it
+        }
+    }
 }
 
 /**

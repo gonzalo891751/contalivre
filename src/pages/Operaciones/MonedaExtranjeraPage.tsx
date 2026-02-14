@@ -19,7 +19,6 @@ import {
     MagicWand,
     PencilSimple,
     Plus,
-    TrendDown,
     TrendUp,
     X,
 } from '@phosphor-icons/react'
@@ -27,8 +26,6 @@ import {
 import { usePeriodYear } from '../../hooks/usePeriodYear'
 import { db } from '../../storage/db'
 import {
-    addFxDebtDisbursement,
-    addFxDebtPayment,
     calculateFxAccountBalance,
     createEntry,
     createFxAccount,
@@ -86,7 +83,7 @@ import {
 // Types & helpers
 // ========================================
 
-type TabId = 'dashboard' | 'activos' | 'pasivos' | 'movimientos' | 'conciliacion'
+type TabId = 'dashboard' | 'activos' | 'movimientos' | 'conciliacion'
 
 type JournalMode = 'auto' | 'manual' | 'none'
 
@@ -100,7 +97,6 @@ interface ManualEntryLine {
 const TABS: { id: TabId; label: string }[] = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'activos', label: 'Activos' },
-    { id: 'pasivos', label: 'Pasivos' },
     { id: 'movimientos', label: 'Movimientos' },
     { id: 'conciliacion', label: 'Conciliación' },
 ]
@@ -701,7 +697,7 @@ function FxAssetAccountModalME2({
     )
 }
 
-function FxDebtCreateModalME2({
+export function FxDebtCreateModalME2({
     open,
     onClose,
     periodId,
@@ -1061,7 +1057,7 @@ function FxDebtCreateModalME2({
     )
 }
 
-function FxDebtPlanModalME2({
+export function FxDebtPlanModalME2({
     open,
     onClose,
     debt,
@@ -1149,7 +1145,6 @@ function FxOperationModalME2({
     settings,
     rates,
     fxAccounts,
-    fxDebts,
     ledgerAccounts,
     onSuccess,
 }: {
@@ -1159,11 +1154,10 @@ function FxOperationModalME2({
     settings: FxSettings | null
     rates: ExchangeRate[]
     fxAccounts: FxAccount[]
-    fxDebts: FxDebt[]
     ledgerAccounts: Account[]
     onSuccess: (message: string) => void
 }) {
-    const [activeTab, setActiveTab] = useState<'compra' | 'venta' | 'pago' | 'refi'>('compra')
+    const [activeTab, setActiveTab] = useState<'compra' | 'venta'>('compra')
     const [journalMode, setJournalMode] = useState<JournalMode>('auto')
     const [manualLines, setManualLines] = useState<ManualEntryLine[]>([])
     const [preview, setPreview] = useState<FxJournalPreview | null>(null)
@@ -1171,7 +1165,6 @@ function FxOperationModalME2({
 
     const assetAccounts = useMemo(() => fxAccounts.filter(acc => acc.type === 'ASSET'), [fxAccounts])
     const assetOptions = useMemo(() => assetAccounts.map(acc => ({ value: acc.id, label: acc.name, meta: acc.currency })), [assetAccounts])
-    const debtOptions = useMemo(() => fxDebts.map(debt => ({ value: debt.id, label: debt.name, meta: debt.currency })), [fxDebts])
 
     const postableAccounts = useMemo(() => ledgerAccounts.filter(acc => !acc.isHeader), [ledgerAccounts])
     const ledgerOptions = useMemo(
@@ -1207,35 +1200,12 @@ function FxOperationModalME2({
         reference: '',
     })
 
-    const [pago, setPago] = useState({
-        debtId: '',
-        date: formatDateInput(),
-        capitalME: 0,
-        rate: 0,
-        interestARS: 0,
-        contrapartidaAccountId: '',
-        comisionARS: 0,
-        comisionAccountId: '',
-        source: 'ARS' as 'ARS' | 'ME',
-        sourceFxAccountId: '',
-    })
-
-    const [refi, setRefi] = useState({
-        debtId: '',
-        date: formatDateInput(),
-        amount: 0,
-        rate: 0,
-        targetAccountId: '',
-    })
-
     useEffect(() => {
         if (!open) return
         const oficial = getQuote(rates, 'Oficial')
         const defaultRate = oficial?.venta || 0
         setCompra(prev => ({ ...prev, rate: defaultRate }))
         setVenta(prev => ({ ...prev, rate: oficial?.compra || 0 }))
-        setPago(prev => ({ ...prev, rate: defaultRate }))
-        setRefi(prev => ({ ...prev, rate: defaultRate }))
         setJournalMode('auto')
         setManualLines([])
     }, [open, rates])
@@ -1287,52 +1257,6 @@ function FxOperationModalME2({
             }
         }
 
-        if (activeTab === 'pago' && pago.debtId) {
-            const debt = fxDebts.find(item => item.id === pago.debtId)
-            if (!debt) return null
-            return {
-                date: pago.date,
-                type: 'PAGO_DEUDA',
-                accountId: debt.accountId,
-                periodId,
-                amount: pago.capitalME,
-                currency: debt.currency,
-                rate: pago.rate,
-                rateType: debt.rateType || 'custom',
-                rateSide: debt.rateSide,
-                rateSource: 'Manual',
-                arsAmount: pago.capitalME * pago.rate,
-                autoJournal: journalMode !== 'none',
-                debtId: debt.id,
-                capitalAmount: pago.capitalME,
-                interestARS: pago.interestARS,
-                contrapartidaAccountId: pago.contrapartidaAccountId,
-                comisionARS: pago.comisionARS,
-                comisionAccountId: pago.comisionAccountId,
-            }
-        }
-
-        if (activeTab === 'refi' && refi.debtId) {
-            const debt = fxDebts.find(item => item.id === refi.debtId)
-            if (!debt) return null
-            return {
-                date: refi.date,
-                type: 'DESEMBOLSO_DEUDA',
-                accountId: debt.accountId,
-                targetAccountId: refi.targetAccountId,
-                periodId,
-                amount: refi.amount,
-                currency: debt.currency,
-                rate: refi.rate,
-                rateType: debt.rateType || 'custom',
-                rateSide: debt.rateSide,
-                rateSource: 'Manual',
-                arsAmount: refi.amount * refi.rate,
-                autoJournal: journalMode !== 'none',
-                debtId: debt.id,
-            }
-        }
-
         return null
     }
 
@@ -1358,7 +1282,7 @@ function FxOperationModalME2({
             }
         }
         run()
-    }, [activeTab, compra, fxDebts, journalMode, open, pago, refi, venta])
+    }, [activeTab, compra, journalMode, open, venta])
 
     const manualTotals = useMemo(() => {
         const debit = manualLines.reduce((sum, line) => sum + (line.debit || 0), 0)
@@ -1480,105 +1404,6 @@ function FxOperationModalME2({
                 return
             }
 
-            if (activeTab === 'pago') {
-                if (!pago.debtId || pago.capitalME <= 0 || pago.rate <= 0) {
-                    onSuccess('Completa deuda, monto y TC')
-                    return
-                }
-                if (journalMode !== 'none' && !pago.contrapartidaAccountId) {
-                    onSuccess('Selecciona contrapartida')
-                    return
-                }
-
-                const debt = fxDebts.find(item => item.id === pago.debtId)
-                if (!debt) {
-                    onSuccess('Deuda no encontrada')
-                    return
-                }
-
-                const result = await addFxDebtPayment({
-                    debtId: debt.id,
-                    capitalME: pago.capitalME,
-                    interestARS: pago.interestARS,
-                    rate: pago.rate,
-                    date: pago.date,
-                    contrapartidaAccountId: pago.contrapartidaAccountId,
-                    comisionARS: pago.comisionARS,
-                    comisionAccountId: pago.comisionAccountId,
-                    autoJournal: journalMode === 'auto',
-                })
-
-                if (pago.source === 'ME' && pago.sourceFxAccountId) {
-                    await createFxMovement({
-                        date: pago.date,
-                        type: 'EGRESO',
-                        accountId: pago.sourceFxAccountId,
-                        periodId,
-                        amount: pago.capitalME,
-                        currency: debt.currency,
-                        rate: pago.rate,
-                        rateType: debt.rateType || 'custom',
-                        rateSide: debt.rateSide,
-                        rateSource: 'Manual',
-                        arsAmount: pago.capitalME * pago.rate,
-                        autoJournal: false,
-                    })
-                }
-
-                if (journalMode === 'manual') {
-                    if (!manualTotals.balanced) {
-                        onSuccess('El asiento manual no balancea')
-                        return
-                    }
-                    const entry = await createEntry({
-                        date: pago.date,
-                        memo: `Pago deuda ${debt.name}`,
-                        lines: manualLines.map(line => ({
-                            accountId: line.accountId,
-                            debit: line.debit,
-                            credit: line.credit,
-                            description: line.description,
-                        })),
-                        createdAt: new Date().toISOString(),
-                    })
-                    await linkFxMovementToEntries(result.movement.id, [entry.id])
-                    await db.fxMovements.update(result.movement.id, { journalStatus: 'desync', autoJournal: true })
-                }
-
-                onSuccess('Pago registrado')
-                onClose()
-                return
-            }
-
-            if (activeTab === 'refi') {
-                if (!refi.debtId || refi.amount <= 0 || refi.rate <= 0 || !refi.targetAccountId) {
-                    onSuccess('Completa deuda, monto, TC y destino')
-                    return
-                }
-
-                const debt = fxDebts.find(item => item.id === refi.debtId)
-                if (!debt) {
-                    onSuccess('Deuda no encontrada')
-                    return
-                }
-
-                await addFxDebtDisbursement({
-                    debtId: debt.id,
-                    amount: refi.amount,
-                    rate: refi.rate,
-                    date: refi.date,
-                    targetAccountId: refi.targetAccountId,
-                    autoJournal: journalMode === 'auto',
-                })
-
-                if (journalMode === 'manual') {
-                    onSuccess('Refinanciación registrada. Ajusta el asiento en conciliación si es necesario.')
-                } else {
-                    onSuccess('Refinanciación registrada')
-                }
-
-                onClose()
-            }
         } catch (error) {
             console.error(error)
             onSuccess(error instanceof Error ? error.message : 'Error al Registrar Operación')
@@ -1607,8 +1432,6 @@ function FxOperationModalME2({
                     {[
                         { id: 'compra', label: 'Compra (Activo)' },
                         { id: 'venta', label: 'Venta (Activo)' },
-                        { id: 'pago', label: 'Pago Deuda' },
-                        { id: 'refi', label: 'Refinanciación' },
                     ].map(tab => (
                         <button
                             key={tab.id}
@@ -1732,116 +1555,6 @@ function FxOperationModalME2({
                                     options={ledgerOptions}
                                     placeholder="Cuenta gasto"
                                     onChange={value => setVenta(prev => ({ ...prev, comisionAccountId: value }))}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === 'pago' && (
-                    <div className="space-y-4">
-                        <div>
-                            <label className="text-xs font-semibold text-slate-500">Pasivo a pagar</label>
-                            <SearchableSelect
-                                value={pago.debtId}
-                                options={debtOptions}
-                                placeholder="Selecciona deuda"
-                                onChange={value => setPago(prev => ({ ...prev, debtId: value }))}
-                            />
-                        </div>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">Monto capital (ME)</label>
-                                <FxInput type="number" step="0.01" value={pago.capitalME} onChange={event => setPago(prev => ({ ...prev, capitalME: Number(event.target.value) || 0 }))} />
-                            </div>
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">TC pago</label>
-                                <FxInput type="number" step="0.01" value={pago.rate} onChange={event => setPago(prev => ({ ...prev, rate: Number(event.target.value) || 0 }))} />
-                            </div>
-                        </div>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">Interes ARS</label>
-                                <FxInput type="number" step="0.01" value={pago.interestARS} onChange={event => setPago(prev => ({ ...prev, interestARS: Number(event.target.value) || 0 }))} />
-                            </div>
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">Fecha pago</label>
-                                <FxInput type="date" value={pago.date} onChange={event => setPago(prev => ({ ...prev, date: event.target.value }))} />
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-xs font-semibold text-slate-500">Origen del pago</label>
-                            <FxSelect value={pago.source} onChange={event => setPago(prev => ({ ...prev, source: event.target.value as 'ARS' | 'ME' }))}>
-                                <option value="ARS">Desde ARS</option>
-                                <option value="ME">Desde Activo ME</option>
-                            </FxSelect>
-                        </div>
-                        {pago.source === 'ME' ? (
-                            <SearchableSelect
-                                value={pago.sourceFxAccountId}
-                                options={assetOptions}
-                                placeholder="Selecciona cartera ME"
-                                onChange={value => setPago(prev => ({ ...prev, sourceFxAccountId: value, contrapartidaAccountId: fxAccounts.find(a => a.id === value)?.accountId || prev.contrapartidaAccountId }))}
-                            />
-                        ) : (
-                            <SearchableSelect
-                                value={pago.contrapartidaAccountId}
-                                options={ledgerOptions}
-                                placeholder="Cuenta ARS"
-                                onChange={value => setPago(prev => ({ ...prev, contrapartidaAccountId: value }))}
-                            />
-                        )}
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">Comisiones ARS</label>
-                                <FxInput type="number" step="0.01" value={pago.comisionARS} onChange={event => setPago(prev => ({ ...prev, comisionARS: Number(event.target.value) || 0 }))} />
-                            </div>
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">Cuenta comision</label>
-                                <SearchableSelect
-                                    value={pago.comisionAccountId}
-                                    options={ledgerOptions}
-                                    placeholder="Cuenta gasto"
-                                    onChange={value => setPago(prev => ({ ...prev, comisionAccountId: value }))}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === 'refi' && (
-                    <div className="space-y-4">
-                        <div>
-                            <label className="text-xs font-semibold text-slate-500">Pasivo</label>
-                            <SearchableSelect
-                                value={refi.debtId}
-                                options={debtOptions}
-                                placeholder="Selecciona deuda"
-                                onChange={value => setRefi(prev => ({ ...prev, debtId: value }))}
-                            />
-                        </div>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">Monto adicional (ME)</label>
-                                <FxInput type="number" step="0.01" value={refi.amount} onChange={event => setRefi(prev => ({ ...prev, amount: Number(event.target.value) || 0 }))} />
-                            </div>
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">TC historico</label>
-                                <FxInput type="number" step="0.01" value={refi.rate} onChange={event => setRefi(prev => ({ ...prev, rate: Number(event.target.value) || 0 }))} />
-                            </div>
-                        </div>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">Fecha</label>
-                                <FxInput type="date" value={refi.date} onChange={event => setRefi(prev => ({ ...prev, date: event.target.value }))} />
-                            </div>
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500">Destino fondos (Activo ME)</label>
-                                <SearchableSelect
-                                    value={refi.targetAccountId}
-                                    options={assetOptions}
-                                    placeholder="Selecciona cartera"
-                                    onChange={value => setRefi(prev => ({ ...prev, targetAccountId: value }))}
                                 />
                             </div>
                         </div>
@@ -1986,10 +1699,7 @@ export default function MonedaExtranjeraPage() {
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
     const [assetModalOpen, setAssetModalOpen] = useState(false)
-    const [debtModalOpen, setDebtModalOpen] = useState(false)
     const [operationModalOpen, setOperationModalOpen] = useState(false)
-    const [planModalOpen, setPlanModalOpen] = useState(false)
-    const [selectedDebt, setSelectedDebt] = useState<FxDebt | null>(null)
 
     const [linkModalOpen, setLinkModalOpen] = useState(false)
     const [linkTargetMovement, setLinkTargetMovement] = useState<FxMovement | null>(null)
@@ -2303,13 +2013,6 @@ export default function MonedaExtranjeraPage() {
                             <div className="text-xs text-slate-400">Origen: {formatCurrencyME(kpis.totalAssetsUSD, 'USD')}</div>
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
-                            <div className="flex items-center justify-between text-sm text-slate-500">
-                                Pasivos ME (Valuado) <TrendDown size={16} className="text-rose-500" />
-                            </div>
-                            <div className="font-display text-2xl font-bold text-slate-600">{formatCurrencyARS(kpis.totalLiabilitiesArs)}</div>
-                            <div className="text-xs text-slate-400">Origen: {formatCurrencyME(kpis.totalLiabilitiesUSD, 'USD')}</div>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
                             <div className="text-sm text-slate-500">Posición Neta</div>
                             <div className="font-display text-2xl font-bold text-blue-600">{formatCurrencyARS(kpis.netPositionArs)}</div>
                             <div className="text-xs text-slate-400">{formatCurrencyME(kpis.netPositionUSD, 'USD')}</div>
@@ -2336,9 +2039,6 @@ export default function MonedaExtranjeraPage() {
                                 </FxButton>
                                 <FxButton variant="secondary" onClick={() => { setActiveTab('activos'); setAssetModalOpen(true) }}>
                                     <Plus size={16} /> Nuevo activo ME
-                                </FxButton>
-                                <FxButton variant="secondary" onClick={() => { setActiveTab('pasivos'); setDebtModalOpen(true) }}>
-                                    <Plus size={16} /> Nueva deuda ME
                                 </FxButton>
                                 <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
                                     <Info size={14} className="inline-block mr-2" /> Todo movimiento ME genera un asiento en ARS.
@@ -2402,73 +2102,6 @@ export default function MonedaExtranjeraPage() {
                                         <tr>
                                             <td colSpan={9} className="px-4 py-6 text-center text-sm text-slate-500">
                                                 No hay activos ME registrados.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {activeTab === 'pasivos' && (
-                <div className="animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
-                    <div className="flex items-center justify-between">
-                        <h2 className="font-display text-xl font-semibold text-slate-900">Pasivos en M.E.</h2>
-                        <FxButton onClick={() => setDebtModalOpen(true)}>
-                            <Plus size={16} /> Nueva deuda
-                        </FxButton>
-                    </div>
-                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full text-sm">
-                                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left">Tipo</th>
-                                        <th className="px-4 py-3 text-left">Acreedor</th>
-                                        <th className="px-4 py-3 text-left">Deuda / Nombre</th>
-                                        <th className="px-4 py-3 text-left">Moneda</th>
-                                        <th className="px-4 py-3 text-right">Saldo ME</th>
-                                        <th className="px-4 py-3 text-right">TC Hist.</th>
-                                        <th className="px-4 py-3 text-right">Val. ARS Hist.</th>
-                                        <th className="px-4 py-3 text-right">TC Actual</th>
-                                        <th className="px-4 py-3 text-right">Val. ARS Actual</th>
-                                        <th className="px-4 py-3 text-right">Prox. Venc.</th>
-                                        <th className="px-4 py-3 text-right">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {debtSummaries.map(item => (
-                                        <tr key={item.debt.id} className="border-t border-slate-200">
-                                            <td className="px-4 py-3">{LIABILITY_SUBTYPE_LABELS[item.debt.accountId ? (accountMap.get(item.debt.accountId)?.subtype as FxLiabilitySubtype) : 'PRESTAMO']}</td>
-                                            <td className="px-4 py-3">{item.debt.creditor}</td>
-                                            <td className="px-4 py-3 text-slate-500">{item.debt.name}</td>
-                                            <td className="px-4 py-3"><FxBadge>{item.debt.currency}</FxBadge></td>
-                                            <td className="px-4 py-3 text-right font-mono">{formatRate(item.debt.saldoME)}</td>
-                                            <td className="px-4 py-3 text-right font-mono">{formatRate(item.rateHistorical)}</td>
-                                            <td className="px-4 py-3 text-right font-mono text-slate-400">{formatCurrencyARS(item.arsHistorical)}</td>
-                                            <td className="px-4 py-3 text-right font-mono">{formatRate(item.rateCurrent)}</td>
-                                            <td className="px-4 py-3 text-right font-mono font-semibold">{formatCurrencyARS(item.arsCurrent)}</td>
-                                            <td className="px-4 py-3 text-right">{formatDateShort(item.nextDue)}</td>
-                                            <td className="px-4 py-3 text-right">
-                                                <FxButton
-                                                    variant="secondary"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        setSelectedDebt(item.debt)
-                                                        setPlanModalOpen(true)
-                                                    }}
-                                                >
-                                                    Ver plan
-                                                </FxButton>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {debtSummaries.length === 0 && (
-                                        <tr>
-                                            <td colSpan={11} className="px-4 py-6 text-center text-sm text-slate-500">
-                                                No hay deudas ME registradas.
                                             </td>
                                         </tr>
                                     )}
@@ -2651,15 +2284,6 @@ export default function MonedaExtranjeraPage() {
                 ledgerAccounts={ledgerAccounts}
                 onSuccess={message => showToast(message, 'success')}
             />
-            <FxDebtCreateModalME2
-                open={debtModalOpen}
-                onClose={() => setDebtModalOpen(false)}
-                periodId={periodId}
-                ledgerAccounts={ledgerAccounts}
-                fxAssetAccounts={assetAccounts}
-                onSuccess={message => showToast(message, 'success')}
-                onOpenAssetModal={() => setAssetModalOpen(true)}
-            />
             <FxOperationModalME2
                 open={operationModalOpen}
                 onClose={() => setOperationModalOpen(false)}
@@ -2667,14 +2291,8 @@ export default function MonedaExtranjeraPage() {
                 settings={settings}
                 rates={rates}
                 fxAccounts={fxAccounts}
-                fxDebts={fxDebts}
                 ledgerAccounts={ledgerAccounts}
                 onSuccess={message => showToast(message, 'success')}
-            />
-            <FxDebtPlanModalME2
-                open={planModalOpen}
-                onClose={() => setPlanModalOpen(false)}
-                debt={selectedDebt}
             />
             <LinkEntryModal
                 open={linkModalOpen}

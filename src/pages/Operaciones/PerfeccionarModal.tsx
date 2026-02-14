@@ -14,6 +14,8 @@ import {
     Trash,
     CheckCircle,
     WarningCircle,
+    CurrencyCircleDollar,
+    Info,
 } from '@phosphor-icons/react'
 import AccountSearchSelect from '../../ui/AccountSearchSelect'
 import type { Account } from '../../core/models'
@@ -52,6 +54,29 @@ interface PreviewLine {
 
 export type PerfeccionarSide = 'clientes' | 'proveedores' | 'acreedores'
 
+/**
+ * Whitelist de cuentas destino permitidas por lado.
+ * Perfeccionar = SOLO instrumentación (cheques/pagarés/valores/documentos).
+ * Dinero real (Caja/Bancos/QR/Transferencia/Tarjeta) va por Pagos.
+ */
+const ALLOWED_DEST_CODES: Record<PerfeccionarSide, string[]> = {
+    clientes: [
+        '1.1.02.02', // Documentos a cobrar
+        '1.1.01.04', // Valores a depositar
+        '1.1.01.05', // Valores a depositar diferidos
+    ],
+    proveedores: [
+        '2.1.01.02', // Documentos a pagar
+        '2.1.01.04', // Valores a pagar
+        '2.1.01.05', // Valores a pagar diferidos
+    ],
+    acreedores: [
+        '2.1.01.02', // Documentos a pagar
+        '2.1.01.04', // Valores a pagar
+        '2.1.01.05', // Valores a pagar diferidos
+    ],
+}
+
 interface PerfeccionarModalProps {
     open: boolean
     onClose: () => void
@@ -70,6 +95,8 @@ interface PerfeccionarModalProps {
     sourceLabel: string
     /** Control codes that need per-tercero subcuenta resolution */
     destControlCodes: string[]
+    /** Callback to redirect to Pagos (Cobrar/Pagar) flow */
+    onGoToPagos?: (data: { counterpartyName: string; suggestedAmount: number }) => void
 }
 
 export interface PerfeccionarSaveData {
@@ -117,6 +144,7 @@ export default function PerfeccionarModal({
     accentColor,
     sourceLabel,
     destControlCodes,
+    onGoToPagos,
 }: PerfeccionarModalProps) {
     // --- Form state ---
     const [date, setDate] = useState(new Date().toISOString().split('T')[0])
@@ -129,6 +157,22 @@ export default function PerfeccionarModal({
     // Override flags — don't auto-fill if user manually edited
     const [userOverrodeDate, setUserOverrodeDate] = useState(false)
     const [userOverrodeAmount, setUserOverrodeAmount] = useState(false)
+
+    // Whitelist filter: only allow instrument accounts as destinations
+    const allowedDestFilter = useMemo(() => {
+        const allowedCodes = new Set(ALLOWED_DEST_CODES[side])
+        const allowedParentIds = new Set(
+            accounts.filter(a => allowedCodes.has(a.code)).map(a => a.id)
+        )
+        return (a: Account) => {
+            if (a.isHeader) return false
+            // Direct match (the control account itself)
+            if (allowedCodes.has(a.code)) return true
+            // Child of an allowed control account (subcuenta per tercero)
+            if (a.parentId && allowedParentIds.has(a.parentId)) return true
+            return false
+        }
+    }, [accounts, side])
 
     // Reset form when modal opens
     useEffect(() => {
@@ -409,6 +453,27 @@ export default function PerfeccionarModal({
                             </div>
                         </div>
 
+                        {/* HELPER TEXT */}
+                        <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start gap-2">
+                            <Info size={16} weight="fill" className="text-blue-500 mt-0.5 shrink-0" />
+                            <p className="text-[11px] text-blue-800 leading-relaxed">
+                                <strong>Perfeccionar</strong> es para documentar (cheques, pagares, valores).
+                                Si {side === 'clientes' ? 'cobras' : 'pagas'} en Caja/Bancos/QR/Transferencia, usa{' '}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (onGoToPagos) {
+                                            onClose()
+                                            onGoToPagos({ counterpartyName: terceroName, suggestedAmount: totalSplits || initialAmount || 0 })
+                                        }
+                                    }}
+                                    className="text-blue-600 font-semibold underline hover:text-blue-800"
+                                >
+                                    Pagos ({side === 'clientes' ? 'Cobrar' : 'Pagar'})
+                                </button>.
+                            </p>
+                        </div>
+
                         {/* SPLIT ROWS */}
                         <div>
                             <div className="flex justify-between items-center mb-2">
@@ -440,6 +505,7 @@ export default function PerfeccionarModal({
                                         ringColor={ringColor}
                                         accentColor={accentColor}
                                         onAmountChange={() => setUserOverrodeAmount(true)}
+                                        accountFilter={allowedDestFilter}
                                     />
                                 ))}
                             </div>
@@ -455,6 +521,11 @@ export default function PerfeccionarModal({
                                 placeholder="Observaciones..."
                                 className={`w-full text-sm border-slate-300 rounded-lg px-3 py-2 bg-white border focus:ring-1 ${ringColor} outline-none`}
                             />
+                        </div>
+
+                        {/* NOTA CASO MIXTO */}
+                        <div className="text-[10px] text-slate-400 italic leading-relaxed">
+                            Si una parte es al contado y otra documentada: registra primero el {side === 'clientes' ? 'cobro' : 'pago'} en Pagos y despues perfecciona el saldo restante.
                         </div>
 
                         {error && (
@@ -527,21 +598,36 @@ export default function PerfeccionarModal({
                 </div>
 
                 {/* FOOTER */}
-                <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
-                    <button
-                        onClick={onClose}
-                        className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900"
-                    >
-                        Cancelar
-                    </button>
-                    <button
-                        onClick={handleSave}
-                        disabled={saving || !isBalanced}
-                        className={`px-5 py-2 text-sm font-semibold ${btnBg} text-white rounded-lg disabled:opacity-50 flex items-center gap-2 shadow-sm`}
-                    >
-                        <ArrowsLeftRight size={14} weight="bold" />
-                        {saving ? 'Guardando...' : 'Perfeccionar'}
-                    </button>
+                <div className="flex justify-between items-center px-6 py-4 border-t border-slate-200 bg-slate-50">
+                    {onGoToPagos ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                onClose()
+                                onGoToPagos({ counterpartyName: terceroName, suggestedAmount: totalSplits || initialAmount || 0 })
+                            }}
+                            className="px-4 py-2 text-sm font-semibold text-violet-600 hover:text-violet-800 hover:bg-violet-50 rounded-lg flex items-center gap-2 transition-colors"
+                        >
+                            <CurrencyCircleDollar size={16} weight="duotone" />
+                            Ir a Pagos ({side === 'clientes' ? 'Cobrar' : 'Pagar'})
+                        </button>
+                    ) : <div />}
+                    <div className="flex gap-3">
+                        <button
+                            onClick={onClose}
+                            className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            onClick={handleSave}
+                            disabled={saving || !isBalanced}
+                            className={`px-5 py-2 text-sm font-semibold ${btnBg} text-white rounded-lg disabled:opacity-50 flex items-center gap-2 shadow-sm`}
+                        >
+                            <ArrowsLeftRight size={14} weight="bold" />
+                            {saving ? 'Guardando...' : 'Perfeccionar'}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -563,6 +649,7 @@ function SplitRowEditor({
     ringColor,
     accentColor,
     onAmountChange,
+    accountFilter,
 }: {
     split: SplitRow
     index: number
@@ -574,6 +661,7 @@ function SplitRowEditor({
     ringColor: string
     accentColor: 'emerald' | 'amber'
     onAmountChange: () => void
+    accountFilter?: (account: Account) => boolean
 }) {
     const borderAccent = accentColor === 'emerald' ? 'border-l-emerald-400' : 'border-l-amber-400'
 
@@ -601,8 +689,8 @@ function SplitRowEditor({
                         accounts={accounts}
                         value={split.accountId}
                         onChange={val => onUpdate('accountId', val)}
-                        placeholder="Buscar cuenta..."
-                        filter={a => !a.isHeader}
+                        placeholder="Buscar cuenta destino..."
+                        filter={accountFilter || (a => !a.isHeader)}
                         inputClassName="h-9 text-sm"
                     />
                 </div>

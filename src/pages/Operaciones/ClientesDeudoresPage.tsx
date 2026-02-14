@@ -575,7 +575,8 @@ export default function ClientesDeudoresPage() {
                 initialAmount={perfeccionarAmount}
                 accentColor="emerald"
                 sourceLabel="Deudores por Ventas (1.1.02.01)"
-                destControlCodes={['1.1.02.02', '1.1.02.03']}
+                destControlCodes={['1.1.02.02', '1.1.01.04', '1.1.01.05']}
+                onGoToPagos={(data) => handleCobrar(data.counterpartyName)}
             />
         </div>
     )

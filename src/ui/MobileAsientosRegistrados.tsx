@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
 import type { JournalEntry, Account } from '../core/models'
 import { sumDebits, sumCredits } from '../core/validation'
+import { resolveAccountDisplay } from '../core/displayAccount'
 
 interface MobileAsientosRegistradosProps {
     accounts: Account[]
@@ -36,16 +37,6 @@ export default function MobileAsientosRegistrados({ accounts }: MobileAsientosRe
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
 
-    const getAccountName = (accountId: string): string => {
-        const acc = accounts.find(a => a.id === accountId)
-        return acc ? acc.name : '(cuenta eliminada)'
-    }
-
-    const getAccountCode = (accountId: string): string => {
-        const acc = accounts.find(a => a.id === accountId)
-        return acc ? acc.code : '?'
-    }
-
     const isBalanced = (entry: JournalEntry): boolean => {
         return sumDebits(entry) === sumCredits(entry)
     }
@@ -68,11 +59,15 @@ export default function MobileAsientosRegistrados({ accounts }: MobileAsientosRe
 
         entries.forEach((entry, entryIndex) => {
             entry.lines.forEach((line) => {
+                const display = resolveAccountDisplay(line.accountId, accounts)
+                const accountLabel = display.terceroDetail
+                    ? `${display.name} / ${display.terceroDetail}`
+                    : display.name
                 rows.push([
                     String(entryIndex + 1),
                     formatDate(entry.date),
                     entry.memo || '',
-                    getAccountName(line.accountId),
+                    accountLabel,
                     line.debit > 0 ? formatAmount(line.debit) : '',
                     line.credit > 0 ? formatAmount(line.credit) : '',
                 ])
@@ -211,11 +206,16 @@ export default function MobileAsientosRegistrados({ accounts }: MobileAsientosRe
                                             <span>Debe</span>
                                             <span>Haber</span>
                                         </div>
-                                        {entry.lines.map((line, i) => (
+                                        {entry.lines.map((line, i) => {
+                                            const display = resolveAccountDisplay(line.accountId, accounts)
+                                            return (
                                             <div key={i} className="mobile-registrados-detail-row">
                                                 <div className="mobile-registrados-detail-account">
-                                                    <span className="code">{getAccountCode(line.accountId)}</span>
-                                                    <span className="name">{getAccountName(line.accountId)}</span>
+                                                    <span className="code">{display.code}</span>
+                                                    <span className="name">{display.name}</span>
+                                                    {display.terceroDetail && (
+                                                        <span className="name" style={{ fontSize: '0.75em', opacity: 0.7 }}>{display.terceroDetail}</span>
+                                                    )}
                                                 </div>
                                                 <span className="mobile-registrados-detail-amount">
                                                     {line.debit > 0 ? `$${formatAmount(line.debit)}` : '-'}
@@ -224,7 +224,8 @@ export default function MobileAsientosRegistrados({ accounts }: MobileAsientosRe
                                                     {line.credit > 0 ? `$${formatAmount(line.credit)}` : '-'}
                                                 </span>
                                             </div>
-                                        ))}
+                                            )
+                                        })}
                                     </div>
                                 )}
                             </div>

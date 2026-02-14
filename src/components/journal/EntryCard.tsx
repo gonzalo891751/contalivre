@@ -4,6 +4,7 @@
 import { Edit2, Trash2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import type { JournalEntry, Account } from '../../core/models'
+import { resolveAccountDisplay } from '../../core/displayAccount'
 
 interface EntryCardProps {
     entry: JournalEntry
@@ -35,11 +36,6 @@ const formatDate = (dateStr: string) => {
 }
 
 export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disabled }: EntryCardProps) {
-    const getAccountName = (accountId: string) => {
-        const acc = accounts.find((a) => a.id === accountId)
-        return acc ? acc.name : 'Cuenta desconocida'
-    }
-
     const totalDebit = entry.lines.reduce((sum, line) => sum + (line.debit || 0), 0)
     const totalCredit = entry.lines.reduce((sum, line) => sum + (line.credit || 0), 0)
 
@@ -101,13 +97,20 @@ export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disa
                         </tr>
                     </thead>
                     <tbody>
-                        {entry.lines.map((line, index) => (
+                        {entry.lines.map((line, index) => {
+                            const display = resolveAccountDisplay(line.accountId, accounts)
+                            return (
                             <tr key={index} className="journal-entry-card-row">
                                 <td className="journal-entry-card-td-account">
                                     <div className="journal-entry-card-account-name">
-                                        {getAccountName(line.accountId)}
+                                        {display.name}
                                     </div>
-                                    {line.description && (
+                                    {display.terceroDetail && (
+                                        <div className="journal-entry-card-account-detail">
+                                            {display.terceroDetail}
+                                        </div>
+                                    )}
+                                    {!display.terceroDetail && line.description && (
                                         <div className="journal-entry-card-account-detail">
                                             {line.description}
                                         </div>
@@ -120,7 +123,8 @@ export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disa
                                     {line.credit > 0 ? formatAmount(line.credit) : '-'}
                                 </td>
                             </tr>
-                        ))}
+                            )
+                        })}
                     </tbody>
                     <tfoot>
                         <tr className="journal-entry-card-totals">

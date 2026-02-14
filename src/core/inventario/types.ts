@@ -289,7 +289,7 @@ export const DEFAULT_ACCOUNT_CODES: Record<AccountMappingKey, string> = {
     ivaCF: '1.1.03.01',
     ivaDF: '2.1.03.01',
     diferenciaInventario: '4.3.02',
-    aperturaInventario: '3.2.01',
+    aperturaInventario: '3.1.01',
     descuentosObtenidos: '4.6.09',
     descuentosOtorgados: '4.2.01',
     // Percepciones / Retenciones
@@ -520,6 +520,8 @@ export interface BienesSettings {
     periodGoals?: Record<string, { salesTarget?: number; marginTarget?: number }>
     // Date for opening balance calculation (optional, defaults to auto logic)
     openingBalanceDate?: string
+    // True once the user completes the onboarding wizard (mode + method + accounts)
+    configCompleted?: boolean
     lastUpdated: string
 }
 

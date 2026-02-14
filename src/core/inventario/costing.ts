@@ -445,6 +445,8 @@ export function calculateProductValuation(
             }
         } else if (mov.type === 'ADJUSTMENT') {
             currentStock += mov.quantity // Can be negative
+        } else if (mov.type === 'INITIAL_STOCK') {
+            currentStock += mov.quantity
         } else if (mov.type === 'VALUE_ADJUSTMENT') {
             // No quantity change — value-only adjustment (RT6 inflation)
         } else if (mov.type === 'COUNT') {
