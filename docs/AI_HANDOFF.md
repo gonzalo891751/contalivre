@@ -2,6 +2,92 @@
 
 ---
 
+## CHECKPOINT #MODAL-MOVIMIENTOS-UX
+**Fecha:** 2026-02-14
+**Estado:** COMPLETADO - 4 issues resueltos (inputs numericos, percepcion default, contrapartida default + autocompletar, validacion campos obligatorios)
+
+### Objetivo
+Mejorar el modal de Movimientos (Compra/Venta/Ajuste/Pagos) en Bienes de Cambio: inputs numericos usables, defaults correctos, boton "Autocompletar restante" reubicado, campos obligatorios con asterisco y bloqueo de confirmacion.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Todos los cambios de UX: helper `selectOnFocus`, `FieldError`, validacion, defaults, autocompletar per-row, asteriscos, labels Confirmar por tab |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+
+**ISSUE A - Inputs numericos "0 pegado"**
+- Agregado helper `selectOnFocus` que selecciona todo el texto al enfocar un input numerico
+- Todos los inputs `type="number"` que mostraban `value={0}` ahora usan `value={val || ''}` para mostrar vacio en vez de "0"
+- Agregado `inputMode="decimal"` (montos) e `inputMode="numeric"` (cantidades) para mejor teclado movil
+- Afecta ~25 inputs: quantity, unitCost, unitPrice, stockAjuste.quantity/unitCost, split amounts, tax rates/amounts, bonificacion, descuento, gastos, rt6 delta, pagoCobro amount, retencion, termDays
+
+**ISSUE B - Default percepcion = Percepcion IVA**
+- `handleAddTax()`: cambiado `taxType: 'IIBB'` → `taxType: 'IVA'`
+- Ahora al agregar percepcion, el default es "Percepcion IVA" (no IIBB)
+
+**ISSUE C - Default contrapartida + Autocompletar restante**
+- Nuevo `useEffect` preselecciona cuenta default en el primer split:
+  - Compra → Proveedores (2.1.01.01)
+  - Venta → Deudores por ventas (1.1.02.01)
+  - Solo en modo create, no pisa initialData (modo edit)
+- `handleAutoFillSplit` ahora acepta `targetSplitId?` opcional para llenar una fila especifica
+- Boton "Autocompletar restante" agregado per-row debajo del input Importe cuando la fila esta vacia y hay restante
+- Muestra el monto que se completaria: `Autocompletar restante ($300.000)`
+- El boton del panel derecho (summary) sigue existiendo como backup
+
+**ISSUE D - Campos obligatorios + asterisco + bloqueo**
+- Nuevo estado `submitted` (boolean) - se activa en primer intento de submit
+- Nuevo `validationErrors` (useMemo) que computa errores por tab:
+  - Compra/Venta: date, productId, quantity, unitCost/unitPrice, counterparty, paymentCondition, splits
+  - Devoluciones: date, productId, originalMovementId, cantidadDevolver
+  - Stock Fisico: date, productId, quantity, unitCost (si entrada)
+  - RT6: date, originMovementId, rt6Period, valueDelta
+  - Bonif/Desc: date, originalMovementId, value
+  - Pagos: date, tercero, amount, pagoSplits
+- Componente `FieldError` para mensajes inline (rojo suave, 11px)
+- Asteriscos rojos (*) en labels de campos obligatorios
+- Inputs con error muestran `border-red-300`
+- Boton "Confirmar" disabled cuando `submitted && hasValidationErrors`
+- Scroll + focus al primer campo con error al intentar confirmar
+- `data-field` attributes en contenedores para targeting del scroll
+
+**HARDENING - Label Confirmar por tab**
+- Fix: el boton ahora muestra la label correcta por pestaña:
+  - Compra → "Confirmar Compra"
+  - Venta → "Confirmar Venta"
+  - Pagos → "Confirmar Cobro" / "Confirmar Pago" (segun pagoCobroMode)
+  - Ajuste/Devoluciones → "Confirmar Devolucion"
+  - Otros ajustes → "Confirmar Ajuste"
+
+### Supuestos
+- **Venta default**: se usa Deudores por ventas (1.1.02.01) como default para ventas. No se implemento distincion contado/credito para el default porque no existe toggle de condicion al inicio del form. Si el usuario selecciona CONTADO, el auto-infer de paymentCondition ya cambia la condicion automaticamente.
+- **Percepcion IVA**: se asume que Percepcion IVA es mas comun que IIBB para el usuario tipico (RI). El select sigue permitiendo cambiar manualmente.
+
+### Validacion
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/repro_eepn.test.ts)
+- `npx vite build`: OK (solo warning de chunk size pre-existente)
+
+### QA Manual
+- [ ] Compra: click en Cantidad/Costo con 0 → tipear "5000" directo → ok, sin "05000"
+- [ ] Impuestos/Percepciones → default "Percepcion IVA"; agregar otra → tambien IVA
+- [ ] Compra → Pago/Contrapartidas → Proveedores preseleccionado
+- [ ] Venta → Imputacion cobro → Deudores por ventas preseleccionado
+- [ ] Cargar total → click "Autocompletar restante" debajo de Importe → completa
+- [ ] 2 splits: 200k en Proveedores, click autocompletar en 2da fila → completa restante
+- [ ] Borrar proveedor o condicion de pago → Confirmar disabled + error visible
+- [ ] Click Confirmar con errores → scroll al primer campo faltante
+- [ ] Pagos tab → label dice "Confirmar Cobro" o "Confirmar Pago"
+- [ ] Repetir en Ajuste/Stock/RT6/Bonif con mismas reglas
+
+### Pendientes (fuera de scope)
+- Auto-focus al abrir modal en primer campo (nice-to-have)
+- Recalcular restante cuando total cambia y ya hay splits asignados (nice-to-have)
+- Validacion de coherencia importes en Pagos vinculados a comprobante
+
+---
+
 ## CHECKPOINT #INVENTARIO-BIENES-FIXES
 **Fecha:** 2026-02-14
 **Estado:** COMPLETADO - 4 issues corregidos (onboarding wizard, stock display, CTA button, back arrow)
