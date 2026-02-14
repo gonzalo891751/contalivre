@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Gestión de Préstamos</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            primary: '#3B82F6',
+                            secondary: '#10B981',
+                        },
+                        ui: {
+                            slate: '#0F172A',
+                            paper: '#FFFFFF',
+                            bg: '#F8FAFC',
+                            border: '#E2E8F0'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05)',
+                        'glow': '0 0 15px rgba(59, 130, 246, 0.15)'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Custom Styles from Brand Book -->
+    <style>
+        :root {
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --brand-gradient-hover: linear-gradient(135deg, #1D4ED8 0%, #059669 100%);
+        }
+        
+        body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; color: #0F172A; }
+        h1, h2, h3, h4 { font-family: 'Outfit', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+        
+        /* Custom Components */
+        .btn-primary {
+            background: var(--brand-gradient);
+            transition: all 0.2s;
+        }
+        .btn-primary:hover {
+            opacity: 0.95;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+        
+        .tab-active {
+            color: #3B82F6;
+            border-bottom: 2px solid #3B82F6;
+            font-weight: 600;
+        }
+        .tab-inactive {
+            color: #64748B;
+            border-bottom: 2px solid transparent;
+        }
+        .tab-inactive:hover { color: #0F172A; }
+
+        /* Scrollbar styling for tables/modals */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+        /* Animation utilities */
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden">
+
+    <!-- 1. SIDEBAR (Mock static) -->
+    <aside class="w-64 bg-white border-r border-ui-border flex flex-col hidden md:flex z-20">
+        <div class="p-6 flex items-center gap-2 border-b border-ui-border">
+            <i class="ph-duotone ph-robot text-2xl text-brand-primary"></i>
+            <span class="font-display font-bold text-xl tracking-tight">ContaLivre</span>
+        </div>
+        
+        <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+            <div class="px-3 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 mt-4">General</div>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 text-slate-500 rounded-lg hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <i class="ph ph-squares-four text-lg"></i> Dashboard
+            </a>
+            
+            <div class="px-3 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 mt-6">Operaciones</div>
+            <a href="#/operaciones" class="flex items-center gap-3 px-3 py-2 bg-blue-50 text-brand-primary font-medium rounded-lg">
+                <i class="ph-fill ph-arrows-left-right text-lg"></i> Operaciones
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 text-slate-500 rounded-lg hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <i class="ph ph-receipt text-lg"></i> Ventas
+            </a>
+
+            <div class="px-3 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 mt-6">Contabilidad</div>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 text-slate-500 rounded-lg hover:bg-slate-50 hover:text-slate-900 transition-colors">
+                <i class="ph ph-notebook text-lg"></i> Libro Diario
+            </a>
+        </nav>
+        
+        <div class="p-4 border-t border-ui-border">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">JS</div>
+                <div class="text-sm">
+                    <p class="font-medium text-slate-900">Juan Silva</p>
+                    <p class="text-slate-500 text-xs">Admin</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 2. MAIN CONTENT AREA -->
+    <main class="flex-1 flex flex-col relative overflow-hidden bg-ui-bg">
+        
+        <!-- Header Global -->
+        <header class="h-16 bg-white border-b border-ui-border flex items-center justify-between px-6 shrink-0">
+            <h2 id="page-title" class="font-display font-semibold text-lg text-slate-800">Operaciones</h2>
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-full text-xs font-medium text-slate-600 border border-slate-200">
+                    <i class="ph-fill ph-currency-dollar"></i>
+                    <span>TC Oficial (BNA): $ 1150,00</span>
+                    <button class="hover:text-brand-primary transition-colors"><i class="ph ph-arrows-clockwise"></i></button>
+                </div>
+                <button class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 text-slate-500 relative">
+                    <i class="ph ph-bell text-lg"></i>
+                    <span class="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- ROUTER OUTLET CONTAINER -->
+        <div id="router-outlet" class="flex-1 overflow-auto p-6 md:p-8 scroll-smooth">
+            <!-- Vistas se inyectan aquí -->
+        </div>
+
+    </main>
+
+    <!-- 3. MODAL ALTA PRESTAMO (Hidden by default) -->
+    <div id="modal-loan" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true">
+        <!-- Backdrop -->
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onclick="closeModal()"></div>
+        
+        <!-- Modal Content -->
+        <div class="absolute inset-y-0 right-0 w-full max-w-2xl bg-white shadow-2xl transform transition-transform duration-300 translate-x-full flex flex-col" id="modal-panel">
+            
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-ui-border flex items-center justify-between bg-white z-10">
+                <div>
+                    <h3 class="font-display font-bold text-xl text-slate-900">Alta de Préstamo</h3>
+                    <p class="text-sm text-slate-500">Registrá un nuevo pasivo financiero.</p>
+                </div>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-100">
+                    <i class="ph ph-x text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Modal Body (Scrollable) -->
+            <div class="flex-1 overflow-y-auto p-6 space-y-8 bg-slate-50">
+                
+                <!-- Section A: Identidad -->
+                <section class="bg-white p-5 rounded-xl border border-ui-border shadow-sm space-y-4">
+                    <div class="flex items-center gap-2 text-brand-primary mb-2">
+                        <i class="ph-duotone ph-identification-card text-lg"></i>
+                        <h4 class="font-semibold text-sm uppercase tracking-wide">A. Identidad y Moneda</h4>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="col-span-2">
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">Nombre / Alias</label>
+                            <input type="text" id="loanName" placeholder="Ej: Préstamo Banco Galicia - Capital" class="w-full px-3 py-2 bg-white border border-ui-border rounded-lg text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">Acreedor</label>
+                            <input type="text" id="loanCreditor" placeholder="Ej: Banco Galicia" class="w-full px-3 py-2 bg-white border border-ui-border rounded-lg text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">Tipo</label>
+                            <select class="w-full px-3 py-2 bg-white border border-ui-border rounded-lg text-sm">
+                                <option>Bancario</option>
+                                <option>Socio / Particular</option>
+                                <option>Financiera</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">Moneda</label>
+                            <select id="loanCurrency" onchange="toggleCurrencyFields()" class="w-full px-3 py-2 bg-white border border-ui-border rounded-lg text-sm font-medium">
+                                <option value="ARS">Peso Argentino (ARS)</option>
+                                <option value="USD">Dólar Estadounidense (USD)</option>
+                            </select>
+                        </div>
+                        <div class="flex items-end">
+                             <div class="px-3 py-2 bg-blue-50 text-blue-700 text-xs rounded-lg border border-blue-100 w-full flex items-center gap-2">
+                                <i class="ph-fill ph-lightbulb"></i>
+                                <span id="accountingHint">Se usará cuenta: 2.1.05 Préstamos (ARS)</span>
+                             </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section B: Importes -->
+                <section class="bg-white p-5 rounded-xl border border-ui-border shadow-sm space-y-4">
+                    <div class="flex items-center gap-2 text-brand-secondary mb-2">
+                        <i class="ph-duotone ph-money text-lg"></i>
+                        <h4 class="font-semibold text-sm uppercase tracking-wide">B. Desembolso</h4>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">Monto Principal</label>
+                            <div class="relative">
+                                <span class="absolute left-3 top-2 text-slate-400 font-mono" id="currencySymbol">$</span>
+                                <input type="number" id="loanAmount" oninput="calculateLoan()" class="w-full pl-7 pr-3 py-2 font-mono bg-white border border-ui-border rounded-lg text-sm focus:border-brand-primary" placeholder="0.00">
+                            </div>
+                        </div>
+                        <div id="exchangeRateField" class="hidden">
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">TC Inicial (Oficial)</label>
+                            <input type="number" id="loanRate" value="1150" oninput="calculateLoan()" class="w-full px-3 py-2 font-mono bg-white border border-ui-border rounded-lg text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">Fecha Alta</label>
+                            <input type="date" class="w-full px-3 py-2 bg-white border border-ui-border rounded-lg text-sm text-slate-600">
+                        </div>
+                         <div class="col-span-2">
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">Destino de Fondos (Activo)</label>
+                            <div class="flex gap-2">
+                                <select class="w-full px-3 py-2 bg-white border border-ui-border rounded-lg text-sm">
+                                    <option>1.1.01.02 Banco Galicia c/c ARS</option>
+                                    <option>1.1.01.01 Caja ARS</option>
+                                </select>
+                                <button class="shrink-0 px-3 py-2 border border-ui-border rounded-lg hover:bg-slate-50 text-slate-600 text-sm">
+                                    + Crear
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section C: Condiciones -->
+                <section class="bg-white p-5 rounded-xl border border-ui-border shadow-sm space-y-4">
+                    <div class="flex items-center gap-2 text-slate-700 mb-2">
+                        <i class="ph-duotone ph-sliders text-lg"></i>
+                        <h4 class="font-semibold text-sm uppercase tracking-wide">C. Condiciones Financieras</h4>
+                    </div>
+                    
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">Cant. Cuotas</label>
+                            <input type="number" id="loanTerms" value="12" oninput="calculateLoan()" class="w-full px-3 py-2 font-mono bg-white border border-ui-border rounded-lg text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">TNA %</label>
+                            <input type="number" id="loanTNA" value="65" oninput="calculateLoan()" class="w-full px-3 py-2 font-mono bg-white border border-ui-border rounded-lg text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-500 mb-1">Sistema</label>
+                            <select id="loanSystem" onchange="calculateLoan()" class="w-full px-3 py-2 bg-white border border-ui-border rounded-lg text-sm">
+                                <option value="french">Francés</option>
+                                <option value="german">Alemán</option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section D: Preview -->
+                <section class="space-y-4">
+                     <!-- Asiento Preview -->
+                     <div class="bg-slate-900 rounded-xl p-5 text-slate-300 font-mono text-xs border border-slate-800 shadow-lg relative overflow-hidden">
+                        <div class="absolute top-0 right-0 p-2 opacity-20"><i class="ph-duotone ph-notebook text-6xl text-white"></i></div>
+                        <h5 class="text-white font-display font-bold mb-3 tracking-wide">VISTA PREVIA ASIENTO (ARS)</h5>
+                        <div class="space-y-2 border-l-2 border-brand-primary pl-3">
+                            <div class="flex justify-between">
+                                <span>DEBE <span class="text-slate-500 ml-2">1.1.01.02 Banco Galicia</span></span>
+                                <span class="text-white" id="previewDebit">$ 0,00</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>HABER <span class="text-slate-500 ml-2">2.1.05.02 Préstamos Bancarios</span></span>
+                                <span class="text-white" id="previewCredit">$ 0,00</span>
+                            </div>
+                        </div>
+                        <div id="previewExchangeRate" class="mt-3 pt-3 border-t border-slate-700 text-slate-500 hidden">
+                            * Valuado al TC Oficial: $ 1150,00
+                        </div>
+                     </div>
+
+                     <!-- Mini Cronograma -->
+                     <div class="bg-white rounded-xl border border-ui-border overflow-hidden">
+                         <div class="bg-slate-50 px-4 py-2 border-b border-ui-border text-xs font-bold text-slate-500 uppercase">Proyección (Primeras 3 cuotas)</div>
+                         <table class="w-full text-xs text-right">
+                             <thead class="bg-white text-slate-400">
+                                 <tr>
+                                     <th class="px-4 py-2 text-left font-normal">#</th>
+                                     <th class="px-4 py-2 font-normal">Cuota Total</th>
+                                     <th class="px-4 py-2 font-normal">Interés</th>
+                                     <th class="px-4 py-2 font-normal">Capital</th>
+                                     <th class="px-4 py-2 font-normal">Saldo</th>
+                                 </tr>
+                             </thead>
+                             <tbody id="previewScheduleBody" class="font-mono text-slate-600">
+                                 <!-- JS Generated -->
+                             </tbody>
+                         </table>
+                     </div>
+                </section>
+                
+                <div class="h-8"></div> <!-- Spacer -->
+            </div>
+
+            <!-- Modal Footer (Sticky) -->
+            <div class="p-4 border-t border-ui-border bg-white flex justify-end gap-3 z-10">
+                <button onclick="closeModal()" class="px-5 py-2.5 rounded-lg border border-ui-border text-slate-700 font-medium hover:bg-slate-50 transition-colors text-sm">
+                    Cancelar
+                </button>
+                <button onclick="saveLoan()" class="btn-primary px-6 py-2.5 rounded-lg text-white font-medium shadow-lg hover:shadow-xl text-sm flex items-center gap-2">
+                    <i class="ph-bold ph-check"></i> Crear Préstamo
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // --- STORE & STATE ---
+        const store = {
+            exchangeRate: 1150,
+            loans: [
+                {
+                    id: 1,
+                    name: 'Leasing Toyota Hilux',
+                    creditor: 'Toyota Cía Fin.',
+                    currency: 'ARS',
+                    originalAmount: 15000000,
+                    balance: 12450000,
+                    nextMaturity: '2026-03-10',
+                    term: 36,
+                    rate: 75,
+                    status: 'active'
+                },
+                {
+                    id: 2,
+                    name: 'Importación Maquinaria',
+                    creditor: 'Comex Bank',
+                    currency: 'USD',
+                    originalAmount: 15000,
+                    balance: 12000,
+                    tc_hist: 980,
+                    tc_curr: 1150,
+                    nextMaturity: '2026-02-28',
+                    term: 12,
+                    rate: 8,
+                    status: 'active'
+                }
+            ]
+        };
+
+        // --- ROUTER ---
+        const routes = {
+            '': renderOperationsHub,
+            '#/operaciones': renderOperationsHub,
+            '#/operaciones/prestamos': renderLoansModule
+        };
+
+        function router() {
+            const hash = window.location.hash || '';
+            const viewFn = routes[hash] || renderOperationsHub;
+            document.getElementById('page-title').innerText = hash.includes('prestamos') ? 'Préstamos y Deudas Financieras' : 'Operaciones';
+            viewFn();
+        }
+
+        window.addEventListener('hashchange', router);
+        window.addEventListener('load', router);
+
+        // --- VIEWS RENDERERS ---
+
+        // View 1: Operations Hub
+        function renderOperationsHub() {
+            const container = document.getElementById('router-outlet');
+            container.innerHTML = `
+                <div class="max-w-6xl mx-auto fade-in">
+                    <div class="mb-8">
+                        <h3 class="text-2xl font-bold text-slate-900 mb-2">Pasivos y Deudas</h3>
+                        <p class="text-slate-500">Gestioná tus compromisos con proveedores, bancos y el fisco.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <!-- Card: Proveedores -->
+                        <div class="bg-white p-6 rounded-2xl border border-ui-border shadow-soft hover:shadow-lg transition-all cursor-pointer group">
+                            <div class="w-12 h-12 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                                <i class="ph-duotone ph-truck text-2xl"></i>
+                            </div>
+                            <h4 class="font-bold text-lg mb-1">Proveedores</h4>
+                            <p class="text-sm text-slate-500 mb-4">Cuentas corrientes comerciales.</p>
+                            <div class="flex items-baseline gap-1">
+                                <span class="text-xs text-slate-400">Saldo:</span>
+                                <span class="font-mono font-medium text-slate-900">$ 4.250.000</span>
+                            </div>
+                        </div>
+
+                        <!-- Card: Préstamos (CLICKABLE) -->
+                        <a href="#/operaciones/prestamos" class="bg-white p-6 rounded-2xl border border-brand-primary shadow-glow relative overflow-hidden group hover:-translate-y-1 transition-transform">
+                            <div class="absolute top-0 right-0 p-1 bg-brand-primary text-white text-[10px] font-bold uppercase rounded-bl-lg px-2">Nuevo Módulo</div>
+                            <div class="w-12 h-12 rounded-xl bg-blue-100 text-brand-primary flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                                <i class="ph-duotone ph-bank text-2xl"></i>
+                            </div>
+                            <h4 class="font-bold text-lg mb-1 text-slate-900">Préstamos</h4>
+                            <p class="text-sm text-slate-500 mb-4">Deudas bancarias y financieras.</p>
+                            <div class="flex items-center justify-between mt-auto">
+                                <div class="flex flex-col">
+                                    <span class="text-xs text-slate-400">Total Deuda (ARS):</span>
+                                    <span class="font-mono font-bold text-brand-primary text-lg">$ 26.250.000</span>
+                                </div>
+                                <div class="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-brand-primary">
+                                    <i class="ph-bold ph-caret-right"></i>
+                                </div>
+                            </div>
+                        </a>
+
+                        <!-- Card: Fiscal -->
+                        <div class="bg-white p-6 rounded-2xl border border-ui-border shadow-soft hover:shadow-lg transition-all cursor-pointer opacity-75">
+                            <div class="w-12 h-12 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center mb-4">
+                                <i class="ph-duotone ph-scales text-2xl"></i>
+                            </div>
+                            <h4 class="font-bold text-lg mb-1">Fiscal e Impuestos</h4>
+                            <p class="text-sm text-slate-500 mb-4">Planes de pago y VEPs.</p>
+                            <span class="inline-block px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded font-medium">Próximamente</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // View 2: Loans Module
+        function renderLoansModule() {
+            const container = document.getElementById('router-outlet');
+            
+            // Build Rows
+            const rowsHTML = store.loans.map(loan => {
+                const isUSD = loan.currency === 'USD';
+                const valARS = isUSD ? loan.balance * store.exchangeRate : loan.balance;
+                const badgeClass = loan.status === 'active' ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-500';
+                
+                return `
+                <tr class="hover:bg-slate-50 transition-colors group">
+                    <td class="px-6 py-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded bg-white border border-ui-border flex items-center justify-center text-slate-500 shadow-sm">
+                                <i class="ph-fill ${loan.creditor.includes('Bank') ? 'ph-bank' : 'ph-car'}"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium text-slate-900 text-sm">${loan.name}</div>
+                                <div class="text-xs text-slate-500">${loan.creditor}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4">
+                        <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium ${isUSD ? 'bg-green-100 text-green-800' : 'bg-blue-50 text-blue-700'}">
+                            ${loan.currency}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 text-right font-mono text-sm text-slate-700">
+                        ${isUSD ? 'US$ ' + formatMoney(loan.balance) : '$ ' + formatMoney(loan.balance)}
+                    </td>
+                    <td class="px-6 py-4 text-right font-mono text-sm text-slate-500">
+                        ${isUSD ? '$ ' + formatMoney(loan.tc_curr) : '—'}
+                    </td>
+                    <td class="px-6 py-4 text-right font-mono text-sm font-medium text-slate-900">
+                        $ ${formatMoney(valARS)}
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        <span class="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-100">
+                            ${formatDate(loan.nextMaturity)}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 text-right">
+                        <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button class="text-xs font-medium text-brand-primary hover:bg-blue-50 px-2 py-1 rounded">Ver</button>
+                            <button class="text-xs font-medium text-slate-600 hover:bg-slate-100 px-2 py-1 rounded">Pagar</button>
+                        </div>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="flex flex-col h-full fade-in space-y-6">
+                    
+                    <!-- KPIs Header -->
+                    <div class="grid grid-cols-4 gap-4">
+                        <div class="bg-white p-4 rounded-xl border border-ui-border shadow-sm">
+                            <p class="text-xs text-slate-500 font-medium uppercase">Total Pasivo (ARS)</p>
+                            <h3 class="text-2xl font-display font-bold text-slate-900 mt-1">$ 26.2M</h3>
+                            <div class="mt-2 text-xs text-green-600 font-medium flex items-center gap-1">
+                                <i class="ph-bold ph-trend-down"></i> -2.4% vs mes anterior
+                            </div>
+                        </div>
+                        <div class="bg-white p-4 rounded-xl border border-ui-border shadow-sm">
+                             <p class="text-xs text-slate-500 font-medium uppercase">Próx. Vencimientos</p>
+                             <h3 class="text-2xl font-display font-bold text-slate-900 mt-1">2</h3>
+                             <p class="mt-2 text-xs text-slate-400">En los próximos 30 días</p>
+                        </div>
+                         <div class="bg-white p-4 rounded-xl border border-ui-border shadow-sm flex flex-col items-center justify-center text-center">
+                             <div class="text-sm font-medium text-slate-600 mb-2">Devengamientos</div>
+                             <button class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2">
+                                <i class="ph-fill ph-check-circle text-green-500"></i> Al día
+                             </button>
+                        </div>
+                        <div class="flex flex-col justify-end">
+                            <button onclick="openModal()" class="w-full h-full btn-primary rounded-xl flex flex-col items-center justify-center text-white shadow-lg hover:shadow-xl transition-all p-4 group">
+                                <i class="ph-bold ph-plus-circle text-3xl mb-1 group-hover:scale-110 transition-transform"></i>
+                                <span class="font-bold text-sm">Nuevo Préstamo</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Main Table Card -->
+                    <div class="bg-white rounded-xl border border-ui-border shadow-sm flex flex-col flex-1 overflow-hidden">
+                        <!-- Toolbar -->
+                        <div class="p-4 border-b border-ui-border flex items-center justify-between">
+                            <div class="flex gap-6">
+                                <button class="tab-active py-2 text-sm">Préstamos Activos</button>
+                                <button class="tab-inactive py-2 text-sm">Movimientos</button>
+                                <button class="tab-inactive py-2 text-sm">Conciliación</button>
+                            </div>
+                            <div class="flex gap-2">
+                                <div class="relative">
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-2 text-slate-400"></i>
+                                    <input type="text" placeholder="Buscar..." class="pl-9 pr-3 py-1.5 bg-slate-50 border border-ui-border rounded-lg text-sm w-48 focus:ring-1 focus:ring-brand-primary focus:outline-none">
+                                </div>
+                                <button class="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><i class="ph ph-funnel"></i></button>
+                                <button class="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><i class="ph ph-export"></i></button>
+                            </div>
+                        </div>
+
+                        <!-- Table Wrapper -->
+                        <div class="overflow-auto flex-1">
+                            <table class="w-full text-left border-collapse">
+                                <thead class="bg-slate-50 sticky top-0 z-10 text-xs uppercase text-slate-500 font-semibold tracking-wide border-b border-ui-border">
+                                    <tr>
+                                        <th class="px-6 py-3">Préstamo</th>
+                                        <th class="px-6 py-3">Moneda</th>
+                                        <th class="px-6 py-3 text-right">Saldo Original</th>
+                                        <th class="px-6 py-3 text-right">TC Actual</th>
+                                        <th class="px-6 py-3 text-right">Valuación (ARS)</th>
+                                        <th class="px-6 py-3 text-center">Próx. Venc</th>
+                                        <th class="px-6 py-3"></th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-ui-border bg-white">
+                                    ${rowsHTML}
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Footer Table -->
+                        <div class="p-3 border-t border-ui-border bg-slate-50 text-xs text-slate-500 flex justify-between items-center">
+                            <span>Mostrando 2 préstamos</span>
+                            <div class="flex gap-2">
+                                <button class="w-6 h-6 flex items-center justify-center bg-white border border-ui-border rounded hover:border-brand-primary">1</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- MODAL LOGIC ---
+
+        function openModal() {
+            const modal = document.getElementById('modal-loan');
+            const panel = document.getElementById('modal-panel');
+            modal.classList.remove('hidden');
+            // Trigger animation
+            setTimeout(() => {
+                panel.classList.remove('translate-x-full');
+            }, 10);
+            calculateLoan(); // Init calc
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('modal-loan');
+            const panel = document.getElementById('modal-panel');
+            panel.classList.add('translate-x-full');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                resetForm();
+            }, 300);
+        }
+
+        function toggleCurrencyFields() {
+            const currency = document.getElementById('loanCurrency').value;
+            const isUSD = currency === 'USD';
+            const rateField = document.getElementById('exchangeRateField');
+            const hint = document.getElementById('accountingHint');
+            const symbol = document.getElementById('currencySymbol');
+            const previewRate = document.getElementById('previewExchangeRate');
+
+            if (isUSD) {
+                rateField.classList.remove('hidden');
+                hint.innerText = 'Se usará: Préstamos ME (CP) - Valuado en ARS';
+                symbol.innerText = 'US$';
+                previewRate.classList.remove('hidden');
+            } else {
+                rateField.classList.add('hidden');
+                hint.innerText = 'Se usará: 2.1.05 Préstamos (ARS)';
+                symbol.innerText = '$';
+                previewRate.classList.add('hidden');
+            }
+            calculateLoan();
+        }
+
+        // --- CALCULATOR ENGINE (French System) ---
+        function calculateLoan() {
+            // 1. Get Values
+            const amount = parseFloat(document.getElementById('loanAmount').value) || 0;
+            const terms = parseInt(document.getElementById('loanTerms').value) || 12;
+            const tna = parseFloat(document.getElementById('loanTNA').value) || 0;
+            const currency = document.getElementById('loanCurrency').value;
+            const rate = currency === 'USD' ? parseFloat(document.getElementById('loanRate').value) || 1 : 1;
+            
+            // 2. Schedule Calc
+            const i = (tna / 100) / 12; // Monthly rate
+            let pmt = 0;
+            
+            if (i > 0 && terms > 0) {
+                 pmt = (amount * i * Math.pow(1+i, terms)) / (Math.pow(1+i, terms) - 1);
+            } else if (terms > 0) {
+                 pmt = amount / terms;
+            }
+
+            // 3. Generate Schedule (First 3 rows)
+            let balance = amount;
+            let html = '';
+            
+            for(let j=1; j<=3; j++) {
+                if (balance <= 0) break;
+                const interest = balance * i;
+                const capital = pmt - interest;
+                balance -= capital;
+                
+                html += `
+                <tr>
+                    <td class="px-4 py-2 text-left">${j}</td>
+                    <td class="px-4 py-2 font-bold">${formatMoney(pmt)}</td>
+                    <td class="px-4 py-2 text-slate-500">${formatMoney(interest)}</td>
+                    <td class="px-4 py-2 text-slate-500">${formatMoney(capital)}</td>
+                    <td class="px-4 py-2 text-slate-400">${formatMoney(balance)}</td>
+                </tr>`;
+            }
+
+            // 4. Update DOM
+            document.getElementById('previewScheduleBody').innerHTML = html;
+
+            // 5. Update Accounting Preview
+            const totalARS = amount * (currency === 'USD' ? rate : 1);
+            document.getElementById('previewDebit').innerText = '$ ' + formatMoney(totalARS);
+            document.getElementById('previewCredit').innerText = '$ ' + formatMoney(totalARS);
+        }
+
+        function saveLoan() {
+            // Mock Save
+            const btn = document.querySelector('#modal-panel .btn-primary');
+            const originalContent = btn.innerHTML;
+            btn.innerHTML = `<i class="ph-bold ph-spinner animate-spin"></i> Guardando...`;
+            
+            setTimeout(() => {
+                // Add new loan to store locally
+                const currency = document.getElementById('loanCurrency').value;
+                const amount = parseFloat(document.getElementById('loanAmount').value);
+                const name = document.getElementById('loanName').value || 'Nuevo Préstamo';
+                const creditor = document.getElementById('loanCreditor').value || 'Varios';
+                
+                store.loans.push({
+                    id: Date.now(),
+                    name: name,
+                    creditor: creditor,
+                    currency: currency,
+                    balance: amount, // Full balance
+                    originalAmount: amount,
+                    nextMaturity: '2026-03-20', // Mock
+                    tc_curr: currency === 'USD' ? 1150 : 0,
+                    status: 'active'
+                });
+
+                closeModal();
+                btn.innerHTML = originalContent;
+                renderLoansModule(); // Re-render table
+            }, 1000);
+        }
+
+        function resetForm() {
+            document.getElementById('loanAmount').value = '';
+            document.getElementById('loanName').value = '';
+            // Reset others as needed
+        }
+
+        // --- UTILS ---
+        function formatMoney(val) {
+            return val.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        
+        function formatDate(isoStr) {
+            if(!isoStr) return '';
+            const [y,m,d] = isoStr.split('-');
+            const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+            return `${d} ${months[parseInt(m)-1]}`;
+        }
+
+    </script>
+</body>
+</html>

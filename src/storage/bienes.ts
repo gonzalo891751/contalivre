@@ -36,7 +36,7 @@ export const ACCOUNT_FALLBACKS: Record<string, { code: string; names: string[] }
     cmv: { code: '4.3.01', names: ['Costo mercaderias vendidas'] },
     compras: { code: '4.8.01', names: ['Compras'] },
     diferenciaInventario: { code: '4.3.02', names: ['Diferencia de inventario'] },
-    aperturaInventario: { code: '3.2.01', names: ['Apertura inventario', 'Resultados acumulados'] },
+    aperturaInventario: { code: '3.1.01', names: ['Capital social', 'Capital suscripto', 'Resultados acumulados', 'Resultados no asignados', 'Apertura inventario'] },
     gastosCompras: { code: '4.8.02', names: ['Gastos sobre compras', 'Gastos s/compras'] },
     bonifCompras: { code: '4.8.03', names: ['Bonificaciones sobre compras', 'Bonif. s/compras'] },
     devolCompras: { code: '4.8.04', names: ['Devoluciones sobre compras', 'Devol. s/compras'] },

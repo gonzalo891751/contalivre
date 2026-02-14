@@ -16,6 +16,7 @@ import {
     Armchair,
     Truck,
     ShoppingCart,
+    Bank,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
 
@@ -55,6 +56,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                         { path: '/operaciones/bienes-uso', label: 'Bienes de Uso', icon: Armchair },
                         { path: '/operaciones/proveedores', label: 'Proveedores', icon: Truck },
                         { path: '/operaciones/clientes', label: 'Clientes', icon: ShoppingCart },
+                        { path: '/operaciones/prestamos', label: 'Préstamos', icon: Bank },
                         { path: '/operaciones/impuestos', label: 'Impuestos', icon: Receipt },
                     ],
                 },

@@ -818,7 +818,7 @@ function CtaButton({
             <button
                 onClick={handleGenerateClosingEntry}
                 disabled={disabled}
-                className="flex items-center gap-2 px-6 py-3 rounded-lg font-semibold text-white text-base bg-brand-gradient shadow-[0_4px_12px_rgba(37,99,235,0.3)] hover:shadow-[0_6px_16px_rgba(37,99,235,0.4)] hover:-translate-y-0.5 transition-all disabled:cursor-not-allowed disabled:shadow-none disabled:translate-y-0 disabled:bg-none disabled:bg-slate-200 disabled:border disabled:border-slate-300 disabled:text-slate-600"
+                className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold text-base transition-all ${disabled ? 'bg-slate-200 border border-slate-300 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-blue-600 to-emerald-500 text-white shadow-lg shadow-blue-500/20 hover:shadow-[0_6px_16px_rgba(37,99,235,0.4)] hover:-translate-y-0.5'}`}
             >
                 <Check size={18} weight="bold" />
                 {closingIsSaving

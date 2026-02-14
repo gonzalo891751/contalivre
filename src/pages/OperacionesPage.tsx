@@ -640,19 +640,27 @@ export default function OperacionesPage() {
                     </div>
 
                     {/* Prestamos */}
-                    <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-blue-400 transition-all group cursor-pointer">
+                    <div
+                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-blue-400 transition-all group cursor-pointer"
+                        onClick={() => navigate('/operaciones/prestamos')}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/prestamos')}
+                        aria-label="Ir a modulo de Prestamos"
+                    >
                         <div className="flex justify-between items-start mb-3">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-slate-50 text-slate-500 flex items-center justify-center text-xl group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+                                <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl group-hover:bg-blue-100 transition-colors">
                                     <Bank weight="duotone" size={24} />
                                 </div>
                                 <span className="font-semibold text-slate-900">Prestamos</span>
                             </div>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-blue-50 text-blue-600 border border-blue-100">Pasivo</span>
                         </div>
                         <div className="flex justify-between items-end">
                             <div>
-                                <div className="text-xs text-slate-500">Proxima cuota (15 dias)</div>
-                                <div className="font-mono text-lg font-bold text-slate-900">$ 45.200</div>
+                                <div className="text-xs text-slate-500">Deudas financieras</div>
+                                <div className="font-mono text-lg font-bold text-slate-900">Gestionar</div>
                             </div>
                             <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all">
                                 <CaretRight weight="bold" size={16} />

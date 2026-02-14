@@ -57,7 +57,7 @@ export type FxLiabilitySubtype = 'PROVEEDOR' | 'PRESTAMO' | 'OTRO'
 /**
  * Currency code
  */
-export type CurrencyCode = 'USD' | 'EUR' | 'USDT' | 'BRL'
+export type CurrencyCode = 'ARS' | 'USD' | 'EUR' | 'USDT' | 'BRL'
 
 /**
  * FX Account (cartera) - represents a holding or debt position
@@ -100,6 +100,8 @@ export type FxMovementType =
     | 'PAGO_DEUDA' // Debt payment (for liabilities)
     | 'TOMA_DEUDA' // Debt origination (disbursement)
     | 'DESEMBOLSO_DEUDA' // Additional disbursement / refinancing
+    | 'DEVENGO_INTERES' // Interest accrual
+    | 'REVALUACION_DEUDA' // Debt revaluation (exchange rate difference)
 
 /**
  * Journal integration status (same as inventory for consistency)
@@ -587,12 +589,15 @@ export const MOVEMENT_TYPE_LABELS: Record<FxMovementType, string> = {
     PAGO_DEUDA: 'Pago Deuda',
     TOMA_DEUDA: 'Toma de Deuda',
     DESEMBOLSO_DEUDA: 'Desembolso Deuda',
+    DEVENGO_INTERES: 'Devengo Intereses',
+    REVALUACION_DEUDA: 'Revaluación Deuda',
 }
 
 /**
  * Currency labels
  */
 export const CURRENCY_LABELS: Record<CurrencyCode, string> = {
+    ARS: 'Peso Argentino (ARS)',
     USD: 'Dólar (USD)',
     EUR: 'Euro (EUR)',
     USDT: 'Tether (USDT)',
