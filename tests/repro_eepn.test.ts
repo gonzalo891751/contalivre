@@ -41,7 +41,7 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
                 id: 'e0',
                 date: '2023-12-31',
                 memo: 'Resultado 2023',
-                isActive: true,
+
                 lines: [
                     { id: 'i0a', accountId: '1', debit: 1000, credit: 0 },
                     { id: 'i0b', accountId: '3', debit: 0, credit: 1000 },
@@ -52,13 +52,13 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
                 id: 'e1',
                 date: '2024-04-01',
                 memo: 'Honorarios Directores',
-                isActive: true,
+
                 lines: [
                     { id: 'i1a', accountId: '3', debit: 500, credit: 0 },
                     { id: 'i1b', accountId: '2', debit: 0, credit: 500 },
                 ],
             },
-        ] as JournalEntry[]
+        ] as unknown as JournalEntry[]
 
         const netIncomeFromER = 2000
         const pnFromBalance = 2500 // 1000 - 500 + 2000
@@ -99,13 +99,13 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
                 id: 'e0',
                 date: '2023-12-31',
                 memo: 'Capital inicial',
-                isActive: true,
+
                 lines: [
                     { id: 'i0a', accountId: '1', debit: 10000, credit: 0 },
                     { id: 'i0b', accountId: '4', debit: 0, credit: 10000 },
                 ],
             },
-        ] as JournalEntry[]
+        ] as unknown as JournalEntry[]
 
         // No in-period entries, but ER shows a result of 5000
         const netIncomeFromER = 5000
@@ -137,13 +137,13 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
                     id: 'e0',
                     date: '2023-12-31',
                     memo: 'Capital',
-                    isActive: true,
+    
                     lines: [
                         { id: 'i0a', accountId: '1', debit: 1000, credit: 0 },
                         { id: 'i0b', accountId: '4', debit: 0, credit: 1000 },
                     ],
                 },
-            ] as JournalEntry[],
+            ] as unknown as JournalEntry[],
             periodStart: '2024-01-01',
             periodEnd: '2024-12-31',
         } as any)
@@ -167,7 +167,7 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
                 id: 'e0',
                 date: '2023-12-31',
                 memo: 'Capital',
-                isActive: true,
+
                 lines: [
                     { id: 'i0a', accountId: '1', debit: 1000, credit: 0 },
                     { id: 'i0b', accountId: '4', debit: 0, credit: 1000 },
@@ -178,14 +178,14 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
                 id: 'e-cierre',
                 date: '2024-12-31',
                 memo: 'Asiento de cierre',
-                isActive: true,
+
                 lines: [
                     { id: 'c1', accountId: '6', debit: 3000, credit: 0 },  // Debit Ventas
                     { id: 'c2', accountId: '7', debit: 0, credit: 1000 },  // Credit CMV
                     { id: 'c3', accountId: '3', debit: 0, credit: 2000 },  // Credit Resultado (net)
                 ],
             },
-        ] as JournalEntry[]
+        ] as unknown as JournalEntry[]
 
         const result = computeEEPN({
             accounts: accounts2,

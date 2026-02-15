@@ -34,7 +34,11 @@ import type { Account } from '../../core/models'
 import type { CostingMethod } from '../../core/inventario/types'
 import PerfeccionarModal from './PerfeccionarModal'
 import type { PerfeccionarSaveData } from './PerfeccionarModal'
+import PagoGastoModal from './components/PagoGastoModal'
+import type { VoucherIvaInfo } from './components/PagoGastoModal'
 import OperationsPageHeader from '../../components/OperationsPageHeader'
+import { OPS_MODULE, computeVoucherStatus, formatDocLabel } from '../../storage/ops'
+import type { VoucherWithStatus } from '../../storage/ops'
 
 // Account codes for control accounts
 const PROVEEDORES_CODE = '2.1.01.01'
@@ -131,6 +135,47 @@ export default function ProveedoresAcreedoresPage() {
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray(), [])
     const entries = useLiveQuery(() => db.entries.toArray(), [])
     const movements = useLiveQuery(() => db.bienesMovements.toArray(), [])
+
+    // Ops module entries (Gastos y Servicios) — for Acreedores mode integration
+    const opsEntries = useLiveQuery(
+        () => db.entries.where('sourceModule').equals(OPS_MODULE).toArray(),
+        [],
+    )
+    const opsVouchersWithStatus = useMemo((): VoucherWithStatus[] => {
+        if (!opsEntries) return []
+        const vouchers = opsEntries.filter(e => e.sourceType === 'vendor_invoice')
+        const payments = opsEntries.filter(e => e.sourceType === 'payment')
+        return vouchers.map(v => computeVoucherStatus(v, payments))
+    }, [opsEntries])
+
+    // PagoGastoModal state (for ops vouchers integration)
+    const [opsPagoModalOpen, setOpsPagoModalOpen] = useState(false)
+    const [opsPagoVoucherId, setOpsPagoVoucherId] = useState<string | undefined>()
+    const [opsPagoCounterparty, setOpsPagoCounterparty] = useState('')
+    const [opsPagoMaxAmount, setOpsPagoMaxAmount] = useState(0)
+    const [opsPagoIvaInfo, setOpsPagoIvaInfo] = useState<VoucherIvaInfo | undefined>()
+
+    const handleOpenOpsPago = useCallback((voucherId: string, counterparty: string, maxAmount: number) => {
+        setOpsPagoVoucherId(voucherId)
+        setOpsPagoCounterparty(counterparty)
+        setOpsPagoMaxAmount(maxAmount)
+        // Extract IVA info from the voucher
+        const voucher = opsEntries?.find(e => e.id === voucherId)
+        if (voucher) {
+            const meta = voucher.metadata || {}
+            const totals = meta.totals || { vat: 0, total: 0 }
+            setOpsPagoIvaInfo({
+                discriminateVat: !!meta.discriminateVat,
+                vatRate: meta.vatRate || 0,
+                voucherVat: totals.vat || 0,
+                voucherTotal: totals.total || 0,
+                docLetter: meta.doc?.docLetter || meta.doc?.type?.split('_')[1],
+            })
+        } else {
+            setOpsPagoIvaInfo(undefined)
+        }
+        setOpsPagoModalOpen(true)
+    }, [opsEntries])
 
     // Compute balances from ledger
     const balances = useMemo(() => {
@@ -566,6 +611,15 @@ export default function ProveedoresAcreedoresPage() {
                 />
             )}
 
+            {/* OPS Gastos y Servicios — block visible in Acreedores mode */}
+            {mode === 'acreedores' && opsVouchersWithStatus.length > 0 && (activeTab === 'dashboard' || activeTab === 'listado') && (
+                <OpsVouchersBlock
+                    vouchers={opsVouchersWithStatus}
+                    onPay={handleOpenOpsPago}
+                    onNavigateToGastos={() => navigate('/operaciones/gastos')}
+                />
+            )}
+
             {/* PERFECCIONAR MODAL */}
             <PerfeccionarModal
                 open={perfeccionarOpen}
@@ -582,6 +636,18 @@ export default function ProveedoresAcreedoresPage() {
                 destControlCodes={['2.1.01.02', '2.1.01.04', '2.1.01.05']}
                 onGoToPagos={(data) => handlePay(data.counterpartyName)}
             />
+
+            {/* PAGO GASTO MODAL (for ops vouchers) */}
+            {opsPagoModalOpen && accounts && opsPagoVoucherId && (
+                <PagoGastoModal
+                    accounts={accounts}
+                    voucherId={opsPagoVoucherId}
+                    counterpartyName={opsPagoCounterparty}
+                    maxAmount={opsPagoMaxAmount}
+                    voucherIvaInfo={opsPagoIvaInfo}
+                    onClose={() => { setOpsPagoModalOpen(false); setOpsPagoVoucherId(undefined) }}
+                />
+            )}
         </div>
     )
 }
@@ -1196,6 +1262,90 @@ function VencimientosTab({
                     )
                 })}
             </div>
+        </div>
+    )
+}
+
+// ================================================================
+// OPS INTEGRATION BLOCK
+// ================================================================
+
+function OpsVouchersBlock({
+    vouchers,
+    onPay,
+    onNavigateToGastos,
+}: {
+    vouchers: VoucherWithStatus[]
+    onPay: (voucherId: string, counterparty: string, maxAmount: number) => void
+    onNavigateToGastos: () => void
+}) {
+    const pendingVouchers = vouchers.filter(v => v.status !== 'CANCELADO')
+
+    return (
+        <div className="bg-white rounded-xl border border-teal-200 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-teal-100 bg-teal-50/50 flex justify-between items-center">
+                <div>
+                    <h3 className="font-display font-semibold text-sm text-slate-900">Comprobantes (Gastos y Servicios)</h3>
+                    <p className="text-[10px] text-slate-500">{pendingVouchers.length} pendiente(s) de pago</p>
+                </div>
+                <button
+                    onClick={onNavigateToGastos}
+                    className="text-teal-600 text-xs font-semibold hover:text-teal-700 flex items-center gap-1"
+                >
+                    Ver todos <CaretRight size={12} weight="bold" />
+                </button>
+            </div>
+            {pendingVouchers.length === 0 ? (
+                <div className="px-5 py-4 text-xs text-slate-400 text-center">Sin comprobantes pendientes.</div>
+            ) : (
+                <div className="divide-y divide-slate-100">
+                    {pendingVouchers.slice(0, 10).map(v => {
+                        const meta = v.entry.metadata || {}
+                        const cpName = meta.counterparty?.name
+                        const counterparty = cpName || 'Acreedores Varios'
+                        const docNumber = meta.doc?.number || ''
+                        const totals = meta.totals || { total: 0 }
+
+                        return (
+                            <div key={v.entry.id} className="px-5 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                <div className="flex items-center gap-3">
+                                    <Receipt size={16} className="text-teal-500" />
+                                    <div>
+                                        <div className="text-sm font-medium text-slate-900">{counterparty}</div>
+                                        <div className="text-[10px] text-slate-500">
+                                            {formatDocLabel(meta)}{docNumber ? ` #${docNumber}` : ''} &middot; {fmtDate(v.entry.date)}
+                                            {meta.dueDate && (
+                                                <span className="ml-1 text-slate-400">Vto: {fmtDate(meta.dueDate)}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <div className="text-right">
+                                        <div className="font-mono text-xs font-semibold tabular-nums">{fmtCurrency(v.remaining)}</div>
+                                        {v.totalPaid > 0 && (
+                                            <div className="text-[10px] text-slate-400">de {fmtCurrency(totals.total)}</div>
+                                        )}
+                                    </div>
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                        v.status === 'PARCIAL'
+                                            ? 'bg-blue-50 text-blue-600 border border-blue-200'
+                                            : 'bg-amber-50 text-amber-600 border border-amber-200'
+                                    }`}>
+                                        {v.status === 'PARCIAL' ? 'Parcial' : 'Pendiente'}
+                                    </span>
+                                    <button
+                                        onClick={() => onPay(v.entry.id, counterparty, v.remaining)}
+                                        className="text-teal-600 text-[10px] font-semibold px-2 py-1 rounded hover:bg-teal-50 transition-colors"
+                                    >
+                                        Pagar
+                                    </button>
+                                </div>
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
         </div>
     )
 }

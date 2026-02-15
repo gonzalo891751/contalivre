@@ -1,6 +1,75 @@
 # ContaLivre - AI Handoff Protocol
 
 ---
+## CHECKPOINT #OPS-GASTOS-MVP-F1
+**Fecha:** 2026-02-15
+**Estado:** MVP COMPLETADO — Gastos y Servicios + Integración Proveedores
+
+### Objetivo
+Implementar módulo operativo para gastos/servicios NO inventariables con:
+- Comprobantes FC A a Acreedores Varios con IVA/percepciones
+- Pagos parciales/totales vinculados 1:1 a comprobantes
+- Estado calculado (Pendiente/Parcial/Cancelado)
+- Asientos automáticos en Libro Diario (sourceModule='ops')
+- Integración con /operaciones/proveedores (modo Acreedores)
+
+### Archivos creados
+| Archivo | Propósito |
+|---|---|
+| `src/storage/ops.ts` | Storage helpers: CRUD vouchers/payments, status computation |
+| `src/pages/Operaciones/GastosServiciosPage.tsx` | Página principal con tabs Comprobantes/Pagos, detalle, CRUD |
+| `src/pages/Operaciones/components/ComprobanteGastoModal.tsx` | Modal FC A: conceptos multi-línea, IVA, percepciones, medios de pago |
+| `src/pages/Operaciones/components/PagoGastoModal.tsx` | Modal pago: vinculado a voucher, retenciones a depositar |
+
+### Archivos modificados
+| Archivo | Cambio |
+|---|---|
+| `src/App.tsx` | +import GastosServiciosPage + Route /operaciones/gastos |
+| `src/pages/OperacionesPage.tsx` | +tarjeta "Gastos y Servicios" en sección Pasivos |
+| `src/storage/journalSync.ts` | +case sourceModule='ops': cascade delete voucher+payments |
+| `src/pages/Operaciones/ProveedoresAcreedoresPage.tsx` | +bloque OpsVouchersBlock en modo Acreedores + PagoGastoModal |
+| `tests/repro_eepn.test.ts` | Fix: remove isActive + cast unknown (pre-existing build error) |
+
+### Modelo de datos
+- Sin tablas nuevas en Dexie — todo en `db.entries` con sourceModule='ops'
+- `sourceType: 'vendor_invoice'` — comprobante de gasto
+- `sourceType: 'payment'` — pago vinculado
+- `metadata.counterparty: { name, accountId }` — tercero
+- `metadata.totals: { net, vat, taxes, total }` — totales
+- `metadata.applyTo: { entryId, amount }` — vinculación pago→voucher (1:1)
+
+### Asiento generado (FC A Cta Cte)
+- Debe: Cuenta(s) de gasto × neto
+- Debe: IVA CF × IVA (si discrimina)
+- Debe: Percepciones sufridas × amount
+- Haber: Subcuenta tercero bajo Acreedores Varios (2.1.06.01) × total
+
+### Asiento generado (Pago)
+- Debe: Subcuenta tercero bajo Acreedores Varios × amount
+- Haber: Caja/Banco × (amount - retenciones)
+- Haber: Retenciones a depositar × amount
+
+### Decisiones de diseño
+1. **Pago 1:1**: cada pago vincula exactamente a 1 comprobante (simplifica cascada)
+2. **Cascada en journalSync**: borrar voucher borra automáticamente pagos vinculados
+3. **Estado calculado**: no persistido, se computa en UI (total - sum pagos)
+4. **Default Acreedores Varios**: usa findOrCreateChildAccountByName bajo 2.1.06.01
+5. **Tax accounts sin BienesSettings**: helper simplificado que usa ACCOUNT_FALLBACKS directamente
+6. **NO toca inventario**: toggle "Solo gasto sin stock" intacto
+
+### Validación
+- `npx tsc --noEmit` → 0 errores
+- `npx vite build` → OK (chunk warning pre-existente)
+- `npx vitest run` → 74/74 tests pass (incluyendo repro_eepn fix)
+
+### Pendientes (fuera de scope MVP)
+- NC A / ND A (iteración 2 — requiere manejo de signos/saldos a favor)
+- Cobros extraordinarios (ingresos no por ventas)
+- Aportes/retiros de socios (wizard separado)
+- Edición completa con regeneración de asiento (MVP solo edita memo/docNumber)
+- Reporte "Gastos por cuenta (mes)"
+
+---
 ## CHECKPOINT #PAYROLL-UX-RECIBOS-SYNC-F0
 **Fecha:** 2026-02-15
 **Estado:** DIAGNOSTICO COMPLETADO (FASE 0) - STOP antes de implementacion
