@@ -883,17 +883,33 @@ export default function MovementModalV3({
     }, [accounts, postAdjust.applyOn, postAdjustSplits])
 
     // FASE 1: Default contrapartida: Proveedores (compra) / Deudores por ventas (venta)
-    // Sets default account AND auto-fills amount when user hasn't touched splits
+    // Applies only for new movements while split is still "auto" (not manually touched).
     useEffect(() => {
         if (isEditing || !accounts || splits.length === 0) return
         if (splitsTouched) return // user manually modified splits
-        if (splits[0].accountId) return // already selected or initialData prefilled
+        // Respect explicit prefill when creating from a source that already provided paymentSplits.
+        if ((initialData?.paymentSplits?.length || 0) > 0) return
+        if (mainTab !== 'compra' && mainTab !== 'venta') return
+
         const isVenta = mainTab === 'venta'
         const targetCode = isVenta ? '1.1.02.01' : '2.1.01.01' // Deudores / Proveedores
-        const acc = accounts.find(a => a.code === targetCode)
-        if (!acc) return
-        setSplits(prev => prev.map((s, i) => (i === 0 ? { ...s, accountId: acc.id } : s)))
-    }, [accounts, mainTab, isEditing, splitsTouched])
+        const targetAcc = accounts.find(a => a.code === targetCode)
+        if (!targetAcc) return
+
+        const firstSplit = splits[0]
+        const currentAcc = firstSplit.accountId
+            ? accounts.find(a => a.id === firstSplit.accountId)
+            : null
+        const isAutoDefaultFromOtherTab = !!currentAcc
+            && (currentAcc.code === '1.1.02.01' || currentAcc.code === '2.1.01.01')
+            && currentAcc.code !== targetCode
+        const shouldApplyDefault = !firstSplit.accountId || isAutoDefaultFromOtherTab
+
+        if (!shouldApplyDefault) return
+        if (firstSplit.accountId === targetAcc.id) return
+
+        setSplits(prev => prev.map((s, i) => (i === 0 ? { ...s, accountId: targetAcc.id } : s)))
+    }, [accounts, mainTab, isEditing, splitsTouched, splits, initialData])
 
     // FASE 1: Auto-sync first split amount with totalFinal when not touched
     useEffect(() => {

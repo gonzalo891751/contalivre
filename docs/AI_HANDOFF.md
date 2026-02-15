@@ -1,7 +1,56 @@
 # ContaLivre - AI Handoff Protocol
 
 ---
+## CHECKPOINT #PAYROLL-MAPPING-HARDENING
+**Fecha:** 2026-02-15
+**Estado:** COMPLETADO - Auto-mapeo de Sueldos endurecido + ensure de cuentas laborales
 
+### Objetivo
+Corregir el auto-mapeo del wizard de Sueldos para evitar falsos positivos hacia cuentas de IVA y asegurar/crear automaticamente las cuentas laborales requeridas del plan generico.
+
+### Diagnostico (Root Cause)
+- `PAYROLL_ACCOUNT_FALLBACKS` usaba codigos de pasivo fiscal (`2.1.03.xx`) para mappings de sueldos, incluyendo `2.1.03.01` (IVA Debito Fiscal) como fallback para `sueldosAPagar`.
+- El wizard (`src/pages/Operaciones/payroll/OnboardingWizard.tsx`) usaba heuristica debil (code/name/includes) sin filtros negativos ni guardrails de grupo.
+- No existia un `ensure` explicito de cuentas payroll requeridas previo al autodetect.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/core/payroll/types.ts` | Correccion de `PAYROLL_ACCOUNT_FALLBACKS` a codigos laborales correctos (`4.5.01`, `4.5.02`, `2.1.02.01`, `2.1.02.02`, `2.1.02.03`, `1.1.03.11`) |
+| `src/storage/payroll.ts` | Nuevo resolver por specs estrictos + `autoDetectPayrollAccountMappings()` + `ensurePayrollRequiredAccounts()` idempotente con creacion minima de padres |
+| `src/pages/Operaciones/payroll/OnboardingWizard.tsx` | Flujo `Auto-detectar` = `ensure -> reload accounts -> detect`; boton de sobrescritura con confirm; warnings/banners de cuentas creadas y faltantes; sin pisar mapeo manual salvo confirm explicita |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+1. **Specs estrictos de payroll**: se definieron reglas por key con prioridad por codigo exacto y `codePrefix` esperado por grupo contable.
+2. **Filtros negativos anti-falsos positivos**: para pasivos de sueldos/retenciones se excluyen nombres con `iva`, `impuesto`, `debito fiscal`, `terceros`, etc.
+3. **No adivinar mal**: si no hay match confiable, el resolver devuelve `null` y el wizard muestra advertencia de faltante.
+4. **Ensure idempotente de cuentas requeridas**: `ensurePayrollRequiredAccounts()` verifica por codigo exacto y luego por nombre normalizado; crea cuentas faltantes y la cadena minima de padres soportada (`2.1.02`, `4.5`, `1.1.03.10` cuando aplica).
+5. **Reuso de helper de creacion existente**: alta de cuentas via `createAccount()` (sin inserciones ad-hoc).
+6. **Integracion UX en wizard**:
+- `Auto-detectar`: completa sin sobrescribir seleccion manual.
+- `Re-autodetectar y sobrescribir`: requiere confirmacion.
+- Banner: cuentas laborales creadas.
+- Warning: cuentas no encontradas para mapeo.
+7. **Defaults seguros primer ingreso**: en `useEffect` del wizard (fuera de liveQuery), solo si onboarding incompleto y mapeo requerido incompleto.
+
+### Decisiones Tecnicas
+- Se centralizo la logica de deteccion en `storage/payroll.ts` para que wizard y resolucion operativa compartan criterios contables.
+- Se mantuvo compatibilidad hacia atras: mappings guardados por usuario tienen prioridad; el auto-detect normal no pisa valores existentes.
+- Se evito cualquier write dentro de `useLiveQuery/liveQuery`; los writes ocurren solo en handlers/effects del wizard.
+
+### Validacion
+- `npx tsc --noEmit`: **ERROR** por tests preexistentes en `tests/repro_eepn.test.ts` (campo `isActive` no pertenece a `JournalEntry`). No relacionado a este cambio.
+- `npm run build`: **ERROR** por el mismo bloqueo preexistente de `tests/repro_eepn.test.ts`.
+
+### QA Manual Sugerido
+- [ ] Abrir `/operaciones/deudas-sociales` -> wizard -> paso `Mapeo de Cuentas`.
+- [ ] Verificar `Sueldos a Pagar` mapea a `2.1.02.01` y nunca a `2.1.03.01 (IVA Debito Fiscal)`.
+- [ ] Click `Auto-detectar` -> mantiene/completa mappings correctos sin sobrescribir manuales.
+- [ ] Borrar cuentas laborales en storage y repetir `Auto-detectar` -> se recrean (`2.1.02.01/02/03`, `4.5.01/02`, `1.1.03.11`) y aparecen en selector.
+- [ ] Probar `Re-autodetectar y sobrescribir` -> pide confirmacion y aplica reset del mapping.
+
+---
 ## CHECKPOINT #DIARIO-CUENTA-COLECTIVA
 **Fecha:** 2026-02-15
 **Estado:** COMPLETADO - Vista formal en Libro Diario + toggle formal/analítica
@@ -7121,3 +7170,39 @@ Corregir crash (pantalla blanca) al entrar a /operaciones/bienes-uso.
 - **Consumidor Final persistido**: Actualmente se usa como string "Consumidor Final" en el counterparty. Si se necesita un tercero real persistido (para reportes, AFIP, etc), se deberia crear automaticamente como cuenta hija de Deudores por Ventas en el primer uso.
 - **Resumen diario tipo cierre Z**: Para kioscos/minoristas, implementar un resumen diario que agrupe ventas a Consumidor Final.
 - **Test unitario para parser**: Agregar tests para `parseAmountExpression` con edge cases (division por cero, parentesis desbalanceados, numeros negativos).
+
+---
+
+## CHECKPOINT #INV-MODAL-VENTA-DEFAULT-DEUDORES-2026-02-15
+**Fecha:** 2026-02-15
+**Estado:** COMPLETADO - Fix de default en Imputacion del cobro (Venta)
+
+### Objetivo
+Corregir el default de la primera linea de `Imputacion del cobro` en `Registrar Movimiento` para que en **Venta** use `1.1.02.01 - Deudores por ventas` (en lugar de Proveedores), manteniendo **Compra** en `2.1.01.01 - Proveedores`.
+
+### Causa raiz
+- El `useEffect` de default de `splits` corria primero con `mainTab='compra'` y seteaba Proveedores.
+- Al cambiar a `venta`, no re-aplicaba default porque cortaba con `if (splits[0].accountId) return`, aun cuando el split no habia sido tocado manualmente.
+
+### Archivos tocados
+| Archivo | Cambio |
+|---|---|
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Ajuste minimo del `useEffect` de default de contrapartida para re-evaluar por tab sin pisar manual/edit ni prefills explicitos |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios aplicados
+1. El default ahora se evalua solo en `compra/venta`, en `create`, con `splitsTouched=false`.
+2. Se mantiene respeto por `initialData.paymentSplits` cuando vienen predefinidos (no override).
+3. Si el primer split esta vacio, aplica el default segun tab:
+- Venta -> `1.1.02.01` (Deudores por ventas)
+- Compra -> `2.1.01.01` (Proveedores)
+4. Si el primer split tiene un default automatico del tab opuesto (Deudores/Proveedores) y no hubo toque manual, lo corrige al cambiar de tab.
+5. Si el usuario eligio otra cuenta manualmente (dirty), no se pisa.
+6. En modo edicion, no se modifica la cuenta guardada.
+
+### Validacion
+- Pendiente de QA manual en flujo UI local (`npm run dev`) para confirmar:
+  - Nuevo movimiento -> Venta: default Deudores por ventas.
+  - Nuevo movimiento -> Compra: default Proveedores.
+  - Cambio manual de cuenta + cambio de tabs: no override.
+  - Editar movimiento existente: sin cambios en cuenta guardada.
