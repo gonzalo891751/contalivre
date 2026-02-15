@@ -17,6 +17,7 @@ import {
     Info,
     Clock,
     Armchair,
+    Notebook,
 } from '@phosphor-icons/react'
 import { db } from '../storage/db'
 import { calculateAllValuations } from '../core/inventario/costing'
@@ -726,6 +727,35 @@ export default function OperacionesPage() {
                             </div>
                         </div>
                     </div>
+                    {/* Gastos y Servicios */}
+                    <div
+                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-teal-400 transition-all group cursor-pointer"
+                        onClick={() => navigate('/operaciones/gastos')}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/gastos')}
+                        aria-label="Ir a modulo de Gastos y Servicios"
+                    >
+                        <div className="flex justify-between items-start mb-3">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center text-xl group-hover:bg-teal-100 transition-colors">
+                                    <Notebook weight="duotone" size={24} />
+                                </div>
+                                <span className="font-semibold text-slate-900">Gastos y Servicios</span>
+                            </div>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-teal-50 text-teal-600 border border-teal-100">Pasivo</span>
+                        </div>
+                        <div className="flex justify-between items-end">
+                            <div>
+                                <div className="text-xs text-slate-500">Comprobantes no inventariables</div>
+                                <div className="font-mono text-lg font-bold text-slate-900">Gestionar</div>
+                            </div>
+                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-teal-500 group-hover:text-white transition-all">
+                                <CaretRight weight="bold" size={16} />
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Deudas Sociales / Sueldos */}
                     <div
                         className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-violet-400 transition-all group cursor-pointer"
