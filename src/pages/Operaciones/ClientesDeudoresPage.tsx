@@ -11,7 +11,6 @@ import React, { useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-    ArrowLeft,
     MagnifyingGlass,
     Plus,
     Invoice,
@@ -33,6 +32,7 @@ import type { Account } from '../../core/models'
 import type { CostingMethod } from '../../core/inventario/types'
 import PerfeccionarModal from './PerfeccionarModal'
 import type { PerfeccionarSaveData } from './PerfeccionarModal'
+import OperationsPageHeader from '../../components/OperationsPageHeader'
 
 // Account codes for control accounts (Activo - Créditos por ventas)
 const DEUDORES_CODE = '1.1.02.01'
@@ -450,24 +450,10 @@ export default function ClientesDeudoresPage() {
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 fade-in">
             {/* HEADER */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                    <button
-                        onClick={() => navigate('/operaciones')}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shadow-sm"
-                    >
-                        <ArrowLeft size={14} weight="bold" /> Volver a Operaciones
-                    </button>
-                    <nav className="hidden md:flex text-slate-500 text-xs items-center gap-2">
-                        <span className="text-slate-400">|</span>
-                        <span>Operaciones</span>
-                        <CaretRight size={10} className="text-slate-400" />
-                        <span className="font-medium text-slate-900">Clientes</span>
-                    </nav>
-                </div>
-
-                <div className="flex items-center gap-4">
-                    {/* CTA */}
+            <OperationsPageHeader
+                title={moduleTitle}
+                subtitle={moduleDesc}
+                rightSlot={
                     <button
                         onClick={handleNewSale}
                         className="btn-primary px-4 py-2 rounded-md font-medium text-xs flex items-center gap-2 shadow-sm"
@@ -475,32 +461,26 @@ export default function ClientesDeudoresPage() {
                         <Plus size={14} weight="bold" />
                         {ctaLabel}
                     </button>
-                </div>
-            </div>
-
-            {/* TITLE + KPIs */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                    <h1 className="font-display font-bold text-3xl text-slate-900">{moduleTitle}</h1>
-                    <p className="text-slate-500 mt-1">{moduleDesc}</p>
-                </div>
-                <div className="flex gap-4">
-                    <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
-                        <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">
-                            Saldo a Cobrar <span className="text-[9px] text-slate-300 ml-1">(Mayor)</span>
+                }
+                badges={
+                    <div className="flex gap-4">
+                        <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
+                            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">
+                                Saldo a Cobrar <span className="text-[9px] text-slate-300 ml-1">(Mayor)</span>
+                            </div>
+                            <div className="font-mono text-lg font-bold text-slate-900 tabular-nums">
+                                {fmtCurrency(totalReceivable)}
+                            </div>
                         </div>
-                        <div className="font-mono text-lg font-bold text-slate-900 tabular-nums">
-                            {fmtCurrency(totalReceivable)}
-                        </div>
-                    </div>
-                    <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm border-l-4 border-l-orange-400">
-                        <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">Vence esta semana</div>
-                        <div className="font-mono text-lg font-bold text-orange-600 tabular-nums">
-                            {fmtCurrency(dueThisWeek)}
+                        <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm border-l-4 border-l-orange-400">
+                            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">Vence esta semana</div>
+                            <div className="font-mono text-lg font-bold text-orange-600 tabular-nums">
+                                {fmtCurrency(dueThisWeek)}
+                            </div>
                         </div>
                     </div>
-                </div>
-            </div>
+                }
+            />
 
             {/* TABS */}
             <div className="border-b border-slate-200 flex gap-6 overflow-x-auto">

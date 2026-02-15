@@ -9,10 +9,8 @@
  */
 
 import { useState, useMemo, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-    ArrowLeft,
     Plus,
     MagnifyingGlass,
     Car,
@@ -33,7 +31,10 @@ import {
     CurrencyCircleDollar,
     Code,
     Stamp,
+    Lightning,
+    ArrowsClockwise,
 } from '@phosphor-icons/react'
+import OperationsPageHeader from '../../components/OperationsPageHeader'
 import { db } from '../../storage/db'
 import type { JournalEntry } from '../../core/models'
 import {
@@ -44,6 +45,10 @@ import {
     calculateFixedAssetDepreciationWithEvents,
     generateAmortizationEntry,
     generateDepreciationSchedule,
+    generateMonthlyDepreciationSchedule,
+    getAmortizationContabilizada,
+    syncMonthlyAmortizationEntry,
+    syncPendingAmortizationEntries,
     buildFixedAssetOpeningEntry,
     syncFixedAssetOpeningEntry,
     syncFixedAssetAcquisitionEntry,
@@ -126,6 +131,8 @@ const EVENT_TYPE_LABELS: Record<FixedAssetEventType, string> = {
     DAMAGE: 'Deterioro',
 }
 
+const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100
+
 const ENTRY_STATUS_LABELS: Record<'generated' | 'pending' | 'error', string> = {
     generated: 'Generado',
     pending: 'Pendiente',
@@ -133,7 +140,6 @@ const ENTRY_STATUS_LABELS: Record<'generated' | 'pending' | 'error', string> = {
 }
 
 export default function BienesUsoPage() {
-    const navigate = useNavigate()
     const { year: periodYear } = usePeriodYear()
     const periodId = String(periodYear)
 
@@ -157,6 +163,8 @@ export default function BienesUsoPage() {
     const [rt6Preview, setRT6Preview] = useState<Omit<JournalEntry, 'id'> | null>(null)
     const [rt6PreviewError, setRT6PreviewError] = useState<string | null>(null)
     const [rt6Info, setRT6Info] = useState<Awaited<ReturnType<typeof calculateRT6Adjustment>> | null>(null)
+    const [planillaView, setPlanillaView] = useState<'mensual' | 'anual'>('mensual')
+    const [generatingEntries, setGeneratingEntries] = useState(false)
 
     // Data queries
     const assets = useLiveQuery(() => getAllFixedAssets(periodId), [periodId])
@@ -264,6 +272,36 @@ export default function BienesUsoPage() {
             .filter(event => event.assetId === selectedAssetId)
             .sort((a, b) => a.date.localeCompare(b.date))
     }, [events, selectedAssetId])
+
+    // Contabilizado: sum of posted entries (opening + amortization)
+    const contabilizadoInfo = useLiveQuery(
+        async () => {
+            if (!selectedAsset) return null
+            return getAmortizationContabilizada(selectedAsset)
+        },
+        [selectedAsset?.id, selectedAsset?.linkedJournalEntryIds?.length, selectedAsset?.openingJournalEntryId]
+    )
+
+    // Monthly depreciation schedule (devengado by month)
+    const monthlySchedule = useMemo(() => {
+        if (!selectedAsset) return []
+        return generateMonthlyDepreciationSchedule(selectedAsset, periodYear)
+    }, [selectedAsset, periodYear])
+
+    // Devengado total = last month's accumulated (or acumuladaCierre from calc)
+    const devengadoTotal = useMemo(() => {
+        if (!selectedAsset) return 0
+        const calc = calculateFixedAssetDepreciationWithEvents(
+            selectedAsset, periodYear, eventsByAsset.get(selectedAsset.id) || []
+        )
+        return calc.acumuladaCierre
+    }, [selectedAsset, periodYear, eventsByAsset])
+
+    // Pendiente = devengado - contabilizado
+    const pendienteAmount = useMemo(() => {
+        if (!contabilizadoInfo) return 0
+        return Math.max(0, round2(devengadoTotal - contabilizadoInfo.total))
+    }, [devengadoTotal, contabilizadoInfo])
 
     // Determine if asset is PURCHASE or OPENING type
     const assetOriginType = useMemo(() => {
@@ -463,11 +501,26 @@ export default function BienesUsoPage() {
     }
 
     const handleDeleteAsset = async (asset: FixedAsset) => {
-        if (!confirm(`¿Eliminar "${asset.name}"? Esta accion no se puede deshacer.`)) return
+        // Build a descriptive confirmation message
+        const linkedCount = (asset.linkedJournalEntryIds?.length || 0)
+            + (asset.openingJournalEntryId ? 1 : 0)
+            + (asset.acquisitionJournalEntryId ? 1 : 0)
+            + (asset.rt6JournalEntryId ? 1 : 0)
+        const warning = linkedCount > 0
+            ? `\n\nSe eliminaran tambien ${linkedCount} asiento(s) vinculado(s).`
+            : ''
+        if (!confirm(`¿Eliminar "${asset.name}"?${warning}\n\nEsta accion no se puede deshacer.`)) return
 
         const result = await deleteFixedAsset(asset.id)
         if (result.success) {
-            showToast('Bien eliminado correctamente', 'success')
+            const parts = ['Bien eliminado']
+            if (result.deletedEntries && result.deletedEntries > 0) {
+                parts.push(`${result.deletedEntries} asiento(s)`)
+            }
+            if (result.deletedEvents && result.deletedEvents > 0) {
+                parts.push(`${result.deletedEvents} evento(s)`)
+            }
+            showToast(parts.join(' + '), 'success')
             handleBackToList()
         } else {
             showToast(result.error || 'Error al eliminar', 'error')
@@ -577,6 +630,55 @@ export default function BienesUsoPage() {
             showToast('Ajuste RT6 generado correctamente', 'success')
         } else {
             showToast(result.error || 'Error al generar ajuste RT6', 'error')
+        }
+    }
+
+    const handleGenerateAnnualAmortEntry = async () => {
+        if (!selectedAsset) return
+        setGeneratingEntries(true)
+        try {
+            const result = await generateAmortizationEntry(selectedAsset, periodYear)
+            if (result.success) {
+                showToast('Asiento anual de amortizacion generado', 'success')
+            } else {
+                showToast(result.error || 'Error al generar asiento', 'error')
+            }
+        } finally {
+            setGeneratingEntries(false)
+        }
+    }
+
+    const handleGenerateMonthlyAmortEntry = async (month: number, amount: number) => {
+        if (!selectedAsset) return
+        setGeneratingEntries(true)
+        try {
+            const result = await syncMonthlyAmortizationEntry(selectedAsset, periodYear, month, amount)
+            if (result.success && result.status === 'generated') {
+                showToast(`Asiento de amortizacion generado (mes ${month})`, 'success')
+            } else if (result.status === 'skipped') {
+                showToast('El asiento ya existe para este mes', 'error')
+            } else {
+                showToast(result.error || 'Error al generar asiento', 'error')
+            }
+        } finally {
+            setGeneratingEntries(false)
+        }
+    }
+
+    const handleGenerateAllPendingEntries = async () => {
+        if (!selectedAsset) return
+        setGeneratingEntries(true)
+        try {
+            const result = await syncPendingAmortizationEntries(selectedAsset, periodYear)
+            if (result.success && result.entriesCreated > 0) {
+                showToast(`${result.entriesCreated} asientos generados por ${formatCurrency(result.totalAmount)}`, 'success')
+            } else if (result.entriesCreated === 0) {
+                showToast('No hay asientos pendientes de generar', 'error')
+            } else {
+                showToast(result.error || 'Error al generar asientos', 'error')
+            }
+        } finally {
+            setGeneratingEntries(false)
         }
     }
 
@@ -806,7 +908,7 @@ export default function BienesUsoPage() {
                         >
                             {tab === 'resumen' && 'Resumen'}
                             {tab === 'planilla' && 'Planilla'}
-                            {tab === 'asiento' && 'Asiento Anual'}
+                            {tab === 'asiento' && 'Asientos'}
                             {tab === 'eventos' && 'Eventos'}
                         </button>
                     ))}
@@ -815,7 +917,7 @@ export default function BienesUsoPage() {
                 {/* Tab Content */}
                 {activeTab === 'resumen' && (
                     <div className="space-y-6">
-                        {/* KPIs */}
+                        {/* KPIs - Devengado vs Contabilizado */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <div className="bg-white rounded-xl border border-slate-200 p-4">
                                 <div className="text-xs text-slate-500 mb-1">Valor Origen</div>
@@ -824,24 +926,76 @@ export default function BienesUsoPage() {
                                 </div>
                             </div>
                             <div className="bg-white rounded-xl border border-slate-200 p-4">
-                                <div className="text-xs text-slate-500 mb-1">Amort. Acumulada</div>
+                                <div className="text-xs text-slate-500 mb-1">Amort. Devengada</div>
                                 <div className="font-mono font-semibold text-lg text-red-600">
                                     {formatCurrency(displayAccum)}
                                 </div>
+                                <div className="text-[10px] text-slate-400 mt-1">
+                                    Corte: 31/12/{periodYear}
+                                </div>
                             </div>
                             <div className="bg-white rounded-xl border border-slate-200 p-4">
-                                <div className="text-xs text-slate-500 mb-1">Valor Residual</div>
-                                <div className="font-mono font-semibold text-lg text-slate-600">
-                                    {formatCurrency(calc.valorResidual)}
+                                <div className="text-xs text-slate-500 mb-1">Amort. Contabilizada</div>
+                                <div className="font-mono font-semibold text-lg text-blue-600">
+                                    {contabilizadoInfo ? formatCurrency(contabilizadoInfo.total) : '—'}
                                 </div>
+                                {pendienteAmount > 0 && (
+                                    <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200">
+                                        <Warning size={10} className="text-amber-600" weight="fill" />
+                                        <span className="text-[10px] font-bold text-amber-700">
+                                            Pend: {formatCurrency(pendienteAmount)}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                             <div className="bg-white rounded-xl border border-slate-200 p-4">
                                 <div className="text-xs text-slate-500 mb-1">Valor Libro (NBV)</div>
                                 <div className="font-mono font-semibold text-lg text-emerald-600">
                                     {formatCurrency(displayNBV)}
                                 </div>
+                                <div className="text-[10px] text-slate-400 mt-0.5">devengado</div>
+                                {contabilizadoInfo && contabilizadoInfo.total !== devengadoTotal && (
+                                    <div className="font-mono text-sm text-slate-500 mt-0.5">
+                                        {formatCurrency(displayCost - (contabilizadoInfo?.total ?? 0))}
+                                        <span className="text-[10px] text-slate-400 ml-1">contable</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
+
+                        {/* Pendiente Banner + CTAs */}
+                        {pendienteAmount > 0 && calc.amortizacionEjercicio > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <div className="flex items-start gap-3">
+                                    <Warning size={20} className="text-amber-600 flex-shrink-0 mt-0.5" weight="fill" />
+                                    <div>
+                                        <div className="font-semibold text-amber-900 text-sm">
+                                            Amortizacion pendiente de contabilizar
+                                        </div>
+                                        <div className="text-xs text-amber-700 mt-0.5">
+                                            Devengada: {formatCurrency(devengadoTotal)} · Contabilizada: {formatCurrency(contabilizadoInfo?.total ?? 0)} · Pendiente: {formatCurrency(pendienteAmount)}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 flex-shrink-0">
+                                    <button
+                                        onClick={handleGenerateAllPendingEntries}
+                                        disabled={generatingEntries}
+                                        className="px-3 py-1.5 text-xs font-semibold bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1.5"
+                                    >
+                                        <Lightning size={14} weight="fill" />
+                                        Generar asientos mensuales
+                                    </button>
+                                    <button
+                                        onClick={handleGenerateAnnualAmortEntry}
+                                        disabled={generatingEntries}
+                                        className="px-3 py-1.5 text-xs font-medium bg-white text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 disabled:opacity-50"
+                                    >
+                                        Asiento anual
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Progress */}
                         <div className="bg-white rounded-xl border border-slate-200 p-6">
@@ -884,49 +1038,180 @@ export default function BienesUsoPage() {
 
                 {activeTab === 'planilla' && (
                     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                        <div className="p-4 border-b border-slate-100">
+                        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <h3 className="font-semibold text-slate-900">Planilla de Amortizaciones</h3>
+                            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
+                                <button
+                                    onClick={() => setPlanillaView('mensual')}
+                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                                        planillaView === 'mensual'
+                                            ? 'bg-white text-slate-900 shadow-sm'
+                                            : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                                >
+                                    Mensual
+                                </button>
+                                <button
+                                    onClick={() => setPlanillaView('anual')}
+                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                                        planillaView === 'anual'
+                                            ? 'bg-white text-slate-900 shadow-sm'
+                                            : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                                >
+                                    Anual
+                                </button>
+                            </div>
                         </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="bg-slate-50 text-slate-600">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left font-medium">Año</th>
-                                        <th className="px-4 py-3 text-right font-medium">Base Amortizable</th>
-                                        <th className="px-4 py-3 text-right font-medium">Cuota Anual</th>
-                                        <th className="px-4 py-3 text-right font-medium">Total Acumulado</th>
-                                        <th className="px-4 py-3 text-right font-medium">Valor Residual</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {schedule.map(row => (
-                                        <tr
-                                            key={row.year}
-                                            className={row.isCurrent ? 'bg-blue-50' : ''}
-                                        >
-                                            <td className="px-4 py-3 font-medium">
-                                                {row.year}
-                                                {row.isCurrent && (
-                                                    <span className="ml-2 text-xs text-blue-600">(Actual)</span>
+
+                        {/* Monthly View */}
+                        {planillaView === 'mensual' && (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-slate-50 text-slate-600">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left font-medium">Mes</th>
+                                            <th className="px-4 py-3 text-right font-medium">Devengado Mes</th>
+                                            <th className="px-4 py-3 text-right font-medium">Dev. Acumulado</th>
+                                            <th className="px-4 py-3 text-right font-medium">Contab. Acum.</th>
+                                            <th className="px-4 py-3 text-right font-medium">Pendiente</th>
+                                            <th className="px-4 py-3 text-center font-medium">Estado</th>
+                                            <th className="px-4 py-3 text-center font-medium"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {monthlySchedule.map(row => {
+                                            const periodStr = `${row.year}-${String(row.month).padStart(2, '0')}`
+                                            const postedForMonth = contabilizadoInfo?.entries.filter(
+                                                e => e.type === 'amortization' && e.period === periodStr
+                                            ) ?? []
+                                            const postedAmount = postedForMonth.reduce((s, e) => s + e.amount, 0)
+                                            const monthPendiente = round2(Math.max(0, row.devengadoMes - postedAmount))
+                                            const isPosted = postedAmount >= row.devengadoMes - 0.01 && row.devengadoMes > 0
+                                            return (
+                                                <tr key={row.month} className={row.devengadoMes > 0 && !isPosted ? 'bg-amber-50/30' : ''}>
+                                                    <td className="px-4 py-2.5 font-medium text-slate-800">
+                                                        {row.label}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-right font-mono text-slate-700">
+                                                        {row.devengadoMes > 0 ? formatCurrency(row.devengadoMes) : '—'}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-right font-mono text-slate-700">
+                                                        {formatCurrency(row.devengadoAcumulado)}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-right font-mono text-blue-600">
+                                                        {postedAmount > 0 ? formatCurrency(postedAmount) : '—'}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-right font-mono">
+                                                        {monthPendiente > 0 ? (
+                                                            <span className="text-amber-600 font-semibold">{formatCurrency(monthPendiente)}</span>
+                                                        ) : row.devengadoMes > 0 ? (
+                                                            <span className="text-emerald-600">0</span>
+                                                        ) : '—'}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-center">
+                                                        {row.devengadoMes > 0 && (
+                                                            isPosted ? (
+                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                                                    <CheckCircle size={10} weight="fill" /> Posteado
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100">
+                                                                    <Clock size={10} weight="fill" /> Pendiente
+                                                                </span>
+                                                            )
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-center">
+                                                        {row.devengadoMes > 0 && !isPosted && (
+                                                            <button
+                                                                onClick={() => handleGenerateMonthlyAmortEntry(row.month, row.devengadoMes)}
+                                                                disabled={generatingEntries}
+                                                                className="px-2 py-1 text-[10px] font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                                            >
+                                                                Generar
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            )
+                                        })}
+                                    </tbody>
+                                    <tfoot className="bg-slate-50 font-semibold text-sm">
+                                        <tr>
+                                            <td className="px-4 py-3">Total {periodYear}</td>
+                                            <td className="px-4 py-3 text-right font-mono">
+                                                {formatCurrency(monthlySchedule.reduce((s, r) => s + r.devengadoMes, 0))}
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-mono">
+                                                {monthlySchedule.length > 0 ? formatCurrency(monthlySchedule[11].devengadoAcumulado) : '—'}
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-mono text-blue-600">
+                                                {contabilizadoInfo ? formatCurrency(contabilizadoInfo.total) : '—'}
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-mono text-amber-600">
+                                                {pendienteAmount > 0 ? formatCurrency(pendienteAmount) : '0'}
+                                            </td>
+                                            <td colSpan={2} className="px-4 py-3 text-center">
+                                                {pendienteAmount > 0 && (
+                                                    <button
+                                                        onClick={handleGenerateAllPendingEntries}
+                                                        disabled={generatingEntries}
+                                                        className="px-3 py-1 text-xs font-semibold bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1 mx-auto"
+                                                    >
+                                                        <ArrowsClockwise size={12} /> Generar todos
+                                                    </button>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 text-right font-mono">
-                                                {formatCurrency(row.baseAmortizable)}
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-mono">
-                                                {formatCurrency(row.cuotaAnual)}
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-mono">
-                                                {formatCurrency(row.acumulado)}
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-mono">
-                                                {formatCurrency(row.valorResidual)}
-                                            </td>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* Annual View (original) */}
+                        {planillaView === 'anual' && (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-slate-50 text-slate-600">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left font-medium">Año</th>
+                                            <th className="px-4 py-3 text-right font-medium">Base Amortizable</th>
+                                            <th className="px-4 py-3 text-right font-medium">Cuota Anual</th>
+                                            <th className="px-4 py-3 text-right font-medium">Total Acumulado</th>
+                                            <th className="px-4 py-3 text-right font-medium">Valor Residual</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {schedule.map(row => (
+                                            <tr
+                                                key={row.year}
+                                                className={row.isCurrent ? 'bg-blue-50' : ''}
+                                            >
+                                                <td className="px-4 py-3 font-medium">
+                                                    {row.year}
+                                                    {row.isCurrent && (
+                                                        <span className="ml-2 text-xs text-blue-600">(Actual)</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-mono">
+                                                    {formatCurrency(row.baseAmortizable)}
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-mono">
+                                                    {formatCurrency(row.cuotaAnual)}
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-mono">
+                                                    {formatCurrency(row.acumulado)}
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-mono">
+                                                    {formatCurrency(row.valorResidual)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -1259,56 +1544,41 @@ export default function BienesUsoPage() {
             )}
 
             {/* Header */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-                <div className="flex items-center gap-4">
-                    <button
-                        onClick={viewMode === 'detail' ? handleBackToList : () => navigate('/operaciones')}
-                        className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                    >
-                        <ArrowLeft size={20} />
-                    </button>
-                    <div>
-                        <h1 className="font-display font-bold text-2xl text-slate-900">
-                            {viewMode === 'detail' && selectedAsset
-                                ? selectedAsset.name
-                                : 'Bienes de Uso'}
-                        </h1>
-                        <p className="text-sm text-slate-500">
-                            {viewMode === 'detail'
-                                ? 'Detalle del bien'
-                                : 'Activos fijos, amortizaciones y ajuste por inflacion'}
-                        </p>
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                    {/* RT6 Toggle */}
-                    <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-slate-200">
-                        <span className="text-xs font-medium text-slate-600">Moneda Homogenea (RT6)</span>
-                        <button
-                            onClick={() => setRt6Enabled(!rt6Enabled)}
-                            className={`relative w-10 h-5 rounded-full transition-colors ${
-                                rt6Enabled ? 'bg-blue-600' : 'bg-slate-300'
-                            }`}
-                        >
-                            <span
-                                className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
-                                    rt6Enabled ? 'translate-x-5' : ''
+            <OperationsPageHeader
+                title={viewMode === 'detail' && selectedAsset ? selectedAsset.name : 'Bienes de Uso'}
+                subtitle={viewMode === 'detail' ? 'Detalle del bien' : 'Activos fijos, amortizaciones y ajuste por inflacion'}
+                backLabel={viewMode === 'detail' ? 'Bienes de Uso' : 'Operaciones'}
+                onBack={viewMode === 'detail' ? handleBackToList : undefined}
+                rightSlot={
+                    <>
+                        {/* RT6 Toggle */}
+                        <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-slate-200">
+                            <span className="text-xs font-medium text-slate-600">Moneda Homogenea (RT6)</span>
+                            <button
+                                onClick={() => setRt6Enabled(!rt6Enabled)}
+                                className={`relative w-10 h-5 rounded-full transition-colors ${
+                                    rt6Enabled ? 'bg-blue-600' : 'bg-slate-300'
                                 }`}
-                            />
-                        </button>
-                    </div>
+                            >
+                                <span
+                                    className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                                        rt6Enabled ? 'translate-x-5' : ''
+                                    }`}
+                                />
+                            </button>
+                        </div>
 
-                    {viewMode === 'list' && (
-                        <button
-                            onClick={handleOpenCreateModal}
-                            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-500 hover:to-emerald-400 text-white rounded-lg font-semibold shadow-md flex items-center gap-2"
-                        >
-                            <Plus size={18} /> Nuevo Bien
-                        </button>
-                    )}
-                </div>
-            </div>
+                        {viewMode === 'list' && (
+                            <button
+                                onClick={handleOpenCreateModal}
+                                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-500 hover:to-emerald-400 text-white rounded-lg font-semibold shadow-md flex items-center gap-2"
+                            >
+                                <Plus size={18} /> Nuevo Bien
+                            </button>
+                        )}
+                    </>
+                }
+            />
 
             {/* RT6 Warning */}
             {rt6Enabled && indices.length === 0 && (

@@ -2,14 +2,18 @@ import { useState, useMemo } from 'react'
 import ImportAsientosUX from '../components/ImportAsientosUX'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { createEntry, getTodayISO, createEmptyLine } from '../storage/entries'
-import { getPostableAccounts } from '../storage/accounts'
+import { getAllAccounts } from '../storage/accounts'
 import { validateEntry, sumDebits, sumCredits } from '../core/validation'
 import type { EntryLine, JournalEntry } from '../core/models'
 import MobileAsientosGrid from '../ui/MobileAsientosGrid'
 import MobileAsientosRegistrados from '../ui/MobileAsientosRegistrados'
 
 export default function AsientosMobile() {
-    const accounts = useLiveQuery(() => getPostableAccounts())
+    const allAccounts = useLiveQuery(() => getAllAccounts())
+    const accounts = useMemo(
+        () => (allAccounts || []).filter(a => !a.isHeader),
+        [allAccounts]
+    )
 
     // Form state
     const [date, setDate] = useState(getTodayISO())
@@ -94,7 +98,7 @@ export default function AsientosMobile() {
     }
 
     // Loading state
-    if (!accounts) {
+    if (!allAccounts) {
         return (
             <div style={{
                 display: 'flex',
@@ -135,7 +139,7 @@ export default function AsientosMobile() {
                 saveSuccess={saveSuccess}
                 saveError={saveError}
             />
-            <MobileAsientosRegistrados accounts={accounts} />
+            <MobileAsientosRegistrados accounts={allAccounts || []} />
 
 
         </div>

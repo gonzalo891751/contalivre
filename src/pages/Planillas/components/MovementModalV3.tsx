@@ -67,6 +67,17 @@ const finalFromNet = (net: number, rate: number): number => {
     return round2(net * (1 + rate / 100))
 }
 
+/** Select all text on focus for numeric inputs (avoids "0 pegado" issue) */
+const selectOnFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    setTimeout(() => e.target.select(), 0)
+}
+
+/** Inline validation error message */
+const FieldError = ({ msg }: { msg?: string }) => {
+    if (!msg) return null
+    return <p className="text-[11px] text-red-500 mt-0.5">{msg}</p>
+}
+
 import type { Account, JournalEntry } from '../../../core/models'
 import AccountSearchSelect from '../../../ui/AccountSearchSelect'
 import AccountSearchSelectWithBalance, { usePendingDocuments, type PendingDocument } from '../../../ui/AccountSearchSelectWithBalance'
@@ -301,6 +312,7 @@ export default function MovementModalV3({
 
     const [isSaving, setIsSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [submitted, setSubmitted] = useState(false)
 
     // Tercero preview: saldo + pending docs for selected counterparty
     const terceroPreview = useMemo(() => {
@@ -592,6 +604,53 @@ export default function MovementModalV3({
         return { assigned, remaining, percentage }
     }, [splits, calculations.totalFinal])
 
+    // Validation errors per tab (computed, not stored)
+    const validationErrors = useMemo(() => {
+        const errors: Record<string, string> = {}
+        if (mainTab === 'compra' || mainTab === 'venta') {
+            if (!formData.date) errors.date = 'Fecha es obligatoria'
+            if (!formData.productId) errors.productId = 'Producto es obligatorio'
+            if (!formData.isSoloGasto && formData.quantity <= 0) errors.quantity = 'Cantidad debe ser mayor a 0'
+            if (mainTab === 'compra' && !formData.isSoloGasto && formData.unitCost <= 0) errors.unitCost = 'Costo unitario es obligatorio'
+            if (mainTab === 'venta' && formData.unitPrice <= 0) errors.unitPrice = 'Precio de venta es obligatorio'
+            if (!formData.counterparty?.trim()) errors.counterparty = mainTab === 'compra' ? 'Proveedor es obligatorio' : 'Cliente es obligatorio'
+            if (!formData.paymentCondition) errors.paymentCondition = 'Condicion de pago es obligatoria'
+            const validSplits = splits.filter(s => s.accountId && s.amount > 0)
+            if (validSplits.length === 0) errors.splits = 'Asigna al menos una cuenta con importe'
+            if (validSplits.length > 0 && Math.abs(splitTotals.remaining) > 1) errors.splitsBalance = 'Los importes no coinciden con el total'
+        } else if (mainTab === 'ajuste' && ajusteSubTab === 'devoluciones') {
+            if (!formData.date) errors.date = 'Fecha es obligatoria'
+            if (!devolucion.productId) errors.productId = 'Producto es obligatorio'
+            if (!devolucion.originalMovementId) errors.originalMovementId = 'Selecciona un movimiento a revertir'
+            if (devolucion.cantidadDevolver <= 0) errors.cantidadDevolver = 'Cantidad debe ser mayor a 0'
+        } else if (mainTab === 'ajuste' && ajusteSubTab === 'stock') {
+            if (!formData.date) errors.date = 'Fecha es obligatoria'
+            if (!stockAjuste.productId) errors.productId = 'Producto es obligatorio'
+            if (stockAjuste.quantity <= 0) errors.quantity = 'Cantidad debe ser mayor a 0'
+            if (stockAjuste.direction === 'IN' && stockAjuste.unitCost <= 0) errors.unitCost = 'Costo unitario es obligatorio para entrada'
+        } else if (mainTab === 'ajuste' && ajusteSubTab === 'rt6') {
+            if (!formData.date) errors.date = 'Fecha es obligatoria'
+            if (!rt6.originMovementId) errors.originMovementId = 'Selecciona un movimiento de origen'
+            if (!rt6.rt6Period.trim()) errors.rt6Period = 'Periodo RT6 es obligatorio'
+            if (rt6.valueDelta === 0) errors.valueDelta = 'Delta de valor no puede ser 0'
+        } else if (mainTab === 'ajuste' && ajusteSubTab === 'bonif_desc') {
+            if (!formData.date) errors.date = 'Fecha es obligatoria'
+            if (!postAdjust.originalMovementId) errors.originalMovementId = 'Selecciona un movimiento a ajustar'
+            if (postAdjust.value <= 0) errors.value = 'Monto o porcentaje es obligatorio'
+        } else if (mainTab === 'pagos') {
+            if (!formData.date) errors.date = 'Fecha es obligatoria'
+            if (!pagoCobro.tercero?.trim()) errors.tercero = pagoCobroMode === 'COBRO' ? 'Cliente es obligatorio' : 'Proveedor es obligatorio'
+            if (pagoCobro.amount <= 0) errors.amount = 'Importe debe ser mayor a 0'
+            const invalidSplit = pagoCobroSplits.find(s => !s.accountId || s.amount <= 0)
+            if (invalidSplit) errors.pagoSplits = 'Completa todas las cuentas con importe'
+            const pcSplitsTotal = pagoCobroSplits.reduce((s, sp) => s + sp.amount, 0)
+            if (pagoCobro.amount > 0 && Math.abs(pagoCobro.amount - pcSplitsTotal) > 1) errors.pagoSplitsBalance = 'Los importes no coinciden con el total'
+        }
+        return errors
+    }, [mainTab, ajusteSubTab, formData, splits, splitTotals.remaining, devolucion, stockAjuste, rt6, postAdjust, pagoCobro, pagoCobroSplits, pagoCobroMode])
+
+    const hasValidationErrors = Object.keys(validationErrors).length > 0
+
     // Available movements for devoluciones
     const availableMovementsForReturn = useMemo(() => {
         if (!movements) return []
@@ -712,6 +771,17 @@ export default function MovementModalV3({
         if (!acc) return
         setPostAdjustSplits(prev => prev.map((s, i) => (i === 0 ? { ...s, accountId: acc.id } : s)))
     }, [accounts, postAdjust.applyOn, postAdjustSplits])
+
+    // Default contrapartida: Proveedores (compra) / Deudores por ventas (venta)
+    useEffect(() => {
+        if (isEditing || !accounts || splits.length === 0) return
+        if (splits[0].accountId) return // user already selected or initialData prefilled
+        const isVenta = mainTab === 'venta'
+        const targetCode = isVenta ? '1.1.02.01' : '2.1.01.01' // Deudores / Proveedores
+        const acc = accounts.find(a => a.code === targetCode)
+        if (!acc) return
+        setSplits(prev => prev.map((s, i) => (i === 0 ? { ...s, accountId: acc.id } : s)))
+    }, [accounts, mainTab, isEditing])
 
     // Sincronizar taxes de devolución cuando cambia el movimiento original o la cantidad
     useEffect(() => {
@@ -948,15 +1018,22 @@ export default function MovementModalV3({
         }))
     }
 
-    const handleAutoFillSplit = () => {
-        const zeroSplit = splits.find(s => s.amount === 0)
-        if (zeroSplit) {
-            handleSplitChange(zeroSplit.id, 'amount', splitTotals.remaining)
+    const handleAutoFillSplit = (targetSplitId?: string) => {
+        if (targetSplitId) {
+            // Fill specific row with remaining (Total - sum of OTHER rows)
+            const otherSum = splits.filter(s => s.id !== targetSplitId).reduce((sum, s) => sum + s.amount, 0)
+            const remaining = Math.max(0, round2(calculations.totalFinal - otherSum))
+            handleSplitChange(targetSplitId, 'amount', remaining)
         } else {
-            setSplits(prev => [
-                ...prev,
-                { id: `split-${Date.now()}`, accountId: '', amount: splitTotals.remaining }
-            ])
+            const zeroSplit = splits.find(s => s.amount === 0)
+            if (zeroSplit) {
+                handleSplitChange(zeroSplit.id, 'amount', splitTotals.remaining)
+            } else {
+                setSplits(prev => [
+                    ...prev,
+                    { id: `split-${Date.now()}`, accountId: '', amount: splitTotals.remaining }
+                ])
+            }
         }
     }
 
@@ -967,7 +1044,7 @@ export default function MovementModalV3({
             {
                 id: `tax-${Date.now()}`,
                 kind: 'PERCEPCION' as TaxLineKind,
-                taxType: 'IIBB' as TaxType,
+                taxType: 'IVA' as TaxType,
                 amount: 0,
                 calcMode: 'PERCENT' as TaxCalcMode,
                 rate: 3,
@@ -1105,6 +1182,19 @@ export default function MovementModalV3({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         setError(null)
+        setSubmitted(true)
+
+        // Check validation errors and scroll to first one
+        if (hasValidationErrors) {
+            const firstKey = Object.keys(validationErrors)[0]
+            const el = document.querySelector(`[data-field="${firstKey}"]`)
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                const input = el.querySelector('input,select') as HTMLElement
+                if (input) setTimeout(() => input.focus(), 300)
+            }
+            return
+        }
 
         // P2: Pagos/Cobros
         if (mainTab === 'pagos') {
@@ -1748,14 +1838,14 @@ export default function MovementModalV3({
                                 {/* Movimiento Original */}
                                 <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                     <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
-                                        <ArrowUUpLeft size={16} weight="duotone" className="text-orange-500" /> Movimiento Original a Revertir
+                                        <ArrowUUpLeft size={16} weight="duotone" className="text-orange-500" /> Movimiento Original a Revertir <span className="text-red-400">*</span>
                                     </h3>
-                                    <div className="relative">
+                                    <div className="relative" data-field="originalMovementId">
                                         <MagnifyingGlass className="absolute left-3 top-2.5 text-slate-400" size={18} />
                                         <select
                                             value={devolucion.originalMovementId}
                                             onChange={(e) => setDevolucion(prev => ({ ...prev, originalMovementId: e.target.value }))}
-                                            className="w-full pl-10 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 outline-none appearance-none"
+                                            className={`w-full pl-10 pr-4 py-2 bg-white border rounded-lg text-sm focus:ring-2 focus:ring-orange-500 outline-none appearance-none ${submitted && validationErrors.originalMovementId ? 'border-red-300' : 'border-slate-300'}`}
                                         >
                                             <option value="">Selecciona un movimiento...</option>
                                             {availableMovementsForReturn.map(m => (
@@ -1768,6 +1858,7 @@ export default function MovementModalV3({
                                             No hay movimientos de {devolucion.tipo === 'DEVOLUCION_COMPRA' ? 'compra' : 'venta'} para este producto.
                                         </p>
                                     )}
+                                    {submitted && <FieldError msg={validationErrors.originalMovementId} />}
                                 </section>
 
                                 {/* Bloque: Traído del comprobante original */}
@@ -1831,8 +1922,10 @@ export default function MovementModalV3({
                                                     type="number"
                                                     min="1"
                                                     max={selectedOriginalMovement.quantity}
-                                                    value={devolucion.cantidadDevolver}
+                                                    inputMode="numeric"
+                                                    value={devolucion.cantidadDevolver || ''}
                                                     onChange={(e) => setDevolucion(prev => ({ ...prev, cantidadDevolver: Number(e.target.value) }))}
+                                                    onFocus={selectOnFocus}
                                                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-orange-500 outline-none"
                                                 />
                                             </div>
@@ -1877,13 +1970,15 @@ export default function MovementModalV3({
                                                     <input
                                                         type="number"
                                                         step="0.01"
-                                                        value={tax.amount}
+                                                        inputMode="decimal"
+                                                        value={tax.amount || ''}
                                                         onChange={(e) => {
                                                             const newAmount = Number(e.target.value)
                                                             setDevolucionTaxes(prev => prev.map((t, i) =>
                                                                 i === idx ? { ...t, amount: round2(newAmount) } : t
                                                             ))
                                                         }}
+                                                        onFocus={selectOnFocus}
                                                         className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-right outline-none focus:ring-1 focus:ring-orange-500"
                                                     />
                                                 </div>
@@ -1969,8 +2064,10 @@ export default function MovementModalV3({
                                                     </div>
                                                     <input
                                                         type="number"
-                                                        value={split.amount}
+                                                        inputMode="decimal"
+                                                        value={split.amount || ''}
                                                         onChange={(e) => handleDevolucionSplitChange(split.id, 'amount', Number(e.target.value))}
+                                                        onFocus={selectOnFocus}
                                                         className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-right outline-none focus:ring-1 focus:ring-orange-500 h-[38px]"
                                                     />
                                                     <button
@@ -2074,14 +2171,17 @@ export default function MovementModalV3({
                                 <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Cantidad</label>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Cantidad <span className="text-red-400">*</span></label>
                                             <input
                                                 type="number"
                                                 min="1"
-                                                value={stockAjuste.quantity}
+                                                inputMode="numeric"
+                                                value={stockAjuste.quantity || ''}
                                                 onChange={(e) => setStockAjuste(prev => ({ ...prev, quantity: Number(e.target.value) }))}
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                                                onFocus={selectOnFocus}
+                                                className={`w-full px-3 py-2 bg-white border rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none ${submitted && validationErrors.quantity ? 'border-red-300' : 'border-slate-300'}`}
                                             />
+                                            {submitted && <FieldError msg={validationErrors.quantity} />}
                                         </div>
                                         {stockAjuste.direction === 'IN' && (
                                             <div>
@@ -2092,8 +2192,10 @@ export default function MovementModalV3({
                                                         type="number"
                                                         min="0"
                                                         step="0.01"
-                                                        value={stockAjuste.unitCost}
+                                                        inputMode="decimal"
+                                                        value={stockAjuste.unitCost || ''}
                                                         onChange={(e) => setStockAjuste(prev => ({ ...prev, unitCost: Number(e.target.value) }))}
+                                                        onFocus={selectOnFocus}
                                                         className="w-full pl-7 px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none"
                                                     />
                                                 </div>
@@ -2193,7 +2295,7 @@ export default function MovementModalV3({
                                     </h3>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Periodo RT6</label>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Periodo RT6 <span className="text-red-400">*</span></label>
                                             <input
                                                 type="text"
                                                 value={rt6.rt6Period}
@@ -2203,7 +2305,7 @@ export default function MovementModalV3({
                                             />
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Delta de Valor ($)</label>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Delta de Valor ($) <span className="text-red-400">*</span></label>
                                             <div className="relative">
                                                 <span className="absolute left-3 top-2 text-slate-400 text-sm">$</span>
                                                 <input
@@ -2211,6 +2313,8 @@ export default function MovementModalV3({
                                                     step="0.01"
                                                     value={rt6.valueDelta || ''}
                                                     onChange={(e) => setRt6(prev => ({ ...prev, valueDelta: Number(e.target.value) }))}
+                                                    onFocus={selectOnFocus}
+                                                    inputMode="decimal"
                                                     placeholder="Monto (+/-)"
                                                     className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-indigo-500 outline-none"
                                                 />
@@ -2384,6 +2488,8 @@ export default function MovementModalV3({
                                                     step="0.01"
                                                     value={postAdjust.value || ''}
                                                     onChange={(e) => setPostAdjust(prev => ({ ...prev, value: Number(e.target.value) }))}
+                                                    onFocus={selectOnFocus}
+                                                    inputMode="decimal"
                                                     className={`w-full ${postAdjust.inputMode === 'AMOUNT' ? 'pl-8' : 'pl-3'} pr-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-emerald-500 outline-none`}
                                                 />
                                             </div>
@@ -2419,8 +2525,10 @@ export default function MovementModalV3({
                                                     <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1">IMPORTE</label>
                                                     <input
                                                         type="number"
+                                                        inputMode="decimal"
                                                         value={split.amount || ''}
                                                         onChange={(e) => handlePostSplitChange(split.id, 'amount', Number(e.target.value))}
+                                                        onFocus={selectOnFocus}
                                                         className="w-full px-3 py-3 pt-5 border border-slate-300 rounded-lg text-sm font-mono text-right outline-none focus:border-blue-500 bg-white h-[52px]"
                                                         placeholder="0,00"
                                                     />
@@ -2599,9 +2707,9 @@ export default function MovementModalV3({
                                                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
                                             />
                                         </div>
-                                        <div className="col-span-8 relative">
+                                        <div className="col-span-8 relative" data-field="tercero">
                                             <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                                {pagoCobroMode === 'COBRO' ? 'Cliente' : 'Proveedor'}
+                                                {pagoCobroMode === 'COBRO' ? 'Cliente' : 'Proveedor'} <span className="text-red-400">*</span>
                                             </label>
                                             <input
                                                 type="text"
@@ -2613,7 +2721,7 @@ export default function MovementModalV3({
                                                 onFocus={() => setShowPagoTerceroDropdown(true)}
                                                 onBlur={() => setTimeout(() => setShowPagoTerceroDropdown(false), 200)}
                                                 placeholder={pagoCobroMode === 'COBRO' ? 'Buscar o crear cliente...' : 'Buscar o crear proveedor...'}
-                                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
+                                                className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500 ${submitted && validationErrors.tercero ? 'border-red-300' : 'border-slate-300'}`}
                                                 autoComplete="off"
                                             />
                                             {showPagoTerceroDropdown && filteredTerceros.length > 0 && (
@@ -2665,11 +2773,12 @@ export default function MovementModalV3({
                                                     )}
                                                 </div>
                                             )}
+                                            {submitted && <FieldError msg={validationErrors.tercero} />}
                                         </div>
                                     </div>
-                                    <div className="mt-4">
+                                    <div className="mt-4" data-field="amount">
                                         <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                            Importe a {pagoCobroMode === 'COBRO' ? 'Cobrar' : 'Pagar'}
+                                            Importe a {pagoCobroMode === 'COBRO' ? 'Cobrar' : 'Pagar'} <span className="text-red-400">*</span>
                                             {selectedPendingDoc && (
                                                 <span className="text-slate-400 font-normal ml-2">(máx: {formatCurrency(selectedPendingDoc.saldoPendiente)})</span>
                                             )}
@@ -2679,15 +2788,18 @@ export default function MovementModalV3({
                                             min="0"
                                             max={selectedPendingDoc?.saldoPendiente || undefined}
                                             step="0.01"
+                                            inputMode="decimal"
                                             value={pagoCobro.amount || ''}
                                             onChange={(e) => {
                                                 const val = Number(e.target.value)
                                                 const max = selectedPendingDoc?.saldoPendiente
                                                 setPagoCobro(prev => ({ ...prev, amount: max && val > max ? max : val }))
                                             }}
+                                            onFocus={selectOnFocus}
                                             placeholder="0.00"
                                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono text-right outline-none focus:ring-1 focus:ring-violet-500"
                                         />
+                                        {submitted && <FieldError msg={validationErrors.amount} />}
                                     </div>
                                 </section>
 
@@ -2745,8 +2857,10 @@ export default function MovementModalV3({
                                                                 min="0"
                                                                 max="100"
                                                                 step="0.1"
-                                                                value={pagoCobroRetencion.rate}
+                                                                inputMode="decimal"
+                                                                value={pagoCobroRetencion.rate || ''}
                                                                 onChange={(e) => setPagoCobroRetencion(prev => ({ ...prev, rate: Number(e.target.value) }))}
+                                                                onFocus={selectOnFocus}
                                                                 className="w-full border border-amber-300 rounded px-2 py-1 text-xs font-mono text-right bg-white"
                                                             />
                                                         ) : (
@@ -2754,8 +2868,10 @@ export default function MovementModalV3({
                                                                 type="number"
                                                                 min="0"
                                                                 step="0.01"
-                                                                value={pagoCobroRetencion.amount}
+                                                                inputMode="decimal"
+                                                                value={pagoCobroRetencion.amount || ''}
                                                                 onChange={(e) => setPagoCobroRetencion(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                                                                onFocus={selectOnFocus}
                                                                 className="w-full border border-amber-300 rounded px-2 py-1 text-xs font-mono text-right bg-white"
                                                             />
                                                         )}
@@ -2828,12 +2944,14 @@ export default function MovementModalV3({
                                                 </div>
                                                 <input
                                                     type="number"
+                                                    inputMode="decimal"
                                                     value={split.amount || ''}
                                                     onChange={(e) => {
                                                         setPagoCobroSplits(prev => prev.map(s =>
                                                             s.id === split.id ? { ...s, amount: Number(e.target.value) } : s
                                                         ))
                                                     }}
+                                                    onFocus={selectOnFocus}
                                                     className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-right outline-none focus:ring-1 focus:ring-violet-500 h-[38px]"
                                                 />
                                                 <button
@@ -2846,7 +2964,8 @@ export default function MovementModalV3({
                                             </div>
                                         ))}
                                     </div>
-                                    <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100">
+                                    {submitted && <FieldError msg={validationErrors.pagoSplits || validationErrors.pagoSplitsBalance} />}
+                                    <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100" data-field="pagoSplits">
                                         <button
                                             type="button"
                                             onClick={() => setPagoCobroSplits(prev => [
@@ -2930,21 +3049,22 @@ export default function MovementModalV3({
 
                                     <div className="grid grid-cols-12 gap-4">
                                         {/* FECHA */}
-                                        <div className="col-span-4">
+                                        <div className="col-span-4" data-field="date">
                                             <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                                <CalendarBlank size={12} weight="bold" className="inline mr-1" />Fecha
+                                                <CalendarBlank size={12} weight="bold" className="inline mr-1" />Fecha <span className="text-red-400">*</span>
                                             </label>
                                             <input
                                                 type="date"
                                                 value={formData.date}
                                                 onChange={(e) => handleChange('date', e.target.value)}
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                                className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none ${submitted && validationErrors.date ? 'border-red-300' : 'border-slate-300'}`}
                                             />
+                                            {submitted && <FieldError msg={validationErrors.date} />}
                                         </div>
                                         <div className="col-span-8" /> {/* spacer */}
 
-                                        <div className="col-span-12">
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Bien de Cambio / Item</label>
+                                        <div className="col-span-12" data-field="productId">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Bien de Cambio / Item <span className="text-red-400">*</span></label>
                                             <div className="relative">
                                                 <MagnifyingGlass className="absolute left-3 top-2.5 text-slate-400" size={18} />
                                                 <select
@@ -2986,24 +3106,27 @@ export default function MovementModalV3({
 
                                         {!formData.isSoloGasto && (
                                             <>
-                                                <div className="col-span-4">
-                                                    <label className="block text-xs font-semibold text-slate-700 mb-1">Cantidad</label>
+                                                <div className="col-span-4" data-field="quantity">
+                                                    <label className="block text-xs font-semibold text-slate-700 mb-1">Cantidad <span className="text-red-400">*</span></label>
                                                     <input
                                                         type="number"
                                                         min="1"
-                                                        value={formData.quantity}
+                                                        inputMode="numeric"
+                                                        value={formData.quantity || ''}
                                                         onChange={(e) => handleChange('quantity', Number(e.target.value))}
-                                                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                                                        onFocus={selectOnFocus}
+                                                        className={`w-full px-3 py-2 bg-white border rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none ${submitted && validationErrors.quantity ? 'border-red-300' : 'border-slate-300'}`}
                                                     />
+                                                    {submitted && <FieldError msg={validationErrors.quantity} />}
                                                 </div>
 
-                                                <div className="col-span-4">
+                                                <div className="col-span-4" data-field={mainTab === 'venta' ? 'unitPrice' : 'unitCost'}>
                                                     <div className="flex justify-between items-center mb-1">
                                                         <label className="text-xs font-semibold text-slate-700">
                                                             {mainTab === 'venta'
                                                                 ? 'Precio Venta (Neto)'
                                                                 : (priceInputMode === 'FINAL' ? 'Costo c/IVA (Final)' : 'Costo Unitario (Neto)')
-                                                            }
+                                                            } <span className="text-red-400">*</span>
                                                         </label>
                                                         {/* Toggle Neto/Final - solo en Compra */}
                                                         {mainTab === 'compra' && (
@@ -3040,8 +3163,10 @@ export default function MovementModalV3({
                                                             type="number"
                                                             min="0"
                                                             step="0.01"
-                                                            value={mainTab === 'venta' ? formData.unitPrice : formData.unitCost}
+                                                            inputMode="decimal"
+                                                            value={(mainTab === 'venta' ? formData.unitPrice : formData.unitCost) || ''}
                                                             onChange={(e) => handleChange(mainTab === 'venta' ? 'unitPrice' : 'unitCost', Number(e.target.value))}
+                                                            onFocus={selectOnFocus}
                                                             className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none"
                                                         />
                                                     </div>
@@ -3051,6 +3176,7 @@ export default function MovementModalV3({
                                                             Neto derivado: {formatCurrency(calculations.derivedNetUnitCost)}
                                                         </p>
                                                     )}
+                                                    {submitted && <FieldError msg={mainTab === 'venta' ? validationErrors.unitPrice : validationErrors.unitCost} />}
                                                 </div>
 
                                                 <div className="col-span-4">
@@ -3086,6 +3212,8 @@ export default function MovementModalV3({
                                                     step="0.5"
                                                     value={formData.bonificacionPct || ''}
                                                     onChange={(e) => handleChange('bonificacionPct', Number(e.target.value))}
+                                                    onFocus={selectOnFocus}
+                                                    inputMode="decimal"
                                                     className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-purple-500 outline-none"
                                                     placeholder="0"
                                                 />
@@ -3110,6 +3238,8 @@ export default function MovementModalV3({
                                                     step="0.5"
                                                     value={formData.descuentoFinancieroPct || ''}
                                                     onChange={(e) => handleChange('descuentoFinancieroPct', Number(e.target.value))}
+                                                    onFocus={selectOnFocus}
+                                                    inputMode="decimal"
                                                     className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-purple-500 outline-none"
                                                     placeholder="0"
                                                 />
@@ -3149,6 +3279,8 @@ export default function MovementModalV3({
                                                                 step="0.01"
                                                                 value={gasto.monto || ''}
                                                                 onChange={(e) => handleGastoChange(gasto.id, 'monto', Number(e.target.value))}
+                                                                onFocus={selectOnFocus}
+                                                                inputMode="decimal"
                                                                 className="w-full px-2 py-1.5 text-sm font-mono text-right border border-slate-300 rounded focus:border-blue-500 outline-none"
                                                             />
                                                         </div>
@@ -3291,6 +3423,8 @@ export default function MovementModalV3({
                                                                                 step="0.01"
                                                                                 value={tax.rate ?? ''}
                                                                                 onChange={(e) => handleTaxChange(tax.id, 'rate', Number(e.target.value))}
+                                                                                onFocus={selectOnFocus}
+                                                                                inputMode="decimal"
                                                                                 className="w-full px-2 py-1.5 text-sm font-mono text-right border border-slate-300 rounded focus:border-amber-500 outline-none"
                                                                                 placeholder="3"
                                                                             />
@@ -3316,6 +3450,8 @@ export default function MovementModalV3({
                                                                             step="0.01"
                                                                             value={tax.amount || ''}
                                                                             onChange={(e) => handleTaxChange(tax.id, 'amount', Number(e.target.value))}
+                                                                            onFocus={selectOnFocus}
+                                                                            inputMode="decimal"
                                                                             className="w-full px-2 py-1.5 text-sm font-mono text-right border border-slate-300 rounded focus:border-amber-500 outline-none"
                                                                             placeholder="0,00"
                                                                         />
@@ -3403,42 +3539,56 @@ export default function MovementModalV3({
                                     {/* Payment Rows Container */}
                                     <div className="space-y-3">
                                         {splits.map((split) => (
-                                            <div key={split.id} className="flex items-center gap-3 relative">
-                                                <div className="flex-1 relative">
-                                                    <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1 z-10">CUENTA</label>
-                                                    <AccountSearchSelectWithBalance
-                                                        accounts={accounts || []}
-                                                        value={split.accountId}
-                                                        onChange={(val) => handleSplitChange(split.id, 'accountId', val)}
-                                                        placeholder="Buscar cuenta..."
-                                                        inputClassName="h-[52px] pt-4 text-sm"
-                                                        balances={ledgerBalances}
-                                                        showBalance={true}
-                                                    />
+                                            <div key={split.id}>
+                                                <div className="flex items-center gap-3 relative">
+                                                    <div className="flex-1 relative">
+                                                        <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1 z-10">CUENTA</label>
+                                                        <AccountSearchSelectWithBalance
+                                                            accounts={accounts || []}
+                                                            value={split.accountId}
+                                                            onChange={(val) => handleSplitChange(split.id, 'accountId', val)}
+                                                            placeholder="Buscar cuenta..."
+                                                            inputClassName="h-[52px] pt-4 text-sm"
+                                                            balances={ledgerBalances}
+                                                            showBalance={true}
+                                                        />
+                                                    </div>
+                                                    <div className="w-1/3 relative">
+                                                        <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1">IMPORTE</label>
+                                                        <input
+                                                            type="number"
+                                                            inputMode="decimal"
+                                                            value={split.amount || ''}
+                                                            onChange={(e) => handleSplitChange(split.id, 'amount', Number(e.target.value))}
+                                                            onFocus={selectOnFocus}
+                                                            className="w-full px-3 py-3 pt-5 border border-slate-300 rounded-lg text-sm font-mono text-right outline-none focus:border-blue-500 bg-white h-[52px]"
+                                                            placeholder="0,00"
+                                                        />
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleRemoveSplit(split.id)}
+                                                        className="mt-2 p-2 text-slate-300 hover:text-red-500 transition-colors"
+                                                        title="Eliminar linea"
+                                                    >
+                                                        <Trash size={18} />
+                                                    </button>
                                                 </div>
-                                                <div className="w-1/3 relative">
-                                                    <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1">IMPORTE</label>
-                                                    <input
-                                                        type="number"
-                                                        value={split.amount || ''}
-                                                        onChange={(e) => handleSplitChange(split.id, 'amount', Number(e.target.value))}
-                                                        className="w-full px-3 py-3 pt-5 border border-slate-300 rounded-lg text-sm font-mono text-right outline-none focus:border-blue-500 bg-white h-[52px]"
-                                                        placeholder="0,00"
-                                                    />
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleRemoveSplit(split.id)}
-                                                    className="mt-2 p-2 text-slate-300 hover:text-red-500 transition-colors"
-                                                    title="Eliminar linea"
-                                                >
-                                                    <Trash size={18} />
-                                                </button>
+                                                {splitTotals.remaining > 1 && !split.amount && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleAutoFillSplit(split.id)}
+                                                        className="mt-1 ml-auto text-[11px] text-blue-600 font-semibold hover:bg-blue-50 px-2 py-0.5 rounded transition-colors flex items-center gap-1"
+                                                    >
+                                                        <Robot size={12} /> Autocompletar restante ({formatCurrency(round2(calculations.totalFinal - splits.filter(s => s.id !== split.id).reduce((sum, s) => sum + s.amount, 0)))})
+                                                    </button>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
 
-                                    <div className="mt-4 pt-3 border-t border-slate-100 flex flex-col gap-2">
+                                    {submitted && <FieldError msg={validationErrors.splits || validationErrors.splitsBalance} />}
+                                    <div className="mt-4 pt-3 border-t border-slate-100 flex flex-col gap-2" data-field="splits">
                                         <div className="flex justify-between items-center">
                                             <span className="text-xs text-slate-500 italic">Podes combinar multiples medios.</span>
                                             <button
@@ -3517,8 +3667,10 @@ export default function MovementModalV3({
                                                                         min="0"
                                                                         max="100"
                                                                         step="0.01"
-                                                                        value={retencionForm.rate}
+                                                                        inputMode="decimal"
+                                                                        value={retencionForm.rate || ''}
                                                                         onChange={(e) => setRetencionForm(prev => ({ ...prev, rate: Number(e.target.value) }))}
+                                                                        onFocus={selectOnFocus}
                                                                         className="w-full px-2 py-1.5 text-sm font-mono text-right border border-slate-300 rounded focus:border-amber-500 outline-none"
                                                                     />
                                                                 </div>
@@ -3541,8 +3693,10 @@ export default function MovementModalV3({
                                                                     type="number"
                                                                     min="0"
                                                                     step="0.01"
+                                                                    inputMode="decimal"
                                                                     value={retencionForm.amount || ''}
                                                                     onChange={(e) => setRetencionForm(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                                                                    onFocus={selectOnFocus}
                                                                     className="w-full px-2 py-1.5 text-sm font-mono text-right border border-slate-300 rounded focus:border-amber-500 outline-none"
                                                                     placeholder="0,00"
                                                                 />
@@ -3580,8 +3734,10 @@ export default function MovementModalV3({
                                         <Files size={16} weight="duotone" className="text-slate-500" /> Comprobante
                                     </h3>
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div className="relative">
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1">Entidad / Tercero</label>
+                                        <div className="relative" data-field="counterparty">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                                {mainTab === 'compra' ? 'Proveedor' : 'Cliente'} <span className="text-red-400">*</span>
+                                            </label>
                                             <input
                                                 type="text"
                                                 value={formData.counterparty}
@@ -3592,7 +3748,7 @@ export default function MovementModalV3({
                                                 onFocus={() => setShowTerceroDropdown(true)}
                                                 onBlur={() => setTimeout(() => setShowTerceroDropdown(false), 200)}
                                                 placeholder={mainTab === 'compra' ? 'Buscar o crear proveedor...' : 'Buscar o crear cliente...'}
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                                                className={`w-full px-3 py-2 bg-white border rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 ${submitted && validationErrors.counterparty ? 'border-red-300' : 'border-slate-300'}`}
                                                 autoComplete="off"
                                             />
                                             {showTerceroDropdown && filteredTerceros.length > 0 && (
@@ -3644,6 +3800,7 @@ export default function MovementModalV3({
                                                     )}
                                                 </div>
                                             )}
+                                            {submitted && <FieldError msg={validationErrors.counterparty} />}
                                         </div>
                                         <div className="flex gap-2">
                                             <div className="w-1/3">
@@ -3676,9 +3833,9 @@ export default function MovementModalV3({
 
                                 {/* CONDICIÓN DE PAGO (compra y venta) */}
                                 {(mainTab === 'compra' || mainTab === 'venta') && !formData.isSoloGasto && (
-                                    <section className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-6">
+                                    <section className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-6" data-field="paymentCondition">
                                         <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-3">
-                                            {mainTab === 'venta' ? 'Condición de Cobro' : 'Condición de Pago'}
+                                            {mainTab === 'venta' ? 'Condición de Cobro' : 'Condición de Pago'} <span className="text-red-400">*</span>
                                         </label>
                                         <div className="flex bg-white p-1 rounded-lg border border-slate-200 mb-4 shadow-sm">
                                             {(['CONTADO', 'CTA_CTE', 'DOCUMENTADO'] as const).map(cond => (
@@ -3702,6 +3859,7 @@ export default function MovementModalV3({
                                                 </button>
                                             ))}
                                         </div>
+                                        {submitted && <FieldError msg={validationErrors.paymentCondition} />}
 
                                         {formData.paymentCondition === 'CONTADO' && (
                                             <div className="text-xs text-slate-500 flex items-center gap-2">
@@ -3718,6 +3876,8 @@ export default function MovementModalV3({
                                                             type="number"
                                                             min={0}
                                                             value={formData.termDays || ''}
+                                                            onFocus={selectOnFocus}
+                                                            inputMode="numeric"
                                                             onChange={(e) => {
                                                                 const days = parseInt(e.target.value) || 0
                                                                 handleChange('termDays', days)
@@ -3944,7 +4104,7 @@ export default function MovementModalV3({
                                         {Math.abs(splitTotals.remaining) > 1 && (
                                             <button
                                                 type="button"
-                                                onClick={handleAutoFillSplit}
+                                                onClick={() => handleAutoFillSplit()}
                                                 className="mt-2 text-xs text-blue-600 font-semibold hover:underline"
                                             >
                                                 Autocompletar restante
@@ -4538,7 +4698,7 @@ export default function MovementModalV3({
                                 </button>
                                 <button
                                     onClick={handleSubmit}
-                                    disabled={isSaving}
+                                    disabled={isSaving || (submitted && hasValidationErrors)}
                                     className="px-4 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-700 hover:to-emerald-600 text-white font-bold shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {isSaving ? (
@@ -4549,6 +4709,8 @@ export default function MovementModalV3({
                                             <span>
                                                 {mainTab === 'compra' ? 'Confirmar Compra' :
                                                  mainTab === 'venta' ? 'Confirmar Venta' :
+                                                 mainTab === 'pagos' ? (pagoCobroMode === 'COBRO' ? 'Confirmar Cobro' : 'Confirmar Pago') :
+                                                 ajusteSubTab === 'devoluciones' ? 'Confirmar Devolucion' :
                                                  'Confirmar Ajuste'}
                                             </span>
                                         </>

@@ -2,6 +2,264 @@
 
 ---
 
+## CHECKPOINT #DIARIO-CUENTA-COLECTIVA
+**Fecha:** 2026-02-15
+**Estado:** COMPLETADO - Vista formal en Libro Diario + toggle formal/analítica
+
+### Objetivo
+En Libro Diario, cuando una línea corresponda a un auxiliar de proveedor (subcuenta bajo "Proveedores" 2.1.01.01), mostrar la cuenta colectiva "Proveedores" como cuenta principal y el nombre del proveedor como detalle auxiliar secundario. Sin cambiar la registración contable (accountId en las líneas).
+
+### Diagnóstico (Root Cause)
+- `findOrCreateChildAccountByName()` en `src/storage/accounts.ts:431-438` marca al padre como `isHeader: true` al crear hijos.
+- `getPostableAccounts()` en `src/storage/accounts.ts:202-207` filtra `isHeader: true`.
+- `AsientosDesktop.tsx` y `AsientosMobile.tsx` usaban `getPostableAccounts()` para cargar cuentas.
+- `resolveAccountDisplay()` en `src/core/displayAccount.ts` busca el padre en el array — pero el padre NO estaba porque fue filtrado.
+- **Resultado**: `resolveAccountDisplay` no podia resolver el parent y mostraba la subcuenta directamente.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/AsientosDesktop.tsx` | `getAllAccounts()` para display; `useMemo` filtra postable para formularios; toggle `formalView` state; pasa `allAccounts` a EntryCard/PDF/search |
+| `src/pages/AsientosMobile.tsx` | Idem: `getAllAccounts()` + postable derivado; pasa `allAccounts` a MobileAsientosRegistrados |
+| `src/components/journal/EntryCard.tsx` | Prop `formalView`; condiciona resolveAccountDisplay vs raw; muestra codigo cuenta en gris (`journal-entry-card-account-code`) |
+| `src/components/journal/JournalToolbar.tsx` | Props `formalView`/`onToggleView`; boton toggle "Formal"/"Analitica" con iconos Eye/List |
+| `src/styles/index.css` | Clases `.journal-entry-card-account-code`, `.journal-entry-card-account-name` (flex), `.journal-toolbar-btn-active` |
+| `src/core/displayAccount.ts` | Sin cambios (ya funcionaba correctamente) |
+| `src/pdf/journalPdf.ts` | Sin cambios (ya usa resolveAccountDisplay, ahora recibe array completo) |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+1. **Root cause fix**: Reemplazado `getPostableAccounts()` por `getAllAccounts()` en ambas paginas (desktop/mobile). Las cuentas header (como "Proveedores" marcada isHeader=true) ahora estan disponibles para `resolveAccountDisplay()`.
+2. **Postable para formularios**: Derivado con `useMemo(() => allAccounts.filter(a => !a.isHeader), [allAccounts])`. Los selectores de cuenta (NewEntryModal, AccountSearchSelect inline) siguen mostrando solo cuentas imputables.
+3. **Codigo cuenta visible**: En EntryCard, se agrego `<span class="journal-entry-card-account-code">` junto al nombre de la cuenta (gris, 0.7rem, opacity 0.7).
+4. **Toggle formal/analitica**: Boton discreto en JournalToolbar. "Formal" (default ON) muestra cuenta colectiva + tercero como detalle. "Analitica" muestra subcuenta directamente (comportamiento anterior).
+5. **Mobile + CSV + PDF**: Todos reciben `allAccounts` y usan `resolveAccountDisplay` — se benefician automaticamente del fix.
+
+### Decisiones Clave
+- NO se cambio la registracion contable (accountId sigue apuntando al auxiliar/subcuenta).
+- NO se tocaron datos historicos ni se hicieron migraciones.
+- La mejora es 100% de presentacion: `resolveAccountDisplay` ya hacia el mapping correcto, solo faltaba pasar el array completo de cuentas.
+- El toggle es opcional (props opcionales en JournalToolbar, default formal=true).
+- Aplica a TODAS las cuentas control con terceros (Proveedores, Deudores por Ventas, Documentos, Acreedores, etc.), no solo Proveedores.
+
+### Validacion
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/repro_eepn.test.ts)
+- `npx vite build`: OK (chunk size warning pre-existente)
+
+### QA Manual
+- [ ] Abrir /asientos con un asiento que tenga subcuenta proveedor (ej "Distribuidora Litoral SRL")
+- [ ] Verificar que muestre "Proveedores" como cuenta principal con codigo "2.1.01.01" en gris
+- [ ] Verificar que debajo aparezca el nombre del proveedor como detalle
+- [ ] Verificar que Debe/Haber y totales son identicos a antes
+- [ ] Click en toggle "Formal" -> cambia a "Analitica" -> muestra subcuenta directamente
+- [ ] Click de vuelta a "Formal" -> restaura vista colectiva
+- [ ] Verificar que crear/editar asientos sigue funcionando (selector de cuenta solo muestra imputables)
+- [ ] Descargar PDF -> verificar que muestra cuenta colectiva + detalle tercero
+- [ ] Mobile: verificar que el detalle expandido muestra correctamente
+- [ ] Mobile: descargar CSV -> verificar formato "Proveedores / Distribuidora Litoral SRL"
+
+---
+
+## CHECKPOINT #FIX-HEADER-INVENTARIO
+**Fecha:** 2026-02-14
+**Estado:** COMPLETADO - Header de /operaciones/inventario homogeneizado
+
+### Objetivo
+Aplicar `OperationsPageHeader` a la pagina de Bienes de Cambio (Mercaderias) para que sea visualmente consistente con las demas subpaginas de /operaciones.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/Planillas/InventarioBienesPage.tsx` | Reemplazo header ad-hoc por OperationsPageHeader, cleanup imports (ArrowLeft, useNavigate) |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+- Reemplazado `<header className="h-16 ...">` con `OperationsPageHeader` dentro de un wrapper `<div className="bg-white border-b ...">` para mantener el layout flex-column del inventario.
+- `title`: "Bienes de Cambio (Mercaderias)" con shimmer activado.
+- `subtitle`: "Stock, costos, movimientos y cierre".
+- `badges`: KPI Range Toggle (Mes/Ejercicio) + date range badge.
+- `rightSlot`: Inventory mode badge (Diferencias/Permanente) + Costing method selector + Settings gear.
+- Removidos imports de `ArrowLeft`, `useNavigate`, y declaracion de `navigate` (ya no necesarios).
+- Tabs del inventario intactos debajo del header.
+
+### Decisiones Clave
+- Se mantiene el componente en `src/pages/Planillas/` (no se creo wrapper en Operaciones/) porque es la unica ruta que lo usa (`/operaciones/inventario`). El redirect desde `/planillas/inventario` tambien apunta ahi.
+- Se agrego `hidden sm:inline` al label "Metodo:" para mejorar responsive mobile.
+
+### Validacion
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/repro_eepn.test.ts)
+- `npx vite build`: OK
+
+### QA Manual
+- [ ] Entrar a /operaciones/inventario -> header identico en estilo a /operaciones/inversiones
+- [ ] Back button -> navega a /operaciones
+- [ ] Breadcrumb visible en desktop, oculto en mobile
+- [ ] Toggle Mes/Ejercicio funciona
+- [ ] Badge Diferencias/Permanente visible
+- [ ] Selector Metodo (PPP/FIFO/LIFO) funciona
+- [ ] Gear icon abre config
+- [ ] Tabs debajo del header funcionan sin cambios
+- [ ] Responsive: mobile sin overflow
+
+---
+
+## CHECKPOINT #FIX-BIENES-USO-HOMOGENIZAR
+**Fecha:** 2026-02-14
+**Estado:** COMPLETADO - 3 objetivos (A: fix amortizacion, B: cascada eliminacion, C: header homogeneo)
+
+### Objetivo
+Corregir calculo de amortizacion en Bienes de Uso (mostraba 180k en vez de 90k), implementar eliminacion en cascada (bien + asientos + eventos), y homogeneizar header en todas las subpaginas de /operaciones.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/storage/fixedAssets.ts` | Fix timezone `parseDateLocal()`, opening.initialAccumDep en calculo, cascada `deleteFixedAsset()` |
+| `src/core/amortizaciones/calc.ts` | Fix timezone en `parseDate()` |
+| `src/pages/Operaciones/BienesUsoPage.tsx` | Usa OperationsPageHeader, confirm mejorado al eliminar |
+| `src/pages/Operaciones/PrestamosPage.tsx` | Usa OperationsPageHeader |
+| `src/pages/Operaciones/InversionesPage.tsx` | Usa OperationsPageHeader |
+| `src/pages/Operaciones/ClientesDeudoresPage.tsx` | Usa OperationsPageHeader |
+| `src/pages/Operaciones/ProveedoresAcreedoresPage.tsx` | Usa OperationsPageHeader |
+| `src/pages/Operaciones/MonedaExtranjeraPage.tsx` | Usa OperationsPageHeader |
+| `src/pages/Operaciones/ImpuestosPage.tsx` | Usa OperationsPageHeader (dentro de sticky header) |
+| `src/components/OperationsPageHeader.tsx` | **NUEVO** - Componente shared header |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+
+**OBJETIVO A - Fix calculo amortizacion**
+- **Root cause**: `new Date('2025-01-01')` parsea como UTC midnight; en UTC-3 (Argentina) `getFullYear()` devuelve 2024 en vez de 2025, sumando un ano fantasma.
+- Agregada `parseDateLocal(dateStr)` que splitea el ISO string y construye `new Date(y, m-1, d)` (local time).
+- Reemplazados 10+ llamados a `new Date(dateStr)` en funciones de calculo, schedule, opening entry, event journal.
+- `parseDate()` en `calc.ts` tambien corregida.
+- Para assets con `originType='OPENING'`: ahora `calculateFixedAssetDepreciation()` usa `opening.initialAccumDep` como base en vez de calcular mecanicamente desde `acquisitionDate`. Formula: `acumInicio = initialAccumDep + yearsSinceImport * amortAnual`.
+- Clamping existente evita overflow sobre VA.
+
+**OBJETIVO B - Cascada eliminacion**
+- `deleteFixedAsset()` cambiado de "bloquear si hay asientos" a **eliminacion en cascada**.
+- Recolecta entry IDs de: `openingJournalEntryId`, `acquisitionJournalEntryId`, `rt6JournalEntryId`, `linkedJournalEntryIds[]`, + busqueda por metadata `sourceModule='fixed-assets'`, + `linkedJournalEntryId` de cada evento.
+- Elimina: todos los entries encontrados (bulkDelete), todos los eventos del bien (bulkDelete), luego el bien.
+- UI: `handleDeleteAsset` muestra confirm con conteo de asientos y toast con detalle de lo eliminado.
+- **Criterio**: cascada directa (no reversal). TODO futuro: si se implementa cierre de periodo, agregar check de periodo bloqueado y generar asiento de reversion en vez de borrar.
+
+**OBJETIVO C - Header homogeneo**
+- Nuevo `src/components/OperationsPageHeader.tsx` con props: `title, subtitle, backHref, backLabel, onBack, rightSlot, badges, shimmer`.
+- Back button: estilo pill con icono + "Volver" (oculto en mobile).
+- Breadcrumb: desktop-only con separador | y CaretRight.
+- Title: con TextShimmer opcional.
+- Aplicado a 7 paginas: BienesUso, Prestamos, Inversiones, Clientes, Proveedores, MonedaExtranjera, Impuestos.
+- Cada pagina mantiene sus controles especificos en `rightSlot` (RT6 toggle, modo valuacion, regime switch, etc).
+- Imports innecesarios de ArrowLeft, useNavigate, TextShimmer limpiados.
+
+### Validacion
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/repro_eepn.test.ts)
+- `npx vite build`: OK (solo warning de chunk size pre-existente)
+
+### QA Manual
+- [ ] Caso 1: Crear bien origen 01/01/2025, costo 900.000, vida 10 anos, ejercicio 2025 -> Amort. Acumulada = 90.000 (no 180.000)
+- [ ] Caso 2: Crear bien OPENING con initialAccumDep=300.000, costo 900.000, ejercicio 2025 -> Acumulada cierre = 390.000
+- [ ] NBV coherente: NBV = costo - acumulada
+- [ ] Planilla: primer ano de vida = ano de origen (no ano anterior)
+- [ ] Eliminar bien con asientos -> confirm muestra conteo, elimina todo, sin asientos huerfanos
+- [ ] Eliminar bien sin asientos -> funciona sin error
+- [ ] Header consistente en: /operaciones/bienes-uso, /inversiones, /moneda-extranjera, /prestamos, /clientes, /proveedores, /impuestos
+- [ ] Back button navega a /operaciones en todas las paginas
+- [ ] BienesUso detalle: back button vuelve al listado (no a /operaciones)
+- [ ] Responsive: header funciona en mobile (back icon sin texto, sin breadcrumb)
+
+### Pendientes (fuera de scope)
+- Cierre de periodo: si se implementa lock de periodos, `deleteFixedAsset` deberia generar asiento de reversion en vez de borrar
+- Prorrateo mensual en OPENING: actualmente solo override para lineal-year; lineal-month necesitaria ajuste similar
+- Test unitario para `parseDateLocal` y `calculateFixedAssetDepreciation` con distintas timezones
+
+---
+
+## CHECKPOINT #MODAL-MOVIMIENTOS-UX
+**Fecha:** 2026-02-14
+**Estado:** COMPLETADO - 4 issues resueltos (inputs numericos, percepcion default, contrapartida default + autocompletar, validacion campos obligatorios)
+
+### Objetivo
+Mejorar el modal de Movimientos (Compra/Venta/Ajuste/Pagos) en Bienes de Cambio: inputs numericos usables, defaults correctos, boton "Autocompletar restante" reubicado, campos obligatorios con asterisco y bloqueo de confirmacion.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Todos los cambios de UX: helper `selectOnFocus`, `FieldError`, validacion, defaults, autocompletar per-row, asteriscos, labels Confirmar por tab |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+
+**ISSUE A - Inputs numericos "0 pegado"**
+- Agregado helper `selectOnFocus` que selecciona todo el texto al enfocar un input numerico
+- Todos los inputs `type="number"` que mostraban `value={0}` ahora usan `value={val || ''}` para mostrar vacio en vez de "0"
+- Agregado `inputMode="decimal"` (montos) e `inputMode="numeric"` (cantidades) para mejor teclado movil
+- Afecta ~25 inputs: quantity, unitCost, unitPrice, stockAjuste.quantity/unitCost, split amounts, tax rates/amounts, bonificacion, descuento, gastos, rt6 delta, pagoCobro amount, retencion, termDays
+
+**ISSUE B - Default percepcion = Percepcion IVA**
+- `handleAddTax()`: cambiado `taxType: 'IIBB'` → `taxType: 'IVA'`
+- Ahora al agregar percepcion, el default es "Percepcion IVA" (no IIBB)
+
+**ISSUE C - Default contrapartida + Autocompletar restante**
+- Nuevo `useEffect` preselecciona cuenta default en el primer split:
+  - Compra → Proveedores (2.1.01.01)
+  - Venta → Deudores por ventas (1.1.02.01)
+  - Solo en modo create, no pisa initialData (modo edit)
+- `handleAutoFillSplit` ahora acepta `targetSplitId?` opcional para llenar una fila especifica
+- Boton "Autocompletar restante" agregado per-row debajo del input Importe cuando la fila esta vacia y hay restante
+- Muestra el monto que se completaria: `Autocompletar restante ($300.000)`
+- El boton del panel derecho (summary) sigue existiendo como backup
+
+**ISSUE D - Campos obligatorios + asterisco + bloqueo**
+- Nuevo estado `submitted` (boolean) - se activa en primer intento de submit
+- Nuevo `validationErrors` (useMemo) que computa errores por tab:
+  - Compra/Venta: date, productId, quantity, unitCost/unitPrice, counterparty, paymentCondition, splits
+  - Devoluciones: date, productId, originalMovementId, cantidadDevolver
+  - Stock Fisico: date, productId, quantity, unitCost (si entrada)
+  - RT6: date, originMovementId, rt6Period, valueDelta
+  - Bonif/Desc: date, originalMovementId, value
+  - Pagos: date, tercero, amount, pagoSplits
+- Componente `FieldError` para mensajes inline (rojo suave, 11px)
+- Asteriscos rojos (*) en labels de campos obligatorios
+- Inputs con error muestran `border-red-300`
+- Boton "Confirmar" disabled cuando `submitted && hasValidationErrors`
+- Scroll + focus al primer campo con error al intentar confirmar
+- `data-field` attributes en contenedores para targeting del scroll
+
+**HARDENING - Label Confirmar por tab**
+- Fix: el boton ahora muestra la label correcta por pestaña:
+  - Compra → "Confirmar Compra"
+  - Venta → "Confirmar Venta"
+  - Pagos → "Confirmar Cobro" / "Confirmar Pago" (segun pagoCobroMode)
+  - Ajuste/Devoluciones → "Confirmar Devolucion"
+  - Otros ajustes → "Confirmar Ajuste"
+
+### Supuestos
+- **Venta default**: se usa Deudores por ventas (1.1.02.01) como default para ventas. No se implemento distincion contado/credito para el default porque no existe toggle de condicion al inicio del form. Si el usuario selecciona CONTADO, el auto-infer de paymentCondition ya cambia la condicion automaticamente.
+- **Percepcion IVA**: se asume que Percepcion IVA es mas comun que IIBB para el usuario tipico (RI). El select sigue permitiendo cambiar manualmente.
+
+### Validacion
+- `npx tsc --noEmit`: OK (solo errores pre-existentes en tests/repro_eepn.test.ts)
+- `npx vite build`: OK (solo warning de chunk size pre-existente)
+
+### QA Manual
+- [ ] Compra: click en Cantidad/Costo con 0 → tipear "5000" directo → ok, sin "05000"
+- [ ] Impuestos/Percepciones → default "Percepcion IVA"; agregar otra → tambien IVA
+- [ ] Compra → Pago/Contrapartidas → Proveedores preseleccionado
+- [ ] Venta → Imputacion cobro → Deudores por ventas preseleccionado
+- [ ] Cargar total → click "Autocompletar restante" debajo de Importe → completa
+- [ ] 2 splits: 200k en Proveedores, click autocompletar en 2da fila → completa restante
+- [ ] Borrar proveedor o condicion de pago → Confirmar disabled + error visible
+- [ ] Click Confirmar con errores → scroll al primer campo faltante
+- [ ] Pagos tab → label dice "Confirmar Cobro" o "Confirmar Pago"
+- [ ] Repetir en Ajuste/Stock/RT6/Bonif con mismas reglas
+
+### Pendientes (fuera de scope)
+- Auto-focus al abrir modal en primer campo (nice-to-have)
+- Recalcular restante cuando total cambia y ya hay splits asignados (nice-to-have)
+- Validacion de coherencia importes en Pagos vinculados a comprobante
+
+---
+
 ## CHECKPOINT #INVENTARIO-BIENES-FIXES
 **Fecha:** 2026-02-14
 **Estado:** COMPLETADO - 4 issues corregidos (onboarding wizard, stock display, CTA button, back arrow)
@@ -6674,3 +6932,124 @@ Auditar end-to-end la interconexion entre Proveedores/Acreedores, Bienes de Camb
 - Validar con:
   - `git diff --stat` (solo docs)
   - `git status` (solo archivos docs nuevos/modificados)
+
+---
+
+## CHECKPOINT 2026-02-15 - BIENES DE USO: DEVENGADO VS CONTABILIZADO + PRORRATEO MENSUAL
+
+### Causa raiz
+En Detalle del Bien (Bienes de Uso) se mezclaban valores "devengados/calculados" con valores "contabilizados/posteados" en los KPIs, generando confusion (ej: amort. acumulada 390k devengada vs solo 300k en libro diario por la apertura). No habia distincion clara ni prorrateo mensual, ni forma de generar asientos mensuales idempotentes.
+
+### Cambios implementados
+
+#### 1. Separacion Devengado vs Contabilizado (storage layer)
+- **`src/storage/fixedAssets.ts`**:
+  - Nueva funcion `generateMonthlyDepreciationSchedule()`: genera planilla mensual con prorrateo diario (`amortMes = amortMensual * diasEnUso / diasDelMes`). Maneja:
+    - Bienes de apertura (OPENING con initialAccumDep)
+    - Compras del ejercicio (PURCHASE, primer mes prorrateado)
+    - Bienes dados de baja (disposalDate)
+    - Ajuste de redondeo en ultimo mes activo
+  - Nueva funcion `getAmortizationContabilizada()`: consulta entradas posteadas (opening + amortization) y suma creditos a cuenta contra-activo
+  - Nueva funcion `buildMonthlyAmortizationEntry()`: construye asiento mensual con metadata para idempotencia
+  - Nueva funcion `syncMonthlyAmortizationEntry()`: genera asiento mensual idempotente (no duplica si ya existe para ese periodo)
+  - Nueva funcion `syncPendingAmortizationEntries()`: genera batch de todos los asientos mensuales pendientes
+  - Actualizado `buildAmortizationJournalEntry()`: metadata.meta con granularity='annual', period, asOf
+  - Actualizado `generateAmortizationEntry()`: check mas especifico (sourceType='amortization') para evitar conflictos
+  - Exportados nuevos tipos: `MonthlyDepreciationRow`, `PostedAmortizationInfo`
+
+#### 2. UI Bienes de Uso - Detalle (BienesUsoPage.tsx)
+- **KPIs Resumen** (4 cards):
+  - "Valor Origen" (sin cambio)
+  - "Amort. Devengada" (antes "Amort. Acumulada") con label "Corte: 31/12/YYYY"
+  - "Amort. Contabilizada" (nuevo) con badge "Pend: $X" cuando devengada > contabilizada
+  - "Valor Libro (NBV)" con dual display: NBV devengado + NBV contable cuando difieren
+- **Banner Pendiente**: panel amber con detalle devengada/contabilizada/pendiente y CTAs:
+  - "Generar asientos mensuales" (batch, Lightning icon)
+  - "Asiento anual" (1 entry al 31/12)
+- **Planilla tab**: toggle Mensual/Anual
+  - Vista mensual (default): 12 filas con Mes | Devengado Mes | Dev. Acumulado | Contab. Acum. | Pendiente | Estado (Posteado/Pendiente) | boton Generar individual
+  - Footer con totales y boton "Generar todos"
+  - Vista anual (original): tabla año-por-año sin cambios
+- Tab "Asiento Anual" renombrado a "Asientos"
+- Nuevos handlers: handleGenerateAnnualAmortEntry, handleGenerateMonthlyAmortEntry, handleGenerateAllPendingEntries
+
+#### 3. Metadata para idempotencia
+Asientos mensuales:
+```
+metadata.meta = {
+    source: 'fixedAssets',
+    kind: 'amortization',
+    type: 'AMORTIZATION',
+    assetId, period: 'YYYY-MM', asOf: 'YYYY-MM-DD',
+    periodId, fiscalYear, granularity: 'monthly'
+}
+```
+Asientos anuales:
+```
+metadata.meta = {
+    source: 'fixedAssets',
+    kind: 'amortization',
+    type: 'AMORTIZATION',
+    assetId, period: 'YYYY', asOf: 'YYYY-12-31',
+    periodId, fiscalYear, granularity: 'annual'
+}
+```
+Borrado en cascada: `deleteFixedAsset()` ya recolecta por metadata.sourceModule + sourceId.
+
+#### 4. Inventario (InventarioBienesPage.tsx)
+- Verificado: ya usa OperationsPageHeader correctamente en /operaciones/inventario con back pill, titulo, subtitulo, shimmer, badges (KPI range toggle) y rightSlot (metodo costeo, settings gear). No requiere cambios.
+
+### Archivos tocados
+- `src/storage/fixedAssets.ts` — nuevas funciones + metadata update
+- `src/pages/Operaciones/BienesUsoPage.tsx` — imports, queries, KPIs, planilla, handlers
+- `docs/AI_HANDOFF.md` — este checkpoint
+
+### Decisiones UX
+- Planilla mensual como vista default (toggle a anual disponible)
+- Badge "Pend: $X" inline en el KPI card de Contabilizada (no popup)
+- Banner pendiente solo aparece si amortizacionEjercicio > 0 y hay gap
+- CTAs de generacion: mensual (batch) como primary, anual como secondary
+- NBV contable mostrado solo cuando difiere del devengado (para no confundir)
+
+### Validacion tecnica
+- `npx tsc --noEmit` — OK (solo errores pre-existentes en tests/repro_eepn.test.ts)
+- `npx vite build` — OK (solo warning pre-existente de chunk size)
+- No se introdujeron warnings nuevos
+
+### QA Manual (checklist)
+- [ ] Bien de apertura: Crear bien OPENING con initialAccumDep=300000, origen=900000, vida=10 años
+  - [ ] KPIs muestran Dev=390000, Contab=300000 (solo apertura), Pend=90000
+  - [ ] NBV devengado=510000, NBV contable=600000
+  - [ ] Badge "Pend: $90.000" visible
+  - [ ] Banner pendiente con CTAs visible
+- [ ] Generar asiento anual → contabilizada sube a 390000, pendiente=0, badge desaparece
+- [ ] Planilla mensual: 12 filas, cada mes muestra $7.500 devengado, estado Posteado/Pendiente correcto
+- [ ] Generar asientos mensuales → 12 entries creados, todos marcan "Posteado"
+- [ ] Idempotencia: intentar generar de nuevo → no duplica, muestra "skipped"
+- [ ] Bien de compra mid-year: primer mes prorrateado por dias
+- [ ] Toggle Mensual/Anual funciona en planilla
+- [ ] Cascada: eliminar bien elimina todos los entries vinculados
+
+---
+
+## CHECKPOINT 2026-02-15 (hotfix) - FIX PANTALLA BLANCA BIENES DE USO (TDZ round2)
+
+### Objetivo
+Corregir crash (pantalla blanca) al entrar a /operaciones/bienes-uso.
+
+### Root cause
+`round2` estaba declarada como `const` dentro del cuerpo del componente (linea ~698) pero se usaba en un `useMemo` anterior (linea ~301). `const` no hace hoisting, asi que acceder a `round2` antes de su declaracion produce un `ReferenceError: Cannot access 'round2' before initialization` (Temporal Dead Zone).
+
+### Archivos tocados
+- `src/pages/Operaciones/BienesUsoPage.tsx`
+- `docs/AI_HANDOFF.md`
+
+### Cambios realizados
+- Movido `round2` de dentro del componente (linea 698) a nivel de modulo (linea 134, antes del componente). Es una funcion pura sin dependencia de estado, por lo que no necesita estar dentro del componente.
+- Eliminada la declaracion duplicada interna.
+
+### Validacion
+- `npx tsc --noEmit` — OK (solo errores pre-existentes en tests/)
+- `npx vite build` — OK
+- /operaciones/bienes-uso carga sin pantalla blanca
+- KPIs devengado/contabilizado, planilla mensual, y generacion de asientos funcionan correctamente

@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { FileText } from 'lucide-react'
 
 import { db } from '../storage/db'
 import { createEntry, getTodayISO, createEmptyLine } from '../storage/entries'
-import { getPostableAccounts } from '../storage/accounts'
+import { getAllAccounts } from '../storage/accounts'
 import { sumDebits, sumCredits } from '../core/validation'
 import type { JournalEntry, EntryLine } from '../core/models'
 
@@ -36,7 +36,11 @@ const formatAmount = (n: number): string => {
 
 
 export default function AsientosDesktop() {
-    const accounts = useLiveQuery(() => getPostableAccounts())
+    const allAccounts = useLiveQuery(() => getAllAccounts())
+    const accounts = useMemo(
+        () => (allAccounts || []).filter(a => !a.isHeader),
+        [allAccounts]
+    )
     const entries = useLiveQuery(() => db.entries.orderBy('date').reverse().toArray())
 
     // Modal state
@@ -47,6 +51,7 @@ export default function AsientosDesktop() {
     const [searchQuery, setSearchQuery] = useState('')
     const [isExporting, setIsExporting] = useState(false)
     const [importSuccessCount, setImportSuccessCount] = useState<number | null>(null)
+    const [formalView, setFormalView] = useState(true)
 
     // Inline editing state
     const [editingEntryId, setEditingEntryId] = useState<string | null>(null)
@@ -126,7 +131,7 @@ export default function AsientosDesktop() {
         setIsExporting(true)
 
         try {
-            await downloadJournalPdf(entries, accounts || [], {
+            await downloadJournalPdf(entries, allAccounts || [], {
                 entityName: '',
                 cuit: '',
                 address: '',
@@ -145,7 +150,7 @@ export default function AsientosDesktop() {
     }
 
     const getAccountName = (accountId: string) => {
-        const acc = accounts?.find((a) => a.id === accountId)
+        const acc = allAccounts?.find((a) => a.id === accountId)
         return acc ? acc.name : 'Cuenta desconocida'
     }
 
@@ -164,8 +169,8 @@ export default function AsientosDesktop() {
         const accountMatches = entry.lines.some(line => {
             const accName = getAccountName(line.accountId).toLowerCase()
             if (accName.includes(q)) return true
-            if (accounts) {
-                const display = resolveAccountDisplay(line.accountId, accounts)
+            if (allAccounts) {
+                const display = resolveAccountDisplay(line.accountId, allAccounts)
                 if (display.name.toLowerCase().includes(q)) return true
                 if (display.terceroDetail?.toLowerCase().includes(q)) return true
             }
@@ -231,6 +236,8 @@ export default function AsientosDesktop() {
                 onSearchChange={setSearchQuery}
                 onDownloadPDF={handleDownloadPDF}
                 isExporting={isExporting}
+                formalView={formalView}
+                onToggleView={() => setFormalView(v => !v)}
             />
 
             {/* Entries List */}
@@ -444,10 +451,11 @@ export default function AsientosDesktop() {
                                     key={entry.id}
                                     entry={entry}
                                     entryNumber={entryNumber}
-                                    accounts={accounts || []}
+                                    accounts={allAccounts || []}
                                     onEdit={handleEdit}
                                     onDelete={(id) => setDeleteConfirmId(id)}
                                     disabled={editingEntryId !== null}
+                                    formalView={formalView}
                                 />
                             )
                         })}
