@@ -224,7 +224,7 @@ export interface PayrollLineDetail {
 
 // ─── Payroll Run (Liquidation) ──────────────────────────────
 
-export type PayrollRunStatus = 'draft' | 'posted' | 'paid' | 'partial'
+export type PayrollRunStatus = 'draft' | 'posted' | 'paid' | 'partial' | 'partially_paid'
 
 export interface PayrollRun {
     id: string
@@ -237,6 +237,8 @@ export interface PayrollRun {
     netTotal: number
     advancesAppliedTotal: number
     journalEntryId?: string
+    postedAt?: string
+    paidAt?: string
     salaryPaid: number
     socialSecurityPaid: number
     createdAt: string

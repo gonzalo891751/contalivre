@@ -32,6 +32,9 @@ import type { PayrollFormulaVars } from '../core/payroll/formulas'
 const normalize = (s: string) =>
     s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 
+const isPartiallyPaidStatus = (status: PayrollRun['status']): boolean =>
+    status === 'partial' || status === 'partially_paid'
+
 interface PayrollAccountSpec {
     key: keyof PayrollAccountMappings
     code: string
@@ -614,15 +617,50 @@ function resolveBaseRef(
 // ─── Payroll Runs CRUD ──────────────────────────────────────
 
 export async function getAllPayrollRuns(): Promise<PayrollRun[]> {
-    return db.payrollRuns.orderBy('period').reverse().toArray()
+    const runs = await db.payrollRuns.orderBy('period').reverse().toArray()
+    return reconcilePayrollRunsJournalConsistency(runs)
 }
 
 export async function getPayrollRunById(id: string): Promise<PayrollRun | undefined> {
-    return db.payrollRuns.get(id)
+    const run = await db.payrollRuns.get(id)
+    if (!run) return undefined
+    const [reconciled] = await reconcilePayrollRunsJournalConsistency([run])
+    return reconciled
 }
 
 export async function getPayrollRunByPeriod(period: string): Promise<PayrollRun | undefined> {
-    return db.payrollRuns.where('period').equals(period).first()
+    const run = await db.payrollRuns.where('period').equals(period).first()
+    if (!run) return undefined
+    const [reconciled] = await reconcilePayrollRunsJournalConsistency([run])
+    return reconciled
+}
+
+async function reconcilePayrollRunsJournalConsistency(runs: PayrollRun[]): Promise<PayrollRun[]> {
+    if (runs.length === 0) return runs
+
+    const entryIds = new Set((await db.entries.toArray()).map(e => e.id))
+    const updates: PayrollRun[] = []
+
+    for (const run of runs) {
+        if (!run.journalEntryId) continue
+        if (entryIds.has(run.journalEntryId)) continue
+
+        updates.push({
+            ...run,
+            status: 'draft',
+            journalEntryId: undefined,
+            postedAt: undefined,
+            paidAt: undefined,
+            updatedAt: new Date().toISOString(),
+        })
+    }
+
+    if (updates.length > 0) {
+        await db.payrollRuns.bulkPut(updates)
+    }
+
+    const updatedMap = new Map(updates.map(u => [u.id, u]))
+    return runs.map(r => updatedMap.get(r.id) || r)
 }
 
 export async function createPayrollRun(period: string): Promise<PayrollRun> {
@@ -742,6 +780,79 @@ export async function deletePayrollRun(runId: string): Promise<void> {
     })
 }
 
+export async function markRunAsDraft(runId: string): Promise<void> {
+    const run = await db.payrollRuns.get(runId)
+    if (!run) throw new Error('Liquidacion no encontrada')
+
+    await db.payrollRuns.update(runId, {
+        status: 'draft',
+        journalEntryId: undefined,
+        postedAt: undefined,
+        paidAt: undefined,
+        updatedAt: new Date().toISOString(),
+    })
+}
+
+export async function unlinkJournalFromRun(
+    runId: string,
+    journalEntryId: string,
+    reason: string,
+): Promise<void> {
+    const run = await db.payrollRuns.get(runId)
+    if (!run) return
+
+    if (run.journalEntryId && run.journalEntryId !== journalEntryId) return
+
+    const paymentsCount = await db.payrollPayments.where('payrollRunId').equals(runId).count()
+    if (paymentsCount > 0) {
+        throw new Error('No se puede despostear la liquidacion porque tiene pagos registrados.')
+    }
+
+    await markRunAsDraft(runId)
+    void reason
+}
+
+async function recomputeRunPaymentState(runId: string): Promise<void> {
+    const run = await db.payrollRuns.get(runId)
+    if (!run) return
+
+    const payments = await db.payrollPayments.where('payrollRunId').equals(runId).toArray()
+    const salaryPaid = round2(payments.filter(p => p.type === 'salary').reduce((s, p) => s + p.amount, 0))
+    const socialSecurityPaid = round2(payments.filter(p => p.type === 'social_security').reduce((s, p) => s + p.amount, 0))
+    const totalSS = round2(run.employeeWithholdTotal + run.employerContribTotal)
+    const allPaid = salaryPaid >= run.netTotal - 0.01 && socialSecurityPaid >= totalSS - 0.01
+
+    let status: PayrollRun['status'] = run.status
+    if (!run.journalEntryId) status = 'draft'
+    else if (allPaid) status = 'paid'
+    else if (payments.length > 0) status = 'partially_paid'
+    else status = 'posted'
+
+    await db.payrollRuns.update(runId, {
+        salaryPaid,
+        socialSecurityPaid,
+        status,
+        paidAt: allPaid ? new Date().toISOString() : undefined,
+        updatedAt: new Date().toISOString(),
+    })
+}
+
+export async function unlinkPaymentFromRun(
+    runId: string,
+    journalEntryId: string,
+    reason: string,
+): Promise<void> {
+    const payments = await db.payrollPayments.where('payrollRunId').equals(runId).toArray()
+    const target = payments.find(p => p.journalEntryId === journalEntryId)
+    if (!target) return
+
+    await db.transaction('rw', db.payrollPayments, db.payrollRuns, async () => {
+        await db.payrollPayments.delete(target.id)
+        await recomputeRunPaymentState(runId)
+    })
+    void reason
+}
+
 // ─── Journal Entry Builders ─────────────────────────────────
 
 /**
@@ -819,6 +930,8 @@ export async function postPayrollRun(runId: string): Promise<JournalEntry> {
     await db.payrollRuns.update(runId, {
         status: 'posted',
         journalEntryId: entry.id,
+        postedAt: new Date().toISOString(),
+        paidAt: undefined,
         updatedAt: new Date().toISOString(),
     })
 
@@ -932,7 +1045,7 @@ export async function registerPayrollPayment(
     const newSSPaid = type === 'social_security' ? round2(run.socialSecurityPaid + amount) : run.socialSecurityPaid
     const totalSS = round2(run.employeeWithholdTotal + run.employerContribTotal)
     const allPaid = newSalaryPaid >= run.netTotal - 0.01 && newSSPaid >= totalSS - 0.01
-    const newStatus: PayrollRun['status'] = allPaid ? 'paid' : 'partial'
+    const newStatus: PayrollRun['status'] = allPaid ? 'paid' : 'partially_paid'
 
     await db.transaction('rw', db.payrollPayments, db.payrollRuns, async () => {
         await db.payrollPayments.add(payment)
@@ -940,6 +1053,7 @@ export async function registerPayrollPayment(
             salaryPaid: newSalaryPaid,
             socialSecurityPaid: newSSPaid,
             status: newStatus,
+            paidAt: allPaid ? new Date().toISOString() : undefined,
             updatedAt: new Date().toISOString(),
         })
     })
@@ -964,7 +1078,7 @@ export async function getPayrollMetrics(): Promise<PayrollMetrics> {
     const runs = await db.payrollRuns.toArray()
     const settings = await getPayrollSettings()
 
-    const pendingRuns = runs.filter(r => r.status === 'posted' || r.status === 'partial')
+    const pendingRuns = runs.filter(r => r.status === 'posted' || isPartiallyPaidStatus(r.status))
 
     let netPending = 0
     let retencionesDepositar = 0

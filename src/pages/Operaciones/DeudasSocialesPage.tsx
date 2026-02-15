@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DeudasSocialesPage - Sueldos PRO
  *
  * Tabs: Dashboard | Empleados | Conceptos | Liquidaciones | Vencimientos | Asientos
@@ -14,7 +14,6 @@ import {
     Receipt,
     Money,
     CaretRight,
-    CaretDown,
     CheckCircle,
     Clock,
     Warning,
@@ -25,7 +24,6 @@ import {
     GearSix,
     Sparkle,
     ListChecks,
-    Info,
 } from '@phosphor-icons/react'
 import {
     PieChart, Pie, Cell, BarChart, Bar,
@@ -34,6 +32,7 @@ import {
 } from 'recharts'
 import OperationsPageHeader from '../../components/OperationsPageHeader'
 import PayrollOnboardingWizard from './payroll/OnboardingWizard'
+import EmployeeReceiptModal from './payroll/EmployeeReceiptModal'
 import { db } from '../../storage/db'
 import {
     getAllEmployees,
@@ -43,7 +42,6 @@ import {
     getAllPayrollRuns,
     createPayrollRun,
     getPayrollLines,
-    updatePayrollLine,
     deletePayrollRun,
     postPayrollRun,
     registerPayrollPayment,
@@ -60,10 +58,10 @@ import {
     getPayrollAreaMetrics,
     getOnboardingStatus,
 } from '../../storage/payroll'
+import { deleteJournalEntryWithSync } from '../../storage/journalSync'
 import type {
     Employee,
     PayrollRun,
-    PayrollLine,
     PayrollSettings,
     PaymentSplit,
     PayrollConcept,
@@ -107,24 +105,72 @@ const fmtPercent = (n: number): string => `${(n * 100).toFixed(2)}%`
 const DONUT_COLORS = ['#3B82F6', '#F59E0B', '#10B981', '#8B5CF6', '#EC4899']
 const AREA_COLORS = ['#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EC4899', '#06B6D4']
 
-// ─── Status Badge ───────────────────────────────────────────
+function parsePeriodToDate(period: string): Date {
+    const [year, month] = period.split('-').map(Number)
+    return new Date(year, month - 1, 1)
+}
 
-function StatusBadge({ status }: { status: PayrollRun['status'] }) {
+function formatPeriodDate(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+function addMonths(period: string, months: number): string {
+    const date = parsePeriodToDate(period)
+    date.setMonth(date.getMonth() + months)
+    return formatPeriodDate(date)
+}
+
+function suggestPayrollPeriod(runs: PayrollRun[] | undefined): string {
+    const periods = (runs || []).map(run => run.period).filter(Boolean)
+    const existing = new Set(periods)
+
+    if (periods.length === 0) {
+        // Default de demo para entorno local actual.
+        return '2025-01'
+    }
+
+    const latest = periods
+        .map(parsePeriodToDate)
+        .sort((a, b) => b.getTime() - a.getTime())[0]
+
+    const candidate = formatPeriodDate(new Date(latest.getFullYear(), latest.getMonth() + 1, 1))
+    if (!existing.has(candidate)) return candidate
+
+    const current = formatPeriodDate(new Date())
+    if (!existing.has(current)) return current
+
+    return addMonths(candidate, 1)
+}
+
+// â”€â”€â”€ Status Badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function StatusBadge({
+    status,
+    hasLinkedJournal = true,
+}: {
+    status: PayrollRun['status']
+    hasLinkedJournal?: boolean
+}) {
     const cfg = {
         draft: { label: 'Borrador', bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' },
         posted: { label: 'Devengado', bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-100' },
         partial: { label: 'Pago parcial', bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-100' },
+        partially_paid: { label: 'Pago parcial', bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-100' },
         paid: { label: 'Pagado', bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-100' },
     }[status]
 
+    const effectiveCfg = status === 'posted' && !hasLinkedJournal
+        ? { label: 'Borrador', bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' }
+        : cfg
+
     return (
-        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${cfg.bg} ${cfg.text} border ${cfg.border}`}>
-            {cfg.label}
+        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${effectiveCfg.bg} ${effectiveCfg.text} border ${effectiveCfg.border}`}>
+            {effectiveCfg.label}
         </span>
     )
 }
 
-// ─── Onboarding Checklist Banner ────────────────────────────
+// â”€â”€â”€ Onboarding Checklist Banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function OnboardingBanner({
     status,
@@ -184,7 +230,7 @@ function OnboardingBanner({
     )
 }
 
-// ─── Main Page Component ────────────────────────────────────
+// â”€â”€â”€ Main Page Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const ZERO_METRICS: Awaited<ReturnType<typeof getPayrollMetrics>> = {
     hasData: false,
@@ -200,10 +246,10 @@ export default function DeudasSocialesPage() {
     const [activeTab, setActiveTab] = useState<TabName>('dashboard')
     const [wizardOpen, setWizardOpen] = useState(false)
 
-    // Seed settings once on mount (WRITE — outside liveQuery)
+    // Seed settings once on mount (WRITE â€” outside liveQuery)
     useEffect(() => { void ensurePayrollSeeded() }, [])
 
-    // Global data — all read-only queries with fallback
+    // Global data â€” all read-only queries with fallback
     const employees = useLiveQuery(async () => {
         try { return await getAllEmployees() } catch (e) { console.error('[payroll] getAllEmployees', e); return [] }
     }, [])
@@ -364,9 +410,9 @@ export default function DeudasSocialesPage() {
     )
 }
 
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // DASHBOARD TAB
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function DashboardTab({
     metrics,
@@ -423,7 +469,7 @@ function DashboardTab({
                     onClick={onNewRun}
                     className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors flex items-center gap-2"
                 >
-                    <Plus weight="bold" size={16} /> Nueva Liquidacion
+                    <Plus weight="bold" size={16} /> Generar borrador del mes
                 </button>
             </div>
 
@@ -515,9 +561,9 @@ function DashboardTab({
     )
 }
 
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // EMPLEADOS TAB
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function EmpleadosTab({
     employees,
@@ -656,14 +702,14 @@ function EmpleadosTab({
                             filtered.map(emp => (
                                 <tr key={emp.id} className="hover:bg-slate-50 transition-colors">
                                     <td className="px-4 py-3 font-medium text-slate-900">{emp.fullName}</td>
-                                    <td className="px-4 py-3 text-slate-500 hidden sm:table-cell font-mono text-xs">{emp.cuil || '—'}</td>
+                                    <td className="px-4 py-3 text-slate-500 hidden sm:table-cell font-mono text-xs">{emp.cuil || 'â€”'}</td>
                                     <td className="px-4 py-3 text-right font-mono text-slate-900">{fmtCurrency(emp.baseGross)}</td>
                                     <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
                                         {emp.area ? (
                                             <span className="px-2 py-0.5 bg-violet-50 text-violet-600 text-xs rounded-full border border-violet-100">
                                                 {emp.area}
                                             </span>
-                                        ) : '—'}
+                                        ) : 'â€”'}
                                     </td>
                                     <td className="px-4 py-3 text-center">
                                         <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
@@ -810,9 +856,9 @@ function EmpleadosTab({
     )
 }
 
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CONCEPTOS TAB
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function ConceptosTab({
     concepts,
@@ -1161,9 +1207,9 @@ function ConceptosTab({
     )
 }
 
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // LIQUIDACIONES TAB
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function LiquidacionesTab({
     runs,
@@ -1175,11 +1221,9 @@ function LiquidacionesTab({
     accounts: Account[] | undefined
 }) {
     const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
-    const [showNewPeriod, setShowNewPeriod] = useState(false)
-    const [newPeriod, setNewPeriod] = useState(() => {
-        const now = new Date()
-        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    })
+    const [showManualPeriod, setShowManualPeriod] = useState(false)
+    const suggestedPeriod = useMemo(() => suggestPayrollPeriod(runs), [runs])
+    const [manualPeriod, setManualPeriod] = useState(suggestedPeriod)
     const [paymentModal, setPaymentModal] = useState<{
         runId: string
         type: 'salary' | 'social_security'
@@ -1188,12 +1232,16 @@ function LiquidacionesTab({
     const [error, setError] = useState<string | null>(null)
     const [success, setSuccess] = useState<string | null>(null)
 
-    const handleCreateRun = async () => {
+    useEffect(() => {
+        setManualPeriod(suggestedPeriod)
+    }, [suggestedPeriod])
+
+    const handleCreateRun = async (period: string) => {
         setError(null)
         try {
-            await createPayrollRun(newPeriod)
-            setShowNewPeriod(false)
-            setSuccess('Liquidacion creada exitosamente')
+            await createPayrollRun(period)
+            setShowManualPeriod(false)
+            setSuccess(`Borrador generado para ${fmtPeriod(period)}`)
             setTimeout(() => setSuccess(null), 3000)
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Error')
@@ -1237,35 +1285,46 @@ function LiquidacionesTab({
 
             <div className="flex flex-col sm:flex-row justify-between gap-3">
                 <h3 className="font-display font-semibold text-lg text-slate-900">Liquidaciones por Periodo</h3>
-                <button
-                    onClick={() => setShowNewPeriod(true)}
-                    className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors flex items-center gap-2"
-                >
-                    <Plus weight="bold" size={16} /> Nueva Liquidacion
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                    <button
+                        onClick={() => handleCreateRun(suggestedPeriod)}
+                        className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors flex items-center gap-2"
+                    >
+                        <Plus weight="bold" size={16} /> Generar borrador del mes
+                    </button>
+                    <button
+                        onClick={() => setShowManualPeriod(prev => !prev)}
+                        className="px-3 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+                    >
+                        Elegir otro periodo
+                    </button>
+                </div>
             </div>
 
-            {/* New period input */}
-            {showNewPeriod && (
+            <div className="text-xs text-slate-500">
+                Sugerido: <span className="font-semibold text-slate-700">{fmtPeriod(suggestedPeriod)}</span>
+            </div>
+
+            {showManualPeriod && (
                 <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-end gap-3">
                     <div>
                         <label className="block text-xs font-medium text-violet-700 mb-1">Periodo (YYYY-MM)</label>
                         <input
                             type="month"
                             className="px-3 py-2 border border-violet-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none font-mono"
-                            value={newPeriod}
-                            onChange={e => setNewPeriod(e.target.value)}
+                            value={manualPeriod}
+                            onChange={e => setManualPeriod(e.target.value)}
                         />
                     </div>
                     <div className="flex gap-2">
                         <button
-                            onClick={handleCreateRun}
+                            onClick={() => handleCreateRun(manualPeriod)}
                             className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700"
                         >
-                            Crear
+                            Generar borrador
                         </button>
                         <button
-                            onClick={() => setShowNewPeriod(false)}
+                            onClick={() => setShowManualPeriod(false)}
                             className="px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-white"
                         >
                             Cancelar
@@ -1286,7 +1345,6 @@ function LiquidacionesTab({
                             key={run.id}
                             run={run}
                             employees={employees}
-                            accounts={accounts}
                             isExpanded={expandedRunId === run.id}
                             onToggle={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
                             onPost={() => handlePost(run.id)}
@@ -1320,7 +1378,7 @@ function LiquidacionesTab({
     )
 }
 
-// ─── PayrollRunCard ─────────────────────────────────────────
+// â”€â”€â”€ PayrollRunCard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function PayrollRunCard({
     run,
@@ -1334,7 +1392,6 @@ function PayrollRunCard({
 }: {
     run: PayrollRun
     employees: Employee[] | undefined
-    accounts: Account[] | undefined
     isExpanded: boolean
     onToggle: () => void
     onPost: () => void
@@ -1344,18 +1401,34 @@ function PayrollRunCard({
 }) {
     const lines = useLiveQuery(() => getPayrollLines(run.id), [run.id])
     const payments = useLiveQuery(() => getPayrollPayments(run.id), [run.id])
+    const linkedJournal = useLiveQuery(
+        () => (run.journalEntryId ? db.entries.get(run.journalEntryId) : Promise.resolve(undefined)),
+        [run.journalEntryId],
+    )
     const empMap = useMemo(() => {
         const m = new Map<string, Employee>()
         employees?.forEach(e => m.set(e.id, e))
         return m
     }, [employees])
+    const [receiptLineId, setReceiptLineId] = useState<string | null>(null)
 
     const salaryRemaining = Math.max(0, run.netTotal - run.salaryPaid)
     const ssTotal = run.employeeWithholdTotal + run.employerContribTotal
     const ssRemaining = Math.max(0, ssTotal - run.socialSecurityPaid)
-
-    // Check if any line has concept breakdown
-    const hasConcepts = lines?.some(l => l.conceptBreakdown && l.conceptBreakdown.length > 0)
+    const hasLinkedJournal = !!(run.journalEntryId && linkedJournal)
+    const isPostedLike = run.status !== 'draft' && hasLinkedJournal
+    const receiptLine = (lines || []).find(line => line.id === receiptLineId)
+    const receiptEmployee = receiptLine ? empMap.get(receiptLine.employeeId) : undefined
+    const handleUnpost = async () => {
+        if (!run.journalEntryId) return
+        if (!confirm('Este asiento de sueldos se anulará y la liquidación volverá a BORRADOR. ¿Continuar?')) return
+        try {
+            const result = await deleteJournalEntryWithSync(run.journalEntryId)
+            alert(result.message)
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'No se pudo anular el asiento')
+        }
+    }
 
     return (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -1373,7 +1446,7 @@ function PayrollRunCard({
                         <span className="font-semibold text-slate-900">{fmtPeriod(run.period)}</span>
                         <span className="text-xs text-slate-500 ml-2">({fmtDate(run.accrualDate)})</span>
                     </div>
-                    <StatusBadge status={run.status} />
+                    <StatusBadge status={run.status} hasLinkedJournal={hasLinkedJournal} />
                 </div>
                 <div className="flex items-center gap-4 text-sm">
                     <div className="hidden sm:block">
@@ -1418,21 +1491,47 @@ function PayrollRunCard({
 
                     {/* Lines Table */}
                     {lines && lines.length > 0 && (
-                        <div className="space-y-2">
-                            {lines.map(line => (
-                                <PayrollLineRow
-                                    key={line.id}
-                                    line={line}
-                                    employeeName={empMap.get(line.employeeId)?.fullName || 'Desconocido'}
-                                    isDraft={run.status === 'draft'}
-                                    hasConcepts={!!hasConcepts}
-                                />
-                            ))}
+                        <div className="border border-slate-200 rounded-lg overflow-hidden">
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full table-fixed text-sm">
+                                    <thead className="bg-slate-50 border-b border-slate-200">
+                                        <tr>
+                                            <th className="text-left px-4 py-2.5 font-medium text-slate-600 w-[36%]">Empleado</th>
+                                            <th className="text-right px-4 py-2.5 font-medium text-slate-600 w-[16%]">Bruto</th>
+                                            <th className="text-right px-4 py-2.5 font-medium text-slate-600 w-[16%]">Retenciones</th>
+                                            <th className="text-right px-4 py-2.5 font-medium text-slate-600 w-[16%]">Contrib. Empleador</th>
+                                            <th className="text-right px-4 py-2.5 font-medium text-slate-600 w-[16%]">Neto</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {lines.map(line => (
+                                            <tr
+                                                key={line.id}
+                                                className="hover:bg-slate-50 cursor-pointer"
+                                                onClick={() => setReceiptLineId(line.id)}
+                                            >
+                                                <td className="px-4 py-2.5">
+                                                    <div className="truncate font-medium text-slate-900" title={empMap.get(line.employeeId)?.fullName || 'Desconocido'}>
+                                                        {empMap.get(line.employeeId)?.fullName || 'Desconocido'}
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-2.5 text-right font-mono tabular-nums text-slate-700">{fmtCurrency2(line.gross)}</td>
+                                                <td className="px-4 py-2.5 text-right font-mono tabular-nums text-slate-700">{fmtCurrency2(line.employeeWithholds)}</td>
+                                                <td className="px-4 py-2.5 text-right font-mono tabular-nums text-slate-700">{fmtCurrency2(line.employerContrib)}</td>
+                                                <td className="px-4 py-2.5 text-right font-mono tabular-nums font-semibold text-slate-900">{fmtCurrency2(line.net)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="px-4 py-2 text-xs text-slate-500 bg-slate-50 border-t border-slate-100">
+                                Click en una fila para abrir Recibo (vista empleador).
+                            </div>
                         </div>
                     )}
 
                     {/* Payment Progress */}
-                    {run.status !== 'draft' && (
+                    {isPostedLike && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-white border border-slate-200 rounded-lg p-3">
                                 <div className="flex justify-between items-center mb-2">
@@ -1514,151 +1613,41 @@ function PayrollRunCard({
                                 </button>
                             </>
                         )}
-                        {run.journalEntryId && (
+                        {hasLinkedJournal && run.journalEntryId && (
                             <button
-                                onClick={() => window.open(`/asientos`, '_self')}
+                                onClick={() => window.open(`/asientos?entryId=${run.journalEntryId}`, '_self')}
                                 className="px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 flex items-center gap-2"
                             >
                                 <Eye size={16} /> Ver Asiento en Diario
                             </button>
                         )}
+                        {hasLinkedJournal && run.status === 'posted' && (
+                            <button
+                                onClick={handleUnpost}
+                                className="px-4 py-2 text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50 flex items-center gap-2"
+                            >
+                                <Receipt size={16} /> Anular / Despostear
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
-        </div>
-    )
-}
 
-// ─── PayrollLineRow (with concept breakdown) ────────────────
-
-function PayrollLineRow({
-    line,
-    employeeName,
-    isDraft,
-}: {
-    line: PayrollLine
-    employeeName: string
-    isDraft: boolean
-    hasConcepts: boolean
-}) {
-    const [editing, setEditing] = useState(false)
-    const [showBreakdown, setShowBreakdown] = useState(false)
-    const [editGross, setEditGross] = useState(String(line.gross))
-    const [editWithholds, setEditWithholds] = useState(String(line.employeeWithholds))
-    const [editContrib, setEditContrib] = useState(String(line.employerContrib))
-
-    const breakdown = line.conceptBreakdown
-
-    const handleSave = async () => {
-        await updatePayrollLine(line.id, {
-            gross: parseFloat(editGross) || 0,
-            employeeWithholds: parseFloat(editWithholds) || 0,
-            employerContrib: parseFloat(editContrib) || 0,
-        })
-        setEditing(false)
-    }
-
-    return (
-        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-            {/* Main row */}
-            <div className="flex items-center px-3 py-2.5 text-sm">
-                <div className="flex-1 flex items-center gap-2">
-                    {breakdown && breakdown.length > 0 && (
-                        <button
-                            onClick={() => setShowBreakdown(!showBreakdown)}
-                            className="text-slate-400 hover:text-violet-600 transition-colors"
-                        >
-                            {showBreakdown ? <CaretDown size={14} /> : <CaretRight size={14} />}
-                        </button>
-                    )}
-                    <span className="font-medium text-slate-900">{employeeName}</span>
-                </div>
-                {editing && isDraft ? (
-                    <>
-                        <input type="number" className="w-24 px-2 py-1 border border-violet-200 rounded text-sm font-mono text-right mx-1" value={editGross} onChange={e => setEditGross(e.target.value)} />
-                        <input type="number" className="w-24 px-2 py-1 border border-violet-200 rounded text-sm font-mono text-right mx-1" value={editWithholds} onChange={e => setEditWithholds(e.target.value)} />
-                        <input type="number" className="w-24 px-2 py-1 border border-violet-200 rounded text-sm font-mono text-right mx-1" value={editContrib} onChange={e => setEditContrib(e.target.value)} />
-                        <div className="flex gap-1 ml-2">
-                            <button onClick={handleSave} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"><FloppyDisk size={16} /></button>
-                            <button onClick={() => setEditing(false)} className="p-1 text-slate-400 hover:bg-slate-100 rounded"><X size={16} /></button>
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <div className="text-right font-mono text-slate-700 w-24 px-2">{fmtCurrency2(line.gross)}</div>
-                        <div className="text-right font-mono text-slate-700 w-24 px-2 hidden sm:block">{fmtCurrency2(line.employeeWithholds)}</div>
-                        <div className="text-right font-mono text-slate-700 w-24 px-2 hidden sm:block">{fmtCurrency2(line.employerContrib)}</div>
-                        <div className="text-right font-mono font-bold text-slate-900 w-24 px-2">{fmtCurrency2(line.net)}</div>
-                        {isDraft && (
-                            <button
-                                onClick={() => setEditing(true)}
-                                className="ml-1 p-1 text-slate-300 hover:text-violet-500 transition-opacity"
-                                title="Editar"
-                            >
-                                <Pencil size={14} />
-                            </button>
-                        )}
-                    </>
-                )}
-            </div>
-
-            {/* Concept Breakdown */}
-            {showBreakdown && breakdown && breakdown.length > 0 && (
-                <div className="border-t border-slate-100 bg-slate-50/50 px-3 py-2">
-                    <table className="w-full text-xs">
-                        <thead>
-                            <tr className="text-slate-400">
-                                <th className="text-left py-1 font-medium">Concepto</th>
-                                <th className="text-left py-1 font-medium">Tipo</th>
-                                <th className="text-right py-1 font-medium">Base</th>
-                                <th className="text-right py-1 font-medium">Tasa</th>
-                                <th className="text-right py-1 font-medium">Monto</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {breakdown.map((detail, i) => (
-                                <tr key={i} className="border-t border-slate-100/50">
-                                    <td className="py-1.5 text-slate-700">
-                                        {detail.conceptName}
-                                        {detail.formulaExpr && (
-                                            <span className="ml-1 text-slate-400 font-mono" title={detail.formulaExpr}>
-                                                <Info size={10} className="inline" />
-                                            </span>
-                                        )}
-                                    </td>
-                                    <td className="py-1.5">
-                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                                            detail.kind === 'earning'
-                                                ? 'bg-emerald-50 text-emerald-600'
-                                                : detail.kind === 'deduction'
-                                                ? 'bg-red-50 text-red-600'
-                                                : 'bg-violet-50 text-violet-600'
-                                        }`}>
-                                            {detail.kind === 'earning' ? 'HAB' : detail.kind === 'deduction' ? 'DED' : 'PAT'}
-                                        </span>
-                                    </td>
-                                    <td className="py-1.5 text-right font-mono text-slate-500">
-                                        {detail.baseAmount > 0 ? fmtCurrency2(detail.baseAmount) : '—'}
-                                    </td>
-                                    <td className="py-1.5 text-right font-mono text-slate-500">
-                                        {detail.rate != null ? fmtPercent(detail.rate) : '—'}
-                                    </td>
-                                    <td className={`py-1.5 text-right font-mono font-medium ${
-                                        detail.kind === 'earning' ? 'text-emerald-700' : detail.kind === 'deduction' ? 'text-red-600' : 'text-violet-600'
-                                    }`}>
-                                        {detail.kind === 'deduction' ? '-' : ''}{fmtCurrency2(detail.amount)}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+            {receiptLine && receiptEmployee && (
+                <EmployeeReceiptModal
+                    run={run}
+                    line={receiptLine}
+                    employee={receiptEmployee}
+                    hasLinkedJournal={hasLinkedJournal}
+                    onClose={() => setReceiptLineId(null)}
+                />
             )}
         </div>
     )
 }
 
-// ─── PaymentModal ───────────────────────────────────────────
+
+// â”€â”€â”€ PaymentModal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function PaymentModal({
     runId,
@@ -1823,9 +1812,9 @@ function PaymentModal({
     )
 }
 
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // VENCIMIENTOS TAB
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function VencimientosTab({
     runs,
@@ -1835,7 +1824,7 @@ function VencimientosTab({
     settings: PayrollSettings | undefined
 }) {
     const pendingRuns = useMemo(() =>
-        runs?.filter(r => r.status === 'posted' || r.status === 'partial') || [],
+        runs?.filter(r => r.status === 'posted' || r.status === 'partial' || r.status === 'partially_paid') || [],
         [runs]
     )
 
@@ -1997,9 +1986,9 @@ function VencimientosTab({
     )
 }
 
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ASIENTOS TAB
-// ═══════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function AsientosTab({
     entries,

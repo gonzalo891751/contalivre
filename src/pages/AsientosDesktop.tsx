@@ -5,6 +5,7 @@ import { FileText } from 'lucide-react'
 import { db } from '../storage/db'
 import { createEntry, getTodayISO, createEmptyLine } from '../storage/entries'
 import { getAllAccounts } from '../storage/accounts'
+import { deleteJournalEntryWithSync } from '../storage/journalSync'
 import { sumDebits, sumCredits } from '../core/validation'
 import type { JournalEntry, EntryLine } from '../core/models'
 
@@ -117,12 +118,16 @@ export default function AsientosDesktop() {
 
     const handleDeleteEntry = async (id: string) => {
         try {
-            await db.entries.delete(id)
+            const result = await deleteJournalEntryWithSync(id)
             setDeleteConfirmId(null)
             setDeleteSuccess(true)
             setTimeout(() => setDeleteSuccess(false), 3000)
+            if (result.mode !== 'deleted') {
+                alert(result.message)
+            }
         } catch (err) {
             console.error('Error deleting entry:', err)
+            alert(err instanceof Error ? err.message : 'No se pudo eliminar el asiento')
         }
     }
 
@@ -188,6 +193,15 @@ export default function AsientosDesktop() {
 
         return false
     })
+
+    const selectedDeleteEntry = deleteConfirmId
+        ? (entries || []).find(entry => entry.id === deleteConfirmId) || null
+        : null
+    const deletingPayrollAccrual = !!(
+        selectedDeleteEntry &&
+        selectedDeleteEntry.sourceModule === 'payroll' &&
+        selectedDeleteEntry.sourceType === 'accrual'
+    )
 
     // ─────────────────────────────────────────────────────────────────────────
     // Render
@@ -477,7 +491,9 @@ export default function AsientosDesktop() {
                 <div className="modal-overlay" onClick={() => setDeleteConfirmId(null)}>
                     <div className="modal" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-header">
-                            <h3 className="modal-title">⚠️ Confirmar eliminación</h3>
+                            <h3 className="modal-title">
+                                {deletingPayrollAccrual ? '⚠️ Anular asiento de sueldos' : '⚠️ Confirmar eliminación'}
+                            </h3>
                             <button
                                 type="button"
                                 className="btn btn-icon btn-secondary"
@@ -487,7 +503,11 @@ export default function AsientosDesktop() {
                             </button>
                         </div>
                         <div className="modal-body">
-                            <p>¿Eliminar este asiento? Esta acción no se puede deshacer.</p>
+                            <p>
+                                {deletingPayrollAccrual
+                                    ? 'Este asiento viene de Sueldos. Se desposteará la liquidación y volverá a BORRADOR.'
+                                    : '¿Eliminar este asiento? Esta acción no se puede deshacer.'}
+                            </p>
                         </div>
                         <div className="modal-footer">
                             <button
@@ -502,7 +522,7 @@ export default function AsientosDesktop() {
                                 className="btn btn-danger"
                                 onClick={() => handleDeleteEntry(deleteConfirmId)}
                             >
-                                🗑️ Eliminar
+                                {deletingPayrollAccrual ? '↩️ Anular / Despostear' : '🗑️ Eliminar'}
                             </button>
                         </div>
                     </div>
