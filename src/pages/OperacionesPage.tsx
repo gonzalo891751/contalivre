@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -22,6 +22,7 @@ import { db } from '../storage/db'
 import { calculateAllValuations } from '../core/inventario/costing'
 import { getFixedAssetsMetrics } from '../storage/fixedAssets'
 import { getInvestmentMetrics } from '../storage/inversiones'
+import { getPayrollMetrics, ensurePayrollSeeded } from '../storage/payroll'
 import { useIndicatorsMetrics } from '../hooks/useIndicatorsMetrics'
 import { usePeriodYear } from '../hooks/usePeriodYear'
 import { useTaxClosure } from '../hooks/useTaxClosure'
@@ -63,6 +64,12 @@ export default function OperacionesPage() {
         () => getInvestmentMetrics(periodId),
         [periodId]
     )
+
+    // Payroll metrics — seed once, read-only query with fallback
+    useEffect(() => { void ensurePayrollSeeded() }, [])
+    const payrollMetrics = useLiveQuery(async () => {
+        try { return await getPayrollMetrics() } catch (e) { console.error('[payroll] getPayrollMetrics', e); return undefined }
+    }, [])
 
     // Tax data for Fiscal/Impuestos card
     const currentMonth = useMemo(() => {
@@ -715,6 +722,61 @@ export default function OperacionesPage() {
                                 )}
                             </div>
                             <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all">
+                                <CaretRight weight="bold" size={16} />
+                            </div>
+                        </div>
+                    </div>
+                    {/* Deudas Sociales / Sueldos */}
+                    <div
+                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-violet-400 transition-all group cursor-pointer"
+                        onClick={() => navigate('/operaciones/deudas-sociales')}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/deudas-sociales')}
+                        aria-label="Ir a modulo de Deudas Sociales / Sueldos"
+                    >
+                        <div className="flex justify-between items-start mb-3">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center text-xl group-hover:bg-violet-100 transition-colors">
+                                    <UsersThree weight="duotone" size={24} />
+                                </div>
+                                <span className="font-semibold text-slate-900">Deudas Sociales</span>
+                            </div>
+                            {payrollMetrics?.dueSeverity === 'overdue' ? (
+                                <span className="bg-red-50 text-red-600 text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 border border-red-100">
+                                    <Warning weight="fill" size={10} /> {payrollMetrics.nextDueLabel}
+                                </span>
+                            ) : payrollMetrics?.dueSeverity === 'upcoming' ? (
+                                <span className="bg-amber-50 text-amber-600 text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 border border-amber-100">
+                                    <Clock weight="fill" size={10} /> {payrollMetrics.nextDueLabel}
+                                </span>
+                            ) : payrollMetrics?.hasData ? (
+                                <span className="bg-emerald-50 text-emerald-600 text-xs px-2 py-1 rounded-full font-bold border border-emerald-100">
+                                    Al dia
+                                </span>
+                            ) : (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-violet-50 text-violet-600 border border-violet-100">Pasivo</span>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 mb-3">
+                            <div>
+                                <div className="text-xs text-slate-500">Neto a pagar</div>
+                                <div className="font-mono font-semibold text-slate-900">
+                                    {payrollMetrics?.hasData ? formatCurrency(payrollMetrics.netPending) : '—'}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-xs text-slate-500">Cargas sociales</div>
+                                <div className="font-mono font-semibold text-slate-900">
+                                    {payrollMetrics?.hasData ? formatCurrency(payrollMetrics.cargasSocialesAPagar) : '—'}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-between items-end">
+                            <div>
+                                <div className="text-xs text-slate-500">{payrollMetrics?.totalEmployees || 0} empleado(s)</div>
+                            </div>
+                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-violet-500 group-hover:text-white transition-all">
                                 <CaretRight weight="bold" size={16} />
                             </div>
                         </div>

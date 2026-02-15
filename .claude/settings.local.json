@@ -25,7 +25,9 @@
       "Bash(npm run lint)",
       "Bash(npx eslint:*)",
       "Bash(npm test:*)",
-      "Bash(npx vite:*)"
+      "Bash(npx vite:*)",
+      "Bash(ls \"d:\\\\Git\\\\ContaLivre\\\\src\\\\lib\"\" 2>/dev/null || echo \"dir does not exist \")",
+      "Bash(ls:*)"
     ]
   }
 }

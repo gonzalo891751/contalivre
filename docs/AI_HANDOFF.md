@@ -7053,3 +7053,71 @@ Corregir crash (pantalla blanca) al entrar a /operaciones/bienes-uso.
 - `npx vite build` — OK
 - /operaciones/bienes-uso carga sin pantalla blanca
 - KPIs devengado/contabilizado, planilla mensual, y generacion de asientos funcionan correctamente
+
+---
+
+## CHECKPOINT: Modal Bienes de Cambio — Defaults inteligentes, terceros, Consumidor Final, mini-calculadora
+
+**Fecha:** 2026-02-15
+
+### Archivos tocados
+| Archivo | Cambio |
+|---|---|
+| `src/lib/amount-expression.ts` | **NUEVO** — Parser seguro de expresiones aritmeticas (shunting-yard/RPN, sin eval) |
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Modificaciones para FASE 1-4 |
+
+### Resumen de cambios
+
+#### FASE 1: Defaults inteligentes de imputacion
+- **Estado `splitsTouched`** — Flag booleano que trackea si el usuario modifico manualmente los splits (cuenta/importe). Previene sobreescritura automatica.
+- **Default de cuenta**: ya existia (linea ~776). Se agrego guard `splitsTouched` para no pisar cambios manuales.
+- **Auto-sync de importe**: Nuevo `useEffect` que sincroniza el importe del primer split con `calculations.totalFinal` cuando `splitsTouched === false` y hay exactamente 1 split con cuenta asignada.
+- En **Venta**: default a Deudores por Ventas (1.1.02.01)
+- En **Compra**: default a Proveedores (2.1.01.01)
+
+#### FASE 2: Selector correcto de terceros
+- `existingTerceros` memo refactorizado para separar por rol:
+  - `clienteTerceros`: hijos de Deudores por Ventas (1.1.02.01)
+  - `proveedorTerceros`: hijos de Proveedores (2.1.01.01) y Acreedores (2.1.06.01)
+- `filteredTerceros` ahora usa la lista correcta segun `mainTab`:
+  - `venta` → solo clientes
+  - `compra` → solo proveedores
+  - `pagos` → todos
+
+#### FASE 3: Consumidor Final
+- Estado `isConsumidorFinal` toggle.
+- Pill button en seccion Comprobante (solo Ventas): activa/desactiva "Consumidor Final".
+- Al activar: setea `counterparty = 'Consumidor Final'`, input queda readOnly con estilo verde.
+- Al desactivar: limpia el counterparty para permitir buscar otro cliente.
+- Si el usuario escribe manualmente, se desactiva el pill.
+- Compatible con el fallback existente en `onSave` (linea ~1536) que ya usaba "Consumidor Final" como default para ventas sin counterparty.
+
+#### FASE 4: Mini-calculadora segura
+- **`src/lib/amount-expression.ts`**: Parser shunting-yard que soporta `+ - * / ( )` con decimales.
+  - Solo se activa si el input empieza con `=`
+  - Normaliza comas decimales AR (`,` → `.`)
+  - Redondea a 2 decimales
+  - Sin `eval()`, sin dependencias externas
+- **`AmountInput` componente**: Wrapper de input que maneja modo expresion con estado local (`rawText`).
+  - Cuando el usuario escribe `=expr`, mantiene el texto raw localmente
+  - En blur/Enter: evalua y reemplaza por el resultado numerico
+  - Muestra hint temporal con la formula usada (4 segundos)
+- Aplicado a los 4 tipos de splits: main (compra/venta), pagoCobro, postAdjust, devolucion.
+
+#### FASE 5: Plazo/Vencimiento
+- **Ya estaba implementado**: los campos Dias Plazo y Vencimiento existen en la seccion CTA_CTE y DOCUMENTADO, para compra y venta. Los datos (`termDays`, `dueDate`) se persisten en `BienesMovement`.
+
+### Decisiones tecnicas
+1. **Dirty flag (`splitsTouched`)**: Se setea `true` en `handleSplitChange`, `handleAddSplit`, `handleRemoveSplit`. No se resetea al cambiar de tab para evitar pisar cambios.
+2. **Terceros por rol**: Se derivan del parentId de las cuentas hijo. Un tercero que es hijo de Proveedores aparece en compras; uno que es hijo de Deudores aparece en ventas. No se agregaron campos nuevos al modelo de cuentas.
+3. **AmountInput component**: Componente local (no exportado) dentro de MovementModalV3.tsx. Usa `useState` interno para el rawText de expresiones, separado del valor numerico controlado por el padre.
+4. **Parser sin eval**: Implementacion propia de shunting-yard con tokenizer, RPN converter, y evaluador de pila. Maneja minus unario y parentesis anidados.
+
+### Validacion QA
+- `npx tsc --noEmit` — OK (solo errores pre-existentes en tests/repro_eepn.test.ts)
+- `npx vite build` — OK (solo warning pre-existente de chunk size)
+
+### Pendientes / Recomendaciones
+- **Consumidor Final persistido**: Actualmente se usa como string "Consumidor Final" en el counterparty. Si se necesita un tercero real persistido (para reportes, AFIP, etc), se deberia crear automaticamente como cuenta hija de Deudores por Ventas en el primer uso.
+- **Resumen diario tipo cierre Z**: Para kioscos/minoristas, implementar un resumen diario que agrupe ventas a Consumidor Final.
+- **Test unitario para parser**: Agregar tests para `parseAmountExpression` con edge cases (division por cero, parentesis desbalanceados, numeros negativos).
