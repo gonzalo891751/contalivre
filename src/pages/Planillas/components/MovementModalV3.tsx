@@ -37,7 +37,9 @@ import {
     ArrowsLeftRight,
     CalendarBlank,
     TrendUp,
+    User,
 } from '@phosphor-icons/react'
+import { parseAmountExpression } from '../../../lib/amount-expression'
 import type {
     BienesProduct,
     BienesMovement,
@@ -76,6 +78,74 @@ const selectOnFocus = (e: React.FocusEvent<HTMLInputElement>) => {
 const FieldError = ({ msg }: { msg?: string }) => {
     if (!msg) return null
     return <p className="text-[11px] text-red-500 mt-0.5">{msg}</p>
+}
+
+/** FASE 4: Amount input with mini-calculator support
+ *  Supports typing `=expr` (e.g. `=0.4*5227200`) which evaluates on blur/Enter.
+ *  Regular numbers work normally. */
+function AmountInput({
+    value,
+    onChange,
+    className,
+    placeholder,
+    hintColor = 'text-blue-500',
+}: {
+    value: number
+    onChange: (v: number) => void
+    className?: string
+    placeholder?: string
+    hintColor?: string
+}) {
+    const [rawText, setRawText] = useState<string | null>(null) // null = use numeric value
+    const [hint, setHint] = useState<string | null>(null)
+
+    const displayValue = rawText !== null ? rawText : (value || '')
+
+    const evaluate = (text: string) => {
+        if (text.trim().startsWith('=')) {
+            const result = parseAmountExpression(text)
+            if (result.ok) {
+                onChange(result.value)
+                setRawText(null)
+                setHint(`${result.expr} = ${result.value}`)
+                setTimeout(() => setHint(null), 4000)
+                return
+            }
+        }
+        setRawText(null) // exit expression mode
+    }
+
+    return (
+        <div className="relative">
+            <input
+                type="text"
+                inputMode="decimal"
+                value={displayValue}
+                onChange={(e) => {
+                    const v = e.target.value
+                    if (v.startsWith('=')) {
+                        setRawText(v) // expression mode: track raw text locally
+                    } else {
+                        setRawText(null)
+                        onChange(Number(v) || 0)
+                    }
+                }}
+                onBlur={(e) => evaluate(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault()
+                        evaluate((e.target as HTMLInputElement).value)
+                    }
+                }}
+                onFocus={selectOnFocus}
+                className={className}
+                placeholder={placeholder || '0,00 o =expr'}
+            />
+            {hint && (
+                <span className={`absolute right-1 -bottom-4 text-[9px] ${hintColor} font-mono whitespace-nowrap z-10`}>{hint}</span>
+            )}
+        </div>
+    )
 }
 
 import type { Account, JournalEntry } from '../../../core/models'
@@ -138,22 +208,49 @@ export default function MovementModalV3({
     const { byAccount: ledgerBalances } = useLedgerBalances(entries, accounts)
 
     // Existing terceros (derived from child accounts under Proveedores/Acreedores/Deudores)
-    const existingTerceros = useMemo(() => {
-        if (!accounts || !ledgerBalances) return []
-        const controlCodes = ['2.1.01.01', '2.1.06.01', '1.1.02.01'] // Proveedores, Acreedores, Deudores
-        const controlAccounts = accounts.filter(a => controlCodes.includes(a.code))
-        const controlIds = new Set(controlAccounts.map(a => a.id))
-        const children = accounts.filter(a => a.parentId && controlIds.has(a.parentId) && !a.isHeader)
-        const seen = new Set<string>()
-        return children
-            .map(a => {
-                const bal = ledgerBalances.get(a.id)
-                const normalizedName = a.name.toLowerCase().trim()
-                if (seen.has(normalizedName)) return null
-                seen.add(normalizedName)
-                return { name: a.name, balance: bal?.balance || 0, accountId: a.id }
-            })
-            .filter(Boolean) as { name: string; balance: number; accountId: string }[]
+    // FASE 2: Separated by role for correct filtering in Compra vs Venta
+    const { existingTerceros, clienteTerceros, proveedorTerceros } = useMemo(() => {
+        if (!accounts || !ledgerBalances) return { existingTerceros: [] as { name: string; balance: number; accountId: string }[], clienteTerceros: [] as { name: string; balance: number; accountId: string }[], proveedorTerceros: [] as { name: string; balance: number; accountId: string }[] }
+
+        const proveedorCodes = ['2.1.01.01', '2.1.06.01'] // Proveedores, Acreedores
+        const clienteCodes = ['1.1.02.01'] // Deudores por ventas
+
+        const proveedorAccounts = accounts.filter(a => proveedorCodes.includes(a.code))
+        const clienteAccounts = accounts.filter(a => clienteCodes.includes(a.code))
+        const proveedorIds = new Set(proveedorAccounts.map(a => a.id))
+        const clienteIds = new Set(clienteAccounts.map(a => a.id))
+        const allControlIds = new Set([...proveedorIds, ...clienteIds])
+
+        const children = accounts.filter(a => a.parentId && allControlIds.has(a.parentId) && !a.isHeader)
+
+        const allTerceros: { name: string; balance: number; accountId: string }[] = []
+        const clientes: { name: string; balance: number; accountId: string }[] = []
+        const proveedores: { name: string; balance: number; accountId: string }[] = []
+        const seenAll = new Set<string>()
+        const seenClientes = new Set<string>()
+        const seenProveedores = new Set<string>()
+
+        for (const a of children) {
+            const bal = ledgerBalances.get(a.id)
+            const normalizedName = a.name.toLowerCase().trim()
+            const entry = { name: a.name, balance: bal?.balance || 0, accountId: a.id }
+
+            if (!seenAll.has(normalizedName)) {
+                seenAll.add(normalizedName)
+                allTerceros.push(entry)
+            }
+
+            if (a.parentId && clienteIds.has(a.parentId) && !seenClientes.has(normalizedName)) {
+                seenClientes.add(normalizedName)
+                clientes.push(entry)
+            }
+            if (a.parentId && proveedorIds.has(a.parentId) && !seenProveedores.has(normalizedName)) {
+                seenProveedores.add(normalizedName)
+                proveedores.push(entry)
+            }
+        }
+
+        return { existingTerceros: allTerceros, clienteTerceros: clientes, proveedorTerceros: proveedores }
     }, [accounts, ledgerBalances])
 
     // Main tab state
@@ -314,6 +411,12 @@ export default function MovementModalV3({
     const [error, setError] = useState<string | null>(null)
     const [submitted, setSubmitted] = useState(false)
 
+    // FASE 1: Track whether user manually touched payment splits (prevents auto-overwrite)
+    const [splitsTouched, setSplitsTouched] = useState(false)
+
+    // FASE 3: Consumidor Final toggle for sales
+    const [isConsumidorFinal, setIsConsumidorFinal] = useState(false)
+
     // Tercero preview: saldo + pending docs for selected counterparty
     const terceroPreview = useMemo(() => {
         const name = mainTab === 'pagos' ? pagoCobro.tercero : formData.counterparty
@@ -341,12 +444,19 @@ export default function MovementModalV3({
     }, [mainTab, pagoCobro.tercero, formData.counterparty, existingTerceros, movements])
 
     // Filtered terceros for combobox dropdown
+    // FASE 2: Use role-based list depending on context (compra→proveedores, venta→clientes, pagos→all)
     const filteredTerceros = useMemo(() => {
         const query = mainTab === 'pagos' ? pagoCobro.tercero : formData.counterparty
-        if (!query?.trim()) return existingTerceros
+        // Pick base list by role
+        let baseList = existingTerceros
+        if (mainTab === 'venta') baseList = clienteTerceros
+        else if (mainTab === 'compra') baseList = proveedorTerceros
+        // For pagos, show all
+
+        if (!query?.trim()) return baseList
         const q = query.toLowerCase().trim()
-        return existingTerceros.filter(t => t.name.toLowerCase().includes(q))
-    }, [mainTab, pagoCobro.tercero, formData.counterparty, existingTerceros])
+        return baseList.filter(t => t.name.toLowerCase().includes(q))
+    }, [mainTab, pagoCobro.tercero, formData.counterparty, existingTerceros, clienteTerceros, proveedorTerceros])
 
     // Sync pagoCobro amount when selecting a pending document
     useEffect(() => {
@@ -772,16 +882,29 @@ export default function MovementModalV3({
         setPostAdjustSplits(prev => prev.map((s, i) => (i === 0 ? { ...s, accountId: acc.id } : s)))
     }, [accounts, postAdjust.applyOn, postAdjustSplits])
 
-    // Default contrapartida: Proveedores (compra) / Deudores por ventas (venta)
+    // FASE 1: Default contrapartida: Proveedores (compra) / Deudores por ventas (venta)
+    // Sets default account AND auto-fills amount when user hasn't touched splits
     useEffect(() => {
         if (isEditing || !accounts || splits.length === 0) return
-        if (splits[0].accountId) return // user already selected or initialData prefilled
+        if (splitsTouched) return // user manually modified splits
+        if (splits[0].accountId) return // already selected or initialData prefilled
         const isVenta = mainTab === 'venta'
         const targetCode = isVenta ? '1.1.02.01' : '2.1.01.01' // Deudores / Proveedores
         const acc = accounts.find(a => a.code === targetCode)
         if (!acc) return
         setSplits(prev => prev.map((s, i) => (i === 0 ? { ...s, accountId: acc.id } : s)))
-    }, [accounts, mainTab, isEditing])
+    }, [accounts, mainTab, isEditing, splitsTouched])
+
+    // FASE 1: Auto-sync first split amount with totalFinal when not touched
+    useEffect(() => {
+        if (isEditing || splitsTouched) return
+        if (mainTab !== 'compra' && mainTab !== 'venta') return
+        if (splits.length !== 1 || !splits[0].accountId) return
+        const total = calculations.totalFinal
+        if (total > 0 && splits[0].amount !== total) {
+            setSplits(prev => prev.map((s, i) => (i === 0 ? { ...s, amount: round2(total) } : s)))
+        }
+    }, [calculations.totalFinal, isEditing, splitsTouched, mainTab, splits])
 
     // Sincronizar taxes de devolución cuando cambia el movimiento original o la cantidad
     useEffect(() => {
@@ -1001,6 +1124,7 @@ export default function MovementModalV3({
     }
 
     const handleAddSplit = () => {
+        setSplitsTouched(true)
         setSplits(prev => [
             ...prev,
             { id: `split-${Date.now()}`, accountId: '', amount: 0 }
@@ -1008,10 +1132,12 @@ export default function MovementModalV3({
     }
 
     const handleRemoveSplit = (id: string) => {
+        setSplitsTouched(true)
         setSplits(prev => prev.filter(s => s.id !== id))
     }
 
     const handleSplitChange = (id: string, field: 'accountId' | 'amount', value: string | number) => {
+        setSplitsTouched(true)
         setSplits(prev => prev.map(s => {
             if (s.id !== id) return s
             return { ...s, [field]: value }
@@ -2062,13 +2188,11 @@ export default function MovementModalV3({
                                                             showBalance={true}
                                                         />
                                                     </div>
-                                                    <input
-                                                        type="number"
-                                                        inputMode="decimal"
-                                                        value={split.amount || ''}
-                                                        onChange={(e) => handleDevolucionSplitChange(split.id, 'amount', Number(e.target.value))}
-                                                        onFocus={selectOnFocus}
+                                                    <AmountInput
+                                                        value={split.amount}
+                                                        onChange={(val) => handleDevolucionSplitChange(split.id, 'amount', val)}
                                                         className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-right outline-none focus:ring-1 focus:ring-orange-500 h-[38px]"
+                                                        hintColor="text-orange-500"
                                                     />
                                                     <button
                                                         type="button"
@@ -2522,15 +2646,11 @@ export default function MovementModalV3({
                                                     />
                                                 </div>
                                                 <div className="w-1/3 relative">
-                                                    <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1">IMPORTE</label>
-                                                    <input
-                                                        type="number"
-                                                        inputMode="decimal"
-                                                        value={split.amount || ''}
-                                                        onChange={(e) => handlePostSplitChange(split.id, 'amount', Number(e.target.value))}
-                                                        onFocus={selectOnFocus}
+                                                    <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1 z-10">IMPORTE</label>
+                                                    <AmountInput
+                                                        value={split.amount}
+                                                        onChange={(val) => handlePostSplitChange(split.id, 'amount', val)}
                                                         className="w-full px-3 py-3 pt-5 border border-slate-300 rounded-lg text-sm font-mono text-right outline-none focus:border-blue-500 bg-white h-[52px]"
-                                                        placeholder="0,00"
                                                     />
                                                 </div>
                                                 <button
@@ -2942,17 +3062,15 @@ export default function MovementModalV3({
                                                         showBalance={true}
                                                     />
                                                 </div>
-                                                <input
-                                                    type="number"
-                                                    inputMode="decimal"
-                                                    value={split.amount || ''}
-                                                    onChange={(e) => {
+                                                <AmountInput
+                                                    value={split.amount}
+                                                    onChange={(val) => {
                                                         setPagoCobroSplits(prev => prev.map(s =>
-                                                            s.id === split.id ? { ...s, amount: Number(e.target.value) } : s
+                                                            s.id === split.id ? { ...s, amount: val } : s
                                                         ))
                                                     }}
-                                                    onFocus={selectOnFocus}
                                                     className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono text-right outline-none focus:ring-1 focus:ring-violet-500 h-[38px]"
+                                                    hintColor="text-violet-500"
                                                 />
                                                 <button
                                                     type="button"
@@ -3554,15 +3672,11 @@ export default function MovementModalV3({
                                                         />
                                                     </div>
                                                     <div className="w-1/3 relative">
-                                                        <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1">IMPORTE</label>
-                                                        <input
-                                                            type="number"
-                                                            inputMode="decimal"
-                                                            value={split.amount || ''}
-                                                            onChange={(e) => handleSplitChange(split.id, 'amount', Number(e.target.value))}
-                                                            onFocus={selectOnFocus}
+                                                        <label className="text-[10px] font-bold text-slate-400 absolute left-3 top-1 z-10">IMPORTE</label>
+                                                        <AmountInput
+                                                            value={split.amount}
+                                                            onChange={(val) => handleSplitChange(split.id, 'amount', val)}
                                                             className="w-full px-3 py-3 pt-5 border border-slate-300 rounded-lg text-sm font-mono text-right outline-none focus:border-blue-500 bg-white h-[52px]"
-                                                            placeholder="0,00"
                                                         />
                                                     </div>
                                                     <button
@@ -3735,21 +3849,50 @@ export default function MovementModalV3({
                                     </h3>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="relative" data-field="counterparty">
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                                {mainTab === 'compra' ? 'Proveedor' : 'Cliente'} <span className="text-red-400">*</span>
-                                            </label>
+                                            <div className="flex items-center justify-between mb-1">
+                                                <label className="block text-xs font-semibold text-slate-700">
+                                                    {mainTab === 'compra' ? 'Proveedor' : 'Cliente'} <span className="text-red-400">*</span>
+                                                </label>
+                                                {/* FASE 3: Consumidor Final pill (solo ventas) */}
+                                                {mainTab === 'venta' && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (isConsumidorFinal) {
+                                                                setIsConsumidorFinal(false)
+                                                                handleChange('counterparty', '')
+                                                            } else {
+                                                                setIsConsumidorFinal(true)
+                                                                handleChange('counterparty', 'Consumidor Final')
+                                                                setShowTerceroDropdown(false)
+                                                            }
+                                                        }}
+                                                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 ${
+                                                            isConsumidorFinal
+                                                                ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                                                                : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200'
+                                                        }`}
+                                                    >
+                                                        <User size={10} weight={isConsumidorFinal ? 'fill' : 'regular'} />
+                                                        Consumidor Final
+                                                        {isConsumidorFinal && <X size={10} weight="bold" />}
+                                                    </button>
+                                                )}
+                                            </div>
                                             <input
                                                 type="text"
                                                 value={formData.counterparty}
                                                 onChange={(e) => {
                                                     handleChange('counterparty', e.target.value)
                                                     setShowTerceroDropdown(true)
+                                                    if (isConsumidorFinal) setIsConsumidorFinal(false)
                                                 }}
-                                                onFocus={() => setShowTerceroDropdown(true)}
+                                                onFocus={() => !isConsumidorFinal && setShowTerceroDropdown(true)}
                                                 onBlur={() => setTimeout(() => setShowTerceroDropdown(false), 200)}
                                                 placeholder={mainTab === 'compra' ? 'Buscar o crear proveedor...' : 'Buscar o crear cliente...'}
-                                                className={`w-full px-3 py-2 bg-white border rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 ${submitted && validationErrors.counterparty ? 'border-red-300' : 'border-slate-300'}`}
+                                                className={`w-full px-3 py-2 bg-white border rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 ${submitted && validationErrors.counterparty ? 'border-red-300' : 'border-slate-300'} ${isConsumidorFinal ? 'bg-emerald-50 text-emerald-700 font-medium' : ''}`}
                                                 autoComplete="off"
+                                                readOnly={isConsumidorFinal}
                                             />
                                             {showTerceroDropdown && filteredTerceros.length > 0 && (
                                                 <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">

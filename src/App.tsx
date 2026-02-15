@@ -18,6 +18,7 @@ import BienesUsoPage from './pages/Operaciones/BienesUsoPage'
 import InversionesPage from './pages/Operaciones/InversionesPage'
 import ProveedoresAcreedoresPage from './pages/Operaciones/ProveedoresAcreedoresPage'
 import ClientesDeudoresPage from './pages/Operaciones/ClientesDeudoresPage'
+import DeudasSocialesPage from './pages/Operaciones/DeudasSocialesPage'
 import ConciliacionesPage from './pages/Planillas/Conciliaciones/ConciliacionesPage'
 import CierreValuacionPage from './pages/Planillas/CierreValuacionPage'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
@@ -53,6 +54,7 @@ function App() {
                 <Route path="/operaciones/inversiones" element={<InversionesPage />} />
                 <Route path="/operaciones/proveedores" element={<ProveedoresAcreedoresPage />} />
                 <Route path="/operaciones/clientes" element={<ClientesDeudoresPage />} />
+                <Route path="/operaciones/deudas-sociales" element={<DeudasSocialesPage />} />
                 <Route path="/cuentas" element={<Cuentas />} />
                 <Route path="/asientos" element={<Asientos />} />
                 <Route path="/mayor" element={<Mayor />} />

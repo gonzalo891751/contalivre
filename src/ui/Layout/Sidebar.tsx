@@ -17,6 +17,7 @@ import {
     Truck,
     ShoppingCart,
     Bank,
+    Users,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
 
@@ -58,6 +59,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                         { path: '/operaciones/clientes', label: 'Clientes', icon: ShoppingCart },
                         { path: '/operaciones/prestamos', label: 'Préstamos', icon: Bank },
                         { path: '/operaciones/impuestos', label: 'Impuestos', icon: Receipt },
+                        { path: '/operaciones/deudas-sociales', label: 'Sueldos', icon: Users },
                     ],
                 },
             ]
