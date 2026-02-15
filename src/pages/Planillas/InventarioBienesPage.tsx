@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
     Package,
     Notebook,
-    ArrowLeft,
     ArrowsLeftRight,
     WarningCircle,
     Coins,
@@ -26,6 +25,7 @@ import {
     Sparkle,
     GearSix,
 } from '@phosphor-icons/react'
+import OperationsPageHeader from '../../components/OperationsPageHeader'
 import { usePeriodYear } from '../../hooks/usePeriodYear'
 import { DEFAULT_ACCOUNT_CODES } from '../../core/inventario/types'
 import type {
@@ -239,7 +239,6 @@ const OPTIONAL_BIENES_RULES = BIENES_ACCOUNT_RULES.filter(rule => rule.optional)
  * Follows the prototype at docs/prototypes/Inventario.html
  */
 export default function InventarioBienesPage() {
-    const navigate = useNavigate()
     // Deep-link: read prefill from location state (e.g., from Proveedores page)
     const location = useLocation()
     const locationState = location.state as {
@@ -2125,85 +2124,83 @@ export default function InventarioBienesPage() {
     return (
         <div className="flex flex-col h-full bg-slate-50">
             {/* Header */}
-            <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shadow-sm shrink-0">
-                <div className="flex items-center gap-4">
-                    <button
-                        type="button"
-                        className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors"
-                        onClick={() => navigate('/operaciones')}
-                    >
-                        <ArrowLeft size={14} /> Operaciones
-                    </button>
-                    <span className="text-slate-300">/</span>
-                    <h2 className="text-lg font-display font-semibold text-slate-900">
-                        Bienes de Cambio (Mercaderias)
-                    </h2>
-                    {/* KPI Range Toggle */}
-                    <div className="hidden sm:flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
-                        <button
-                            onClick={() => changeKpiRangeMode('month')}
-                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                                kpiRangeMode === 'month'
-                                    ? 'bg-white text-slate-900 shadow-sm'
-                                    : 'text-slate-500 hover:text-slate-700'
-                            }`}
-                        >
-                            Mes
-                        </button>
-                        <button
-                            onClick={() => changeKpiRangeMode('ejercicio')}
-                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                                kpiRangeMode === 'ejercicio'
-                                    ? 'bg-white text-slate-900 shadow-sm'
-                                    : 'text-slate-500 hover:text-slate-700'
-                            }`}
-                        >
-                            Ejercicio
-                        </button>
-                    </div>
-                    <div className="hidden sm:flex items-center px-2 py-1 bg-slate-50 rounded-md text-xs font-mono text-slate-500">
-                        <span className="w-2 h-2 rounded-full bg-green-500 mr-2" />
-                        {kpiDateRange.label}
-                    </div>
-                </div>
-                <div className="flex items-center gap-3">
-                    {/* Inventory Mode Badge */}
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${settings?.inventoryMode === 'PERIODIC'
-                        ? 'bg-amber-100 text-amber-700'
-                        : 'bg-blue-100 text-blue-700'
-                        }`}>
-                        {settings?.inventoryMode === 'PERIODIC' ? 'Diferencias' : 'Permanente'}
-                    </span>
-                    {/* Costing Method Selector */}
-                    <div className="flex items-center gap-2 text-sm">
-                        <span className="text-slate-500">Metodo:</span>
-                        <select
-                            value={settings?.costMethod || 'PPP'}
-                            onChange={(e) => handleChangeCostMethod(e.target.value as CostingMethod)}
-                            className="px-2 py-1 border border-slate-200 rounded-md text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
-                            disabled={costMethodLocked}
-                            title={costMethodLocked ? 'Bloqueado: ya hay ventas registradas' : undefined}
-                        >
-                            <option value="PPP">Prom. Ponderado</option>
-                            <option value="FIFO">FIFO (PEPS)</option>
-                            <option value="LIFO">LIFO (UEPS)</option>
-                        </select>
-                        {costMethodLocked && (
-                            <span className="text-xs text-amber-600" title="Hay ventas registradas">
-                                <Warning size={14} weight="fill" />
+            <div className="bg-white border-b border-slate-200 px-6 pt-4 shrink-0">
+                <OperationsPageHeader
+                    title="Bienes de Cambio (Mercaderias)"
+                    subtitle="Stock, costos, movimientos y cierre"
+                    shimmer
+                    badges={
+                        <>
+                            {/* KPI Range Toggle */}
+                            <div className="hidden sm:flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                                <button
+                                    onClick={() => changeKpiRangeMode('month')}
+                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                                        kpiRangeMode === 'month'
+                                            ? 'bg-white text-slate-900 shadow-sm'
+                                            : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                                >
+                                    Mes
+                                </button>
+                                <button
+                                    onClick={() => changeKpiRangeMode('ejercicio')}
+                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                                        kpiRangeMode === 'ejercicio'
+                                            ? 'bg-white text-slate-900 shadow-sm'
+                                            : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                                >
+                                    Ejercicio
+                                </button>
+                            </div>
+                            <div className="hidden sm:flex items-center px-2 py-1 bg-slate-50 rounded-md text-xs font-mono text-slate-500">
+                                <span className="w-2 h-2 rounded-full bg-green-500 mr-2" />
+                                {kpiDateRange.label}
+                            </div>
+                        </>
+                    }
+                    rightSlot={
+                        <>
+                            {/* Inventory Mode Badge */}
+                            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${settings?.inventoryMode === 'PERIODIC'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-blue-100 text-blue-700'
+                                }`}>
+                                {settings?.inventoryMode === 'PERIODIC' ? 'Diferencias' : 'Permanente'}
                             </span>
-                        )}
-                    </div>
-                    {/* Settings Gear */}
-                    <button
-                        onClick={openAccountConfigModal}
-                        className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                        title="Configuracion del modulo"
-                    >
-                        <GearSix size={20} />
-                    </button>
-                </div>
-            </header>
+                            {/* Costing Method Selector */}
+                            <div className="flex items-center gap-2 text-sm">
+                                <span className="text-slate-500 hidden sm:inline">Metodo:</span>
+                                <select
+                                    value={settings?.costMethod || 'PPP'}
+                                    onChange={(e) => handleChangeCostMethod(e.target.value as CostingMethod)}
+                                    className="px-2 py-1 border border-slate-200 rounded-md text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+                                    disabled={costMethodLocked}
+                                    title={costMethodLocked ? 'Bloqueado: ya hay ventas registradas' : undefined}
+                                >
+                                    <option value="PPP">Prom. Ponderado</option>
+                                    <option value="FIFO">FIFO (PEPS)</option>
+                                    <option value="LIFO">LIFO (UEPS)</option>
+                                </select>
+                                {costMethodLocked && (
+                                    <span className="text-xs text-amber-600" title="Hay ventas registradas">
+                                        <Warning size={14} weight="fill" />
+                                    </span>
+                                )}
+                            </div>
+                            {/* Settings Gear */}
+                            <button
+                                onClick={openAccountConfigModal}
+                                className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                                title="Configuracion del modulo"
+                            >
+                                <GearSix size={20} />
+                            </button>
+                        </>
+                    }
+                />
+            </div>
 
             {/* Tabs */}
             <div className="bg-white border-b border-slate-200 px-6 pt-2 shrink-0">

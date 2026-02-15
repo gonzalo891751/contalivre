@@ -5918,6 +5918,12 @@ html[data-theme="dark"] .journal-hero-decoration {
   cursor: not-allowed;
 }
 
+.journal-toolbar-btn-active {
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+  background: rgba(var(--brand-primary-rgb, 59, 130, 246), 0.06);
+}
+
 .journal-toolbar-btn-pdf {
   display: flex;
   align-items: center;
@@ -6130,6 +6136,16 @@ html[data-theme="dark"] .journal-entry-card-status {
 .journal-entry-card-account-name {
   font-weight: 500;
   color: var(--text);
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.journal-entry-card-account-code {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 400;
+  opacity: 0.7;
 }
 
 .journal-entry-card-account-detail {

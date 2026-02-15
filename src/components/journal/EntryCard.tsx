@@ -13,6 +13,7 @@ interface EntryCardProps {
     onEdit: (entry: JournalEntry) => void
     onDelete: (id: string) => void
     disabled?: boolean
+    formalView?: boolean
 }
 
 const formatAmount = (n: number): string => {
@@ -35,7 +36,7 @@ const formatDate = (dateStr: string) => {
     })
 }
 
-export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disabled }: EntryCardProps) {
+export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disabled, formalView = true }: EntryCardProps) {
     const totalDebit = entry.lines.reduce((sum, line) => sum + (line.debit || 0), 0)
     const totalCredit = entry.lines.reduce((sum, line) => sum + (line.credit || 0), 0)
 
@@ -98,12 +99,20 @@ export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disa
                     </thead>
                     <tbody>
                         {entry.lines.map((line, index) => {
-                            const display = resolveAccountDisplay(line.accountId, accounts)
+                            const display = formalView
+                                ? resolveAccountDisplay(line.accountId, accounts)
+                                : (() => {
+                                    const acc = accounts.find(a => a.id === line.accountId)
+                                    return acc
+                                        ? { name: acc.name, code: acc.code, terceroDetail: null }
+                                        : { name: 'Cuenta desconocida', code: '?', terceroDetail: null }
+                                })()
                             return (
                             <tr key={index} className="journal-entry-card-row">
                                 <td className="journal-entry-card-td-account">
                                     <div className="journal-entry-card-account-name">
                                         {display.name}
+                                        <span className="journal-entry-card-account-code">{display.code}</span>
                                     </div>
                                     {display.terceroDetail && (
                                         <div className="journal-entry-card-account-detail">

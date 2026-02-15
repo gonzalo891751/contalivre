@@ -6,9 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useNavigate } from 'react-router-dom'
 import {
-    ArrowLeft,
     ArrowsClockwise,
     ArrowsLeftRight,
     CheckCircle,
@@ -51,6 +49,7 @@ import {
 } from '../../storage/fxMapping'
 import { getExchangeRates, getQuote, getRateValue } from '../../services/exchangeRates'
 import type { Account } from '../../core/models'
+import OperationsPageHeader from '../../components/OperationsPageHeader'
 import type {
     CurrencyCode,
     ExchangeRate,
@@ -1685,7 +1684,6 @@ function LinkEntryModal({
 // ========================================
 
 export default function MonedaExtranjeraPage() {
-    const navigate = useNavigate()
     const { year } = usePeriodYear()
     const periodId = String(year)
 
@@ -1931,14 +1929,14 @@ export default function MonedaExtranjeraPage() {
             </div>
 
             {/* Header */}
-            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-4">
-                <div className="flex items-center justify-between text-sm text-slate-500">
-                    <button type="button" className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-900" onClick={() => navigate('/operaciones')}>
-                        <ArrowLeft size={14} /> Operaciones
-                    </button>
-                    <div className="flex items-center gap-3">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Modo valuación</span>
+            <OperationsPageHeader
+                title="Moneda Extranjera"
+                shimmer
+                rightSlot={
+                    <>
+                        {/* Modo valuación toggle */}
                         <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 hidden sm:inline">Modo</span>
                             <span className="text-xs text-slate-500">Contable</span>
                             <button
                                 type="button"
@@ -1957,20 +1955,19 @@ export default function MonedaExtranjeraPage() {
                             </button>
                             <span className={cx('text-xs font-semibold', valuationMode === 'gestion' ? 'text-blue-600' : 'text-slate-400')}>Gestion</span>
                         </div>
-                    </div>
-                </div>
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                        <h1 className="font-display text-2xl font-bold text-slate-900">Moneda Extranjera</h1>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                        {ratesLoading ? 'Actualizando cotizaciones...' : ratesError || `Cotizacion: ${QUOTE_TYPE_LABELS[currentQuoteType]}`}
-                        <FxButton variant="ghost" size="sm" onClick={() => fetchRates(true)}>
-                            <ArrowsClockwise size={14} />
-                        </FxButton>
-                    </div>
-                </div>
-            </div>
+
+                        <div className="h-6 w-px bg-slate-200" />
+
+                        {/* Cotizaciones */}
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                            {ratesLoading ? 'Actualizando...' : ratesError || `Cotizacion: ${QUOTE_TYPE_LABELS[currentQuoteType]}`}
+                            <FxButton variant="ghost" size="sm" onClick={() => fetchRates(true)}>
+                                <ArrowsClockwise size={14} />
+                            </FxButton>
+                        </div>
+                    </>
+                }
+            />
 
             {/* Tabs header */}
             <div className="flex items-end justify-between border-b border-slate-200 pb-2">

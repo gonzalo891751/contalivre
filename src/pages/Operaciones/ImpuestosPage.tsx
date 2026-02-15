@@ -34,6 +34,7 @@ import { useTaxNotifications } from '../../hooks/useTaxNotifications'
 import { db } from '../../storage/db'
 import { repairTaxAccounts } from '../../storage'
 import { listAllTaxClosures, getTaxClosure } from '../../storage/impuestos'
+import OperationsPageHeader from '../../components/OperationsPageHeader'
 import { getLocalDateISO } from '../../storage/entries'
 import type {
     TaxRegime,
@@ -2989,45 +2990,36 @@ function ImpuestosPageContent() {
 
     return (
         <div className="min-h-screen bg-slate-50">
-            {/* Header */}
+            {/* Header (sticky for sidebar layout) */}
             <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <button
-                            type="button"
-                            onClick={() => navigate('/operaciones')}
-                            className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-                            aria-label="Volver a Operaciones"
-                        >
-                            <ArrowLeft size={16} weight="bold" />
-                        </button>
-                        <div>
-                            <h1 className="text-lg font-bold leading-none text-slate-900">Impuestos</h1>
-                            <span className="text-xs text-slate-500 font-medium">Liquidacion Mensual</span>
-                        </div>
-                    </div>
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+                    <OperationsPageHeader
+                        title="Impuestos"
+                        subtitle="Liquidacion Mensual"
+                        rightSlot={
+                            <>
+                                {/* Period Selector */}
+                                <PeriodPicker
+                                    value={month}
+                                    onChange={setMonth}
+                                    onClear={() => setMonth('')}
+                                />
 
-                    <div className="flex items-center gap-3 sm:gap-6">
-                        {/* Period Selector */}
-                        <PeriodPicker
-                            value={month}
-                            onChange={setMonth}
-                            onClear={() => setMonth('')}
-                        />
-
-                        {/* Regime Switch */}
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-slate-500 hidden md:block">Regimen:</span>
-                            <select
-                                value={regime}
-                                onChange={(e) => setRegime(e.target.value as TaxRegime)}
-                                className="text-sm bg-white border border-slate-300 rounded-md px-2 py-1.5 focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none cursor-pointer"
-                            >
-                                <option value="RI">Resp. Inscripto</option>
-                                <option value="MT">Monotributo</option>
-                            </select>
-                        </div>
-                    </div>
+                                {/* Regime Switch */}
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-semibold text-slate-500 hidden md:block">Regimen:</span>
+                                    <select
+                                        value={regime}
+                                        onChange={(e) => setRegime(e.target.value as TaxRegime)}
+                                        className="text-sm bg-white border border-slate-300 rounded-md px-2 py-1.5 focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none cursor-pointer"
+                                    >
+                                        <option value="RI">Resp. Inscripto</option>
+                                        <option value="MT">Monotributo</option>
+                                    </select>
+                                </div>
+                            </>
+                        }
+                    />
                 </div>
             </header>
 

@@ -48,6 +48,18 @@ const normalizeText = (value: string) =>
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
 
+/** Parse ISO date string (YYYY-MM-DD) as local time to avoid timezone shift.
+ *  new Date('2025-01-01') parses as UTC midnight, which in UTC-3 becomes Dec 31 2024 21:00 local,
+ *  causing getFullYear() to return 2024 instead of 2025. */
+function parseDateLocal(dateStr: string): Date {
+    const parts = dateStr.split('-').map(Number)
+    if (parts.length >= 3 && parts.every(n => !isNaN(n))) {
+        return new Date(parts[0], parts[1] - 1, parts[2])
+    }
+    // Fallback for non-ISO formats
+    return new Date(dateStr)
+}
+
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
 
 const findAccountByCodeOrName = (
@@ -286,24 +298,58 @@ export async function updateFixedAsset(
 }
 
 /**
- * Delete a fixed asset (only if no linked entries)
+ * Delete a fixed asset with cascade: removes all linked journal entries and events.
+ * Collects entry IDs from all linkage fields + metadata search to avoid orphans.
  */
-export async function deleteFixedAsset(id: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteFixedAsset(id: string): Promise<{ success: boolean; error?: string; deletedEntries?: number; deletedEvents?: number }> {
     const asset = await db.fixedAssets.get(id)
     if (!asset) {
         return { success: false, error: 'Bien de uso no encontrado' }
     }
 
-    // Check for linked journal entries
-    if (asset.linkedJournalEntryIds.length > 0) {
-        return {
-            success: false,
-            error: `Este bien tiene ${asset.linkedJournalEntryIds.length} asiento(s) vinculado(s). Eliminalos primero.`,
-        }
+    // Collect all linked entry IDs from explicit fields
+    const entryIdsToDelete = new Set<string>()
+    if (asset.openingJournalEntryId) entryIdsToDelete.add(asset.openingJournalEntryId)
+    if (asset.acquisitionJournalEntryId) entryIdsToDelete.add(asset.acquisitionJournalEntryId)
+    if (asset.rt6JournalEntryId) entryIdsToDelete.add(asset.rt6JournalEntryId)
+    for (const eid of asset.linkedJournalEntryIds) {
+        entryIdsToDelete.add(eid)
     }
 
+    // Also search entries by metadata to catch any not tracked in explicit fields
+    try {
+        const metaEntries = await db.entries
+            .filter(e => e.sourceModule === 'fixed-assets' && e.sourceId === id)
+            .toArray()
+        for (const e of metaEntries) {
+            entryIdsToDelete.add(e.id)
+        }
+    } catch {
+        // Non-critical: explicit IDs should cover most cases
+    }
+
+    // Collect event-linked entry IDs
+    const events = await db.fixedAssetEvents.where('assetId').equals(id).toArray()
+    for (const evt of events) {
+        if (evt.linkedJournalEntryId) entryIdsToDelete.add(evt.linkedJournalEntryId)
+    }
+
+    // Delete all linked entries
+    const idsArray = Array.from(entryIdsToDelete)
+    if (idsArray.length > 0) {
+        await db.entries.bulkDelete(idsArray)
+    }
+
+    // Delete all events for this asset
+    const eventIds = events.map(e => e.id)
+    if (eventIds.length > 0) {
+        await db.fixedAssetEvents.bulkDelete(eventIds)
+    }
+
+    // Delete the asset
     await db.fixedAssets.delete(id)
-    return { success: true }
+
+    return { success: true, deletedEntries: idsArray.length, deletedEvents: eventIds.length }
 }
 
 // ========================================
@@ -415,8 +461,8 @@ export function calculateFixedAssetDepreciation(
         }
     }
 
-    // Parse dates
-    const acquisitionDate = new Date(asset.placedInServiceDate || asset.acquisitionDate)
+    // Parse dates (use parseDateLocal to avoid timezone shift)
+    const acquisitionDate = parseDateLocal(asset.placedInServiceDate || asset.acquisitionDate)
     const fiscalYearEnd = new Date(fiscalYear, 11, 31)
     const fiscalYearStart = new Date(fiscalYear, 0, 1)
 
@@ -488,6 +534,15 @@ export function calculateFixedAssetDepreciation(
         }
     }
 
+    // For OPENING-type assets, override acumuladaInicio with user-provided value
+    // opening.initialAccumDep = accumulated depreciation at the START of the import year
+    if (asset.originType === 'OPENING' && asset.opening?.initialAccumDep !== undefined) {
+        const importYear = parseInt(asset.periodId) || fiscalYear
+        const yearsSinceImport = Math.max(0, fiscalYear - importYear)
+        acumuladaInicio = asset.opening.initialAccumDep + yearsSinceImport * amortizacionAnual
+        amortizacionEjercicio = amortizacionAnual
+    }
+
     // Clamp values
     acumuladaInicio = Math.min(acumuladaInicio, VA)
     const acumuladaCierre = Math.min(acumuladaInicio + amortizacionEjercicio, VA)
@@ -515,7 +570,7 @@ export interface FixedAssetCalculationWithEvents extends FixedAssetCalculation {
 }
 
 function getRemainingLifeYearsForImprovement(asset: FixedAsset, eventDate: Date): number {
-    const baseDate = new Date(asset.placedInServiceDate || asset.acquisitionDate)
+    const baseDate = parseDateLocal(asset.placedInServiceDate || asset.acquisitionDate)
     const elapsedYears = eventDate.getFullYear() - baseDate.getFullYear()
     const remaining = (asset.lifeYears || 1) - elapsedYears
     return Math.max(1, remaining)
@@ -534,7 +589,7 @@ export function calculateFixedAssetDepreciationWithEvents(
     const fiscalYearEnd = new Date(fiscalYear, 11, 31)
 
     const improvements = events.filter(
-        e => e.type === 'IMPROVEMENT' && new Date(e.date) <= fiscalYearEnd && e.amount > 0
+        e => e.type === 'IMPROVEMENT' && parseDateLocal(e.date) <= fiscalYearEnd && e.amount > 0
     )
 
     if (improvements.length === 0) {
@@ -551,9 +606,11 @@ export function calculateFixedAssetDepreciationWithEvents(
     let totalValorLibro = base.valorLibro
 
     improvements.forEach(event => {
-        const eventDate = new Date(event.date)
+        const eventDate = parseDateLocal(event.date)
         const component: FixedAsset = {
             ...asset,
+            originType: 'PURCHASE', // improvements are always treated as new components
+            opening: undefined,
             originalValue: event.amount,
             residualValuePct: 0,
             acquisitionDate: event.date,
@@ -646,7 +703,7 @@ export function calculateFixedAssetDepreciationToDate(
         }
     }
 
-    const acquisitionDate = new Date(asset.placedInServiceDate || asset.acquisitionDate)
+    const acquisitionDate = parseDateLocal(asset.placedInServiceDate || asset.acquisitionDate)
     if (acquisitionDate > asOfDate) {
         return {
             valorResidual: VR,
@@ -706,7 +763,7 @@ function getImprovementEventsUpToDate(
     asOfDate: Date
 ): FixedAssetEvent[] {
     return events.filter(
-        e => e.type === 'IMPROVEMENT' && new Date(e.date) <= asOfDate && e.amount > 0
+        e => e.type === 'IMPROVEMENT' && parseDateLocal(e.date) <= asOfDate && e.amount > 0
     )
 }
 
@@ -719,9 +776,11 @@ function calculateAccumulatedWithImprovementsToDate(
     let total = base.acumuladaCierre
     const improvements = getImprovementEventsUpToDate(events, asOfDate)
     improvements.forEach(event => {
-        const eventDate = new Date(event.date)
+        const eventDate = parseDateLocal(event.date)
         const component: FixedAsset = {
             ...asset,
+            originType: 'PURCHASE',
+            opening: undefined,
             originalValue: event.amount,
             residualValuePct: 0,
             acquisitionDate: event.date,
@@ -962,7 +1021,7 @@ export async function buildFixedAssetOpeningEntry(
     fiscalYear: number
 ): Promise<JournalBuildResult> {
     const fiscalYearStart = new Date(fiscalYear, 0, 1)
-    const acquisitionDate = new Date(asset.acquisitionDate)
+    const acquisitionDate = parseDateLocal(asset.acquisitionDate)
     const isCurrentYearAsset = acquisitionDate >= fiscalYearStart
 
     // Determine if this asset needs an opening entry
@@ -1073,7 +1132,7 @@ export async function syncFixedAssetOpeningEntry(
     fiscalYear: number
 ): Promise<{ success: boolean; entryId?: string; error?: string; status?: 'generated' | 'updated' | 'skipped' }> {
     const fiscalYearStart = new Date(fiscalYear, 0, 1)
-    const isCurrentYearAsset = new Date(asset.acquisitionDate) >= fiscalYearStart
+    const isCurrentYearAsset = parseDateLocal(asset.acquisitionDate) >= fiscalYearStart
     const originType = asset.originType || (isCurrentYearAsset ? 'PURCHASE' : 'OPENING')
 
     // PURCHASE assets from current year don't need opening entry
@@ -1181,6 +1240,17 @@ export async function buildAmortizationJournalEntry(
                 assetId: asset.id,
                 assetName: asset.name,
                 fiscalYear,
+                meta: {
+                    source: 'fixedAssets',
+                    kind: 'amortization',
+                    type: 'AMORTIZATION',
+                    assetId: asset.id,
+                    period: String(fiscalYear),
+                    asOf: closingDate,
+                    periodId: asset.periodId,
+                    fiscalYear,
+                    granularity: 'annual',
+                },
             },
         },
     }
@@ -1193,20 +1263,21 @@ export async function generateAmortizationEntry(
     asset: FixedAsset,
     fiscalYear: number
 ): Promise<{ success: boolean; entryId?: string; error?: string }> {
-    // Check for existing entry for this fiscal year
+    // Check for existing amortization entries for this fiscal year (annual or monthly)
     const existingEntries = await db.entries
         .filter(
             e =>
                 e.sourceModule === 'fixed-assets' &&
                 e.sourceId === asset.id &&
-                e.metadata?.fiscalYear === fiscalYear
+                e.sourceType === 'amortization' &&
+                (e.metadata?.fiscalYear === fiscalYear || e.metadata?.meta?.fiscalYear === fiscalYear)
         )
         .toArray()
 
     if (existingEntries.length > 0) {
         return {
             success: false,
-            error: 'Ya existe un asiento de amortizacion para este bien en este ejercicio',
+            error: 'Ya existen asientos de amortizacion para este bien en este ejercicio.',
         }
     }
 
@@ -1318,7 +1389,7 @@ export async function buildFixedAssetEventJournalEntry(
             return { entry: null, error: 'Falta cuenta Resultado venta bienes de uso (4.7.04).' }
         }
 
-        const eventDateObj = new Date(event.date)
+        const eventDateObj = parseDateLocal(event.date)
         const allEvents = await db.fixedAssetEvents.where('assetId').equals(asset.id).toArray()
         const accum = round2(
             calculateAccumulatedWithImprovementsToDate(asset, allEvents, eventDateObj)
@@ -1714,7 +1785,7 @@ export function generateDepreciationSchedule(
         return schedule
     }
 
-    const startYear = new Date(asset.placedInServiceDate || asset.acquisitionDate).getFullYear()
+    const startYear = parseDateLocal(asset.placedInServiceDate || asset.acquisitionDate).getFullYear()
     const lifeYears = asset.lifeYears || 5
     const C = asset.originalValue
     const VR = C * ((asset.residualValuePct || 0) / 100)
@@ -1738,4 +1809,370 @@ export function generateDepreciationSchedule(
     }
 
     return schedule
+}
+
+// ========================================
+// Monthly Depreciation & Devengado vs Contabilizado
+// ========================================
+
+const MONTH_NAMES_ES = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+]
+
+export interface MonthlyDepreciationRow {
+    month: number           // 1-12
+    year: number
+    label: string           // 'Enero', 'Febrero', etc
+    daysInMonth: number
+    daysInUse: number
+    devengadoMes: number
+    devengadoAcumulado: number  // total accumulated depreciation from inception through this month end
+}
+
+/**
+ * Generate monthly depreciation schedule for a fiscal year.
+ * Uses daily proration: amortMes = amortMensual * (diasEnUso / diasDelMes)
+ */
+export function generateMonthlyDepreciationSchedule(
+    asset: FixedAsset,
+    fiscalYear: number
+): MonthlyDepreciationRow[] {
+    const C = asset.originalValue
+    const residualPct = asset.residualValuePct ?? 0
+    const VR = C * (residualPct / 100)
+    const VA = Math.max(0, C - VR)
+    const rows: MonthlyDepreciationRow[] = []
+
+    // Non-depreciable or in-project assets: return empty schedule
+    if (asset.method === 'none' || asset.category === 'Terrenos' || VA <= 0 || asset.status === 'in_progress') {
+        for (let m = 0; m < 12; m++) {
+            const daysInMonth = new Date(fiscalYear, m + 1, 0).getDate()
+            rows.push({
+                month: m + 1, year: fiscalYear, label: MONTH_NAMES_ES[m],
+                daysInMonth, daysInUse: 0, devengadoMes: 0, devengadoAcumulado: 0,
+            })
+        }
+        return rows
+    }
+
+    const lifeYears = asset.lifeYears || 1
+    const amortAnual = VA / lifeYears
+    const amortMensual = amortAnual / 12
+    const lifeMonths = lifeYears * 12
+
+    const acquisitionDate = parseDateLocal(asset.placedInServiceDate || asset.acquisitionDate)
+    const fiscalYearStart = new Date(fiscalYear, 0, 1)
+    const fiscalYearEnd = new Date(fiscalYear, 11, 31)
+
+    // If asset acquired after fiscal year end, no depreciation
+    if (acquisitionDate > fiscalYearEnd) {
+        for (let m = 0; m < 12; m++) {
+            const daysInMonth = new Date(fiscalYear, m + 1, 0).getDate()
+            rows.push({
+                month: m + 1, year: fiscalYear, label: MONTH_NAMES_ES[m],
+                daysInMonth, daysInUse: 0, devengadoMes: 0, devengadoAcumulado: 0,
+            })
+        }
+        return rows
+    }
+
+    // Calculate accumulated depreciation before fiscal year start
+    let acumAnterior = 0
+    if (asset.originType === 'OPENING' && asset.opening?.initialAccumDep !== undefined) {
+        const importYear = parseInt(asset.periodId) || fiscalYear
+        const yearsBefore = Math.max(0, fiscalYear - importYear)
+        acumAnterior = asset.opening.initialAccumDep + yearsBefore * amortAnual
+    } else if (acquisitionDate < fiscalYearStart) {
+        const prevYearEnd = new Date(fiscalYear - 1, 11, 31)
+        const monthsPrior = calculateMonthsBetween(acquisitionDate, prevYearEnd) + 1
+        acumAnterior = Math.min(monthsPrior, lifeMonths) * amortMensual
+    }
+    acumAnterior = Math.min(round2(acumAnterior), VA)
+
+    // Determine depreciation start date for this fiscal year
+    const depStartDate = acquisitionDate > fiscalYearStart ? acquisitionDate : fiscalYearStart
+
+    let devengadoAcumulado = acumAnterior
+    let totalAssigned = 0
+
+    for (let m = 0; m < 12; m++) {
+        const monthStart = new Date(fiscalYear, m, 1)
+        const monthEnd = new Date(fiscalYear, m + 1, 0) // last day of month
+        const daysInMonth = monthEnd.getDate()
+
+        // Not yet active or already fully depreciated
+        if (depStartDate > monthEnd || devengadoAcumulado >= VA - 0.005) {
+            rows.push({
+                month: m + 1, year: fiscalYear, label: MONTH_NAMES_ES[m],
+                daysInMonth, daysInUse: 0, devengadoMes: 0,
+                devengadoAcumulado: round2(devengadoAcumulado),
+            })
+            continue
+        }
+
+        // Calculate days in use this month
+        let daysInUse: number
+        if (depStartDate > monthStart) {
+            // First partial month: from acquisition date to end of month
+            daysInUse = daysInMonth - depStartDate.getDate() + 1
+        } else {
+            daysInUse = daysInMonth
+        }
+
+        // Handle disposal (if asset has disposal date)
+        if (asset.disposalDate) {
+            const dispDate = parseDateLocal(asset.disposalDate)
+            if (dispDate >= monthStart && dispDate <= monthEnd) {
+                daysInUse = Math.min(daysInUse, dispDate.getDate())
+            } else if (dispDate < monthStart) {
+                daysInUse = 0
+            }
+        }
+
+        let devengadoMes = round2(amortMensual * (daysInUse / daysInMonth))
+
+        // Clamp: don't exceed VA
+        if (devengadoAcumulado + devengadoMes > VA) {
+            devengadoMes = round2(VA - devengadoAcumulado)
+        }
+
+        devengadoAcumulado = round2(devengadoAcumulado + devengadoMes)
+        totalAssigned += devengadoMes
+
+        rows.push({
+            month: m + 1, year: fiscalYear, label: MONTH_NAMES_ES[m],
+            daysInMonth, daysInUse, devengadoMes: round2(devengadoMes),
+            devengadoAcumulado: round2(devengadoAcumulado),
+        })
+    }
+
+    // Rounding adjustment: distribute remainder to last active month
+    // so the yearly total matches the annual calculation
+    const calcFiscalYear = calculateFixedAssetDepreciation(asset, fiscalYear)
+    const expectedTotal = calcFiscalYear.amortizacionEjercicio
+    const diff = round2(expectedTotal - totalAssigned)
+    if (Math.abs(diff) > 0.005 && Math.abs(diff) < 1) {
+        let lastActiveIdx = -1
+        for (let i = rows.length - 1; i >= 0; i--) {
+            if (rows[i].devengadoMes > 0) { lastActiveIdx = i; break }
+        }
+        if (lastActiveIdx >= 0) {
+            rows[lastActiveIdx].devengadoMes = round2(rows[lastActiveIdx].devengadoMes + diff)
+            // Recalculate accumulated from that point
+            let acc = lastActiveIdx > 0 ? rows[lastActiveIdx - 1].devengadoAcumulado : acumAnterior
+            for (let i = lastActiveIdx; i < 12; i++) {
+                acc = round2(acc + rows[i].devengadoMes)
+                rows[i].devengadoAcumulado = acc
+            }
+        }
+    }
+
+    return rows
+}
+
+/**
+ * Query posted (contabilizado) amortization amounts for a fixed asset.
+ * Returns the total accumulated depreciation that has been posted to the books.
+ */
+export interface PostedAmortizationInfo {
+    /** Total accumulated depreciation posted to books (opening + amortization entries) */
+    total: number
+    /** Amortization entries for the current fiscal year only */
+    currentYearAmort: number
+    /** List of relevant posted entries */
+    entries: Array<{
+        entryId: string
+        date: string
+        amount: number
+        period?: string
+        type: string
+    }>
+}
+
+export async function getAmortizationContabilizada(
+    asset: FixedAsset
+): Promise<PostedAmortizationInfo> {
+    const allEntries = await db.entries
+        .filter(e =>
+            e.sourceModule === 'fixed-assets' &&
+            (e.sourceId === asset.id || e.metadata?.assetId === asset.id || e.metadata?.meta?.assetId === asset.id)
+        )
+        .toArray()
+
+    let total = 0
+    let currentYearAmort = 0
+    const entries: PostedAmortizationInfo['entries'] = []
+
+    for (const entry of allEntries) {
+        const role = entry.sourceType || entry.metadata?.journalRole
+        if (role !== 'opening' && role !== 'amortization') continue
+
+        // Sum credits to contra-account (accumulated depreciation)
+        const creditAmount = entry.lines
+            .filter(l => l.accountId === asset.contraAccountId && l.credit > 0)
+            .reduce((sum, l) => sum + l.credit, 0)
+
+        if (creditAmount > 0) {
+            total += creditAmount
+            if (role === 'amortization') {
+                currentYearAmort += creditAmount
+            }
+            entries.push({
+                entryId: entry.id,
+                date: entry.date,
+                amount: round2(creditAmount),
+                period: entry.metadata?.meta?.period || entry.metadata?.fiscalYear?.toString(),
+                type: role,
+            })
+        }
+    }
+
+    return {
+        total: round2(total),
+        currentYearAmort: round2(currentYearAmort),
+        entries: entries.sort((a, b) => a.date.localeCompare(b.date)),
+    }
+}
+
+/**
+ * Build monthly amortization entry with metadata for idempotency.
+ */
+export async function buildMonthlyAmortizationEntry(
+    asset: FixedAsset,
+    fiscalYear: number,
+    month: number,
+    amount: number
+): Promise<JournalBuildResult> {
+    if (amount <= 0) {
+        return { entry: null, error: 'No hay amortizacion a registrar para este mes.' }
+    }
+
+    const accounts = await db.accounts.toArray()
+    const expenseAccount = accounts.find(a => a.code === DEPRECIATION_EXPENSE_CODE)
+    if (!expenseAccount) {
+        return { entry: null, error: `Falta cuenta: Amortizaciones Bienes de Uso (${DEPRECIATION_EXPENSE_CODE}).` }
+    }
+
+    const contraAccount = accounts.find(a => a.id === asset.contraAccountId)
+    if (!contraAccount) {
+        return { entry: null, error: 'Falta cuenta de Amortizacion Acumulada vinculada al bien.' }
+    }
+
+    const monthEnd = new Date(fiscalYear, month, 0)
+    const closingDate = `${fiscalYear}-${String(month).padStart(2, '0')}-${String(monthEnd.getDate()).padStart(2, '0')}`
+    const periodStr = `${fiscalYear}-${String(month).padStart(2, '0')}`
+
+    const roundedAmount = round2(amount)
+    const lines: EntryLine[] = [
+        {
+            accountId: expenseAccount.id,
+            debit: roundedAmount,
+            credit: 0,
+            description: `Amortizacion ${asset.name} (${MONTH_NAMES_ES[month - 1]})`,
+        },
+        {
+            accountId: contraAccount.id,
+            debit: 0,
+            credit: roundedAmount,
+            description: `Amort. Acum. ${asset.name}`,
+        },
+    ]
+
+    return {
+        entry: {
+            date: closingDate,
+            memo: `Amortizacion Bienes de Uso - ${asset.name} - ${MONTH_NAMES_ES[month - 1]} ${fiscalYear}`,
+            lines,
+            sourceModule: 'fixed-assets',
+            sourceId: asset.id,
+            sourceType: 'amortization',
+            createdAt: new Date().toISOString(),
+            metadata: {
+                journalRole: 'amortization',
+                assetId: asset.id,
+                assetName: asset.name,
+                fiscalYear,
+                meta: {
+                    source: 'fixedAssets',
+                    kind: 'amortization',
+                    type: 'AMORTIZATION',
+                    assetId: asset.id,
+                    period: periodStr,
+                    asOf: closingDate,
+                    periodId: asset.periodId,
+                    fiscalYear,
+                    granularity: 'monthly',
+                },
+            },
+        },
+    }
+}
+
+/**
+ * Sync (create or skip) monthly amortization entry with idempotency.
+ */
+export async function syncMonthlyAmortizationEntry(
+    asset: FixedAsset,
+    fiscalYear: number,
+    month: number,
+    amount: number
+): Promise<{ success: boolean; entryId?: string; error?: string; status?: 'generated' | 'updated' | 'skipped' }> {
+    const periodStr = `${fiscalYear}-${String(month).padStart(2, '0')}`
+    if (amount <= 0) {
+        return { success: false, status: 'skipped', error: 'No hay monto a registrar.' }
+    }
+
+    // Check for existing entry for this period (idempotency)
+    const existing = await db.entries
+        .filter(e =>
+            e.sourceModule === 'fixed-assets' &&
+            e.sourceId === asset.id &&
+            e.sourceType === 'amortization' &&
+            e.metadata?.meta?.period === periodStr
+        )
+        .first()
+
+    if (existing) {
+        return { success: true, entryId: existing.id, status: 'skipped' }
+    }
+
+    const { entry, error } = await buildMonthlyAmortizationEntry(asset, fiscalYear, month, amount)
+    if (!entry) {
+        return { success: false, error: error || 'No se pudo generar el asiento.' }
+    }
+
+    const created = await createEntry(entry)
+    await updateFixedAsset(asset.id, {
+        linkedJournalEntryIds: [...asset.linkedJournalEntryIds, created.id],
+    })
+    return { success: true, entryId: created.id, status: 'generated' }
+}
+
+/**
+ * Generate all pending monthly amortization entries up to end of fiscal year.
+ */
+export async function syncPendingAmortizationEntries(
+    asset: FixedAsset,
+    fiscalYear: number
+): Promise<{ success: boolean; entriesCreated: number; totalAmount: number; error?: string }> {
+    const schedule = generateMonthlyDepreciationSchedule(asset, fiscalYear)
+    let entriesCreated = 0
+    let totalAmount = 0
+    let currentAsset = asset
+
+    for (const row of schedule) {
+        if (row.devengadoMes <= 0) continue
+
+        const result = await syncMonthlyAmortizationEntry(currentAsset, fiscalYear, row.month, row.devengadoMes)
+        if (result.success && result.status === 'generated') {
+            entriesCreated++
+            totalAmount += row.devengadoMes
+            // Refresh asset to get updated linkedJournalEntryIds
+            const refreshed = await db.fixedAssets.get(asset.id)
+            if (refreshed) currentAsset = refreshed
+        }
+    }
+
+    return { success: true, entriesCreated, totalAmount: round2(totalAmount) }
 }

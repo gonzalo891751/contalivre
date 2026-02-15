@@ -6,10 +6,8 @@
  */
 
 import { useState, useMemo, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-    ArrowLeft,
     ArrowsClockwise,
     FilePdf,
     ChartBar,
@@ -61,6 +59,7 @@ import {
     getInvestmentNotifications,
     dismissNotification,
 } from '../../storage/inversiones'
+import OperationsPageHeader from '../../components/OperationsPageHeader'
 
 // ============================================
 // Constants
@@ -114,7 +113,6 @@ const formatDate = (date: string): string => {
 // ============================================
 
 export default function InversionesPage() {
-    const navigate = useNavigate()
     const { year: periodYear } = usePeriodYear()
     const periodId = String(periodYear)
 
@@ -1165,46 +1163,37 @@ export default function InversionesPage() {
     // Main render
     return (
         <div className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-6 scroll-smooth bg-slate-50">
-            {/* Breadcrumb */}
-            <div className="print:hidden">
-                <button
-                    className="text-slate-500 hover:text-slate-900 flex items-center gap-2 text-sm"
-                    onClick={() => navigate('/operaciones')}
-                >
-                    <ArrowLeft size={16} /> Volver al Panel
-                </button>
-            </div>
-
             {/* Header */}
-            <div className="bg-white rounded-xl border border-slate-200 p-6 flex flex-col md:flex-row justify-between gap-4">
-                <div>
-                    <h1 className="font-display font-bold text-2xl text-slate-900 mb-2">Cartera de Inversiones</h1>
-                    <p className="text-slate-500 max-w-xl">
-                        Gestion integral de cartera propia. Plazos fijos, Acciones, Cripto y VPP.
-                    </p>
-                </div>
-                <div className="flex gap-2 print:hidden">
-                    <button
-                        className="px-4 py-2 bg-gradient-to-r from-blue-600 to-emerald-500 text-white rounded-lg font-medium hover:from-blue-500 hover:to-emerald-400 flex items-center gap-2"
-                        onClick={openNewModal}
-                    >
-                        <Plus size={16} weight="bold" /> Nuevo
-                    </button>
-                    <button
-                        className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                        onClick={handleSync}
-                        disabled={isSyncing}
-                    >
-                        <ArrowsClockwise size={16} className={isSyncing ? 'animate-spin' : ''} />
-                        {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
-                    </button>
-                    <button
-                        className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                        onClick={handlePrint}
-                    >
-                        <FilePdf size={16} /> Reporte PDF
-                    </button>
-                </div>
+            <div className="print:hidden">
+                <OperationsPageHeader
+                    title="Cartera de Inversiones"
+                    subtitle="Gestion integral de cartera propia. Plazos fijos, Acciones, Cripto y VPP."
+                    shimmer
+                    rightSlot={
+                        <>
+                            <button
+                                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-emerald-500 text-white rounded-lg font-medium hover:from-blue-500 hover:to-emerald-400 flex items-center gap-2"
+                                onClick={openNewModal}
+                            >
+                                <Plus size={16} weight="bold" /> Nuevo
+                            </button>
+                            <button
+                                className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                onClick={handleSync}
+                                disabled={isSyncing}
+                            >
+                                <ArrowsClockwise size={16} className={isSyncing ? 'animate-spin' : ''} />
+                                {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+                            </button>
+                            <button
+                                className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                onClick={handlePrint}
+                            >
+                                <FilePdf size={16} /> Reporte PDF
+                            </button>
+                        </>
+                    }
+                />
             </div>
 
             {/* Integration Panel */}

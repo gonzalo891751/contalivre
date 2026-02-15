@@ -11,7 +11,6 @@
 
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useNavigate } from 'react-router-dom'
 import {
     ArrowLeft,
     CalendarCheck,
@@ -25,7 +24,7 @@ import {
     TrendUp,
     X,
 } from '@phosphor-icons/react'
-import TextShimmer from '../../ui/TextShimmer'
+import OperationsPageHeader from '../../components/OperationsPageHeader'
 import NumberTicker from '../../ui/NumberTicker'
 
 import { usePeriodYear } from '../../hooks/usePeriodYear'
@@ -228,7 +227,6 @@ function computeDebtSummary(debt: FxDebt, oficialRate: number): DebtSummary {
 // ========================================
 
 export default function PrestamosPage() {
-    const navigate = useNavigate()
     const { year: periodYear } = usePeriodYear()
     const periodId = String(periodYear)
 
@@ -317,17 +315,11 @@ export default function PrestamosPage() {
             )}
 
             {/* Header */}
-            <div className="flex items-center gap-4">
-                <button onClick={() => navigate('/operaciones')} className="rounded-lg p-2 hover:bg-slate-200 transition-colors">
-                    <ArrowLeft size={20} className="text-slate-600" />
-                </button>
-                <div>
-                    <h1 className="font-display text-2xl font-bold text-slate-900">
-                        <TextShimmer duration={3}>Préstamos y Deudas Financieras</TextShimmer>
-                    </h1>
-                    <p className="text-sm text-slate-500">Gestión de préstamos ARS y ME con asientos automáticos en ARS</p>
-                </div>
-            </div>
+            <OperationsPageHeader
+                title="Préstamos y Deudas Financieras"
+                subtitle="Gestión de préstamos ARS y ME con asientos automáticos en ARS"
+                shimmer
+            />
 
             {/* KPIs */}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

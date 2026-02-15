@@ -11,7 +11,6 @@ import React, { useState, useMemo, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-    ArrowLeft,
     Truck,
     Briefcase,
     MagnifyingGlass,
@@ -35,6 +34,7 @@ import type { Account } from '../../core/models'
 import type { CostingMethod } from '../../core/inventario/types'
 import PerfeccionarModal from './PerfeccionarModal'
 import type { PerfeccionarSaveData } from './PerfeccionarModal'
+import OperationsPageHeader from '../../components/OperationsPageHeader'
 
 // Account codes for control accounts
 const PROVEEDORES_CODE = '2.1.01.01'
@@ -449,79 +449,62 @@ export default function ProveedoresAcreedoresPage() {
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 fade-in">
             {/* HEADER */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                    <button
-                        onClick={() => navigate('/operaciones')}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shadow-sm"
-                    >
-                        <ArrowLeft size={14} weight="bold" /> Volver a Operaciones
-                    </button>
-                    <nav className="hidden md:flex text-slate-500 text-xs items-center gap-2">
-                        <span className="text-slate-400">|</span>
-                        <span>Operaciones</span>
-                        <CaretRight size={10} className="text-slate-400" />
-                        <span className="font-medium text-slate-900">{moduleTitle}</span>
-                    </nav>
-                </div>
+            <OperationsPageHeader
+                title={moduleTitle}
+                subtitle={moduleDesc}
+                rightSlot={
+                    <>
+                        {/* TOGGLE Proveedores / Acreedores */}
+                        <div className="bg-slate-100 p-1 rounded-lg flex items-center">
+                            <button
+                                onClick={() => switchMode('proveedores')}
+                                className={`px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all ${mode === 'proveedores'
+                                    ? 'bg-white text-blue-600 shadow-sm font-semibold'
+                                    : 'text-slate-500 font-medium hover:text-slate-700 hover:bg-white/50'}`}
+                            >
+                                <Truck size={14} weight="bold" /> Proveedores
+                            </button>
+                            <button
+                                onClick={() => switchMode('acreedores')}
+                                className={`px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all ${mode === 'acreedores'
+                                    ? 'bg-white text-blue-600 shadow-sm font-semibold'
+                                    : 'text-slate-500 font-medium hover:text-slate-700 hover:bg-white/50'}`}
+                            >
+                                <Briefcase size={14} weight="bold" /> Acreedores
+                            </button>
+                        </div>
 
-                <div className="flex items-center gap-4">
-                    {/* TOGGLE Proveedores / Acreedores */}
-                    <div className="bg-slate-100 p-1 rounded-lg flex items-center">
+                        <div className="h-6 w-px bg-slate-200" />
+
+                        {/* CTA */}
                         <button
-                            onClick={() => switchMode('proveedores')}
-                            className={`px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all ${mode === 'proveedores'
-                                ? 'bg-white text-blue-600 shadow-sm font-semibold'
-                                : 'text-slate-500 font-medium hover:text-slate-700 hover:bg-white/50'}`}
+                            onClick={handleNewPurchase}
+                            className="btn-primary px-4 py-2 rounded-md font-medium text-xs flex items-center gap-2 shadow-sm"
                         >
-                            <Truck size={14} weight="bold" /> Proveedores
+                            <Plus size={14} weight="bold" />
+                            {ctaLabel}
                         </button>
-                        <button
-                            onClick={() => switchMode('acreedores')}
-                            className={`px-3 py-1.5 rounded-md flex items-center gap-2 text-xs transition-all ${mode === 'acreedores'
-                                ? 'bg-white text-blue-600 shadow-sm font-semibold'
-                                : 'text-slate-500 font-medium hover:text-slate-700 hover:bg-white/50'}`}
-                        >
-                            <Briefcase size={14} weight="bold" /> Acreedores
-                        </button>
-                    </div>
-
-                    <div className="h-6 w-px bg-slate-200" />
-
-                    {/* CTA */}
-                    <button
-                        onClick={handleNewPurchase}
-                        className="btn-primary px-4 py-2 rounded-md font-medium text-xs flex items-center gap-2 shadow-sm"
-                    >
-                        <Plus size={14} weight="bold" />
-                        {ctaLabel}
-                    </button>
-                </div>
-            </div>
-
-            {/* TITLE + KPIs */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                    <h1 className="font-display font-bold text-3xl text-slate-900">{moduleTitle}</h1>
-                    <p className="text-slate-500 mt-1">{moduleDesc}</p>
-                </div>
-                <div className="flex gap-4">
-                    <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
-                        <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">
-                            Deuda Total <span className="text-[9px] text-slate-300 ml-1">(Mayor)</span>
+                    </>
+                }
+                badges={
+                    <div className="flex gap-4">
+                        <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
+                            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">
+                                Deuda Total <span className="text-[9px] text-slate-300 ml-1">(Mayor)</span>
+                            </div>
+                            <div className="font-mono text-lg font-bold text-slate-900 tabular-nums">
+                                {fmtCurrency(totalDebt)}
+                            </div>
                         </div>
-                        <div className="font-mono text-lg font-bold text-slate-900 tabular-nums">
-                            {fmtCurrency(totalDebt)}
+                        <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm border-l-4 border-l-orange-400">
+                            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">Vence esta semana</div>
+                            <div className="font-mono text-lg font-bold text-orange-600 tabular-nums">
+                                {fmtCurrency(dueThisWeek)}
+                            </div>
                         </div>
                     </div>
-                    <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm border-l-4 border-l-orange-400">
-                        <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">Vence esta semana</div>
-                        <div className="font-mono text-lg font-bold text-orange-600 tabular-nums">
-                            {fmtCurrency(dueThisWeek)}
-                        </div>
-                    </div>
-                </div>
-            </div>
+                }
+            />
 
             {/* TABS */}
             <div className="border-b border-slate-200 flex gap-6 overflow-x-auto">

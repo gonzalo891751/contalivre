@@ -26,10 +26,15 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * Parse a date string to Date object
+ * Parse a date string to Date object (local time to avoid timezone shift).
+ * new Date('2025-01-01') parses as UTC midnight which shifts day in negative-UTC timezones.
  */
 export function parseDate(dateStr: string): Date | null {
     if (!dateStr) return null
+    const parts = dateStr.split('-').map(Number)
+    if (parts.length >= 3 && parts.every(n => !isNaN(n))) {
+        return new Date(parts[0], parts[1] - 1, parts[2])
+    }
     const d = new Date(dateStr)
     return isNaN(d.getTime()) ? null : d
 }
