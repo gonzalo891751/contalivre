@@ -224,7 +224,7 @@ export interface PayrollLineDetail {
 
 // ─── Payroll Run (Liquidation) ──────────────────────────────
 
-export type PayrollRunStatus = 'draft' | 'posted' | 'paid' | 'partial'
+export type PayrollRunStatus = 'draft' | 'posted' | 'paid' | 'partial' | 'partially_paid'
 
 export interface PayrollRun {
     id: string
@@ -237,6 +237,8 @@ export interface PayrollRun {
     netTotal: number
     advancesAppliedTotal: number
     journalEntryId?: string
+    postedAt?: string
+    paidAt?: string
     salaryPaid: number
     socialSecurityPaid: number
     createdAt: string
@@ -286,27 +288,27 @@ export interface PayrollPayment {
 
 export const PAYROLL_ACCOUNT_FALLBACKS: Record<string, { codes: string[]; names: string[] }> = {
     sueldosYJornales: {
-        codes: ['5.2.01', '5.2.01.01'],
+        codes: ['4.5.01'],
         names: ['Sueldos y Jornales', 'Sueldos', 'Remuneraciones'],
     },
     cargasSociales: {
-        codes: ['5.2.02', '5.2.02.01'],
+        codes: ['4.5.02'],
         names: ['Cargas Sociales', 'Contribuciones Patronales', 'Contribuciones Sociales'],
     },
     sueldosAPagar: {
-        codes: ['2.1.03.01', '2.1.03'],
+        codes: ['2.1.02.01'],
         names: ['Sueldos a Pagar', 'Sueldos y Jornales a Pagar', 'Remuneraciones a Pagar'],
     },
     retencionesADepositar: {
-        codes: ['2.1.03.02', '2.1.04.01'],
-        names: ['Retenciones a Depositar', 'Aportes a Depositar', 'Retenciones y Aportes a Depositar', 'Aportes y Retenciones a Depositar'],
+        codes: ['2.1.02.03'],
+        names: ['Retenciones s/ sueldos a depositar', 'Retenciones so/ sueldos a depositar', 'Retenciones a Depositar', 'Aportes a Depositar'],
     },
     cargasSocialesAPagar: {
-        codes: ['2.1.03.03', '2.1.04.02'],
+        codes: ['2.1.02.02'],
         names: ['Cargas Sociales a Pagar', 'Contribuciones a Pagar', 'Contribuciones Patronales a Pagar'],
     },
     anticiposAlPersonal: {
-        codes: ['1.1.04.01', '1.1.02.03'],
-        names: ['Anticipos al Personal', 'Anticipos de Sueldos', 'Adelantos al Personal'],
+        codes: ['1.1.03.11'],
+        names: ['Anticipos de personal', 'Anticipos al Personal', 'Anticipos de Sueldos', 'Adelantos al Personal'],
     },
 }

@@ -1,7 +1,197 @@
 # ContaLivre - AI Handoff Protocol
 
 ---
+## CHECKPOINT #PAYROLL-UX-RECIBOS-SYNC-F0
+**Fecha:** 2026-02-15
+**Estado:** DIAGNOSTICO COMPLETADO (FASE 0) - STOP antes de implementacion
 
+### Objetivo de esta fase
+Diagnosticar puntos exactos para:
+- UX Pro en `Liquidaciones`
+- Recibo por empleado (vista empleador)
+- Flujo `BORRADOR -> DEVENGADO`
+- Sincronizacion fuerte con Libro Diario al anular/eliminar asientos
+
+### Hallazgos de ubicacion (paths reales)
+1. **Lista “Liquidaciones por Periodo”**
+- Render principal: `src/pages/Operaciones/DeudasSocialesPage.tsx:1168` (`LiquidacionesTab`)
+- Cards por periodo: `src/pages/Operaciones/DeudasSocialesPage.tsx:1325` (`PayrollRunCard`)
+- Filas de empleados: `src/pages/Operaciones/DeudasSocialesPage.tsx:1534` (`PayrollLineRow`)
+
+2. **Estructura actual de `PayrollRun`**
+- Tipo estado: `src/core/payroll/types.ts:227` -> `'draft' | 'posted' | 'paid' | 'partial'`
+- Interface: `src/core/payroll/types.ts:229`
+- Campos relevantes existentes: `status` (`:233`), `journalEntryId?` (`:239`), `salaryPaid` (`:240`), `socialSecurityPaid` (`:241`)
+- **No existen** `postedAt` ni `paidAt` en el tipo actual.
+
+3. **Como se abre “Ver asiento en diario”**
+- Boton en card de liquidacion: `src/pages/Operaciones/DeudasSocialesPage.tsx:1522`
+- Comportamiento actual: `window.open('/asientos', '_self')` (navega al Diario sin foco por `entryId`).
+
+4. **Logica de borrar asiento en Libro Diario**
+- Desktop: `src/pages/AsientosDesktop.tsx:118` (`handleDeleteEntry`) usa `db.entries.delete(id)` directo (`:120`)
+- Confirm modal: `src/pages/AsientosDesktop.tsx:480`
+- Mobile: `src/ui/MobileAsientosRegistrados.tsx:46` usa `db.entries.delete(id)` directo
+- Helper de storage existente: `src/storage/entries.ts:70` (`deleteEntry`) solo sincroniza `sourceModule === 'fx'` (`:74`), no payroll
+
+5. **Flujo actual de payroll con Diario**
+- Crear borrador: `src/storage/payroll.ts:628` (`createPayrollRun`) crea estado `draft`
+- Devengar: `src/storage/payroll.ts:759` (`postPayrollRun`) crea asiento con `sourceModule: 'payroll'` (`:808`) y marca run `posted + journalEntryId` (`:820-821`)
+- Pagos: `src/storage/payroll.ts:842` (`registerPayrollPayment`) genera asientos payroll de pago (`:907`) y actualiza estado a `paid|partial`
+- Eliminar liquidacion: `src/storage/payroll.ts:732` solo permite `draft`
+- Consulta de asientos payroll: `src/storage/payroll.ts:1034`
+
+### Brechas detectadas
+- UX de detalle por empleado es una fila expandible, no “recibo empleador” modal/drawer.
+- Riesgo de inconsistencia: si se elimina asiento payroll en Diario, hoy no hay desposteo del run.
+- `deleteEntry()` central no se usa en UI del Diario (se usa `db.entries.delete` directo), y ademas no contempla payroll.
+- Estado `posted` se puede mostrar aun cuando `journalEntryId` ya no exista (estado fantasma).
+
+### Plan minimo (10 pasos) para Fase 1-4
+1. Ajustar modelo de estados en payroll para soportar nomenclatura objetivo sin romper compatibilidad (`partial` -> `partially_paid` alias o migracion minima controlada).
+2. Extender `PayrollRun` con `postedAt?` y `paidAt?`, preservando lectura de datos existentes.
+3. Crear helper de sugerencia de periodo para CTA “Generar borrador del mes”.
+4. Reemplazar listado visual de lineas por tabla fija en `PayrollRunCard` (columnas: Empleado, Bruto, Retenciones, Contrib., Neto).
+5. Hacer fila clickeable y abrir modal/drawer “Recibo (vista empleador)”.
+6. Implementar contenido del recibo: encabezado empleado + secciones Haberes/Descuentos/Contribuciones + resumen.
+7. Mantener/enganchar accion “Editar conceptos” en el recibo (reusar datos de `conceptBreakdown`; fallback a override actual).
+8. Crear API de sincronizacion en payroll (`unlinkJournalFromRun`, `markRunAsDraft`, y verificacion de `journalEntryId` valido).
+9. Interceptar eliminacion de asientos payroll en Diario (desktop + mobile): reemplazar delete duro por flujo “Anular/Despostear” y luego borrar asiento segun politica B.
+10. Ejecutar QA integral (flujo borrador->devengar, recibos por empleado, desposteo desde Diario, compilacion `tsc`/`build`).
+
+### Archivos candidatos a modificar (fase de implementacion)
+- `src/pages/Operaciones/DeudasSocialesPage.tsx`
+- `src/storage/payroll.ts`
+- `src/core/payroll/types.ts`
+- `src/pages/AsientosDesktop.tsx`
+- `src/ui/MobileAsientosRegistrados.tsx`
+- `src/storage/entries.ts` (si centralizamos delete + hook payroll)
+- `docs/AI_HANDOFF.md` (checkpoint final al cerrar implementacion)
+
+### Decision de politica para sync (aprobada para implementar)
+- **Opcion elegida:** B (mas simple por ahora): “Anular / Despostear” = des-vincular run en payroll, volver a `DRAFT`, luego eliminar asiento.
+- Se mantiene abierta evolucion futura a reversal profesional (asiento inverso) en fase posterior.
+
+---
+## CHECKPOINT #PAYROLL-UX-RECIBOS-SYNC-FINAL
+**Fecha:** 2026-02-15
+**Estado:** IMPLEMENTADO (FASE 1-4) - UX PRO + Recibos + BORRADOR->DEVENGADO + Sync Diario fuerte
+
+### Archivos tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/pages/Operaciones/DeudasSocialesPage.tsx` | CTA principal "Generar borrador del mes", sugerencia automatica de periodo, tabla fija por empleado (sin solapamiento), fila clickeable, modal recibo, badge/acciones condicionadas a link real de asiento, accion "Anular / Despostear" desde Sueldos |
+| `src/pages/Operaciones/payroll/EmployeeReceiptModal.tsx` | **NUEVO** modal/drawer "Recibo (vista empleador)" con secciones Haberes/Descuentos/Contribuciones, resumen, override por linea, boton Ver asiento y placeholder PDF |
+| `src/core/payroll/types.ts` | Status model ampliado (`partially_paid` manteniendo compatibilidad con `partial`) + campos `postedAt?` y `paidAt?` en `PayrollRun` |
+| `src/storage/payroll.ts` | Reconciliacion automatica run<->asiento, helpers `markRunAsDraft`, `unlinkJournalFromRun`, `unlinkPaymentFromRun`, tracking `postedAt/paidAt`, estado pago parcial nuevo |
+| `src/storage/journalSync.ts` | **NUEVO** flujo central `deleteJournalEntryWithSync()` para eliminar/anular asiento con sincronizacion payroll bidireccional |
+| `src/pages/AsientosDesktop.tsx` | Delete de Diario migrado a flujo sincronizado; modal cambia copy/accion a "Anular / Despostear" cuando el asiento es payroll-accrual |
+| `src/ui/MobileAsientosRegistrados.tsx` | Idem Desktop para delete/anulacion sincronizada en mobile |
+| `docs/AI_HANDOFF.md` | Checkpoint F0 + checkpoint final |
+
+### Implementacion por fase
+1. **Fase 1 (UX / legibilidad)**  
+- Liquidaciones muestra tabla fija: Empleado | Bruto | Retenciones | Contrib. Empleador | Neto.  
+- Montos con `font-mono` + `tabular-nums`; nombres con `truncate`; fila clickeable para recibo.
+
+2. **Fase 2 (recibo por empleado)**  
+- Nuevo `EmployeeReceiptModal` con:
+  - Encabezado de periodo + empleado + datos laborales.
+  - Secciones Haberes, Descuentos/Retenciones, Contribuciones empleador.
+  - Resumen: Bruto, Neto, Costo empleador.
+  - Acciones: `Editar conceptos` (override por linea en draft), `Ver asiento` (si existe), PDF disabled con "próximamente".
+
+3. **Fase 3 (automatizacion borrador mensual)**  
+- CTA principal reemplazada por `Generar borrador del mes`.
+- Sugerencia automatica de periodo (`suggestPayrollPeriod`):
+  - Si no hay runs: default demo `2025-01`.
+  - Si hay runs: siguiente periodo faltante desde el ultimo.
+  - Opcion secundaria `Elegir otro periodo`.
+
+4. **Fase 4 (sync fuerte con Diario)**  
+- Politica aplicada: **Opcion B - Anular / Despostear**.
+- `deleteJournalEntryWithSync()`:
+  - `sourceModule='payroll'` + `sourceType='accrual'`: despostea run (unlink + `draft`) y elimina asiento.
+  - `sourceType` de pagos: desvincula/elimina pago y recalcula saldos/estado run.
+  - resto: delete normal.
+- Diario Desktop/Mobile ya no borra directo con `db.entries.delete`; usa flujo sincronizado.
+- Auto-fix en payroll: si `journalEntryId` no existe, run vuelve a `draft` (sin estados fantasma).
+
+### Decisiones tecnicas
+- Estado nuevo operativo: `partially_paid`; compatibilidad hacia atras mantenida con `partial`.
+- "Devengado" visual solo si `posted` + `journalEntryId` vigente.
+- Se bloqueo desposteo de accrual cuando la run tiene pagos registrados (evita inconsistencias de mayor riesgo).
+- Se agrego accion de `Anular / Despostear` tambien desde Sueldos para cubrir sincronizacion "viceversa".
+
+### QA ejecutado
+1. `npx tsc --noEmit`  
+- Resultado: **ERROR preexistente** en `tests/repro_eepn.test.ts` (campo `isActive` no valido en `JournalEntry`).
+- Sin errores nuevos del modulo Sueldos/Diario.
+
+2. `npm run build`  
+- Resultado: **ERROR preexistente** por el mismo archivo `tests/repro_eepn.test.ts`.
+
+3. Validacion tecnica de wiring (estatica por codigo)
+- Confirmado uso de `deleteJournalEntryWithSync()` en Desktop y Mobile.
+- Confirmado helpers payroll (`unlinkJournalFromRun`, `markRunAsDraft`, `unlinkPaymentFromRun`) y reconciliacion de links.
+- Confirmada presencia de tabla fija + modal recibo + CTA de borrador mensual.
+
+### Pendientes / TODO
+- QA manual end-to-end en UI real (enero 2025 con 3 empleados) para capturar screenshots/flujo visual.
+- Si se desea modo profesional posterior: reemplazar desposteo por reversal contable (asiento inverso).
+- Resolver test preexistente `tests/repro_eepn.test.ts` para recuperar verde de `tsc/build` global.
+
+---
+## CHECKPOINT #PAYROLL-MAPPING-HARDENING
+**Fecha:** 2026-02-15
+**Estado:** COMPLETADO - Auto-mapeo de Sueldos endurecido + ensure de cuentas laborales
+
+### Objetivo
+Corregir el auto-mapeo del wizard de Sueldos para evitar falsos positivos hacia cuentas de IVA y asegurar/crear automaticamente las cuentas laborales requeridas del plan generico.
+
+### Diagnostico (Root Cause)
+- `PAYROLL_ACCOUNT_FALLBACKS` usaba codigos de pasivo fiscal (`2.1.03.xx`) para mappings de sueldos, incluyendo `2.1.03.01` (IVA Debito Fiscal) como fallback para `sueldosAPagar`.
+- El wizard (`src/pages/Operaciones/payroll/OnboardingWizard.tsx`) usaba heuristica debil (code/name/includes) sin filtros negativos ni guardrails de grupo.
+- No existia un `ensure` explicito de cuentas payroll requeridas previo al autodetect.
+
+### Archivos Tocados
+| Archivo | Cambio |
+|:--------|:-------|
+| `src/core/payroll/types.ts` | Correccion de `PAYROLL_ACCOUNT_FALLBACKS` a codigos laborales correctos (`4.5.01`, `4.5.02`, `2.1.02.01`, `2.1.02.02`, `2.1.02.03`, `1.1.03.11`) |
+| `src/storage/payroll.ts` | Nuevo resolver por specs estrictos + `autoDetectPayrollAccountMappings()` + `ensurePayrollRequiredAccounts()` idempotente con creacion minima de padres |
+| `src/pages/Operaciones/payroll/OnboardingWizard.tsx` | Flujo `Auto-detectar` = `ensure -> reload accounts -> detect`; boton de sobrescritura con confirm; warnings/banners de cuentas creadas y faltantes; sin pisar mapeo manual salvo confirm explicita |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios Detallados
+1. **Specs estrictos de payroll**: se definieron reglas por key con prioridad por codigo exacto y `codePrefix` esperado por grupo contable.
+2. **Filtros negativos anti-falsos positivos**: para pasivos de sueldos/retenciones se excluyen nombres con `iva`, `impuesto`, `debito fiscal`, `terceros`, etc.
+3. **No adivinar mal**: si no hay match confiable, el resolver devuelve `null` y el wizard muestra advertencia de faltante.
+4. **Ensure idempotente de cuentas requeridas**: `ensurePayrollRequiredAccounts()` verifica por codigo exacto y luego por nombre normalizado; crea cuentas faltantes y la cadena minima de padres soportada (`2.1.02`, `4.5`, `1.1.03.10` cuando aplica).
+5. **Reuso de helper de creacion existente**: alta de cuentas via `createAccount()` (sin inserciones ad-hoc).
+6. **Integracion UX en wizard**:
+- `Auto-detectar`: completa sin sobrescribir seleccion manual.
+- `Re-autodetectar y sobrescribir`: requiere confirmacion.
+- Banner: cuentas laborales creadas.
+- Warning: cuentas no encontradas para mapeo.
+7. **Defaults seguros primer ingreso**: en `useEffect` del wizard (fuera de liveQuery), solo si onboarding incompleto y mapeo requerido incompleto.
+
+### Decisiones Tecnicas
+- Se centralizo la logica de deteccion en `storage/payroll.ts` para que wizard y resolucion operativa compartan criterios contables.
+- Se mantuvo compatibilidad hacia atras: mappings guardados por usuario tienen prioridad; el auto-detect normal no pisa valores existentes.
+- Se evito cualquier write dentro de `useLiveQuery/liveQuery`; los writes ocurren solo en handlers/effects del wizard.
+
+### Validacion
+- `npx tsc --noEmit`: **ERROR** por tests preexistentes en `tests/repro_eepn.test.ts` (campo `isActive` no pertenece a `JournalEntry`). No relacionado a este cambio.
+- `npm run build`: **ERROR** por el mismo bloqueo preexistente de `tests/repro_eepn.test.ts`.
+
+### QA Manual Sugerido
+- [ ] Abrir `/operaciones/deudas-sociales` -> wizard -> paso `Mapeo de Cuentas`.
+- [ ] Verificar `Sueldos a Pagar` mapea a `2.1.02.01` y nunca a `2.1.03.01 (IVA Debito Fiscal)`.
+- [ ] Click `Auto-detectar` -> mantiene/completa mappings correctos sin sobrescribir manuales.
+- [ ] Borrar cuentas laborales en storage y repetir `Auto-detectar` -> se recrean (`2.1.02.01/02/03`, `4.5.01/02`, `1.1.03.11`) y aparecen en selector.
+- [ ] Probar `Re-autodetectar y sobrescribir` -> pide confirmacion y aplica reset del mapping.
+
+---
 ## CHECKPOINT #DIARIO-CUENTA-COLECTIVA
 **Fecha:** 2026-02-15
 **Estado:** COMPLETADO - Vista formal en Libro Diario + toggle formal/analítica
@@ -7121,3 +7311,39 @@ Corregir crash (pantalla blanca) al entrar a /operaciones/bienes-uso.
 - **Consumidor Final persistido**: Actualmente se usa como string "Consumidor Final" en el counterparty. Si se necesita un tercero real persistido (para reportes, AFIP, etc), se deberia crear automaticamente como cuenta hija de Deudores por Ventas en el primer uso.
 - **Resumen diario tipo cierre Z**: Para kioscos/minoristas, implementar un resumen diario que agrupe ventas a Consumidor Final.
 - **Test unitario para parser**: Agregar tests para `parseAmountExpression` con edge cases (division por cero, parentesis desbalanceados, numeros negativos).
+
+---
+
+## CHECKPOINT #INV-MODAL-VENTA-DEFAULT-DEUDORES-2026-02-15
+**Fecha:** 2026-02-15
+**Estado:** COMPLETADO - Fix de default en Imputacion del cobro (Venta)
+
+### Objetivo
+Corregir el default de la primera linea de `Imputacion del cobro` en `Registrar Movimiento` para que en **Venta** use `1.1.02.01 - Deudores por ventas` (en lugar de Proveedores), manteniendo **Compra** en `2.1.01.01 - Proveedores`.
+
+### Causa raiz
+- El `useEffect` de default de `splits` corria primero con `mainTab='compra'` y seteaba Proveedores.
+- Al cambiar a `venta`, no re-aplicaba default porque cortaba con `if (splits[0].accountId) return`, aun cuando el split no habia sido tocado manualmente.
+
+### Archivos tocados
+| Archivo | Cambio |
+|---|---|
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Ajuste minimo del `useEffect` de default de contrapartida para re-evaluar por tab sin pisar manual/edit ni prefills explicitos |
+| `docs/AI_HANDOFF.md` | Este checkpoint |
+
+### Cambios aplicados
+1. El default ahora se evalua solo en `compra/venta`, en `create`, con `splitsTouched=false`.
+2. Se mantiene respeto por `initialData.paymentSplits` cuando vienen predefinidos (no override).
+3. Si el primer split esta vacio, aplica el default segun tab:
+- Venta -> `1.1.02.01` (Deudores por ventas)
+- Compra -> `2.1.01.01` (Proveedores)
+4. Si el primer split tiene un default automatico del tab opuesto (Deudores/Proveedores) y no hubo toque manual, lo corrige al cambiar de tab.
+5. Si el usuario eligio otra cuenta manualmente (dirty), no se pisa.
+6. En modo edicion, no se modifica la cuenta guardada.
+
+### Validacion
+- Pendiente de QA manual en flujo UI local (`npm run dev`) para confirmar:
+  - Nuevo movimiento -> Venta: default Deudores por ventas.
+  - Nuevo movimiento -> Compra: default Proveedores.
+  - Cambio manual de cuenta + cambio de tabs: no override.
+  - Editar movimiento existente: sin cambios en cuenta guardada.

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
+import { deleteJournalEntryWithSync } from '../storage/journalSync'
 import type { JournalEntry, Account } from '../core/models'
 import { sumDebits, sumCredits } from '../core/validation'
 import { resolveAccountDisplay } from '../core/displayAccount'
@@ -43,11 +44,15 @@ export default function MobileAsientosRegistrados({ accounts }: MobileAsientosRe
 
     const handleDelete = async (id: string) => {
         try {
-            await db.entries.delete(id)
+            const result = await deleteJournalEntryWithSync(id)
             setDeleteConfirmId(null)
             setMenuOpenId(null)
+            if (result.mode !== 'deleted') {
+                alert(result.message)
+            }
         } catch (err) {
             console.error('Error deleting entry:', err)
+            alert(err instanceof Error ? err.message : 'No se pudo eliminar el asiento')
         }
     }
 
@@ -103,6 +108,15 @@ export default function MobileAsientosRegistrados({ accounts }: MobileAsientosRe
     if (!entries) {
         return null
     }
+
+    const selectedDeleteEntry = deleteConfirmId
+        ? entries.find(entry => entry.id === deleteConfirmId) || null
+        : null
+    const deletingPayrollAccrual = !!(
+        selectedDeleteEntry &&
+        selectedDeleteEntry.sourceModule === 'payroll' &&
+        selectedDeleteEntry.sourceType === 'accrual'
+    )
 
     return (
         <div className="mobile-registrados-section">
@@ -238,8 +252,12 @@ export default function MobileAsientosRegistrados({ accounts }: MobileAsientosRe
             {deleteConfirmId && (
                 <div className="mobile-registrados-modal-overlay" onClick={() => setDeleteConfirmId(null)}>
                     <div className="mobile-registrados-modal" onClick={(e) => e.stopPropagation()}>
-                        <h4>⚠️ Eliminar asiento</h4>
-                        <p>¿Seguro que querés eliminarlo? No se puede deshacer.</p>
+                        <h4>{deletingPayrollAccrual ? '⚠️ Anular asiento payroll' : '⚠️ Eliminar asiento'}</h4>
+                        <p>
+                            {deletingPayrollAccrual
+                                ? 'Se desposteará la liquidación de sueldos y volverá a borrador.'
+                                : '¿Seguro que querés eliminarlo? No se puede deshacer.'}
+                        </p>
                         <div className="mobile-registrados-modal-actions">
                             <button
                                 type="button"
@@ -253,7 +271,7 @@ export default function MobileAsientosRegistrados({ accounts }: MobileAsientosRe
                                 className="btn-delete"
                                 onClick={() => handleDelete(deleteConfirmId)}
                             >
-                                Eliminar
+                                {deletingPayrollAccrual ? 'Anular / Despostear' : 'Eliminar'}
                             </button>
                         </div>
                     </div>

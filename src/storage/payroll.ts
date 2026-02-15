@@ -7,7 +7,9 @@
 
 import { db, generateId } from './db'
 import { createEntry } from './entries'
-import type { Account, JournalEntry, EntryLine } from '../core/models'
+import { createAccount } from './accounts'
+import { getDefaultNormalSide } from '../core/models'
+import type { Account, AccountKind, AccountSection, StatementGroup, JournalEntry, EntryLine } from '../core/models'
 import type {
     Employee,
     PayrollSettings,
@@ -21,7 +23,7 @@ import type {
     PayrollLineDetail,
     TemplateType,
 } from '../core/payroll/types'
-import { DEFAULT_PAYROLL_SETTINGS, PAYROLL_ACCOUNT_FALLBACKS, PAYROLL_TEMPLATES } from '../core/payroll/types'
+import { DEFAULT_PAYROLL_SETTINGS, PAYROLL_TEMPLATES } from '../core/payroll/types'
 import { evaluatePayrollFormula } from '../core/payroll/formulas'
 import type { PayrollFormulaVars } from '../core/payroll/formulas'
 
@@ -29,6 +31,248 @@ import type { PayrollFormulaVars } from '../core/payroll/formulas'
 
 const normalize = (s: string) =>
     s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+const isPartiallyPaidStatus = (status: PayrollRun['status']): boolean =>
+    status === 'partial' || status === 'partially_paid'
+
+interface PayrollAccountSpec {
+    key: keyof PayrollAccountMappings
+    code: string
+    codePrefix?: string
+    kind: AccountKind
+    aliases: string[]
+    negativeTokens?: string[]
+}
+
+interface PayrollRequiredSeed {
+    code: string
+    name: string
+    kind: AccountKind
+    section: AccountSection
+    group: string
+    statementGroup: StatementGroup | null
+    parentCode: string | null
+    isHeader?: boolean
+}
+
+const PAYROLL_ACCOUNT_SPECS: PayrollAccountSpec[] = [
+    {
+        key: 'sueldosYJornales',
+        code: '4.5.01',
+        codePrefix: '4.5',
+        kind: 'EXPENSE',
+        aliases: ['sueldos y jornales', 'sueldos', 'remuneraciones'],
+    },
+    {
+        key: 'cargasSociales',
+        code: '4.5.02',
+        codePrefix: '4.5',
+        kind: 'EXPENSE',
+        aliases: ['cargas sociales', 'contribuciones patronales', 'contribuciones sociales'],
+    },
+    {
+        key: 'sueldosAPagar',
+        code: '2.1.02.01',
+        codePrefix: '2.1.02',
+        kind: 'LIABILITY',
+        aliases: ['sueldos a pagar', 'sueldos y jornales a pagar', 'remuneraciones a pagar'],
+        negativeTokens: ['iva', 'impuesto', 'debito fiscal', 'débito fiscal', 'fiscal'],
+    },
+    {
+        key: 'retencionesADepositar',
+        code: '2.1.02.03',
+        codePrefix: '2.1.02',
+        kind: 'LIABILITY',
+        aliases: [
+            'retenciones s/ sueldos a depositar',
+            'retenciones so/ sueldos a depositar',
+            'retenciones sobre sueldos a depositar',
+            'retenciones sueldos a depositar',
+            'retenciones a depositar',
+        ],
+        negativeTokens: ['iva', 'terceros', 'impuesto', 'debito fiscal', 'débito fiscal'],
+    },
+    {
+        key: 'cargasSocialesAPagar',
+        code: '2.1.02.02',
+        codePrefix: '2.1.02',
+        kind: 'LIABILITY',
+        aliases: ['cargas sociales a pagar', 'contribuciones a pagar', 'contribuciones patronales a pagar'],
+    },
+    {
+        key: 'anticiposAlPersonal',
+        code: '1.1.03.11',
+        codePrefix: '1.1.03',
+        kind: 'ASSET',
+        aliases: ['anticipos de personal', 'anticipos al personal', 'anticipos de sueldos', 'adelantos al personal'],
+        negativeTokens: ['impuesto', 'iva'],
+    },
+]
+
+const PAYROLL_REQUIRED_SEED_ACCOUNTS: PayrollRequiredSeed[] = [
+    { code: '1.1.03.10', name: 'Creditos con socios y personal', kind: 'ASSET', section: 'CURRENT', group: 'Creditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03', isHeader: true },
+    { code: '1.1.03.11', name: 'Anticipos de personal', kind: 'ASSET', section: 'CURRENT', group: 'Creditos con socios y personal', statementGroup: 'OTHER_RECEIVABLES', parentCode: '1.1.03.10' },
+    { code: '2.1.02', name: 'Deudas laborales', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas laborales', statementGroup: 'PAYROLL_LIABILITIES', parentCode: '2.1', isHeader: true },
+    { code: '2.1.02.01', name: 'Sueldos a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas laborales', statementGroup: 'PAYROLL_LIABILITIES', parentCode: '2.1.02' },
+    { code: '2.1.02.02', name: 'Cargas sociales a pagar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas laborales', statementGroup: 'PAYROLL_LIABILITIES', parentCode: '2.1.02' },
+    { code: '2.1.02.03', name: 'Retenciones so/ sueldos a depositar', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas laborales', statementGroup: 'PAYROLL_LIABILITIES', parentCode: '2.1.02' },
+    { code: '4.5', name: 'Gastos de administracion', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administracion', statementGroup: 'ADMIN_EXPENSES', parentCode: '4', isHeader: true },
+    { code: '4.5.01', name: 'Sueldos y jornales', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administracion', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+    { code: '4.5.02', name: 'Cargas sociales', kind: 'EXPENSE', section: 'ADMIN', group: 'Gastos de administracion', statementGroup: 'ADMIN_EXPENSES', parentCode: '4.5' },
+]
+
+export interface PayrollEnsureRequiredAccountsResult {
+    created: Account[]
+    ensured: boolean
+}
+
+export interface PayrollAutoDetectResult {
+    mappings: Partial<PayrollAccountMappings>
+    missing: (keyof PayrollAccountMappings)[]
+}
+
+function getSpecByKey(key: keyof PayrollAccountMappings): PayrollAccountSpec | undefined {
+    return PAYROLL_ACCOUNT_SPECS.find(spec => spec.key === key)
+}
+
+function nameScore(accountName: string, aliases: string[]): number {
+    const normalized = normalize(accountName)
+    let score = 0
+    for (const alias of aliases) {
+        const token = normalize(alias)
+        if (normalized === token) score = Math.max(score, 100)
+        else if (normalized.startsWith(token)) score = Math.max(score, 80)
+        else if (normalized.includes(token)) score = Math.max(score, 60)
+    }
+    return score
+}
+
+function matchesNegativeToken(accountName: string, tokens: string[] | undefined): boolean {
+    if (!tokens || tokens.length === 0) return false
+    const normalized = normalize(accountName)
+    return tokens.some(t => normalized.includes(normalize(t)))
+}
+
+function resolveAccountBySpec(accounts: Account[], spec: PayrollAccountSpec): Account | null {
+    const postableByKind = accounts.filter(a => !a.isHeader && a.kind === spec.kind)
+
+    const byExactCode = postableByKind.find(a => a.code === spec.code)
+    if (byExactCode && !matchesNegativeToken(byExactCode.name, spec.negativeTokens)) return byExactCode
+
+    const prefix = spec.codePrefix
+    if (prefix) {
+        const inGroup = postableByKind.filter(a => a.code.startsWith(prefix))
+        const scoredInGroup = inGroup
+            .filter(a => !matchesNegativeToken(a.name, spec.negativeTokens))
+            .map(a => ({ account: a, score: nameScore(a.name, spec.aliases) }))
+            .filter(x => x.score > 0)
+            .sort((a, b) => b.score - a.score || a.account.code.localeCompare(b.account.code))
+        if (scoredInGroup.length > 0) return scoredInGroup[0].account
+    }
+
+    const scored = postableByKind
+        .filter(a => !matchesNegativeToken(a.name, spec.negativeTokens))
+        .map(a => ({ account: a, score: nameScore(a.name, spec.aliases) }))
+        .filter(x => x.score >= 80)
+        .sort((a, b) => b.score - a.score || a.account.code.localeCompare(b.account.code))
+
+    return scored[0]?.account ?? null
+}
+
+export function autoDetectPayrollAccountMappings(
+    accounts: Account[],
+    currentMappings: Partial<PayrollAccountMappings> = {},
+    opts?: { overwrite?: boolean }
+): PayrollAutoDetectResult {
+    const overwrite = !!opts?.overwrite
+    const next: Partial<PayrollAccountMappings> = { ...currentMappings }
+    const missing: (keyof PayrollAccountMappings)[] = []
+
+    for (const spec of PAYROLL_ACCOUNT_SPECS) {
+        if (!overwrite && next[spec.key]) {
+            const mappedId = next[spec.key]
+            const mappedAccount = accounts.find(a => a.id === mappedId && !a.isHeader)
+            if (mappedAccount) continue
+        }
+        const match = resolveAccountBySpec(accounts, spec)
+        if (match) next[spec.key] = match.id
+        else missing.push(spec.key)
+    }
+
+    return { mappings: next, missing }
+}
+
+async function ensureSeedAccount(
+    seed: PayrollRequiredSeed,
+    accountsByCode: Map<string, Account>,
+    accounts: Account[],
+    seedByCode: Map<string, PayrollRequiredSeed>,
+    created: Account[]
+): Promise<Account | null> {
+    const existingByCode = accountsByCode.get(seed.code)
+    if (existingByCode) return existingByCode
+
+    const normalizedSeedName = normalize(seed.name)
+    const existingByName = accounts.find(a => normalize(a.name) === normalizedSeedName && a.kind === seed.kind)
+    if (existingByName) {
+        accountsByCode.set(seed.code, existingByName)
+        return existingByName
+    }
+
+    let parentId: string | null = null
+    if (seed.parentCode) {
+        const existingParent = accountsByCode.get(seed.parentCode)
+        if (existingParent) {
+            parentId = existingParent.id
+        } else {
+            const parentSeed = seedByCode.get(seed.parentCode)
+            if (parentSeed) {
+                const ensuredParent = await ensureSeedAccount(parentSeed, accountsByCode, accounts, seedByCode, created)
+                parentId = ensuredParent?.id ?? null
+            } else {
+                const parentFromDb = accounts.find(a => a.code === seed.parentCode)
+                parentId = parentFromDb?.id ?? null
+            }
+        }
+    }
+
+    const newAccount = await createAccount({
+        code: seed.code,
+        name: seed.name,
+        kind: seed.kind,
+        section: seed.section,
+        group: seed.group,
+        statementGroup: seed.statementGroup,
+        parentId,
+        normalSide: getDefaultNormalSide(seed.kind),
+        isContra: false,
+        isHeader: !!seed.isHeader,
+    })
+
+    accounts.push(newAccount)
+    accountsByCode.set(newAccount.code, newAccount)
+    created.push(newAccount)
+    return newAccount
+}
+
+export async function ensurePayrollRequiredAccounts(): Promise<PayrollEnsureRequiredAccountsResult> {
+    const created: Account[] = []
+
+    await db.transaction('rw', db.accounts, async () => {
+        const accounts = await db.accounts.toArray()
+        const accountsByCode = new Map(accounts.map(a => [a.code, a]))
+        const seedByCode = new Map(PAYROLL_REQUIRED_SEED_ACCOUNTS.map(seed => [seed.code, seed]))
+
+        const orderedCodes = ['4.5.01', '4.5.02', '2.1.02.01', '2.1.02.02', '2.1.02.03', '1.1.03.11']
+        for (const code of orderedCodes) {
+            const seed = seedByCode.get(code)
+            if (!seed) continue
+            await ensureSeedAccount(seed, accountsByCode, accounts, seedByCode, created)
+        }
+    })
+
+    return { created, ensured: true }
+}
 
 function resolveAccountId(
     accounts: Account[],
@@ -42,30 +286,9 @@ function resolveAccountId(
         if (found) return found.id
     }
 
-    const fallback = PAYROLL_ACCOUNT_FALLBACKS[key]
-    if (!fallback) return undefined
-
-    // 2) By code
-    for (const code of fallback.codes) {
-        const found = accounts.find(a => a.code === code && !a.isHeader)
-        if (found) return found.id
-    }
-
-    // 3) By name (normalized)
-    for (const name of fallback.names) {
-        const norm = normalize(name)
-        const found = accounts.find(a => normalize(a.name) === norm && !a.isHeader)
-        if (found) return found.id
-    }
-
-    // 4) By name includes
-    for (const name of fallback.names) {
-        const norm = normalize(name)
-        const found = accounts.find(a => normalize(a.name).includes(norm) && !a.isHeader)
-        if (found) return found.id
-    }
-
-    return undefined
+    const spec = getSpecByKey(key)
+    if (!spec) return undefined
+    return resolveAccountBySpec(accounts, spec)?.id
 }
 
 function getLastDayOfMonth(period: string): string {
@@ -394,15 +617,50 @@ function resolveBaseRef(
 // ─── Payroll Runs CRUD ──────────────────────────────────────
 
 export async function getAllPayrollRuns(): Promise<PayrollRun[]> {
-    return db.payrollRuns.orderBy('period').reverse().toArray()
+    const runs = await db.payrollRuns.orderBy('period').reverse().toArray()
+    return reconcilePayrollRunsJournalConsistency(runs)
 }
 
 export async function getPayrollRunById(id: string): Promise<PayrollRun | undefined> {
-    return db.payrollRuns.get(id)
+    const run = await db.payrollRuns.get(id)
+    if (!run) return undefined
+    const [reconciled] = await reconcilePayrollRunsJournalConsistency([run])
+    return reconciled
 }
 
 export async function getPayrollRunByPeriod(period: string): Promise<PayrollRun | undefined> {
-    return db.payrollRuns.where('period').equals(period).first()
+    const run = await db.payrollRuns.where('period').equals(period).first()
+    if (!run) return undefined
+    const [reconciled] = await reconcilePayrollRunsJournalConsistency([run])
+    return reconciled
+}
+
+async function reconcilePayrollRunsJournalConsistency(runs: PayrollRun[]): Promise<PayrollRun[]> {
+    if (runs.length === 0) return runs
+
+    const entryIds = new Set((await db.entries.toArray()).map(e => e.id))
+    const updates: PayrollRun[] = []
+
+    for (const run of runs) {
+        if (!run.journalEntryId) continue
+        if (entryIds.has(run.journalEntryId)) continue
+
+        updates.push({
+            ...run,
+            status: 'draft',
+            journalEntryId: undefined,
+            postedAt: undefined,
+            paidAt: undefined,
+            updatedAt: new Date().toISOString(),
+        })
+    }
+
+    if (updates.length > 0) {
+        await db.payrollRuns.bulkPut(updates)
+    }
+
+    const updatedMap = new Map(updates.map(u => [u.id, u]))
+    return runs.map(r => updatedMap.get(r.id) || r)
 }
 
 export async function createPayrollRun(period: string): Promise<PayrollRun> {
@@ -522,6 +780,79 @@ export async function deletePayrollRun(runId: string): Promise<void> {
     })
 }
 
+export async function markRunAsDraft(runId: string): Promise<void> {
+    const run = await db.payrollRuns.get(runId)
+    if (!run) throw new Error('Liquidacion no encontrada')
+
+    await db.payrollRuns.update(runId, {
+        status: 'draft',
+        journalEntryId: undefined,
+        postedAt: undefined,
+        paidAt: undefined,
+        updatedAt: new Date().toISOString(),
+    })
+}
+
+export async function unlinkJournalFromRun(
+    runId: string,
+    journalEntryId: string,
+    reason: string,
+): Promise<void> {
+    const run = await db.payrollRuns.get(runId)
+    if (!run) return
+
+    if (run.journalEntryId && run.journalEntryId !== journalEntryId) return
+
+    const paymentsCount = await db.payrollPayments.where('payrollRunId').equals(runId).count()
+    if (paymentsCount > 0) {
+        throw new Error('No se puede despostear la liquidacion porque tiene pagos registrados.')
+    }
+
+    await markRunAsDraft(runId)
+    void reason
+}
+
+async function recomputeRunPaymentState(runId: string): Promise<void> {
+    const run = await db.payrollRuns.get(runId)
+    if (!run) return
+
+    const payments = await db.payrollPayments.where('payrollRunId').equals(runId).toArray()
+    const salaryPaid = round2(payments.filter(p => p.type === 'salary').reduce((s, p) => s + p.amount, 0))
+    const socialSecurityPaid = round2(payments.filter(p => p.type === 'social_security').reduce((s, p) => s + p.amount, 0))
+    const totalSS = round2(run.employeeWithholdTotal + run.employerContribTotal)
+    const allPaid = salaryPaid >= run.netTotal - 0.01 && socialSecurityPaid >= totalSS - 0.01
+
+    let status: PayrollRun['status'] = run.status
+    if (!run.journalEntryId) status = 'draft'
+    else if (allPaid) status = 'paid'
+    else if (payments.length > 0) status = 'partially_paid'
+    else status = 'posted'
+
+    await db.payrollRuns.update(runId, {
+        salaryPaid,
+        socialSecurityPaid,
+        status,
+        paidAt: allPaid ? new Date().toISOString() : undefined,
+        updatedAt: new Date().toISOString(),
+    })
+}
+
+export async function unlinkPaymentFromRun(
+    runId: string,
+    journalEntryId: string,
+    reason: string,
+): Promise<void> {
+    const payments = await db.payrollPayments.where('payrollRunId').equals(runId).toArray()
+    const target = payments.find(p => p.journalEntryId === journalEntryId)
+    if (!target) return
+
+    await db.transaction('rw', db.payrollPayments, db.payrollRuns, async () => {
+        await db.payrollPayments.delete(target.id)
+        await recomputeRunPaymentState(runId)
+    })
+    void reason
+}
+
 // ─── Journal Entry Builders ─────────────────────────────────
 
 /**
@@ -599,6 +930,8 @@ export async function postPayrollRun(runId: string): Promise<JournalEntry> {
     await db.payrollRuns.update(runId, {
         status: 'posted',
         journalEntryId: entry.id,
+        postedAt: new Date().toISOString(),
+        paidAt: undefined,
         updatedAt: new Date().toISOString(),
     })
 
@@ -712,7 +1045,7 @@ export async function registerPayrollPayment(
     const newSSPaid = type === 'social_security' ? round2(run.socialSecurityPaid + amount) : run.socialSecurityPaid
     const totalSS = round2(run.employeeWithholdTotal + run.employerContribTotal)
     const allPaid = newSalaryPaid >= run.netTotal - 0.01 && newSSPaid >= totalSS - 0.01
-    const newStatus: PayrollRun['status'] = allPaid ? 'paid' : 'partial'
+    const newStatus: PayrollRun['status'] = allPaid ? 'paid' : 'partially_paid'
 
     await db.transaction('rw', db.payrollPayments, db.payrollRuns, async () => {
         await db.payrollPayments.add(payment)
@@ -720,6 +1053,7 @@ export async function registerPayrollPayment(
             salaryPaid: newSalaryPaid,
             socialSecurityPaid: newSSPaid,
             status: newStatus,
+            paidAt: allPaid ? new Date().toISOString() : undefined,
             updatedAt: new Date().toISOString(),
         })
     })
@@ -744,7 +1078,7 @@ export async function getPayrollMetrics(): Promise<PayrollMetrics> {
     const runs = await db.payrollRuns.toArray()
     const settings = await getPayrollSettings()
 
-    const pendingRuns = runs.filter(r => r.status === 'posted' || r.status === 'partial')
+    const pendingRuns = runs.filter(r => r.status === 'posted' || isPartiallyPaidStatus(r.status))
 
     let netPending = 0
     let retencionesDepositar = 0

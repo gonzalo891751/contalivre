@@ -7,7 +7,7 @@
  * Step 4: Quick employee add
  */
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
     GearSix,
     ArrowRight,
@@ -31,39 +31,50 @@ import type {
 import {
     DEFAULT_AREAS,
     PAYROLL_TEMPLATES,
-    PAYROLL_ACCOUNT_FALLBACKS,
 } from '../../../core/payroll/types'
 import {
     updatePayrollSettings,
     seedConceptsFromTemplate,
     createEmployee,
+    ensurePayrollRequiredAccounts,
+    autoDetectPayrollAccountMappings,
 } from '../../../storage/payroll'
+import { getAllAccounts } from '../../../storage/accounts'
 
 // ─── Account rules for auto-detect ──────────────────────────
 
 interface AccountRule {
     key: keyof PayrollAccountMappings
     label: string
-    codes: string[]
-    names: string[]
     required: boolean
+    expectedCode: string
 }
 
-const ACCOUNT_RULES: AccountRule[] = Object.entries(PAYROLL_ACCOUNT_FALLBACKS).map(([key, fb]) => ({
-    key: key as keyof PayrollAccountMappings,
-    label: key === 'sueldosYJornales' ? 'Sueldos y Jornales (Gasto)'
-        : key === 'cargasSociales' ? 'Cargas Sociales (Gasto)'
-        : key === 'sueldosAPagar' ? 'Sueldos a Pagar (Pasivo)'
-        : key === 'retencionesADepositar' ? 'Retenciones a Depositar (Pasivo)'
-        : key === 'cargasSocialesAPagar' ? 'Cargas Sociales a Pagar (Pasivo)'
-        : 'Anticipos al Personal (Activo)',
-    codes: fb.codes,
-    names: fb.names,
-    required: key !== 'anticiposAlPersonal',
-}))
+const ACCOUNT_RULES: AccountRule[] = [
+    { key: 'sueldosYJornales', label: 'Sueldos y Jornales (Gasto)', required: true, expectedCode: '4.5.01' },
+    { key: 'cargasSociales', label: 'Cargas Sociales (Gasto)', required: true, expectedCode: '4.5.02' },
+    { key: 'sueldosAPagar', label: 'Sueldos a Pagar (Pasivo)', required: true, expectedCode: '2.1.02.01' },
+    { key: 'retencionesADepositar', label: 'Retenciones s/ Sueldos a Depositar (Pasivo)', required: true, expectedCode: '2.1.02.03' },
+    { key: 'cargasSocialesAPagar', label: 'Cargas Sociales a Pagar (Pasivo)', required: true, expectedCode: '2.1.02.02' },
+    { key: 'anticiposAlPersonal', label: 'Anticipos de Personal (Activo)', required: false, expectedCode: '1.1.03.11' },
+]
 
-const normalize = (s: string) =>
-    s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+const REQUIRED_MAPPING_KEYS: (keyof PayrollAccountMappings)[] = [
+    'sueldosYJornales',
+    'cargasSociales',
+    'sueldosAPagar',
+    'retencionesADepositar',
+    'cargasSocialesAPagar',
+]
+
+const MAPPING_LABELS: Record<keyof PayrollAccountMappings, string> = {
+    sueldosYJornales: 'Sueldos y Jornales',
+    cargasSociales: 'Cargas Sociales',
+    sueldosAPagar: 'Sueldos a Pagar',
+    retencionesADepositar: 'Retenciones s/ Sueldos a Depositar',
+    cargasSocialesAPagar: 'Cargas Sociales a Pagar',
+    anticiposAlPersonal: 'Anticipos de Personal',
+}
 
 // ─── Props ──────────────────────────────────────────────────
 
@@ -96,6 +107,11 @@ export default function PayrollOnboardingWizard({
     const [mappings, setMappings] = useState<Partial<PayrollAccountMappings>>(
         settings.accountMappings || {}
     )
+    const [availableAccounts, setAvailableAccounts] = useState<Account[]>(accounts)
+    const [mappingTouched, setMappingTouched] = useState<Partial<Record<keyof PayrollAccountMappings, boolean>>>({})
+    const [mappingMissing, setMappingMissing] = useState<(keyof PayrollAccountMappings)[]>([])
+    const [ensureCreatedCodes, setEnsureCreatedCodes] = useState<string[]>([])
+    const [ensuring, setEnsuring] = useState(false)
 
     // Step 3: Areas + Template
     const [areas, setAreas] = useState<string[]>(settings.areas || [...DEFAULT_AREAS])
@@ -109,47 +125,87 @@ export default function PayrollOnboardingWizard({
 
     // ─── Account resolution ─────────────────────────────────
 
-    const findAccount = useCallback(
-        (rule: AccountRule): Account | null => {
-            if (!accounts.length) return null
-            for (const code of rule.codes) {
-                const found = accounts.find(a => a.code === code && !a.isHeader)
-                if (found) return found
+    useEffect(() => {
+        setAvailableAccounts(accounts)
+    }, [accounts])
+
+    useEffect(() => {
+        const shouldBootstrap = !settings.onboardingCompleted && REQUIRED_MAPPING_KEYS.some(key => !mappings[key])
+        if (!shouldBootstrap) return
+        let cancelled = false
+
+        void (async () => {
+            setEnsuring(true)
+            try {
+                const ensured = await ensurePayrollRequiredAccounts()
+                const refreshed = await getAllAccounts()
+                if (cancelled) return
+                setAvailableAccounts(refreshed)
+                setEnsureCreatedCodes(ensured.created.map(a => a.code))
+                const detected = autoDetectPayrollAccountMappings(refreshed, mappings, { overwrite: false })
+                setMappings(detected.mappings)
+                setMappingMissing(detected.missing)
+            } finally {
+                if (!cancelled) setEnsuring(false)
             }
-            for (const name of rule.names) {
-                const norm = normalize(name)
-                const found = accounts.find(a => normalize(a.name) === norm && !a.isHeader)
-                if (found) return found
-            }
-            for (const name of rule.names) {
-                const norm = normalize(name)
-                const found = accounts.find(a => normalize(a.name).includes(norm) && !a.isHeader)
-                if (found) return found
-            }
-            return null
-        },
-        [accounts]
+        })()
+
+        return () => { cancelled = true }
+    }, [settings.onboardingCompleted])
+
+    const accountById = useMemo(() => {
+        const map = new Map<string, Account>()
+        availableAccounts.forEach(a => map.set(a.id, a))
+        return map
+    }, [availableAccounts])
+
+    const suggestions = useMemo(
+        () => autoDetectPayrollAccountMappings(availableAccounts, mappings, { overwrite: true }),
+        [availableAccounts, mappings]
     )
 
-    const suggestions = useMemo(() => {
-        const map = new Map<keyof PayrollAccountMappings, Account | null>()
-        ACCOUNT_RULES.forEach(r => map.set(r.key, findAccount(r)))
-        return map
-    }, [findAccount])
+    const applyAutoConfig = async (overwrite: boolean) => {
+        setEnsuring(true)
+        try {
+            const ensured = await ensurePayrollRequiredAccounts()
+            const refreshed = await getAllAccounts()
+            setAvailableAccounts(refreshed)
+            setEnsureCreatedCodes(ensured.created.map(a => a.code))
+            const detected = autoDetectPayrollAccountMappings(refreshed, mappings, { overwrite })
+            if (!overwrite) {
+                const preserved = { ...detected.mappings }
+                for (const key of Object.keys(mappingTouched) as (keyof PayrollAccountMappings)[]) {
+                    if (!mappingTouched[key]) continue
+                    preserved[key] = mappings[key]
+                }
+                setMappings(preserved)
+            } else {
+                setMappings(detected.mappings)
+            }
+            setMappingMissing(detected.missing)
+        } finally {
+            setEnsuring(false)
+        }
+    }
 
-    const handleAutoConfig = () => {
-        const next = { ...mappings }
-        ACCOUNT_RULES.forEach(rule => {
-            if (next[rule.key]) return
-            const suggested = suggestions.get(rule.key)
-            if (suggested) next[rule.key] = suggested.id
-        })
-        setMappings(next)
+    const handleAutoConfig = async () => {
+        await applyAutoConfig(false)
+    }
+
+    const handleAutoConfigOverwrite = async () => {
+        const ok = window.confirm('Esto va a re-autodetectar y sobrescribir el mapeo actual. Queres continuar?')
+        if (!ok) return
+        await applyAutoConfig(true)
     }
 
     const requiredMapped = ACCOUNT_RULES
         .filter(r => r.required)
-        .every(r => mappings[r.key])
+        .every(r => {
+            const id = mappings[r.key]
+            if (!id) return false
+            const acc = accountById.get(id)
+            return !!acc && !acc.isHeader
+        })
 
     // ─── Actions ────────────────────────────────────────────
 
@@ -351,22 +407,43 @@ export default function PayrollOnboardingWizard({
                                         <MapPin size={20} weight="duotone" />
                                         Mapeo de Cuentas
                                     </h3>
-                                    <button
-                                        onClick={handleAutoConfig}
-                                        className="px-3 py-1.5 text-xs font-medium text-violet-600 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors flex items-center gap-1"
-                                    >
-                                        <Sparkle size={14} weight="fill" /> Auto-detectar
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={handleAutoConfig}
+                                            disabled={ensuring}
+                                            className="px-3 py-1.5 text-xs font-medium text-violet-600 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors flex items-center gap-1 disabled:opacity-60"
+                                        >
+                                            <Sparkle size={14} weight="fill" /> Auto-detectar
+                                        </button>
+                                        <button
+                                            onClick={handleAutoConfigOverwrite}
+                                            disabled={ensuring}
+                                            className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-60"
+                                        >
+                                            Re-autodetectar y sobrescribir
+                                        </button>
+                                    </div>
                                 </div>
                                 <p className="text-sm text-slate-500">
                                     Vincula las cuentas contables que se usaran en los asientos de sueldos.
                                 </p>
+                                {ensureCreatedCodes.length > 0 && (
+                                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-800">
+                                        Se crearon {ensureCreatedCodes.length} cuentas laborales faltantes: {ensureCreatedCodes.join(', ')}
+                                    </div>
+                                )}
+                                {mappingMissing.length > 0 && (
+                                    <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                                        No se encontro: {mappingMissing.map(key => MAPPING_LABELS[key]).join(', ')}. Podes crear/ajustar manualmente en el plan y reintentar.
+                                    </div>
+                                )}
 
                                 <div className="space-y-3 mt-4">
                                     {ACCOUNT_RULES.map(rule => {
                                         const currentId = mappings[rule.key]
-                                        const currentAcc = accounts.find(a => a.id === currentId)
-                                        const suggestion = suggestions.get(rule.key)
+                                        const currentAcc = currentId ? accountById.get(currentId) : undefined
+                                        const suggestionId = suggestions.mappings[rule.key]
+                                        const suggestion = suggestionId ? accountById.get(suggestionId) : undefined
 
                                         return (
                                             <div key={rule.key} className="bg-white border border-slate-200 rounded-lg p-3">
@@ -387,10 +464,14 @@ export default function PayrollOnboardingWizard({
                                                 <select
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none"
                                                     value={currentId || ''}
-                                                    onChange={e => setMappings(prev => ({ ...prev, [rule.key]: e.target.value || undefined }))}
+                                                    onChange={e => {
+                                                        const value = e.target.value || undefined
+                                                        setMappings(prev => ({ ...prev, [rule.key]: value }))
+                                                        setMappingTouched(prev => ({ ...prev, [rule.key]: true }))
+                                                    }}
                                                 >
                                                     <option value="">Seleccionar cuenta...</option>
-                                                    {accounts
+                                                    {availableAccounts
                                                         .filter(a => !a.isHeader)
                                                         .map(a => (
                                                             <option key={a.id} value={a.id}>
@@ -403,6 +484,11 @@ export default function PayrollOnboardingWizard({
                                                     <div className="mt-1 text-xs text-emerald-600 flex items-center gap-1">
                                                         <CheckCircle size={12} weight="fill" />
                                                         {currentAcc.code} - {currentAcc.name}
+                                                    </div>
+                                                )}
+                                                {!currentAcc && (
+                                                    <div className="mt-1 text-[11px] text-slate-500">
+                                                        Esperada: {rule.expectedCode}
                                                     </div>
                                                 )}
                                             </div>
