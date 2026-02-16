@@ -39,7 +39,6 @@ import {
     TrendUp,
     User,
 } from '@phosphor-icons/react'
-import { parseAmountExpression } from '../../../lib/amount-expression'
 import type {
     BienesProduct,
     BienesMovement,
@@ -123,73 +122,8 @@ const FieldError = ({ msg }: { msg?: string }) => {
     return <p className="text-[11px] text-red-500 mt-0.5">{msg}</p>
 }
 
-/** FASE 4: Amount input with mini-calculator support
- *  Supports typing `=expr` (e.g. `=0.4*5227200`) which evaluates on blur/Enter.
- *  Regular numbers work normally. */
-function AmountInput({
-    value,
-    onChange,
-    className,
-    placeholder,
-    hintColor = 'text-blue-500',
-}: {
-    value: number
-    onChange: (v: number) => void
-    className?: string
-    placeholder?: string
-    hintColor?: string
-}) {
-    const [rawText, setRawText] = useState<string | null>(null) // null = use numeric value
-    const [hint, setHint] = useState<string | null>(null)
-
-    const displayValue = rawText !== null ? rawText : (value || '')
-
-    const evaluate = (text: string) => {
-        if (text.trim().startsWith('=')) {
-            const result = parseAmountExpression(text)
-            if (result.ok) {
-                onChange(result.value)
-                setRawText(null)
-                setHint(`${result.expr} = ${result.value}`)
-                setTimeout(() => setHint(null), 4000)
-                return
-            }
-        }
-        setRawText(null) // exit expression mode
-    }
-
-    return (
-        <div className="relative">
-            <input
-                type="text"
-                inputMode="decimal"
-                value={displayValue}
-                onChange={(e) => {
-                    const v = e.target.value
-                    if (v.startsWith('=')) {
-                        setRawText(v) // expression mode: track raw text locally
-                    } else {
-                        setRawText(null)
-                        onChange(Number(v) || 0)
-                    }
-                }}
-                onBlur={(e) => evaluate(e.target.value)}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault()
-                        evaluate((e.target as HTMLInputElement).value)
-                    }
-                }}
-                onFocus={selectOnFocus}
-                className={className}
-                placeholder={placeholder || '0,00 o =expr'}
-            />
-            {hint && (
-                <span className={`absolute right-1 -bottom-4 text-[9px] ${hintColor} font-mono whitespace-nowrap z-10`}>{hint}</span>
-            )}
-        </div>
-    )
-}
+// AmountInput — shared component with =expr mini-calculator
+import AmountInput from '../../../components/AmountInput'
 
 import type { Account, JournalEntry } from '../../../core/models'
 import AccountSearchSelect from '../../../ui/AccountSearchSelect'

@@ -110,6 +110,8 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '1.2.01.05', name: 'Equipos de computación', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
     { code: '1.2.01.06', name: 'Terrenos', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
     { code: '1.2.01.07', name: 'Obras en construcción', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
+    { code: '1.2.01.08', name: 'Maquinarias', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
+    { code: '1.2.01.09', name: 'Otros bienes de uso', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01' },
     // Amortizaciones acumuladas
     { code: '1.2.01.90', name: 'Amortización acumulada bienes de uso', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01', isHeader: true, isContra: true, normalSide: 'CREDIT' },
     { code: '1.2.01.91', name: 'Amort. acum. Inmuebles', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
@@ -118,6 +120,8 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '1.2.01.94', name: 'Amort. acum. Rodados', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
     { code: '1.2.01.95', name: 'Amort. acum. Equipos comp.', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
     { code: '1.2.01.96', name: 'Amort. acum. Terrenos', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
+    { code: '1.2.01.98', name: 'Amort. acum. Maquinarias', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
+    { code: '1.2.01.99', name: 'Amort. acum. Otros bienes', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE', parentCode: '1.2.01.90', isContra: true, normalSide: 'CREDIT' },
 
     // 1.2.02 - Intangibles
     { code: '1.2.02', name: 'Activos intangibles', kind: 'ASSET', section: 'NON_CURRENT', group: 'Intangibles', statementGroup: 'INTANGIBLES', parentCode: '1.2', isHeader: true },

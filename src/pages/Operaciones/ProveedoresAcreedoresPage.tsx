@@ -141,12 +141,23 @@ export default function ProveedoresAcreedoresPage() {
         () => db.entries.where('sourceModule').equals(OPS_MODULE).toArray(),
         [],
     )
+    // Fixed-assets entries for Acreedores integration
+    const faEntries = useLiveQuery(
+        () => db.entries.where('sourceModule').equals('fixed-assets').toArray(),
+        [],
+    )
     const opsVouchersWithStatus = useMemo((): VoucherWithStatus[] => {
         if (!opsEntries) return []
-        const vouchers = opsEntries.filter(e => e.sourceType === 'vendor_invoice')
-        const payments = opsEntries.filter(e => e.sourceType === 'payment')
+        const vouchers = [
+            ...(opsEntries || []).filter(e => e.sourceType === 'vendor_invoice'),
+            ...(faEntries || []).filter(e => e.sourceType === 'acquisition' && e.metadata?.totals?.total),
+        ]
+        const payments = [
+            ...(opsEntries || []).filter(e => e.sourceType === 'payment'),
+            ...(faEntries || []).filter(e => e.sourceType === 'payment' && e.metadata?.applyTo),
+        ]
         return vouchers.map(v => computeVoucherStatus(v, payments))
-    }, [opsEntries])
+    }, [opsEntries, faEntries])
 
     // PagoGastoModal state (for ops vouchers integration)
     const [opsPagoModalOpen, setOpsPagoModalOpen] = useState(false)
@@ -159,8 +170,9 @@ export default function ProveedoresAcreedoresPage() {
         setOpsPagoVoucherId(voucherId)
         setOpsPagoCounterparty(counterparty)
         setOpsPagoMaxAmount(maxAmount)
-        // Extract IVA info from the voucher
+        // Extract IVA info from the voucher (search both ops and fixed-assets entries)
         const voucher = opsEntries?.find(e => e.id === voucherId)
+            ?? faEntries?.find(e => e.id === voucherId)
         if (voucher) {
             const meta = voucher.metadata || {}
             const totals = meta.totals || { vat: 0, total: 0 }
@@ -175,7 +187,7 @@ export default function ProveedoresAcreedoresPage() {
             setOpsPagoIvaInfo(undefined)
         }
         setOpsPagoModalOpen(true)
-    }, [opsEntries])
+    }, [opsEntries, faEntries])
 
     // Compute balances from ledger
     const balances = useMemo(() => {

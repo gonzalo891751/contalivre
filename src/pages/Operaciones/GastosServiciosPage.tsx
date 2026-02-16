@@ -77,22 +77,33 @@ export default function GastosServiciosPage() {
 
     // ── Data hooks ──
     const accounts = useLiveQuery(() => db.accounts.toArray(), [])
+    // Query ops entries + fixed-assets acquisition/payment entries
     const allOpsEntries = useLiveQuery(
         () => db.entries.where('sourceModule').equals(OPS_MODULE).toArray(),
         [],
     )
+    const allFaEntries = useLiveQuery(
+        () => db.entries.where('sourceModule').equals('fixed-assets').toArray(),
+        [],
+    )
 
     const vouchers = useMemo(() => {
-        if (!allOpsEntries) return []
-        return allOpsEntries.filter(e => e.sourceType === 'vendor_invoice')
-            .sort((a, b) => b.date.localeCompare(a.date))
-    }, [allOpsEntries])
+        const ops = (allOpsEntries || []).filter(e => e.sourceType === 'vendor_invoice')
+        // Include fixed-assets acquisition entries (they have counterparty + totals metadata)
+        const fa = (allFaEntries || []).filter(e =>
+            e.sourceType === 'acquisition' && e.metadata?.totals?.total
+        )
+        return [...ops, ...fa].sort((a, b) => b.date.localeCompare(a.date))
+    }, [allOpsEntries, allFaEntries])
 
     const payments = useMemo(() => {
-        if (!allOpsEntries) return []
-        return allOpsEntries.filter(e => e.sourceType === 'payment')
-            .sort((a, b) => b.date.localeCompare(a.date))
-    }, [allOpsEntries])
+        const ops = (allOpsEntries || []).filter(e => e.sourceType === 'payment')
+        // Include fixed-assets payment entries
+        const fa = (allFaEntries || []).filter(e =>
+            e.sourceType === 'payment' && e.metadata?.applyTo
+        )
+        return [...ops, ...fa].sort((a, b) => b.date.localeCompare(a.date))
+    }, [allOpsEntries, allFaEntries])
 
     const vouchersWithStatus = useMemo((): VoucherWithStatus[] => {
         return vouchers.map(v => computeVoucherStatus(v, payments))
