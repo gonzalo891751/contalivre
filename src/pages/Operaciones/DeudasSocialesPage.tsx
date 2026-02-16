@@ -1,4 +1,4 @@
-﻿/**
+/**
  * DeudasSocialesPage - Sueldos PRO
  *
  * Tabs: Dashboard | Empleados | Conceptos | Liquidaciones | Vencimientos | Asientos
@@ -246,10 +246,10 @@ export default function DeudasSocialesPage() {
     const [activeTab, setActiveTab] = useState<TabName>('dashboard')
     const [wizardOpen, setWizardOpen] = useState(false)
 
-    // Seed settings once on mount (WRITE â€” outside liveQuery)
+    // Seed settings once on mount (WRITE - outside liveQuery)
     useEffect(() => { void ensurePayrollSeeded() }, [])
 
-    // Global data â€” all read-only queries with fallback
+    // Global data - all read-only queries with fallback
     const employees = useLiveQuery(async () => {
         try { return await getAllEmployees() } catch (e) { console.error('[payroll] getAllEmployees', e); return [] }
     }, [])
@@ -702,14 +702,14 @@ function EmpleadosTab({
                             filtered.map(emp => (
                                 <tr key={emp.id} className="hover:bg-slate-50 transition-colors">
                                     <td className="px-4 py-3 font-medium text-slate-900">{emp.fullName}</td>
-                                    <td className="px-4 py-3 text-slate-500 hidden sm:table-cell font-mono text-xs">{emp.cuil || 'â€”'}</td>
+                                    <td className="px-4 py-3 text-slate-500 hidden sm:table-cell font-mono text-xs">{emp.cuil || ' - '}</td>
                                     <td className="px-4 py-3 text-right font-mono text-slate-900">{fmtCurrency(emp.baseGross)}</td>
                                     <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
                                         {emp.area ? (
                                             <span className="px-2 py-0.5 bg-violet-50 text-violet-600 text-xs rounded-full border border-violet-100">
                                                 {emp.area}
                                             </span>
-                                        ) : 'â€”'}
+                                        ) : ' - '}
                                     </td>
                                     <td className="px-4 py-3 text-center">
                                         <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${

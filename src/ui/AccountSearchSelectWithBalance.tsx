@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AccountSearchSelectWithBalance - Account selector with balance display
  *
  * Wraps AccountSearchSelect to show the current balance when an account is selected.
@@ -8,6 +8,8 @@ import { useMemo } from 'react'
 import AccountSearchSelect, { AccountSearchSelectRef } from './AccountSearchSelect'
 import type { Account } from '../core/models'
 import type { AccountBalance } from '../core/ledger/computeBalances'
+import type { BienesMovement, TaxLine } from '../core/inventario/types'
+import { computeOpenItemsByDirection } from '../core/inventario/openItems'
 
 interface AccountSearchSelectWithBalanceProps {
     accounts: Account[]
@@ -90,8 +92,7 @@ export default function AccountSearchSelectWithBalance({
 }
 
 /**
- * Hook to get pending documents for payment/collection selection
- * Returns movements with outstanding balances (saldo > 0)
+ * Hook to get pending documents for payment/collection selection.
  */
 export interface PendingDocument {
     id: string
@@ -100,98 +101,56 @@ export interface PendingDocument {
     type: 'SALE' | 'PURCHASE'
     counterparty: string
     reference: string
+    dueDate?: string
     originalTotal: number
     saldoPendiente: number
     ivaAmount: number
     subtotal: number
-    taxes?: { kind: string; taxType: string; amount: number }[]
+    taxes?: TaxLine[]
+    pendingSubtotal: number
+    pendingIva: number
+    pendingTaxes?: TaxLine[]
+    ajustesAplicados: number
+    pagosAplicados: number
+    applicationsCount: number
+}
+
+export interface PendingDocumentsResult {
+    documents: PendingDocument[]
+    hasUnlinked: boolean
+    unlinkedCount: number
 }
 
 export function usePendingDocuments(
-    movements: {
-        id: string
-        date: string
-        type: string
-        counterparty?: string
-        reference?: string
-        total: number
-        subtotal: number
-        ivaAmount: number
-        taxes?: { kind: string; taxType: string; amount: number }[]
-        isDevolucion?: boolean
-        paymentDirection?: string
-        sourceMovementId?: string
-    }[] | undefined,
-    payments: {
-        id: string
-        type: string
-        paymentDirection?: string
-        total: number
-        notes?: string
-        sourceMovementId?: string
-    }[] | undefined,
+    movements: BienesMovement[] | undefined,
     direction: 'COBRO' | 'PAGO'
-): PendingDocument[] {
+): PendingDocumentsResult {
     return useMemo(() => {
-        if (!movements) return []
-
+        const result = computeOpenItemsByDirection(movements, direction)
         const targetType = direction === 'COBRO' ? 'SALE' : 'PURCHASE'
-
-        // Get all original documents (sales/purchases that are not returns)
-        const originalDocs = movements.filter(m =>
-            m.type === targetType &&
-            !m.isDevolucion &&
-            m.total > 0
-        )
-
-        // Calculate payments by formal link (sourceMovementId) — primary path
-        const paymentsBySourceId = new Map<string, number>()
-        // Legacy fallback: payments matched by notes/reference (for backward compat)
-        const paymentsByRef = new Map<string, number>()
-
-        if (payments) {
-            payments
-                .filter(p => p.type === 'PAYMENT' && p.paymentDirection === direction)
-                .forEach(p => {
-                    if (p.sourceMovementId) {
-                        // Formal link: payment explicitly references the purchase/sale
-                        const current = paymentsBySourceId.get(p.sourceMovementId) || 0
-                        paymentsBySourceId.set(p.sourceMovementId, current + p.total)
-                    } else if (p.notes) {
-                        // Legacy fallback: match by notes
-                        const current = paymentsByRef.get(p.notes) || 0
-                        paymentsByRef.set(p.notes, current + p.total)
-                    }
-                })
-        }
-
-        // Build pending documents list
-        const pending: PendingDocument[] = []
-        for (const doc of originalDocs) {
-            // Primary: sum payments linked by sourceMovementId
-            const paidByLink = paymentsBySourceId.get(doc.id) || 0
-            // Legacy fallback: sum payments matched by reference
-            const paidByRef = paymentsByRef.get(doc.reference || doc.id) || 0
-            const saldoPendiente = doc.total - paidByLink - paidByRef
-
-            if (saldoPendiente <= 0.01) continue // fully paid (epsilon for FP)
-
-            pending.push({
-                id: doc.id,
-                movementId: doc.id,
-                date: doc.date,
+        return {
+            documents: result.items.map(item => ({
+                id: item.docId,
+                movementId: item.docId,
+                date: item.date,
                 type: targetType as 'SALE' | 'PURCHASE',
-                counterparty: doc.counterparty || 'Sin tercero',
-                reference: doc.reference || doc.id.slice(0, 8),
-                originalTotal: doc.total,
-                saldoPendiente,
-                ivaAmount: doc.ivaAmount,
-                subtotal: doc.subtotal,
-                taxes: doc.taxes,
-            })
+                counterparty: item.counterparty,
+                reference: item.reference,
+                dueDate: item.dueDate,
+                originalTotal: item.originalTotal,
+                saldoPendiente: item.saldoActual,
+                ivaAmount: item.originalIva,
+                subtotal: item.originalSubtotal,
+                taxes: item.originalTaxes,
+                pendingSubtotal: item.pendingSubtotal,
+                pendingIva: item.pendingIva,
+                pendingTaxes: item.pendingTaxes,
+                ajustesAplicados: item.ajustesAplicados,
+                pagosAplicados: item.pagosAplicados,
+                applicationsCount: item.applications.length,
+            })),
+            hasUnlinked: result.unlinkedCount > 0,
+            unlinkedCount: result.unlinkedCount,
         }
-
-        pending.sort((a, b) => b.date.localeCompare(a.date))
-        return pending
-    }, [movements, payments, direction])
+    }, [movements, direction])
 }

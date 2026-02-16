@@ -323,6 +323,107 @@ describe('Costing Engine - Devoluciones de Venta (PEPS)', () => {
         const marchLayers = layers.filter(l => l.date.startsWith('2026-03'))
         expect(marchLayers.length).toBe(0)
     })
+    it('Devolucion en producto unitario reparte enteros y conserva suma exacta', () => {
+        const now = new Date().toISOString()
+        const product: BienesProduct = {
+            id: 'prod-entero',
+            sku: 'ENT-001',
+            name: 'Producto Unitario',
+            unit: 'u',
+            quantityPrecision: 0,
+            category: 'MERCADERIA',
+            reorderPoint: 5,
+            ivaRate: 21,
+            openingQty: 0,
+            openingUnitCost: 0,
+            openingDate: '2026-01-01',
+            createdAt: now,
+            updatedAt: now,
+        }
+
+        const base = {
+            productId: product.id,
+            ivaRate: 21 as const,
+            costMethod: 'FIFO' as const,
+            autoJournal: false,
+            linkedJournalEntryIds: [],
+            journalStatus: 'none' as const,
+            createdAt: now,
+            updatedAt: now,
+        }
+
+        const movements: BienesMovement[] = [
+            {
+                ...base,
+                id: 'c1',
+                date: '2026-01-10',
+                type: 'PURCHASE',
+                quantity: 40,
+                unitCost: 10,
+                ivaAmount: 84,
+                subtotal: 400,
+                total: 484,
+                costUnitAssigned: 10,
+                costTotalAssigned: 400,
+            },
+            {
+                ...base,
+                id: 'c2',
+                date: '2026-01-15',
+                type: 'PURCHASE',
+                quantity: 30,
+                unitCost: 12,
+                ivaAmount: 75.6,
+                subtotal: 360,
+                total: 435.6,
+                costUnitAssigned: 12,
+                costTotalAssigned: 360,
+            },
+            {
+                ...base,
+                id: 'v1',
+                date: '2026-01-20',
+                type: 'SALE',
+                quantity: 22,
+                unitPrice: 20,
+                ivaAmount: 92.4,
+                subtotal: 440,
+                total: 532.4,
+                costUnitAssigned: 10.82,
+                costTotalAssigned: 238,
+                costLayersUsed: [
+                    { movementId: 'c1', quantity: 13, unitCost: 10 },
+                    { movementId: 'c2', quantity: 9, unitCost: 12 },
+                ],
+            },
+            {
+                ...base,
+                id: 'dv1',
+                date: '2026-01-25',
+                type: 'SALE',
+                isDevolucion: true,
+                sourceMovementId: 'v1',
+                quantity: 7,
+                unitPrice: 20,
+                ivaAmount: 29.4,
+                subtotal: 140,
+                total: 169.4,
+                costUnitAssigned: 10.82,
+                costTotalAssigned: 75.74,
+            },
+        ]
+
+        const layers = buildCostLayers(product, movements, 'FIFO')
+        const totalQty = layers.reduce((sum, l) => sum + l.quantity, 0)
+        const c1 = layers.find(l => l.movementId === 'c1')
+        const c2 = layers.find(l => l.movementId === 'c2')
+
+        expect(totalQty).toBe(55)
+        expect(c1?.quantity).toBe(22)
+        expect(c2?.quantity).toBe(33)
+        expect(Number.isInteger(c1?.quantity || 0)).toBe(true)
+        expect(Number.isInteger(c2?.quantity || 0)).toBe(true)
+    })
 })
 
 // ========================================

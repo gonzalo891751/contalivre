@@ -1,6 +1,84 @@
 # ContaLivre - AI Handoff Protocol
 
 ---
+## CHECKPOINT #COBRO-RETENCION-FINAL
+**Fecha:** 2026-02-16
+**Estado:** IMPLEMENTADO + QA — Asiento cobro con retención sufrida
+
+### Objetivo
+Fixear el modal "Registrar Cobro" para que al agregar una retención sufrida, el asiento contable quede balanceado y la UX sea consistente.
+
+### Archivos modificados
+| Archivo | Cambio |
+|---|---|
+| `src/pages/Planillas/components/MovementModalV3.tsx` | +helper `adjustSplitsWithRetention`, auto-ajuste de primaryLine en click retención + onChange importe + % buttons + Trash handler, cap retención > target, warning UX, mensaje informativo |
+
+### Cambios concretos
+1. **`adjustSplitsWithRetention(splits, targetAmount)`** (L557-574): helper que encuentra la primaryLine (primer split no-retención) y la ajusta a `max(0, target - sum(otros))` usando `round2` con tolerancia 0.01.
+2. **Click "Agregar Retención"** (L3551-3580): cap `retAmount = min(ret, target)`, usa helper para auto-ajustar Caja/Banco. Botón disabled si ret ≤ 0 o target ≤ 0.
+3. **onChange "Importe a Cobrar"** (L3421-3433): si hay retención en splits, recalcula primaryLine via helper (antes solo ajustaba con 1 split).
+4. **Botones % (25/50/75/100)** (L3447-3456): misma lógica de ajuste con retención.
+5. **Trash handler** (L3630-3639): si queda 1 solo split al eliminar, restaura su monto al target completo.
+6. **Warning retención > target** (L3554-3557): mensaje rojo cuando retención supera importe.
+7. **Mensaje UX** (L3583-3585): "La retención reduce el efectivo recibido. Caja/Banco se ajusta automáticamente."
+
+### Cubre también
+- **PAGO (Proveedor)**: la misma lógica aplica a retenciones practicadas (cuenta 2.1.03.03) porque `adjustSplitsWithRetention` usa `pagoCobroMode` dinámicamente.
+- **Cobro parcial**: al cambiar importe, recalcula primaryLine.
+- **Múltiples medios (Caja + Banco + Retención)**: ajusta siempre el primer split no-retención.
+- **Redondeos**: `round2` + tolerancia 0.01.
+
+### Validación
+- `npx tsc --noEmit` → OK (sin errores nuevos)
+- `npx vite build` → OK (chunk size warning pre-existente)
+- QA manual pasos:
+  1. Cobro sin retención → asiento cierra, confirma ✓
+  2. Cobro T=1.860.000, R=15.000 → Caja=1.845.000, Ret=15.000, Deudores=1.860.000 → balanceado ✓
+  3. Retención > target → warning + cap ✓
+  4. Cambiar importe (parcial) con retención → recalcula Caja ✓
+  5. Eliminar retención → Caja vuelve al monto original ✓
+
+### Pendientes
+- Ninguno dentro del scope de este fix.
+
+---
+## CHECKPOINT #COBRO-RETENCION-F0 (STOP — Diagnóstico)
+**Fecha:** 2026-02-16
+**Estado:** COMPLETADO → ver #COBRO-RETENCION-FINAL
+
+### Bug reportado
+Al registrar un cobro con retención sufrida, el asiento contable queda desbalanceado y "Restante" muestra valor negativo.
+
+Ejemplo: T=1.860.000, R=15.000
+- Actual: Debe Caja 1.860.000 + Ret 15.000 = 1.875.000 vs Haber Deudores 1.860.000 → DESBALANCE
+- Esperado: Debe Caja 1.845.000 + Ret 15.000 = 1.860.000 vs Haber Deudores 1.860.000 → BALANCEADO
+
+### Causa raíz
+En `MovementModalV3.tsx`, al clickear "Agregar Retención a las Formas de Cobro" (línea ~3529), el sistema agrega un split de retención ON TOP del split de Caja/Banco existente SIN reducir el monto de Caja.
+
+El cálculo de "Restante" (línea 3622) es `pagoCobro.amount - sum(splits)` → queda negativo.
+
+La preview contable (línea 537) suma todos los splits como débito total, pero el crédito a Deudores es solo `amountToCancel = pagoCobro.amount` → queda desbalanceado.
+
+En `bienes.ts` (línea 1159), el journal entry pone ALL splits como debit y `paymentTotal` como credit → si splits > paymentTotal, asiento desbalanceado real en DB.
+
+### Archivos candidatos a tocar
+| Archivo | Cambio planeado |
+|---|---|
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Auto-ajustar primaryLine al agregar retención; cap retención ≤ target; UX feedback |
+
+`src/storage/bienes.ts` NO necesita cambios — si los splits están correctos en el modal, el journal entry sale bien.
+
+### Plan mínimo de cambios (5 bullets)
+1. **Click handler "Agregar Retención"** (~L3529): al agregar/actualizar split de retención, buscar la primaryLine (primer split no-retención con cuenta de Caja/Banco) y ajustar su monto a `max(0, pagoCobro.amount - sum(otros splits))`
+2. **useEffect de auto-ajuste**: cuando cambian los splits, si hay retención, recalcular primaryLine para que `sum(splits) === pagoCobro.amount`
+3. **Cap retención**: si retención ≥ pagoCobro.amount, bloquear con mensaje ("La retención no puede superar el importe a cobrar")
+4. **Mensaje UX**: agregar nota informativa en la sección de retención ("La retención reduce el efectivo recibido; Caja/Banco se ajusta automáticamente")
+5. **Validación de confirm**: asegurar que el botón queda disabled cuando `abs(previewDebit - previewCredit) > 0.01`
+
+### STOP — No implementar hasta aprobar este checkpoint
+
+---
 ## CHECKPOINT #OPS-GASTOS-MVP-F1
 **Fecha:** 2026-02-15
 **Estado:** MVP COMPLETADO — Gastos y Servicios + Integración Proveedores
@@ -7416,3 +7494,326 @@ Corregir el default de la primera linea de `Imputacion del cobro` en `Registrar 
   - Nuevo movimiento -> Compra: default Proveedores.
   - Cambio manual de cuenta + cambio de tabs: no override.
   - Editar movimiento existente: sin cambios en cuenta guardada.
+
+---
+
+## CHECKPOINT #ESP-DEVOLUCIONES-HEADER-FIX-MINIMO-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** COMPLETADO - Fix minimo para evitar posteos a cuentas madre en devoluciones
+
+### Causa raiz confirmada
+- En `purchase_return` y `sale_return` se permitia persistir contrapartidas con `accountId` de cuentas header (`isHeader=true`), especialmente `2.1.01.01` y `1.1.02.01`.
+- El Trial Balance excluye headers; por lo tanto, esas lineas quedaban fuera del TB/ESP y generaban descuadre.
+
+### Solucion aplicada (sin refactor masivo)
+1. Normalizacion en storage antes de persistir devoluciones:
+- Si split apunta a header/control, se resuelve/crea subcuenta por tercero bajo la cuenta control y se postea al hijo (postable).
+- Si falta tercero y no se puede resolver una subcuenta postable, se aborta con error claro.
+2. Guardrail defensivo final:
+- Ningun asiento de inventario se guarda si alguna linea referencia una cuenta header.
+3. UI preventiva en modal de movimientos:
+- En devoluciones, default y confirmacion fuerzan auxiliar del tercero; se bloquea submit si queda header.
+- Se agrega hint contable para explicar por que se usa auxiliar.
+4. Repair DEV-only:
+- Se agrega helper para reasignar lineas historicas posteadas a headers hacia subcuentas por tercero cuando hay metadata suficiente.
+
+### Archivos tocados (fase)
+- `src/storage/bienes.ts`
+- `src/pages/Planillas/components/MovementModalV3.tsx`
+- `src/storage/index.ts`
+- `tests/bienes.devoluciones-header.test.ts`
+
+### Validacion
+- `npm run build` OK.
+- `npm test` OK.
+
+---
+
+## CHECKPOINT #AUDIT-DEVOLUCIONES-SUBCUENTAS-ER-FASE0-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** FASE 0 COMPLETADA (forense, sin fix)
+
+### Reporte
+- `docs/AUDIT_DEVOLUCIONES_SUBCUENTAS_Y_ER.md`
+
+### Resumen causa probable priorizada
+- La regresion de ER ("devolucion venta no resta en Ventas Netas") es consistente con metadata legacy de cuentas de contra-ventas (`4.8.05/4.8.06`) fuera de `SALES` (ej. `COGS`), por lo que el builder las clasifica fuera de deducciones de ventas.
+- En paralelo, se confirma riesgo historico de lineas en cuentas header (excluidas del TB), mitigado para nuevos asientos por guardrails ya presentes, pero aun relevante para datos legacy.
+
+### Nota de fase
+- No se implementaron cambios funcionales en esta fase.
+- FASE 1 queda pendiente de OK para aplicar fix minimo + tests de regresion.
+- Regresion cubierta: devolucion compra/venta con split inicial a header termina en subcuenta postable; TB/ESP no pierde la linea.
+
+---
+
+## CHECKPOINT #FIX-ER-DEVOLUCIONES-CODIGO-FASE1-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** FASE 1 COMPLETADA - fix minimo aplicado
+
+### Objetivo cubierto
+- Corregir regresion donde la devolucion de venta no restaba en Ventas Netas del ER.
+- Mantener guardrails de subcuentas (no headers) para devoluciones.
+
+### Cambios aplicados
+1. `src/domain/reports/estadoResultados.ts`
+- Override por codigo para `4.8.05` y `4.8.06`: siempre se enrutan a deducciones de ventas (Ventas Netas), incluso con metadata legacy.
+
+2. `tests/estadoResultados.devoluciones.test.ts`
+- Nuevo test de regresion ER: con `4.8.06` legacy (`statementGroup='COGS'`), la devolucion igualmente resta en Ventas Netas.
+
+3. `tests/bienes.devoluciones-header.test.ts`
+- Nuevo test de regresion: si split apunta a header sin tercero, se rechaza con error claro (no se permite cuenta madre).
+
+4. `docs/AUDIT_DEVOLUCIONES_SUBCUENTAS_Y_ER.md`
+- Seccion "FASE 1 - Fix minimo aplicado" con evidencia y validacion.
+
+### Validacion
+- `npm test` OK (16 archivos, 82 tests).
+- `npm run build` OK.
+
+---
+
+## CHECKPOINT #OPEN-ITEMS-PAGOS-COBROS-FASE0-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** FASE 0 COMPLETADA (audit/diagnostico)
+
+### Diagnostico
+- El saldo pendiente por comprobante en Pagos/Cobros se calculaba en `usePendingDocuments` restando solo `PAYMENT` (no neteaba NC/devoluciones/ajustes post-factura).
+- La UI de `MovementModalV3` consumia ese saldo para:
+  - dropdown "Comprobante a cancelar",
+  - bloque "Datos del comprobante original",
+  - maximo del input de importe.
+- Ya existia vinculacion explicita por `sourceMovementId` en pagos/devoluciones/ajustes, pero faltaba consolidar eso en un helper unico de open items.
+
+### Paths inspeccionados (fuente de verdad)
+- `src/pages/Planillas/components/MovementModalV3.tsx`
+- `src/ui/AccountSearchSelectWithBalance.tsx`
+- `src/storage/bienes.ts`
+- `src/core/inventario/types.ts`
+
+### Estrategia minima definida
+1. Crear helper unico para open items por comprobante (FIFO asc, saldo real, fallback legacy conservador, warning no vinculados).
+2. Reemplazar en Pagos/Cobros el origen de "pendientes" por el helper.
+3. Agregar Condiciones comerciales en Pagos/Cobros (NC automatica por % sobre neto pendiente).
+4. Postear 2 movimientos trazables (NC + pago/cobro), ambos vinculados al comprobante.
+5. Extender asientos/meta para reflejar aplicaA (appliesTo) y reversa de percepciones en NC comercial.
+
+---
+
+## CHECKPOINT #OPEN-ITEMS-PAGOS-COBROS-INTERMEDIO-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** FASE 1/2 COMPLETADA (implementacion MVP + hardening)
+
+### Archivos tocados
+- `src/core/inventario/openItems.ts` (nuevo)
+- `src/ui/AccountSearchSelectWithBalance.tsx`
+- `src/pages/Planillas/components/MovementModalV3.tsx`
+- `src/storage/bienes.ts`
+- `src/core/inventario/types.ts`
+
+### Cambios aplicados
+- Open items por comprobante:
+  - Nuevo helper `computeOpenItemsByDirection()` con regla:
+    - `saldoActual = totalDoc - NC/ajustes credito - pagos/cobros` (ND preparado como extension).
+  - Vinculacion:
+    - Prioridad: `appliesToDocId` / `sourceMovementId`.
+    - Fallback legacy seguro: match por `notes` (id/ref) o referencia unica.
+    - No vinculados: contador para hint UI.
+  - Orden FIFO asc por fecha y ocultacion de saldo <= 0.
+
+- Pagos/Cobros UI:
+  - `usePendingDocuments` ahora usa open items y devuelve:
+    - saldo real,
+    - neto/IVA/taxes pendientes,
+    - ajustes/pagos aplicados,
+    - estado de no vinculados.
+  - En el modal:
+    - dropdown y bloque pendientes muestran saldo actual real,
+    - detalle muestra "Ajustes aplicados" y "Pagos/Cobros aplicados",
+    - aviso "Hay movimientos no vinculados a comprobantes".
+
+- Condiciones comerciales (Pagos/Cobros):
+  - Nueva seccion "Condiciones comerciales (sobre este comprobante)".
+  - Input `% Descuento/Bonificacion`.
+  - Preview NC: neto, IVA, percepciones y total + nuevo saldo.
+  - Maximo del pago/cobro usa saldo post-NC (`nuevoSaldo`).
+
+- Posting NC + pago/cobro en la misma confirmacion:
+  - Si hay descuento > 0 y comprobante seleccionado:
+    1) crea `VALUE_ADJUSTMENT` (`BONUS_PURCHASE` / `BONUS_SALE`) como NC comercial,
+    2) luego crea `PAYMENT` parcial.
+  - Ambos guardan link explicito:
+    - `sourceMovementId`
+    - `appliesToDocId`.
+
+- Asientos/metadatos:
+  - `buildPostAdjustmentJournalEntries` ahora revierte tambien `taxes` (percepciones) en NC comercial.
+  - Metadata en asientos incluye:
+    - `kind` (`credit_note_discount`, `payment`, `collection`),
+    - `source: 'inventario_modal_pagos'`,
+    - `appliesTo: { docId, docType, counterpartyId }`.
+
+---
+
+## CHECKPOINT #OPEN-ITEMS-PAGOS-COBROS-FINAL-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** FASE 3 COMPLETADA (QA tecnica + docs)
+
+### Validacion ejecutada
+- `npm run build` -> OK
+- `npm run lint` -> FAIL por errores/warnings preexistentes y masivos fuera del scope del fix (se mantiene sin refactor masivo)
+
+### Notas de QA manual (pendiente en UI)
+- Validar flujo objetivo Mayorista en `/operaciones/inventario`:
+  1. saldo FC original neteando NC previa,
+  2. NC comercial 2%,
+  3. pago parcial 60%,
+  4. remanente correcto por comprobante,
+  5. trazabilidad en mayor con 2 asientos separados (NC + pago).
+
+---
+
+## CHECKPOINT #PAGOS-COBROS-FIX-BONIF-DESC-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** FIXES POST-CODEX COMPLETADOS
+
+### Bugs corregidos
+
+#### 1. Mojibake / encoding roto en UI
+- **Archivos afectados:** `MovementModalV3.tsx`, `DeudasSocialesPage.tsx`, `ProductModal.tsx`, `monedaExtranjera/types.ts`
+- **Causa raiz:** Doble codificacion UTF-8 -> Windows-1252 -> UTF-8 introducida por Codex
+- **Fix:** Script Python que detecta y reemplaza secuencias mojibake (C3+Win1252, E2+20AC+201D, etc.)
+- **Resultado:** Todos los strings UI muestran caracteres espanoles correctos (acentos, ene, guiones)
+
+#### 2. Contaminacion de estado al cambiar Cobro <-> Pago
+- **Problema:** Cambiar entre COBRO y PAGO no reseteaba estado (tercero, comprobante, splits, retenciones, descuentos)
+- **Fix:** Agregado `useEffect([pagoCobroMode])` que resetea: `pagoCobro`, `pagoCobroCondicion`, `pagoCobroSplits`, `pagoCobroRetencion`
+
+#### 3. Select de comprobante inestable al cambiar seleccion
+- **Problema:** Cambiar comprobante no limpiaba state derivado del anterior
+- **Fix:** En `onChange` del select: reset completo de retenciones, descuentos, y si elige "Sin vincular", tambien reset de amount/splits
+
+#### 4. Bonificacion comercial vs Descuento financiero separados
+- **Estado anterior:** Un unico campo "Descuento/Bonificacion (%)" que siempre generaba NC
+- **Estado nuevo:**
+  - **Bonificacion comercial (%):** Genera NC automatica, afecta base imponible + IVA + percepciones. Misma logica que antes.
+  - **Descuento financiero (%):** NO genera NC. Se trata como "forma de pago/cobro no-caja":
+    - Pagos: agrega split auto `Descuentos obtenidos (4.6.09)` al Haber
+    - Cobros: agrega split auto `Descuentos otorgados (4.2.01)` al Debe
+  - UI: inputs mutuamente excluyentes (uno desactiva el otro)
+  - El monto del descuento financiero reduce el "efectivo a pagar/cobrar"
+  - El total cancelado contra el comprobante = efectivo + descuento financiero
+
+### Asientos contables garantizados
+
+#### A) Bonificacion comercial (con NC) - Proveedor
+NC: D Proveedores / H Bonif s/compras + H IVA CF + H Percepciones
+Pago: D Proveedores / H Caja + H Retenciones a depositar
+
+#### B) Bonificacion comercial (con NC) - Cliente
+NC: D Bonif s/ventas + D IVA DF + D Percepciones / H Deudores
+Cobro: D Caja + D Retenciones IVA terceros / H Deudores
+
+#### C) Descuento financiero (sin NC) - Pago a proveedor
+D Proveedores (importe cancelado) / H Caja (efectivo) + H Descuentos obtenidos (descuento)
+
+#### D) Descuento financiero (sin NC) - Cobro a cliente
+D Caja (efectivo) + D Descuentos otorgados (descuento) / H Deudores (importe cancelado)
+
+### Archivos modificados
+| Archivo | Cambio |
+|---------|--------|
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Mojibake fix, reset COBRO/PAGO, select estable, separacion bonif/desc, vista previa contable, logica submit |
+| `src/pages/Operaciones/DeudasSocialesPage.tsx` | Mojibake fix (em-dashes en comentarios y UI) |
+| `src/pages/Planillas/components/ProductModal.tsx` | Mojibake fix (acento en string) |
+| `src/core/monedaExtranjera/types.ts` | Mojibake fix (acentos en comentario) |
+
+### Validacion
+- `npx tsc --noEmit` -> OK (sin errores nuevos)
+- `npx vite build` -> OK (chunk size warning preexistente)
+
+---
+
+## CHECKPOINT #PAGOS-DESBALANCE-FIX-2026-02-16
+
+### Bug corregido
+La preview contable de PAYMENT mostraba "Asiento desbalanceado" cuando el usuario hacia un pago parcial con bonificacion comercial.
+
+**Causa raiz**: `previewDebitTotal` (PAGO) y `previewCreditTotal` (COBRO) usaban `importeACancelar` (saldo total post-NC) como monto de Proveedores/Deudores, en lugar de `pagoCobro.amount` (lo que el usuario realmente elige pagar).
+
+**Fix**: Introducida variable `amountToCancel = pagoCobro.amount + financialDiscountAmount` que reemplaza `importeACancelar` en:
+1. `previewDebitTotal` / `previewCreditTotal` (lineas ~535-541)
+2. Preview JSX de Proveedores (PAGO) y Deudores (COBRO)
+
+### UX: Helper de porcentaje parcial
+Agregados botones 25%/50%/75%/100% debajo del input de importe cuando hay comprobante vinculado, con indicador en vivo del % del saldo que se esta pagando.
+
+### QA Numerico
+- Factura: saldo $3,571,200 | Bonif 2% -> NC $71,424 | Saldo post-NC: $3,499,776
+- Pago parcial 60%: `pagoCobro.amount` = $2,099,865.60
+- `amountToCancel` = $2,099,865.60 (correcto, no $3,499,776)
+- Preview: Debe Proveedores $2,099,865.60 == Haber Banco $2,099,865.60 -> BALANCEADO
+
+### Archivo modificado
+| Archivo | Cambio |
+|---------|--------|
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Fix desbalance preview (amountToCancel), botones % parcial |
+
+### Validacion
+- `npx tsc --noEmit` -> OK
+- `npx vite build` -> OK
+
+---
+
+## CHECKPOINT #NC-COMERCIAL-JOURNAL-FIX-2026-02-16
+
+### Bug corregido: NC por bonificacion comercial no se posteaba en Libro Diario
+
+**Sintoma**: Al confirmar un pago/cobro con bonificacion comercial, el Libro Diario solo mostraba el asiento del PAYMENT. La NC por bonificacion comercial no aparecia (faltaba el asiento de reversa de IVA/percepciones + bonificacion).
+
+**Causas raiz (2)**:
+1. `buildPostAdjustmentJournalEntries` (bienes.ts) resolvia la contrapartida (Proveedores/Deudores) al account generico padre. Si el usuario tenia subcuentas por tercero (ej. "Proveedores/MAYORISTA S.A."), el padre es un header account. `validateNoHeaderPostingLines` rechazaba el entry y lanzaba error.
+2. `handleSaveMovement` (InventarioBienesPage.tsx) atrapaba el error en su propio try-catch, mostraba un toast, pero NO re-lanzaba. El modal no recibia el error, creia que la NC se creo OK, y procedia a crear el PAYMENT sin NC.
+
+### Fixes aplicados
+
+#### A) Sub-account resolution en buildPostAdjustmentJournalEntries (bienes.ts:515-535)
+Agregado bloque que resuelve subcuenta por tercero para BONUS_PURCHASE/BONUS_SALE/DISCOUNT_*, identico al patron del builder PAYMENT (bienes.ts:1120-1128). Usa `findOrCreateChildAccountByName` para mapear "Proveedores" -> "Proveedores/MAYORISTA S.A.".
+
+#### B) NC creada directamente desde el modal (MovementModalV3.tsx:1603-1630)
+Reemplazado `await onSave({type: 'VALUE_ADJUSTMENT'...})` (que pasaba por handleSaveMovement y tragaba errores) por `await createBienesMovement({...})` llamado directamente. Errores ahora propagan al try-catch del modal:
+- Si NC falla -> el modal muestra el error y NO crea el PAYMENT
+- Si NC OK -> el PAYMENT se crea via onSave (que cierra modal y recarga datos)
+
+### Asientos generados (PAGO con bonif comercial 2%)
+1. **NC bonificacion comercial** (71.424):
+   - Debe: Proveedores/MAYORISTA (71.424)
+   - Haber: Bonificaciones s/compras (neto), IVA CF (iva), Percepciones (proporcional)
+2. **Pago parcial 60%** (2.099.865,60):
+   - Debe: Proveedores/MAYORISTA (2.099.865,60)
+   - Haber: Banco (2.099.865,60)
+
+### Asientos generados (COBRO con bonif comercial - simetrico)
+1. **NC bonificacion s/ventas**:
+   - Debe: Bonificaciones s/ventas + IVA DF + Percepciones
+   - Haber: Deudores/CLIENTE
+2. **Cobro parcial**:
+   - Debe: Caja/Banco
+   - Haber: Deudores/CLIENTE
+
+### QA Numerico
+- Factura saldo: 3.571.200 | Bonif 2% -> NC 71.424 | Saldo post-NC: 3.499.776
+- Pago 60%: 2.099.865,60
+- Libro Diario: 2 asientos (NC + Pago), ambos balanceados
+- Open item remanente: 1.399.910,40
+
+### Archivos modificados
+| Archivo | Cambio |
+|---------|--------|
+| `src/storage/bienes.ts` | Sub-account resolution en buildPostAdjustmentJournalEntries |
+| `src/pages/Planillas/components/MovementModalV3.tsx` | NC creada via createBienesMovement directo (error propagation) |
+
+### Validacion
+- `npx tsc --noEmit` -> OK
+- `npx vite build` -> OK

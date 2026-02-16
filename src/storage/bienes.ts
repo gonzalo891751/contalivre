@@ -184,6 +184,121 @@ const resolveCounterpartyAccountId = (
     return null
 }
 
+const HEADER_ACCOUNT_ERROR_MESSAGE = 'La contrapartida no puede imputarse a una cuenta madre. Selecciona un tercero o una subcuenta.'
+
+const normalizeCounterpartyName = (value: string) => value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+
+async function normalizeCounterpartySplitAccount(params: {
+    accounts: Account[]
+    splitAccountId: string
+    counterpartyName?: string
+    counterpartyKind: 'supplier' | 'customer'
+    parentControlAccountCode: '2.1.01.01' | '1.1.02.01'
+    findOrCreateChildAccountId?: (parentCode: string, counterpartyName: string) => Promise<string>
+}): Promise<string> {
+    const {
+        accounts,
+        splitAccountId,
+        counterpartyName,
+        counterpartyKind,
+        parentControlAccountCode,
+        findOrCreateChildAccountId,
+    } = params
+
+    const splitAccount = resolveAccountByIdOrCode(accounts, splitAccountId)
+    if (!splitAccount) return splitAccountId
+
+    const parentControl = accounts.find(a => a.code === parentControlAccountCode)
+    const isControlAccount = splitAccount.code === parentControlAccountCode
+    const isChildOfControl = !!parentControl && splitAccount.parentId === parentControl.id
+    const requiresChildAccount = splitAccount.isHeader || isControlAccount
+
+    if (!requiresChildAccount) {
+        return splitAccount.id
+    }
+
+    const normalizedCounterparty = normalizeCounterpartyName(counterpartyName || '')
+    if (!normalizedCounterparty) {
+        throw new Error(HEADER_ACCOUNT_ERROR_MESSAGE)
+    }
+
+    const existingChild = parentControl
+        ? accounts.find(a =>
+            a.parentId === parentControl.id
+            && !a.isHeader
+            && normalizeCounterpartyName(a.name) === normalizedCounterparty
+        )
+        : undefined
+
+    if (existingChild) {
+        return existingChild.id
+    }
+
+    try {
+        if (findOrCreateChildAccountId) {
+            return await findOrCreateChildAccountId(parentControlAccountCode, counterpartyName!.trim())
+        }
+        return await findOrCreateChildAccountByName(parentControlAccountCode, counterpartyName!.trim())
+    } catch (e) {
+        console.warn(`[bienes] Subcuenta ${counterpartyKind} split fallback: ${e}`)
+        if (!isChildOfControl && splitAccount.isHeader) {
+            throw new Error(HEADER_ACCOUNT_ERROR_MESSAGE)
+        }
+        return splitAccount.id
+    }
+}
+
+export async function normalizeReturnSplitAccountsForCounterparty(params: {
+    accounts: Account[]
+    splits: Array<{ accountId: string; amount: number; method?: string }>
+    counterpartyName?: string
+    counterpartyKind: 'supplier' | 'customer'
+    parentControlAccountCode: '2.1.01.01' | '1.1.02.01'
+    findOrCreateChildAccountId?: (parentCode: string, counterpartyName: string) => Promise<string>
+}): Promise<Array<{ accountId: string; amount: number; method?: string }>> {
+    const {
+        accounts,
+        splits,
+        counterpartyName,
+        counterpartyKind,
+        parentControlAccountCode,
+        findOrCreateChildAccountId,
+    } = params
+    const normalized: Array<{ accountId: string; amount: number; method?: string }> = []
+    for (const split of splits) {
+        const accountId = await normalizeCounterpartySplitAccount({
+            accounts,
+            splitAccountId: split.accountId,
+            counterpartyName,
+            counterpartyKind,
+            parentControlAccountCode,
+            findOrCreateChildAccountId,
+        })
+        normalized.push({ ...split, accountId })
+    }
+    return normalized
+}
+
+const validateNoHeaderPostingLines = (
+    entries: Omit<JournalEntry, 'id'>[],
+    accounts: Account[]
+): string | null => {
+    const accountById = new Map(accounts.map(account => [account.id, account]))
+    for (const entry of entries) {
+        for (const line of entry.lines) {
+            const account = accountById.get(line.accountId)
+            if (account?.isHeader) {
+                return `${HEADER_ACCOUNT_ERROR_MESSAGE} (${account.code} ${account.name})`
+            }
+        }
+    }
+    return null
+}
+
 /**
  * Resolve account ID for a TaxLine based on taxType, kind, and movement direction.
  * Priority: TaxLine.accountId (explicit) → mapped setting → fallback by code/name
@@ -245,6 +360,7 @@ const buildEntryMetadata = (movement: BienesMovement, product?: BienesProduct) =
     productName: product?.name,
     reference: movement.reference,
     counterparty: movement.counterparty,
+    appliesToDocId: movement.appliesToDocId || movement.sourceMovementId,
 })
 
 /**
@@ -397,11 +513,34 @@ const buildPostAdjustmentJournalEntries = async (
     const descuentosObtenidosId = resolveMappedAccountId(accounts, settings, 'descuentosObtenidos', 'descuentosObtenidos')
     const descuentosOtorgadosId = resolveMappedAccountId(accounts, settings, 'descuentosOtorgados', 'descuentosOtorgados')
     const hasSplits = movement.paymentSplits && movement.paymentSplits.length > 0
-    const contraId = resolveCounterpartyAccountId(accounts, movement)
+    let contraId = resolveCounterpartyAccountId(accounts, movement)
+
+    // Resolve sub-account for counterparty (same as PAYMENT builder)
+    const isPurchaseSide = movement.adjustmentKind === 'BONUS_PURCHASE' || movement.adjustmentKind === 'DISCOUNT_PURCHASE'
+    const isSaleSide = movement.adjustmentKind === 'BONUS_SALE' || movement.adjustmentKind === 'DISCOUNT_SALE'
+    if (movement.counterparty?.trim() && contraId) {
+        const genericProveedoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.proveedores)
+        const genericDeudoresId = resolveAccountId(accounts, ACCOUNT_FALLBACKS.deudores)
+        if (contraId === genericProveedoresId && isPurchaseSide) {
+            try {
+                contraId = await findOrCreateChildAccountByName(ACCOUNT_FALLBACKS.proveedores.code, movement.counterparty)
+            } catch (e) {
+                console.warn(`[bienes] Subcuenta post-adjustment fallback: ${e}`)
+            }
+        } else if (contraId === genericDeudoresId && isSaleSide) {
+            try {
+                contraId = await findOrCreateChildAccountByName(ACCOUNT_FALLBACKS.deudores.code, movement.counterparty)
+            } catch (e) {
+                console.warn(`[bienes] Subcuenta post-adjustment fallback: ${e}`)
+            }
+        }
+    }
 
     const neto = movement.subtotal || movement.valueDelta || 0
     const ivaAmount = movement.ivaAmount || 0
-    const total = movement.total || neto + ivaAmount
+    const taxes = (movement.taxes || []).filter(t => (t.amount || 0) > 0.01)
+    const taxesTotal = taxes.reduce((sum, tax) => sum + (tax.amount || 0), 0)
+    const total = movement.total || neto + ivaAmount + taxesTotal
 
     const missing: string[] = []
     if (!hasSplits && !contraId) missing.push('Cuenta contrapartida')
@@ -410,10 +549,18 @@ const buildPostAdjustmentJournalEntries = async (
         case 'BONUS_PURCHASE':
             if (!bonifComprasId) missing.push('Bonificaciones s/compras')
             if (ivaAmount > 0 && !ivaCFId) missing.push('IVA Credito Fiscal')
+            taxes.forEach((tax, index) => {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, true)
+                if (!taxAccountId) missing.push(`Impuesto adicional #${index + 1}`)
+            })
             break
         case 'BONUS_SALE':
             if (!bonifVentasId) missing.push('Bonificaciones s/ventas')
             if (ivaAmount > 0 && !ivaDFId) missing.push('IVA Debito Fiscal')
+            taxes.forEach((tax, index) => {
+                const taxAccountId = resolveTaxLineAccountId(accounts, settings, tax, false)
+                if (!taxAccountId) missing.push(`Impuesto adicional #${index + 1}`)
+            })
             break
         case 'DISCOUNT_PURCHASE':
             if (!descuentosObtenidosId) missing.push('Descuentos obtenidos')
@@ -435,6 +582,8 @@ const buildPostAdjustmentJournalEntries = async (
 
     const metadata = buildEntryMetadata(movement, product)
     const lines: EntryLine[] = []
+    const isPurchaseBonus = movement.adjustmentKind === 'BONUS_PURCHASE'
+    const isSaleBonus = movement.adjustmentKind === 'BONUS_SALE'
 
     const pushContraDebit = () => {
         if (hasSplits) {
@@ -456,12 +605,29 @@ const buildPostAdjustmentJournalEntries = async (
         }
     }
 
+    const pushBonusTaxLines = (side: 'DEBIT' | 'CREDIT') => {
+        if (taxes.length === 0) return
+        const isPurchase = side === 'CREDIT'
+        taxes.forEach(tax => {
+            const accountId = resolveTaxLineAccountId(accounts, settings, tax, isPurchase)
+            if (!accountId) return
+            const amount = tax.amount || 0
+            lines.push({
+                accountId,
+                debit: side === 'DEBIT' ? amount : 0,
+                credit: side === 'CREDIT' ? amount : 0,
+                description: `${tax.kind} ${tax.taxType} reversion`,
+            })
+        })
+    }
+
     if (movement.adjustmentKind === 'BONUS_PURCHASE') {
         pushContraDebit()
         lines.push({ accountId: bonifComprasId!, debit: 0, credit: neto, description: 'Bonificacion s/compras' })
         if (ivaAmount > 0 && ivaCFId) {
             lines.push({ accountId: ivaCFId, debit: 0, credit: ivaAmount, description: 'IVA CF reversion' })
         }
+        pushBonusTaxLines('CREDIT')
     }
 
     if (movement.adjustmentKind === 'BONUS_SALE') {
@@ -469,6 +635,7 @@ const buildPostAdjustmentJournalEntries = async (
         if (ivaAmount > 0 && ivaDFId) {
             lines.push({ accountId: ivaDFId, debit: ivaAmount, credit: 0, description: 'IVA DF reversion' })
         }
+        pushBonusTaxLines('DEBIT')
         pushContraCredit()
     }
 
@@ -498,7 +665,19 @@ const buildPostAdjustmentJournalEntries = async (
             sourceId: movement.id,
             sourceType: 'value_adjustment',
             createdAt: new Date().toISOString(),
-            metadata: { ...metadata, journalRole: 'post_adjustment' },
+            metadata: {
+                ...metadata,
+                journalRole: 'post_adjustment',
+                kind: (isPurchaseBonus || isSaleBonus) ? 'credit_note_discount' : 'post_adjustment',
+                source: 'inventario_modal_pagos',
+            appliesTo: (movement.appliesToDocId || movement.sourceMovementId)
+                ? {
+                        docId: movement.appliesToDocId || movement.sourceMovementId,
+                        docType: isPurchaseBonus ? 'PURCHASE' : (isSaleBonus ? 'SALE' : undefined),
+                        counterpartyId: movement.counterparty,
+                    }
+                : undefined,
+            },
         }],
     }
 }
@@ -660,9 +839,16 @@ const buildJournalEntriesForMovement = async (
             const lines: EntryLine[] = []
             // P0 FIX: Usar paymentSplits para contrapartida (Nota de Débito a Proveedores vs Reembolso en Caja)
             if (hasSplits) {
-                movement.paymentSplits!.forEach(split => {
-                    lines.push({ accountId: split.accountId, debit: split.amount, credit: 0, description: 'Contrapartida devolucion' })
-                })
+                for (const split of movement.paymentSplits!) {
+                    const normalizedAccountId = await normalizeCounterpartySplitAccount({
+                        accounts,
+                        splitAccountId: split.accountId,
+                        counterpartyName: movement.counterparty,
+                        counterpartyKind: 'supplier',
+                        parentControlAccountCode: '2.1.01.01',
+                    })
+                    lines.push({ accountId: normalizedAccountId, debit: split.amount, credit: 0, description: 'Contrapartida devolucion' })
+                }
             } else {
                 lines.push({ accountId: contraId!, debit: total, credit: 0, description: 'Proveedores - devolucion' })
             }
@@ -789,9 +975,16 @@ const buildJournalEntriesForMovement = async (
 
             // P0 FIX: Usar paymentSplits para contrapartida (Nota de Crédito a Deudores vs Reembolso en Caja)
             if (hasSplits) {
-                movement.paymentSplits!.forEach(split => {
-                    lines.push({ accountId: split.accountId, debit: 0, credit: split.amount, description: 'Contrapartida devolucion' })
-                })
+                for (const split of movement.paymentSplits!) {
+                    const normalizedAccountId = await normalizeCounterpartySplitAccount({
+                        accounts,
+                        splitAccountId: split.accountId,
+                        counterpartyName: movement.counterparty,
+                        counterpartyKind: 'customer',
+                        parentControlAccountCode: '1.1.02.01',
+                    })
+                    lines.push({ accountId: normalizedAccountId, debit: 0, credit: split.amount, description: 'Contrapartida devolucion' })
+                }
             } else {
                 lines.push({ accountId: contraId!, debit: 0, credit: total, description: 'Devolucion a cliente' })
             }
@@ -979,7 +1172,18 @@ const buildJournalEntriesForMovement = async (
             ? `Cobro${movement.counterparty ? ` - ${movement.counterparty}` : ''}`
             : `Pago${movement.counterparty ? ` a ${movement.counterparty}` : ''}`
 
-        pushEntry(memo, lines, { journalRole: isCobro ? 'collection' : 'payment' })
+        pushEntry(memo, lines, {
+            journalRole: isCobro ? 'collection' : 'payment',
+            kind: isCobro ? 'collection' : 'payment',
+            source: 'inventario_modal_pagos',
+            appliesTo: (movement.appliesToDocId || movement.sourceMovementId)
+                ? {
+                    docId: movement.appliesToDocId || movement.sourceMovementId,
+                    docType: isCobro ? 'SALE' : 'PURCHASE',
+                    counterpartyId: movement.counterparty,
+                }
+                : undefined,
+        })
     }
 
     // RECLASS: Perfeccionamiento de pasivo/crédito
@@ -1090,6 +1294,11 @@ const buildJournalEntriesForMovement = async (
         pushEntry(reclassMemo, reclassLines, { journalRole: 'reclassification' })
     }
 
+    const headerError = validateNoHeaderPostingLines(entries, accounts)
+    if (headerError) {
+        return { entries: [], error: headerError }
+    }
+
     return { entries }
 }
 
@@ -1121,6 +1330,85 @@ const stripInventoryLinkFromEntry = (entry: JournalEntry, movementId: string): J
         sourceType: undefined,
         metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     }
+}
+
+/**
+ * DEV repair: remap inventory entry lines posted to header control accounts
+ * to per-counterparty child accounts.
+ */
+export async function repairHeaderPostedCounterpartyLinesDev(): Promise<{
+    scannedEntries: number
+    scannedLines: number
+    repairedLines: number
+    updatedEntries: number
+}> {
+    const isDev = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true
+    if (!isDev) {
+        return { scannedEntries: 0, scannedLines: 0, repairedLines: 0, updatedEntries: 0 }
+    }
+
+    const [accounts, entries, movements] = await Promise.all([
+        db.accounts.toArray(),
+        db.entries.toArray(),
+        db.bienesMovements.toArray(),
+    ])
+
+    const movementById = new Map(movements.map(movement => [movement.id, movement]))
+    let scannedEntries = 0
+    let scannedLines = 0
+    let repairedLines = 0
+    let updatedEntries = 0
+
+    await db.transaction('rw', db.entries, async () => {
+        for (const entry of entries) {
+            const lines = [...entry.lines]
+            let changed = false
+            scannedEntries++
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i]
+                const account = resolveAccountByIdOrCode(accounts, line.accountId)
+                if (!account?.isHeader) continue
+
+                scannedLines++
+
+                const movement = entry.sourceId ? movementById.get(entry.sourceId) : undefined
+                const counterparty = (entry.metadata?.counterparty as string | undefined)
+                    || movement?.counterparty
+
+                const controlCode = account.code === '2.1.01.01'
+                    ? '2.1.01.01'
+                    : account.code === '1.1.02.01'
+                        ? '1.1.02.01'
+                        : null
+
+                if (!controlCode || !counterparty?.trim()) {
+                    continue
+                }
+
+                const normalizedId = await normalizeCounterpartySplitAccount({
+                    accounts,
+                    splitAccountId: account.id,
+                    counterpartyName: counterparty,
+                    counterpartyKind: controlCode === '2.1.01.01' ? 'supplier' : 'customer',
+                    parentControlAccountCode: controlCode,
+                })
+
+                if (normalizedId !== line.accountId) {
+                    lines[i] = { ...line, accountId: normalizedId }
+                    changed = true
+                    repairedLines++
+                }
+            }
+
+            if (changed) {
+                await db.entries.put({ ...entry, lines })
+                updatedEntries++
+            }
+        }
+    })
+
+    return { scannedEntries, scannedLines, repairedLines, updatedEntries }
 }
 
 /**
@@ -1532,6 +1820,11 @@ export async function createBienesMovement(
             if (error) {
                 throw new Error(error)
             }
+            const postingAccounts = await db.accounts.toArray()
+            const headerError = validateNoHeaderPostingLines(entries, postingAccounts)
+            if (headerError) {
+                throw new Error(headerError)
+            }
             // Hardening: validate journal balance
             const balErr = validateEntriesBalance(entries)
             if (balErr) {
@@ -1645,6 +1938,11 @@ export async function createBienesMovement(
     const { entries, error } = await buildJournalEntriesForMovement(newMovement, product)
     if (error) {
         throw new Error(error)
+    }
+    const postingAccounts = await db.accounts.toArray()
+    const headerError = validateNoHeaderPostingLines(entries, postingAccounts)
+    if (headerError) {
+        throw new Error(headerError)
     }
 
     // Hardening: validate journal balance before persisting
@@ -1898,6 +2196,15 @@ export async function updateBienesMovementWithJournal(
         if (error) {
             throw new Error(error)
         }
+        const postingAccounts = await db.accounts.toArray()
+        const headerError = validateNoHeaderPostingLines(entries, postingAccounts)
+        if (headerError) {
+            throw new Error(headerError)
+        }
+        const balanceError = validateEntriesBalance(entries)
+        if (balanceError) {
+            throw new Error(balanceError)
+        }
 
         await db.transaction('rw', db.bienesMovements, db.entries, async () => {
             if (autoEntries.length > 0) {
@@ -1986,6 +2293,15 @@ export async function generateJournalForMovement(
     const { entries, error } = await buildJournalEntriesForMovement(movement, product)
     if (error) {
         throw new Error(error)
+    }
+    const postingAccounts = await db.accounts.toArray()
+    const headerError = validateNoHeaderPostingLines(entries, postingAccounts)
+    if (headerError) {
+        throw new Error(headerError)
+    }
+    const balanceError = validateEntriesBalance(entries)
+    if (balanceError) {
+        throw new Error(balanceError)
     }
 
     const createdEntries: JournalEntry[] = []

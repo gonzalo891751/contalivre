@@ -112,6 +112,7 @@ export {
     deleteBienesProductWithMovements,
     reconcileMovementJournalLinks,
     repairInitialStockMovements,
+    repairHeaderPostedCounterpartyLinesDev,
     // Bulk
     clearAllBienesData,
     clearBienesPeriodData,

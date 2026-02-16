@@ -72,6 +72,7 @@ export interface EstadoResultadosData {
 // ============================================
 
 const TOLERANCE = 0.01
+const SALES_DEDUCTION_CODES = new Set(['4.8.05', '4.8.06'])
 
 /**
  * Filter entries by date range (inclusive)
@@ -315,7 +316,9 @@ function processTrialBalance(
         const code = row.account.code
         const group = row.account.statementGroup
         const name = row.account.name
-        const isSalesDeduction = isDevolucionVentas(name) || isBonificacionVentas(name)
+        const isSalesDeductionByCode = SALES_DEDUCTION_CODES.has(code)
+        const isSalesDeductionByName = isDevolucionVentas(name) || isBonificacionVentas(name)
+        const isSalesDeduction = isSalesDeductionByCode || isSalesDeductionByName
         const isFinancialByCode = code.startsWith('4.6')
         const isDiscountByName = isDescuentosObtenidos(name) || isDescuentoOtorgado(name)
 
@@ -328,6 +331,13 @@ function processTrialBalance(
         // Override: financial accounts and descuentos always go to financial results
         if (isFinancialByCode || isDiscountByName) {
             addToSection(resultadosFinancieros, row, signedAmount)
+            continue
+        }
+
+        // Hard override by code: contra-ventas must always deduct net sales,
+        // even if legacy metadata keeps the account in another statementGroup.
+        if (isSalesDeductionByCode) {
+            addToSection(devolucionesYBonificaciones, row, signedAmount, true)
             continue
         }
 
