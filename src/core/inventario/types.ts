@@ -383,6 +383,7 @@ export interface BienesProduct {
     name: string
     description?: string
     unit: UnidadMedida
+    quantityPrecision?: number     // Decimales permitidos para cantidad (0 = unitario)
     category: ProductCategory
     reorderPoint: number           // Stock minimo para alerta
     ivaRate: IVARate
@@ -399,6 +400,30 @@ export interface BienesProduct {
     // Metadata
     createdAt: string
     updatedAt: string
+}
+
+/**
+ * Resolve quantity precision for a product with a safe default.
+ * - If product defines quantityPrecision, use it.
+ * - Unitario ('u') defaults to 0 decimals.
+ * - Other units fallback to 3 decimals.
+ */
+export function getQuantityPrecision(product?: Pick<BienesProduct, 'quantityPrecision' | 'unit'> | null): number {
+    if (product && typeof product.quantityPrecision === 'number' && Number.isFinite(product.quantityPrecision)) {
+        return Math.max(0, Math.floor(product.quantityPrecision))
+    }
+    if (product?.unit === 'u') return 0
+    return 3
+}
+
+/**
+ * Normalize quantity respecting product precision.
+ */
+export function normalizeQuantityByPrecision(quantity: number, precision: number): number {
+    if (!Number.isFinite(quantity)) return 0
+    const safePrecision = Math.max(0, Math.floor(precision))
+    const factor = Math.pow(10, safePrecision)
+    return Math.round((quantity + Number.EPSILON) * factor) / factor
 }
 
 /**
@@ -471,6 +496,7 @@ export interface BienesMovement {
     rt6SourceEntryId?: string      // Journal entry ID of the RT6 asiento that originated this
     originCategory?: 'EI' | 'COMPRAS' | 'GASTOS_COMPRA' | 'BONIF_COMPRA' | 'DEVOL_COMPRA'  // RT6 origin category for cierre breakdown
     sourceMovementId?: string      // Optional: purchase movement to target cost layers (capitalization)
+    appliesToDocId?: string        // Optional: explicit AP/AR document link for open items
     // P2: Payment (cobro/pago posterior)
     paymentDirection?: PaymentDirection  // COBRO (cliente) or PAGO (proveedor) — only for type=PAYMENT
     // Additional info

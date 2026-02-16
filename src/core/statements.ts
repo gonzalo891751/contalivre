@@ -104,7 +104,7 @@ function createSection(
  */
 function computeBalanceSheet(
     trialBalance: TrialBalance,
-    netIncome: number
+    _netIncome: number
 ): BalanceSheet {
     const rows = trialBalance.rows.map((r) => ({
         account: r.account,
@@ -169,13 +169,21 @@ function computeBalanceSheet(
         'RETAINED_EARNINGS',
     ])
 
-    // Agregar resultado del ejercicio al PN
-    if (Math.abs(netIncome) > TOLERANCE) {
+        // Resultado abierto real: saldos de cuentas de resultado (INCOME/EXPENSE).
+    // Convencion de signo: Credit - Debit (ganancia > 0, perdida < 0).
+    const openNetIncome = Math.round(
+        trialBalance.rows
+            .filter(r => !r.account.isHeader && (r.account.kind === 'INCOME' || r.account.kind === 'EXPENSE'))
+            .reduce((sum, r) => sum + (r.balanceCredit - r.balanceDebit), 0) * 100
+    ) / 100
+
+    // Agregar resultado sintetico solo cuando existe resultado abierto.
+    if (Math.abs(openNetIncome) > TOLERANCE) {
         equity.accounts.push({
             account: {
                 id: '__current_result__',
                 code: '---',
-                name: netIncome >= 0 ? 'Resultado del ejercicio (Ganancia)' : 'Resultado del ejercicio (Pérdida)',
+                name: openNetIncome >= 0 ? 'Resultado del ejercicio (Ganancia)' : 'Resultado del ejercicio (Perdida)',
                 kind: 'EQUITY',
                 section: 'CURRENT',
                 group: 'Resultados',
@@ -186,10 +194,10 @@ function computeBalanceSheet(
                 isContra: false,
                 isHeader: false,
             },
-            balance: netIncome,
+            balance: openNetIncome,
             isContra: false,
         })
-        equity.subtotal = Math.round((equity.subtotal + netIncome) * 100) / 100
+        equity.subtotal = Math.round((equity.subtotal + openNetIncome) * 100) / 100
         equity.netTotal = equity.subtotal
     }
 
@@ -286,3 +294,4 @@ export function getStatementsStatusMessage(statements: FinancialStatements): str
 
     return messages
 }
+

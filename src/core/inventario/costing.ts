@@ -13,6 +13,9 @@ import type {
     ProductValuation,
     BienesKPIs,
 } from './types'
+import { getQuantityPrecision, normalizeQuantityByPrecision } from './types'
+
+const COSTING_EPSILON = 0.000001
 
 // ========================================
 // Inventariable Cost
@@ -32,6 +35,59 @@ export function computeInventariableUnitCost(mov: BienesMovement): number {
     return (netoAfterBonif + gastos) / mov.quantity
 }
 
+function roundToPrecision(value: number, precision: number): number {
+    return normalizeQuantityByPrecision(value, precision)
+}
+
+function allocateByLargestRemainder(
+    idealValues: number[],
+    total: number,
+    precision: number
+): number[] {
+    const safePrecision = Math.max(0, Math.floor(precision))
+    const unit = 1 / Math.pow(10, safePrecision)
+    const normalizedTotal = roundToPrecision(total, safePrecision)
+    const base = idealValues.map(v => Math.max(0, Math.floor((Math.max(0, v) + COSTING_EPSILON) / unit) * unit))
+    const baseSum = roundToPrecision(base.reduce((sum, v) => sum + v, 0), safePrecision)
+    let unitsToDistribute = Math.round((normalizedTotal - baseSum) / unit)
+
+    const fractions = idealValues
+        .map((v, idx) => ({
+            idx,
+            frac: ((Math.max(0, v) / unit) - Math.floor((Math.max(0, v) + COSTING_EPSILON) / unit)),
+        }))
+        .sort((a, b) => b.frac - a.frac || a.idx - b.idx)
+
+    while (unitsToDistribute > 0 && fractions.length > 0) {
+        const slot = fractions[(unitsToDistribute - 1) % fractions.length]
+        base[slot.idx] = roundToPrecision(base[slot.idx] + unit, safePrecision)
+        unitsToDistribute--
+    }
+
+    while (unitsToDistribute < 0 && fractions.length > 0) {
+        const reversed = [...fractions].reverse()
+        let consumed = false
+        for (const slot of reversed) {
+            if (base[slot.idx] >= unit - COSTING_EPSILON) {
+                base[slot.idx] = roundToPrecision(Math.max(0, base[slot.idx] - unit), safePrecision)
+                unitsToDistribute++
+                consumed = true
+                break
+            }
+        }
+        if (!consumed) break
+    }
+
+    const finalSum = roundToPrecision(base.reduce((sum, v) => sum + v, 0), safePrecision)
+    const residual = roundToPrecision(normalizedTotal - finalSum, safePrecision)
+    if (Math.abs(residual) >= unit - COSTING_EPSILON && base.length > 0) {
+        const idx = fractions[0]?.idx ?? 0
+        base[idx] = roundToPrecision(Math.max(0, base[idx] + residual), safePrecision)
+    }
+
+    return base.map(v => roundToPrecision(Math.max(0, v), safePrecision))
+}
+
 // ========================================
 // Cost Layer Management
 // ========================================
@@ -45,6 +101,7 @@ export function buildCostLayers(
     movements: BienesMovement[],
     method: CostingMethod
 ): CostLayer[] {
+    const quantityPrecision = getQuantityPrecision(product)
     // Sort movements by date
     const sorted = [...movements]
         .filter(m => m.productId === product.id)
@@ -97,16 +154,22 @@ export function buildCostLayers(
                         // Restore proportionally to original layers used by the sale
                         const sourceQty = Math.abs(source.quantity)
                         const ratio = sourceQty > 0 ? qtyToReturn / sourceQty : 0
+                        const idealRestores = sourceLayers.map(usedLayer => usedLayer.quantity * ratio)
+                        const restoreAllocations = allocateByLargestRemainder(
+                            idealRestores,
+                            qtyToReturn,
+                            quantityPrecision
+                        )
 
-                        sourceLayers.forEach(usedLayer => {
-                            const qtyToRestore = usedLayer.quantity * ratio
+                        sourceLayers.forEach((usedLayer, idx) => {
+                            const qtyToRestore = restoreAllocations[idx] ?? 0
                             if (qtyToRestore > 0) {
                                 // Find existing layer with same movementId to restore to
                                 const existingLayer = layers.find(l => l.movementId === usedLayer.movementId)
 
                                 if (existingLayer) {
                                     // Layer still exists: add back the returned quantity
-                                    existingLayer.quantity += qtyToRestore
+                                    existingLayer.quantity = roundToPrecision(existingLayer.quantity + qtyToRestore, quantityPrecision)
                                 } else {
                                     // Layer was fully consumed: recreate with ORIGINAL date
                                     // Get original purchase date from movement
@@ -115,7 +178,7 @@ export function buildCostLayers(
 
                                     layers.push({
                                         date: originalDate,
-                                        quantity: qtyToRestore,
+                                        quantity: roundToPrecision(qtyToRestore, quantityPrecision),
                                         unitCost: usedLayer.unitCost,
                                         movementId: usedLayer.movementId,
                                     })
@@ -128,7 +191,7 @@ export function buildCostLayers(
                         const existingLayer = layers.find(l => l.movementId === targetMovementId)
 
                         if (existingLayer) {
-                            existingLayer.quantity += qtyToReturn
+                            existingLayer.quantity = roundToPrecision(existingLayer.quantity + qtyToReturn, quantityPrecision)
                         } else {
                             // Get original date from source movement
                             const originalMov = mov.sourceMovementId ? movementsById.get(mov.sourceMovementId) : undefined
@@ -136,7 +199,7 @@ export function buildCostLayers(
 
                             layers.push({
                                 date: originalDate,
-                                quantity: qtyToReturn,
+                                quantity: roundToPrecision(qtyToReturn, quantityPrecision),
                                 unitCost: mov.costUnitAssigned,
                                 movementId: targetMovementId,
                             })
@@ -150,7 +213,7 @@ export function buildCostLayers(
                         if (avgCost > 0 && layers.length > 0) {
                             // Add to oldest layer to maintain FIFO priority
                             const oldestLayer = [...layers].sort((a, b) => a.date.localeCompare(b.date))[0]
-                            oldestLayer.quantity += qtyToReturn
+                            oldestLayer.quantity = roundToPrecision(oldestLayer.quantity + qtyToReturn, quantityPrecision)
                         } else if (avgCost > 0) {
                             // No layers exist, create one with original source date if available
                             const originalMov = mov.sourceMovementId ? movementsById.get(mov.sourceMovementId) : undefined
@@ -158,7 +221,7 @@ export function buildCostLayers(
 
                             layers.push({
                                 date: originalDate,
-                                quantity: qtyToReturn,
+                                quantity: roundToPrecision(qtyToReturn, quantityPrecision),
                                 unitCost: avgCost,
                                 movementId: mov.sourceMovementId || mov.id,
                             })

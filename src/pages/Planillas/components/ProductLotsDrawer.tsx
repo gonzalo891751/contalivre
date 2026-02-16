@@ -15,6 +15,7 @@ import {
 } from '@phosphor-icons/react'
 import type { ProductEndingValuation } from '../../../core/inventario/valuation-homogenea'
 import type { BienesProduct, BienesMovement, CostingMethod } from '../../../core/inventario/types'
+import { getQuantityPrecision, normalizeQuantityByPrecision } from '../../../core/inventario/types'
 import { buildLayerHistory, getLotHistorySummary, type LotHistory, type LotEvent } from '../../../core/inventario/layer-history'
 
 interface Props {
@@ -47,6 +48,11 @@ function formatDateShort(dateStr: string): string {
     return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })
 }
 
+function formatQuantity(value: number, precision: number): string {
+    const normalized = normalizeQuantityByPrecision(value, precision)
+    return normalized.toFixed(precision)
+}
+
 function getEventIcon(type: LotEvent['type']) {
     switch (type) {
         case 'CREATION': return <Package size={12} weight="fill" className="text-emerald-500" />
@@ -57,10 +63,11 @@ function getEventIcon(type: LotEvent['type']) {
 }
 
 // Tooltip component using Portal to avoid overflow issues
-function LotTooltip({ lot, formatCurrency, anchorRect }: {
+function LotTooltip({ lot, formatCurrency, anchorRect, quantityPrecision }: {
     lot: LotHistory
     formatCurrency: (v: number) => string
     anchorRect: DOMRect | null
+    quantityPrecision: number
 }) {
     if (!anchorRect) return null
 
@@ -87,11 +94,11 @@ function LotTooltip({ lot, formatCurrency, anchorRect }: {
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-2">
                 <div className="text-slate-400">Inicial:</div>
-                <div className="font-mono tabular-nums text-right">{lot.initialQuantity} u.</div>
+                <div className="font-mono tabular-nums text-right">{formatQuantity(lot.initialQuantity, quantityPrecision)} u.</div>
                 <div className="text-slate-400">Actual:</div>
-                <div className="font-mono tabular-nums text-right">{Math.max(0, lot.currentQuantity)} u.</div>
+                <div className="font-mono tabular-nums text-right">{formatQuantity(Math.max(0, lot.currentQuantity), quantityPrecision)} u.</div>
                 <div className="text-slate-400">Consumido:</div>
-                <div className="font-mono tabular-nums text-right">{lot.initialQuantity - Math.max(0, lot.currentQuantity)} u.</div>
+                <div className="font-mono tabular-nums text-right">{formatQuantity(lot.initialQuantity - Math.max(0, lot.currentQuantity), quantityPrecision)} u.</div>
                 <div className="text-slate-400">Costo unit.:</div>
                 <div className="font-mono tabular-nums text-right">{formatCurrency(lot.unitCostHistorico)}</div>
             </div>
@@ -105,7 +112,7 @@ function LotTooltip({ lot, formatCurrency, anchorRect }: {
                                 <span className="text-slate-400 w-14">{formatDateShort(ev.date)}</span>
                                 <span className="flex-1 truncate">{ev.referenceMemo}</span>
                                 <span className={`font-mono tabular-nums ${ev.quantity >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                                    {ev.quantity >= 0 ? '+' : ''}{ev.quantity}
+                                    {ev.quantity >= 0 ? '+' : ''}{formatQuantity(ev.quantity, quantityPrecision)}
                                 </span>
                             </div>
                         ))}
@@ -122,10 +129,11 @@ function LotTooltip({ lot, formatCurrency, anchorRect }: {
 }
 
 // Individual lot row with progress bar and hover tooltip
-function LotRow({ lot, idx, formatCurrency }: {
+function LotRow({ lot, idx, formatCurrency, quantityPrecision }: {
     lot: LotHistory
     idx: number
     formatCurrency: (v: number) => string
+    quantityPrecision: number
 }) {
     const [hoverRect, setHoverRect] = useState<DOMRect | null>(null)
 
@@ -166,7 +174,7 @@ function LotRow({ lot, idx, formatCurrency }: {
                             {originLabel}
                         </span>
                         <span className={`font-mono tabular-nums font-medium ${isExhausted ? 'text-slate-400' : 'text-slate-600'}`}>
-                            {Math.max(0, lot.currentQuantity)}<span className="text-slate-300 mx-0.5">/</span>{lot.initialQuantity}
+                            {formatQuantity(Math.max(0, lot.currentQuantity), quantityPrecision)}<span className="text-slate-300 mx-0.5">/</span>{formatQuantity(lot.initialQuantity, quantityPrecision)}
                             <span className="text-slate-400 font-normal ml-0.5">u.</span>
                         </span>
                     </div>
@@ -193,8 +201,8 @@ function LotRow({ lot, idx, formatCurrency }: {
                     {/* Mini legend */}
                     {lot.initialQuantity > lot.currentQuantity && lot.currentQuantity > 0 && (
                         <div className="flex justify-between mt-1 text-[9px] text-slate-400">
-                            <span>Consumido: {lot.initialQuantity - lot.currentQuantity}</span>
-                            <span>Remanente: {lot.currentQuantity}</span>
+                            <span>Consumido: {formatQuantity(lot.initialQuantity - lot.currentQuantity, quantityPrecision)}</span>
+                            <span>Remanente: {formatQuantity(lot.currentQuantity, quantityPrecision)}</span>
                         </div>
                     )}
                 </div>
@@ -211,7 +219,7 @@ function LotRow({ lot, idx, formatCurrency }: {
                 </div>
             </motion.div>
             <AnimatePresence>
-                {hoverRect && <LotTooltip lot={lot} formatCurrency={formatCurrency} anchorRect={hoverRect} />}
+                {hoverRect && <LotTooltip lot={lot} formatCurrency={formatCurrency} anchorRect={hoverRect} quantityPrecision={quantityPrecision} />}
             </AnimatePresence>
         </>
     )
@@ -260,6 +268,10 @@ export default function ProductLotsDrawer({
     }, [bienesProduct, movements, method, product])
 
     const summary = useMemo(() => getLotHistorySummary(lotHistory), [lotHistory])
+    const quantityPrecision = useMemo(
+        () => getQuantityPrecision(bienesProduct ?? product?.product ?? null),
+        [bienesProduct, product]
+    )
 
     // Filter based on showExhausted toggle
     const displayLots = useMemo(() => {
@@ -327,11 +339,11 @@ export default function ProductLotsDrawer({
                                             <span className="text-xs font-bold uppercase tracking-wider whitespace-nowrap">Stock Total</span>
                                         </div>
                                         <div className="text-2xl sm:text-3xl font-mono tabular-nums font-bold text-slate-900 tracking-tight">
-                                            {product.endingQty}<span className="text-xs sm:text-sm font-sans text-slate-400 font-normal ml-1">unid.</span>
+                                            {formatQuantity(product.endingQty, quantityPrecision)}<span className="text-xs sm:text-sm font-sans text-slate-400 font-normal ml-1">unid.</span>
                                         </div>
                                         {summary.totalConsumed > 0 && (
                                             <div className="text-[10px] text-slate-400 mt-1">
-                                                {summary.totalConsumed} consumidas de {summary.totalInitial} ingresadas
+                                                {formatQuantity(summary.totalConsumed, quantityPrecision)} consumidas de {formatQuantity(summary.totalInitial, quantityPrecision)} ingresadas
                                             </div>
                                         )}
                                     </div>
@@ -402,6 +414,7 @@ export default function ProductLotsDrawer({
                                                     lot={lot}
                                                     idx={idx}
                                                     formatCurrency={formatCurrency}
+                                                    quantityPrecision={quantityPrecision}
                                                 />
                                             ))}
                                         </div>
@@ -413,7 +426,7 @@ export default function ProductLotsDrawer({
                                             <div className="flex justify-between text-xs text-slate-600 mb-2">
                                                 <span>Resumen: {summary.activeLots} lotes activos, {summary.exhaustedLots} agotados</span>
                                                 <span className="font-mono tabular-nums">
-                                                    {summary.totalCurrent} / {summary.totalInitial} u.
+                                                    {formatQuantity(summary.totalCurrent, quantityPrecision)} / {formatQuantity(summary.totalInitial, quantityPrecision)} u.
                                                 </span>
                                             </div>
                                             <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden flex">
@@ -456,7 +469,7 @@ export default function ProductLotsDrawer({
                                                     {activeLayers.map((lot, idx) => (
                                                         <tr key={idx} className="hover:bg-slate-50 transition-colors group">
                                                             <td className="px-4 py-3.5 text-slate-900 font-medium whitespace-nowrap">{formatPeriodLabel(lot.date)}</td>
-                                                            <td className="px-4 py-3.5 text-right font-mono tabular-nums text-slate-600">{lot.quantity}</td>
+                                                            <td className="px-4 py-3.5 text-right font-mono tabular-nums text-slate-600">{formatQuantity(lot.quantity, quantityPrecision)}</td>
                                                             <td className="px-4 py-3.5 text-right font-mono tabular-nums text-slate-400 group-hover:text-slate-500">
                                                                 {formatCurrency(lot.unitCostOrigen)}
                                                             </td>

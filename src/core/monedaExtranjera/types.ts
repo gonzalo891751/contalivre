@@ -668,7 +668,7 @@ export function getDefaultRateSide(type: FxMovementType): RateSide {
             return 'venta' // You need FC to pay, you buy at venta
         case 'TOMA_DEUDA':
         case 'DESEMBOLSO_DEUDA':
-            return 'venta' // ValuaciÃ³n histÃ³rica de ingreso
+            return 'venta' // Valuación histórica de ingreso
         default:
             return 'compra' // Default for other types
     }

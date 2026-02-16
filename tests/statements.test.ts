@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { computeLedger } from '../src/core/ledger'
 import { computeTrialBalance } from '../src/core/balance'
 import { computeStatements } from '../src/core/statements'
-import type { Account, JournalEntry } from '../src/core/models'
+import type { Account, JournalEntry, TrialBalance } from '../src/core/models'
 
 const testAccounts: Account[] = [
     {
@@ -69,6 +69,20 @@ const testAccounts: Account[] = [
         section: 'CURRENT',
         group: 'Capital',
         statementGroup: 'CAPITAL',
+        parentId: null,
+        level: 2,
+        normalSide: 'CREDIT',
+        isContra: false,
+        isHeader: false,
+    },
+    {
+        id: 'resultado_ejercicio',
+        code: '3.3.02',
+        name: 'Resultado del Ejercicio',
+        kind: 'EQUITY',
+        section: 'CURRENT',
+        group: 'Resultados acumulados',
+        statementGroup: 'RETAINED_EARNINGS',
         parentId: null,
         level: 2,
         normalSide: 'CREDIT',
@@ -348,5 +362,92 @@ describe('computeStatements', () => {
 
         // Income: 1000, Expenses: 3000, Net: -2000 (loss)
         expect(statements.incomeStatement.netIncome).toBe(-2000)
+    })
+
+    it('should append synthetic result when 3.3.02 has saldo but there is open income/expense', () => {
+        const trialBalance: TrialBalance = {
+            rows: [
+                {
+                    account: testAccounts.find(a => a.id === 'caja')!,
+                    sumDebit: 12000,
+                    sumCredit: 0,
+                    balanceDebit: 12000,
+                    balanceCredit: 0,
+                },
+                {
+                    account: testAccounts.find(a => a.id === 'capital')!,
+                    sumDebit: 0,
+                    sumCredit: 10000,
+                    balanceDebit: 0,
+                    balanceCredit: 10000,
+                },
+                {
+                    account: testAccounts.find(a => a.id === 'resultado_ejercicio')!,
+                    sumDebit: 0,
+                    sumCredit: 500,
+                    balanceDebit: 0,
+                    balanceCredit: 500,
+                },
+                {
+                    account: testAccounts.find(a => a.id === 'ventas')!,
+                    sumDebit: 0,
+                    sumCredit: 1500,
+                    balanceDebit: 0,
+                    balanceCredit: 1500,
+                },
+            ],
+            totalSumDebit: 12000,
+            totalSumCredit: 12000,
+            totalBalanceDebit: 12000,
+            totalBalanceCredit: 12000,
+            isBalanced: true,
+        }
+
+        const statements = computeStatements(trialBalance, testAccounts)
+
+        expect(statements.incomeStatement.netIncome).toBe(1500)
+        expect(statements.balanceSheet.equity.accounts.some(a => a.account.id === '__current_result__')).toBe(true)
+        expect(statements.balanceSheet.isBalanced).toBe(true)
+        expect(statements.balanceSheet.totalAssets).toBe(statements.balanceSheet.totalLiabilitiesAndEquity)
+    })
+
+    it('should not append synthetic result when income/expense are closed even if 3.3.02 has saldo', () => {
+        const trialBalance: TrialBalance = {
+            rows: [
+                {
+                    account: testAccounts.find(a => a.id === 'caja')!,
+                    sumDebit: 10500,
+                    sumCredit: 0,
+                    balanceDebit: 10500,
+                    balanceCredit: 0,
+                },
+                {
+                    account: testAccounts.find(a => a.id === 'capital')!,
+                    sumDebit: 0,
+                    sumCredit: 10000,
+                    balanceDebit: 0,
+                    balanceCredit: 10000,
+                },
+                {
+                    account: testAccounts.find(a => a.id === 'resultado_ejercicio')!,
+                    sumDebit: 0,
+                    sumCredit: 500,
+                    balanceDebit: 0,
+                    balanceCredit: 500,
+                },
+            ],
+            totalSumDebit: 10500,
+            totalSumCredit: 10500,
+            totalBalanceDebit: 10500,
+            totalBalanceCredit: 10500,
+            isBalanced: true,
+        }
+
+        const statements = computeStatements(trialBalance, testAccounts)
+
+        expect(statements.incomeStatement.netIncome).toBe(0)
+        expect(statements.balanceSheet.equity.accounts.some(a => a.account.id === '__current_result__')).toBe(false)
+        expect(statements.balanceSheet.isBalanced).toBe(true)
+        expect(statements.balanceSheet.totalAssets).toBe(statements.balanceSheet.totalLiabilitiesAndEquity)
     })
 })

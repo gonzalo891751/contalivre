@@ -54,9 +54,52 @@ import type {
     TaxCalcBase,
     PaymentDirection,
 } from '../../../core/inventario/types'
+import { getQuantityPrecision, normalizeQuantityByPrecision } from '../../../core/inventario/types'
 
 /** Round to 2 decimal places, handling floating point errors */
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100
+const QTY_EPSILON = 0.000001
+const CONTROL_ACCOUNT_CODES = {
+    DEUDORES: '1.1.02.01',
+    PROVEEDORES: '2.1.01.01',
+} as const
+const COMMERCIAL_CONTROL_CODES = new Set([
+    '1.1.02.01', // Deudores por ventas
+    '1.1.02.02', // Documentos a cobrar
+    '1.1.02.03', // Deudores con tarjeta
+    '2.1.01.01', // Proveedores
+    '2.1.06.01', // Acreedores varios
+    '2.1.01.02', // Documentos a pagar
+    '2.1.01.04', // Valores diferidos a pagar
+    '2.1.01.05', // Tarjetas a pagar
+])
+
+const isQuantityValidForPrecision = (value: number, precision: number): boolean => {
+    return Math.abs(value - normalizeQuantityByPrecision(value, precision)) <= QTY_EPSILON
+}
+
+const getDefaultCounterpartyCode = (
+    kind: 'COMPRA' | 'VENTA' | 'DEVOLUCION_COMPRA' | 'DEVOLUCION_VENTA'
+): string => {
+    return kind === 'VENTA' || kind === 'DEVOLUCION_VENTA'
+        ? CONTROL_ACCOUNT_CODES.DEUDORES
+        : CONTROL_ACCOUNT_CODES.PROVEEDORES
+}
+
+const normalizeCounterpartyName = (value: string) => value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+
+const isCommercialControlOrChild = (accountId: string, accounts: Account[]): boolean => {
+    const acc = accounts.find(a => a.id === accountId)
+    if (!acc) return false
+    if (COMMERCIAL_CONTROL_CODES.has(acc.code)) return true
+    if (!acc.parentId) return false
+    const parent = accounts.find(a => a.id === acc.parentId)
+    return !!parent && COMMERCIAL_CONTROL_CODES.has(parent.code)
+}
 
 /** Convert final price (with IVA) to net price. If rate=0, final==net */
 const netFromFinal = (final: number, rate: number): number => {
@@ -152,6 +195,8 @@ import type { Account, JournalEntry } from '../../../core/models'
 import AccountSearchSelect from '../../../ui/AccountSearchSelect'
 import AccountSearchSelectWithBalance, { usePendingDocuments, type PendingDocument } from '../../../ui/AccountSearchSelectWithBalance'
 import { useLedgerBalances } from '../../../hooks/useLedgerBalances'
+import { findOrCreateChildAccountByName } from '../../../storage/accounts'
+import { createBienesMovement } from '../../../storage/bienes'
 
 type MainTab = 'compra' | 'venta' | 'ajuste' | 'pagos'
 type AjusteSubTab = 'devoluciones' | 'stock' | 'rt6' | 'bonif_desc'
@@ -366,6 +411,10 @@ export default function MovementModalV3({
         originMovementId: '',
         amount: 0,
     })
+    const [pagoCobroCondicion, setPagoCobroCondicion] = useState({
+        commercialDiscountPct: 0,   // Bonificacion comercial (genera NC)
+        financialDiscountPct: 0,    // Descuento financiero (no genera NC, resultado financiero)
+    })
     const [pagoCobroSplits, setPagoCobroSplits] = useState<PaymentSplit[]>([
         { id: 'pc-split-1', accountId: '', amount: 0 }
     ])
@@ -379,8 +428,17 @@ export default function MovementModalV3({
         amount: 0,
     })
 
-    // Pending documents for payment/collection selection
-    const allPendingDocs = usePendingDocuments(movements, movements, pagoCobroMode)
+    // Reset payment flow state when switching COBRO <-> PAGO
+    useEffect(() => {
+        setPagoCobro({ tercero: '', originMovementId: '', amount: 0 })
+        setPagoCobroCondicion({ commercialDiscountPct: 0, financialDiscountPct: 0 })
+        setPagoCobroSplits([{ id: 'pc-split-1', accountId: '', amount: 0 }])
+        setPagoCobroRetencion({ enabled: false, calcMode: 'PERCENT', rate: 100, base: 'IVA', taxType: 'IVA', amount: 0 })
+    }, [pagoCobroMode])
+
+    // Pending documents for payment/collection selection (Open Items)
+    const pendingDocsResult = usePendingDocuments(movements, pagoCobroMode)
+    const allPendingDocs = pendingDocsResult.documents
 
     // Filter pending docs by selected tercero (FASE 3B)
     const pendingDocs = useMemo(() => {
@@ -398,6 +456,122 @@ export default function MovementModalV3({
         if (!pagoCobro.originMovementId) return null
         return allPendingDocs.find(d => d.movementId === pagoCobro.originMovementId) || null
     }, [allPendingDocs, pagoCobro.originMovementId])
+    const selectedPendingMovement = useMemo(() => {
+        if (!selectedPendingDoc || !movements) return null
+        return movements.find(m => m.id === selectedPendingDoc.movementId) || null
+    }, [movements, selectedPendingDoc?.movementId])
+
+    const pagoCobroNcPreview = useMemo(() => {
+        if (!selectedPendingDoc) return null
+        const pct = Math.max(0, pagoCobroCondicion.commercialDiscountPct || 0)
+        if (pct <= 0) {
+            return {
+                pct: 0,
+                neto: 0,
+                iva: 0,
+                taxes: [] as TaxLine[],
+                total: 0,
+                nuevoSaldo: selectedPendingDoc.saldoPendiente,
+            }
+        }
+
+        const descuentoNeto = round2(selectedPendingDoc.pendingSubtotal * (pct / 100))
+        const ivaRate = selectedPendingDoc.pendingSubtotal > 0
+            ? (selectedPendingDoc.pendingIva / selectedPendingDoc.pendingSubtotal) * 100
+            : 21
+        const iva = round2(descuentoNeto * (ivaRate / 100))
+        const taxes = (selectedPendingDoc.pendingTaxes || []).map((tax, idx) => {
+            let amount = 0
+            if (tax.calcMode === 'PERCENT' && (tax.rate || 0) > 0) {
+                const base = tax.base === 'IVA' ? iva : descuentoNeto
+                amount = round2(base * ((tax.rate || 0) / 100))
+            } else {
+                amount = round2((tax.amount || 0) * (pct / 100))
+            }
+            return {
+                ...tax,
+                id: tax.id || `pc-nc-tax-${idx}`,
+                amount,
+            } as TaxLine
+        }).filter(t => t.amount > 0.01)
+        const total = round2(descuentoNeto + iva + taxes.reduce((sum, tax) => sum + tax.amount, 0))
+        const nuevoSaldo = round2(Math.max(0, selectedPendingDoc.saldoPendiente - total))
+
+        return {
+            pct,
+            neto: descuentoNeto,
+            iva,
+            taxes,
+            total,
+            nuevoSaldo,
+        }
+    }, [selectedPendingDoc, pagoCobroCondicion.commercialDiscountPct])
+
+    // Financial discount preview: does NOT generate NC, treated as non-cash payment form
+    const pagoCobroFinancialPreview = useMemo(() => {
+        if (!selectedPendingDoc) return null
+        const pct = Math.max(0, pagoCobroCondicion.financialDiscountPct || 0)
+        // Apply financial discount AFTER NC (bonificacion) adjusts the saldo
+        const saldoAfterNc = pagoCobroNcPreview?.nuevoSaldo ?? selectedPendingDoc.saldoPendiente
+        if (pct <= 0 || saldoAfterNc <= 0) {
+            return { pct: 0, amount: 0, saldoAfterNc }
+        }
+        const amount = round2(saldoAfterNc * (pct / 100))
+        return { pct, amount, saldoAfterNc }
+    }, [selectedPendingDoc, pagoCobroCondicion.financialDiscountPct, pagoCobroNcPreview])
+
+    // "Importe a cancelar" = saldo after NC. User pays (cancelar - descuento financiero) in cash.
+    const importeACancelar = pagoCobroFinancialPreview?.saldoAfterNc ?? pagoCobroNcPreview?.nuevoSaldo ?? selectedPendingDoc?.saldoPendiente ?? 0
+    const financialDiscountAmount = pagoCobroFinancialPreview?.amount ?? 0
+    // maxPagoCobroAmount = what the user actually needs to pay in cash (saldo - desc financiero)
+    const maxPagoCobroAmount = round2(Math.max(0, importeACancelar - financialDiscountAmount))
+    const pagoCobroSplitsTotal = useMemo(
+        () => round2(pagoCobroSplits.reduce((sum, s) => sum + (s.accountId ? s.amount : 0), 0)),
+        [pagoCobroSplits]
+    )
+    const ncPreviewTotal = round2(pagoCobroNcPreview?.total || 0)
+    // Preview totals: include NC + financial discount + cash splits
+    // For the journal entry: financial discount appears as a separate line
+    // amountToCancel = what we're actually removing from Proveedores/Deudores (user's payment + financial discount)
+    const amountToCancel = round2(pagoCobro.amount + financialDiscountAmount)
+    const previewDebitTotal = pagoCobroMode === 'COBRO'
+        ? round2(pagoCobroSplitsTotal + (financialDiscountAmount > 0 ? financialDiscountAmount : 0) + ncPreviewTotal)
+        : round2(amountToCancel + ncPreviewTotal)
+    const previewCreditTotal = pagoCobroMode === 'COBRO'
+        ? round2(amountToCancel + ncPreviewTotal)
+        : round2(pagoCobroSplitsTotal + (financialDiscountAmount > 0 ? financialDiscountAmount : 0) + ncPreviewTotal)
+
+    useEffect(() => {
+        if (!selectedPendingDoc) return
+        setPagoCobro(prev => {
+            if (prev.amount <= maxPagoCobroAmount + 0.01) return prev
+            return { ...prev, amount: maxPagoCobroAmount }
+        })
+        setPagoCobroSplits(prev => {
+            if (prev.length !== 1 || !prev[0].accountId) return prev
+            if (prev[0].amount <= maxPagoCobroAmount + 0.01) return prev
+            return [{ ...prev[0], amount: maxPagoCobroAmount }]
+        })
+    }, [selectedPendingDoc?.movementId, maxPagoCobroAmount])
+
+    // Helper: adjust primary line (Caja/Banco) when retention is present in splits
+    // so that sum(splits) === targetAmount. Returns new array or same ref if no change.
+    const adjustSplitsWithRetention = (splits: PaymentSplit[], targetAmount: number): PaymentSplit[] => {
+        if (!accounts || splits.length < 2) return splits
+        const retCode = pagoCobroMode === 'COBRO' ? '1.1.03.07' : '2.1.03.03'
+        const retAcc = accounts.find(a => a.code === retCode)
+        if (!retAcc) return splits
+        const hasRet = splits.some(s => s.accountId === retAcc.id && s.amount > 0)
+        if (!hasRet) return splits
+        // Primary = first non-retention split with an account
+        const primaryIdx = splits.findIndex(s => s.accountId && s.accountId !== retAcc.id)
+        if (primaryIdx < 0) return splits
+        const sumOthers = splits.reduce((sum, s, i) =>
+            i !== primaryIdx ? sum + (s.accountId ? s.amount : 0) : sum, 0)
+        const adjusted = round2(Math.max(0, targetAmount - sumOthers))
+        if (Math.abs(splits[primaryIdx].amount - adjusted) < 0.01) return splits
+        return splits.map((s, i) => i === primaryIdx ? { ...s, amount: adjusted } : s)
+    }
 
     // Override flags: prevent auto-overwriting user manual choices
     const [userOverrodePaymentCondition, setUserOverrodePaymentCondition] = useState(false)
@@ -425,26 +599,16 @@ export default function MovementModalV3({
         const tercero = existingTerceros.find(t => t.name.toLowerCase().trim() === normName)
         if (!tercero) return null
 
-        const pending = (movements || [])
-            .filter(m =>
-                m.type === 'PURCHASE' && !m.isDevolucion && m.total > 0 &&
-                m.counterparty?.toLowerCase().trim() === normName
-            )
+        const pending = allPendingDocs
+            .filter(m => m.counterparty.toLowerCase().trim() === normName)
             .slice(0, 5)
-            .map(m => {
-                const paid = (movements || [])
-                    .filter(p => p.type === 'PAYMENT' && p.sourceMovementId === m.id)
-                    .reduce((s, p) => s + p.total, 0)
-                const saldo = m.total - paid
-                return saldo > 0.01 ? { ref: m.reference || m.id.slice(0, 8), date: m.date, dueDate: (m as any).dueDate, saldo } : null
-            })
-            .filter(Boolean) as { ref: string; date: string; dueDate?: string; saldo: number }[]
+            .map(m => ({ ref: m.reference || m.id.slice(0, 8), date: m.date, dueDate: m.dueDate, saldo: m.saldoPendiente }))
 
         return { balance: tercero.balance, pending }
-    }, [mainTab, pagoCobro.tercero, formData.counterparty, existingTerceros, movements])
+    }, [mainTab, pagoCobro.tercero, formData.counterparty, existingTerceros, allPendingDocs])
 
     // Filtered terceros for combobox dropdown
-    // FASE 2: Use role-based list depending on context (compra→proveedores, venta→clientes, pagos→all)
+    // FASE 2: Use role-based list depending on context (compra->proveedores, venta->clientes, pagos->all)
     const filteredTerceros = useMemo(() => {
         const query = mainTab === 'pagos' ? pagoCobro.tercero : formData.counterparty
         // Pick base list by role
@@ -483,17 +647,13 @@ export default function MovementModalV3({
     // Calculate retention amount for pagoCobro
     useEffect(() => {
         if (!pagoCobroRetencion.enabled || !selectedPendingDoc) return
-        const ivaOriginal = selectedPendingDoc.ivaAmount || 0
-        const saldoRatio = selectedPendingDoc.originalTotal > 0
-            ? selectedPendingDoc.saldoPendiente / selectedPendingDoc.originalTotal
-            : 1
-        const ivaProporcional = ivaOriginal * saldoRatio
-        const baseValue = pagoCobroRetencion.base === 'IVA' ? ivaProporcional : selectedPendingDoc.subtotal * saldoRatio
+        const ivaProporcional = selectedPendingDoc.pendingIva || 0
+        const baseValue = pagoCobroRetencion.base === 'IVA' ? ivaProporcional : selectedPendingDoc.pendingSubtotal
         const calculated = pagoCobroRetencion.calcMode === 'PERCENT'
             ? round2(baseValue * (pagoCobroRetencion.rate / 100))
             : pagoCobroRetencion.amount
         setPagoCobroRetencion(prev => ({ ...prev, amount: calculated }))
-    }, [pagoCobroRetencion.enabled, pagoCobroRetencion.calcMode, pagoCobroRetencion.rate, pagoCobroRetencion.base, selectedPendingDoc?.movementId])
+    }, [pagoCobroRetencion.enabled, pagoCobroRetencion.calcMode, pagoCobroRetencion.rate, pagoCobroRetencion.base, selectedPendingDoc?.movementId, selectedPendingDoc?.pendingIva, selectedPendingDoc?.pendingSubtotal])
 
     // Auto-infer paymentCondition from selected split accounts (Compra AND Venta)
     useEffect(() => {
@@ -502,8 +662,8 @@ export default function MovementModalV3({
 
         const isVenta = mainTab === 'venta'
 
-        // Compra side: Proveedores/Acreedores → CTA_CTE, Documentos a Pagar → DOCUMENTADO
-        // Venta side: Deudores por Ventas → CTA_CTE, Documentos a Cobrar → DOCUMENTADO
+        // Compra side: Proveedores/Acreedores -> CTA_CTE, Documentos a Pagar -> DOCUMENTADO
+        // Venta side: Deudores por Ventas -> CTA_CTE, Documentos a Cobrar -> DOCUMENTADO
         const ctaCteControlCodes = isVenta
             ? new Set(['1.1.02.01']) // Deudores por ventas
             : new Set(['2.1.01.01', '2.1.06.01']) // Proveedores, Acreedores
@@ -610,11 +770,21 @@ export default function MovementModalV3({
     }, [initialData, products])
 
     // Product & valuation
-    const _selectedProduct = useMemo(
+    const selectedProduct = useMemo(
         () => products.find((p) => p.id === formData.productId),
         [products, formData.productId]
     )
-    void _selectedProduct // reserved for future use
+    const mainQuantityPrecision = getQuantityPrecision(selectedProduct)
+    const devolucionProduct = useMemo(
+        () => products.find((p) => p.id === devolucion.productId),
+        [products, devolucion.productId]
+    )
+    const devolucionQuantityPrecision = getQuantityPrecision(devolucionProduct)
+    const stockAjusteProduct = useMemo(
+        () => products.find((p) => p.id === stockAjuste.productId),
+        [products, stockAjuste.productId]
+    )
+    const stockAjusteQuantityPrecision = getQuantityPrecision(stockAjusteProduct)
     const selectedValuation = useMemo(
         () => valuations.find((v) => v.product.id === formData.productId),
         [valuations, formData.productId]
@@ -721,6 +891,11 @@ export default function MovementModalV3({
             if (!formData.date) errors.date = 'Fecha es obligatoria'
             if (!formData.productId) errors.productId = 'Producto es obligatorio'
             if (!formData.isSoloGasto && formData.quantity <= 0) errors.quantity = 'Cantidad debe ser mayor a 0'
+            if (!formData.isSoloGasto && !isQuantityValidForPrecision(formData.quantity, mainQuantityPrecision)) {
+                errors.quantity = mainQuantityPrecision === 0
+                    ? 'Cantidad debe ser entera para este producto'
+                    : `Cantidad admite hasta ${mainQuantityPrecision} decimales`
+            }
             if (mainTab === 'compra' && !formData.isSoloGasto && formData.unitCost <= 0) errors.unitCost = 'Costo unitario es obligatorio'
             if (mainTab === 'venta' && formData.unitPrice <= 0) errors.unitPrice = 'Precio de venta es obligatorio'
             if (!formData.counterparty?.trim()) errors.counterparty = mainTab === 'compra' ? 'Proveedor es obligatorio' : 'Cliente es obligatorio'
@@ -733,10 +908,20 @@ export default function MovementModalV3({
             if (!devolucion.productId) errors.productId = 'Producto es obligatorio'
             if (!devolucion.originalMovementId) errors.originalMovementId = 'Selecciona un movimiento a revertir'
             if (devolucion.cantidadDevolver <= 0) errors.cantidadDevolver = 'Cantidad debe ser mayor a 0'
+            if (!isQuantityValidForPrecision(devolucion.cantidadDevolver, devolucionQuantityPrecision)) {
+                errors.cantidadDevolver = devolucionQuantityPrecision === 0
+                    ? 'Cantidad a devolver debe ser entera para este producto'
+                    : `Cantidad admite hasta ${devolucionQuantityPrecision} decimales`
+            }
         } else if (mainTab === 'ajuste' && ajusteSubTab === 'stock') {
             if (!formData.date) errors.date = 'Fecha es obligatoria'
             if (!stockAjuste.productId) errors.productId = 'Producto es obligatorio'
             if (stockAjuste.quantity <= 0) errors.quantity = 'Cantidad debe ser mayor a 0'
+            if (!isQuantityValidForPrecision(stockAjuste.quantity, stockAjusteQuantityPrecision)) {
+                errors.quantity = stockAjusteQuantityPrecision === 0
+                    ? 'Cantidad debe ser entera para este producto'
+                    : `Cantidad admite hasta ${stockAjusteQuantityPrecision} decimales`
+            }
             if (stockAjuste.direction === 'IN' && stockAjuste.unitCost <= 0) errors.unitCost = 'Costo unitario es obligatorio para entrada'
         } else if (mainTab === 'ajuste' && ajusteSubTab === 'rt6') {
             if (!formData.date) errors.date = 'Fecha es obligatoria'
@@ -750,14 +935,20 @@ export default function MovementModalV3({
         } else if (mainTab === 'pagos') {
             if (!formData.date) errors.date = 'Fecha es obligatoria'
             if (!pagoCobro.tercero?.trim()) errors.tercero = pagoCobroMode === 'COBRO' ? 'Cliente es obligatorio' : 'Proveedor es obligatorio'
-            if (pagoCobro.amount <= 0) errors.amount = 'Importe debe ser mayor a 0'
-            const invalidSplit = pagoCobroSplits.find(s => !s.accountId || s.amount <= 0)
-            if (invalidSplit) errors.pagoSplits = 'Completa todas las cuentas con importe'
-            const pcSplitsTotal = pagoCobroSplits.reduce((s, sp) => s + sp.amount, 0)
-            if (pagoCobro.amount > 0 && Math.abs(pagoCobro.amount - pcSplitsTotal) > 1) errors.pagoSplitsBalance = 'Los importes no coinciden con el total'
+            // Allow amount=0 when financial discount covers everything
+            const hasFinDiscount = (pagoCobroCondicion.financialDiscountPct || 0) > 0
+            if (pagoCobro.amount <= 0 && !hasFinDiscount) errors.amount = 'Importe debe ser mayor a 0'
+            // Block when both bonif and desc financiero are set
+            if (pagoCobroCondicion.commercialDiscountPct > 0 && pagoCobroCondicion.financialDiscountPct > 0) errors.dualDiscount = 'No se permite bonificacion y descuento financiero simultaneamente'
+            if (pagoCobro.amount > 0) {
+                const invalidSplit = pagoCobroSplits.find(s => !s.accountId || s.amount <= 0)
+                if (invalidSplit) errors.pagoSplits = 'Completa todas las cuentas con importe'
+                const pcSplitsTotal = pagoCobroSplits.reduce((s, sp) => s + sp.amount, 0)
+                if (Math.abs(pagoCobro.amount - pcSplitsTotal) > 1) errors.pagoSplitsBalance = 'Los importes no coinciden con el total'
+            }
         }
         return errors
-    }, [mainTab, ajusteSubTab, formData, splits, splitTotals.remaining, devolucion, stockAjuste, rt6, postAdjust, pagoCobro, pagoCobroSplits, pagoCobroMode])
+    }, [mainTab, ajusteSubTab, formData, splits, splitTotals.remaining, devolucion, stockAjuste, rt6, postAdjust, pagoCobro, pagoCobroSplits, pagoCobroMode, mainQuantityPrecision, devolucionQuantityPrecision, stockAjusteQuantityPrecision])
 
     const hasValidationErrors = Object.keys(validationErrors).length > 0
 
@@ -891,19 +1082,13 @@ export default function MovementModalV3({
         if ((initialData?.paymentSplits?.length || 0) > 0) return
         if (mainTab !== 'compra' && mainTab !== 'venta') return
 
-        const isVenta = mainTab === 'venta'
-        const targetCode = isVenta ? '1.1.02.01' : '2.1.01.01' // Deudores / Proveedores
+        const targetCode = getDefaultCounterpartyCode(mainTab === 'venta' ? 'VENTA' : 'COMPRA')
         const targetAcc = accounts.find(a => a.code === targetCode)
         if (!targetAcc) return
 
         const firstSplit = splits[0]
-        const currentAcc = firstSplit.accountId
-            ? accounts.find(a => a.id === firstSplit.accountId)
-            : null
-        const isAutoDefaultFromOtherTab = !!currentAcc
-            && (currentAcc.code === '1.1.02.01' || currentAcc.code === '2.1.01.01')
-            && currentAcc.code !== targetCode
-        const shouldApplyDefault = !firstSplit.accountId || isAutoDefaultFromOtherTab
+        const shouldApplyDefault = !firstSplit.accountId
+            || (firstSplit.accountId !== targetAcc.id && isCommercialControlOrChild(firstSplit.accountId, accounts))
 
         if (!shouldApplyDefault) return
         if (firstSplit.accountId === targetAcc.id) return
@@ -1000,10 +1185,19 @@ export default function MovementModalV3({
         if (devolucionContraMode === 'NOTA_CREDITO') {
             // Modo seguro: contrapartida a Deudores (venta) o Proveedores (compra)
             // Genera Nota de Crédito/Débito sin movimiento de efectivo
-            const targetCode = isCompra ? '2.1.01.01' : '1.1.02.01' // Proveedores / Deudores
-            const acc = accounts.find(a => a.code === targetCode)
-            if (acc) {
-                setDevolucionSplits([{ id: 'dev-split-1', accountId: acc.id, amount: totalDevolucion }])
+            const targetCode = getDefaultCounterpartyCode(isCompra ? 'DEVOLUCION_COMPRA' : 'DEVOLUCION_VENTA')
+            const parentAcc = accounts.find(a => a.code === targetCode)
+            if (parentAcc) {
+                const normalizedCounterparty = normalizeCounterpartyName(formData.counterparty || '')
+                const existingChild = normalizedCounterparty
+                    ? accounts.find(a =>
+                        a.parentId === parentAcc.id
+                        && !a.isHeader
+                        && normalizeCounterpartyName(a.name) === normalizedCounterparty
+                    )
+                    : null
+                const preferredAccount = existingChild || parentAcc
+                setDevolucionSplits([{ id: 'dev-split-1', accountId: preferredAccount.id, amount: totalDevolucion }])
             }
         } else if (devolucionContraMode === 'REEMBOLSO_EFECTIVO') {
             // Reembolsar en Caja/Banco: permite edición manual de contrapartidas
@@ -1038,7 +1232,7 @@ export default function MovementModalV3({
                 }
             }
         }
-    }, [selectedOriginalMovement?.id, devolucion.cantidadDevolver, devolucion.tipo, devolucionContraMode, accounts])
+    }, [selectedOriginalMovement?.id, devolucion.cantidadDevolver, devolucion.tipo, devolucionContraMode, accounts, formData.counterparty])
 
     // Return calculations - ahora considera bonificación y taxes
     const devolucionCalculations = useMemo(() => {
@@ -1117,7 +1311,12 @@ export default function MovementModalV3({
 
     // Handlers
     const handleChange = (field: keyof typeof formData, value: string | number | boolean) => {
-        setFormData(prev => ({ ...prev, [field]: value }))
+        if (field === 'quantity' && typeof value === 'number') {
+            const normalizedQty = normalizeQuantityByPrecision(value, mainQuantityPrecision)
+            setFormData(prev => ({ ...prev, [field]: normalizedQty }))
+        } else {
+            setFormData(prev => ({ ...prev, [field]: value }))
+        }
         setError(null)
     }
 
@@ -1234,8 +1433,8 @@ export default function MovementModalV3({
             return
         }
 
-        // Compra: retención practicada → Pasivo (2.1.03.03 Retenciones a depositar)
-        // Venta: retención sufrida → Activo (1.1.03.07 Retenciones IVA de terceros)
+        // Compra: retención practicada -> Pasivo (2.1.03.03 Retenciones a depositar)
+        // Venta: retención sufrida -> Activo (1.1.03.07 Retenciones IVA de terceros)
         const targetCode = mainTab === 'compra' ? '2.1.03.03' : '1.1.03.07'
         const acc = accounts?.find(a => a.code === targetCode)
 
@@ -1320,6 +1519,55 @@ export default function MovementModalV3({
         }).format(value)
     }
 
+    const normalizeDevolucionSplitAccounts = async (
+        currentSplits: PaymentSplit[],
+        tipo: DevolucionTipo
+    ): Promise<PaymentSplit[]> => {
+        if (!accounts || currentSplits.length === 0) return currentSplits
+
+        const parentControlCode = getDefaultCounterpartyCode(tipo)
+        const counterpartyName = formData.counterparty?.trim()
+        const parentAccount = accounts.find(a => a.code === parentControlCode)
+        let changed = false
+
+        const normalized = await Promise.all(currentSplits.map(async split => {
+            const selectedAccount = accounts.find(a => a.id === split.accountId)
+            if (!selectedAccount) return split
+
+            const pointsToControl = selectedAccount.code === parentControlCode
+            const pointsToHeader = selectedAccount.isHeader
+            if (!pointsToControl && !pointsToHeader) return split
+
+            if (!counterpartyName) {
+                throw new Error('La contrapartida no puede imputarse a una cuenta madre. Selecciona un tercero o una subcuenta.')
+            }
+
+            const sameNamedChild = parentAccount
+                ? accounts.find(a =>
+                    a.parentId === parentAccount.id
+                    && !a.isHeader
+                    && normalizeCounterpartyName(a.name) === normalizeCounterpartyName(counterpartyName)
+                )
+                : undefined
+
+            const childId = sameNamedChild
+                ? sameNamedChild.id
+                : await findOrCreateChildAccountByName(parentControlCode, counterpartyName)
+
+            if (childId !== split.accountId) {
+                changed = true
+                return { ...split, accountId: childId }
+            }
+            return split
+        }))
+
+        if (changed) {
+            setDevolucionSplits(normalized)
+        }
+
+        return normalized
+    }
+
     // Handle Submit
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -1340,42 +1588,104 @@ export default function MovementModalV3({
 
         // P2: Pagos/Cobros
         if (mainTab === 'pagos') {
-            if (pagoCobro.amount <= 0) {
+            // Block dual discount
+            if (pagoCobroCondicion.commercialDiscountPct > 0 && pagoCobroCondicion.financialDiscountPct > 0) {
+                setError('No se permite bonificacion comercial y descuento financiero simultaneamente')
+                return
+            }
+            const hasFinDiscount = financialDiscountAmount > 0
+            if (pagoCobro.amount <= 0 && !hasFinDiscount) {
                 setError('El importe debe ser mayor a 0')
                 return
             }
-            const invalidSplit = pagoCobroSplits.find(s => !s.accountId || s.amount <= 0)
-            if (invalidSplit) {
-                setError('Completa todas las cuentas con importe mayor a 0')
+            if (selectedPendingDoc && pagoCobro.amount > maxPagoCobroAmount + 0.01) {
+                setError(`El importe supera el saldo disponible del comprobante. Maximo: ${formatCurrency(maxPagoCobroAmount)}`)
                 return
             }
-            const splitsTotal = pagoCobroSplits.reduce((s, sp) => s + sp.amount, 0)
-            if (Math.abs(pagoCobro.amount - splitsTotal) > 1) {
-                setError(`El total asignado no coincide. Diferencia: ${formatCurrency(pagoCobro.amount - splitsTotal)}`)
-                return
+            if (pagoCobro.amount > 0) {
+                const invalidSplit = pagoCobroSplits.find(s => !s.accountId || s.amount <= 0)
+                if (invalidSplit) {
+                    setError('Completa todas las cuentas con importe mayor a 0')
+                    return
+                }
+                const splitsTotal = pagoCobroSplits.reduce((s, sp) => s + sp.amount, 0)
+                if (Math.abs(pagoCobro.amount - splitsTotal) > 1) {
+                    setError(`El total asignado no coincide. Diferencia: ${formatCurrency(pagoCobro.amount - splitsTotal)}`)
+                    return
+                }
             }
 
             setIsSaving(true)
             try {
+                // Step 1: Create NC movement + journal entry DIRECTLY (not via onSave)
+                // This ensures errors propagate here instead of being swallowed by handleSaveMovement
+                const ncPreview = pagoCobroNcPreview
+                if (selectedPendingDoc && ncPreview && ncPreview.total > 0.01) {
+                    const isCobro = pagoCobroMode === 'COBRO'
+                    await createBienesMovement({
+                        type: 'VALUE_ADJUSTMENT',
+                        adjustmentKind: isCobro ? 'BONUS_SALE' : 'BONUS_PURCHASE',
+                        productId: selectedPendingMovement?.productId || '',
+                        date: formData.date,
+                        quantity: 0,
+                        periodId,
+                        unitCost: 0,
+                        unitPrice: 0,
+                        ivaRate: (selectedPendingMovement?.ivaRate || 21) as IVARate,
+                        ivaAmount: ncPreview.iva,
+                        subtotal: ncPreview.neto,
+                        total: ncPreview.total,
+                        taxes: ncPreview.taxes.length > 0 ? ncPreview.taxes : undefined,
+                        costMethod,
+                        counterparty: pagoCobro.tercero || undefined,
+                        paymentMethod: 'CUENTA_CORRIENTE',
+                        notes: `NC bonificacion comercial ${ncPreview.pct}% - ${pagoCobro.tercero || ''}`.trim(),
+                        reference: formData.reference ? `NC-${formData.reference}` : undefined,
+                        autoJournal: formData.autoJournal,
+                        sourceMovementId: selectedPendingDoc.movementId,
+                        appliesToDocId: selectedPendingDoc.movementId,
+                        linkedJournalEntryIds: [],
+                    })
+                }
+
+                // Step 2: Build payment splits: cash + financial discount (if any)
+                const paymentSplitsFinal: { accountId: string; amount: number; method: string }[] = pagoCobroSplits.map(s => ({ accountId: s.accountId, amount: s.amount, method: pagoCobroMode }))
+                let paymentTotal = pagoCobro.amount
+
+                // Financial discount: add as non-cash split, increases total cancelled
+                if (financialDiscountAmount > 0 && accounts) {
+                    // Pago: Descuentos obtenidos (4.6.09) -- Cobro: Descuentos otorgados (4.2.01)
+                    const discountCode = pagoCobroMode === 'PAGO' ? '4.6.09' : '4.2.01'
+                    const discountAcc = accounts.find(a => a.code === discountCode)
+                    if (discountAcc) {
+                        paymentSplitsFinal.push({ accountId: discountAcc.id, amount: financialDiscountAmount, method: 'DESCUENTO' })
+                        paymentTotal = round2(paymentTotal + financialDiscountAmount)
+                    }
+                }
+
+                // Step 3: Create PAYMENT via onSave (handles modal close + data reload)
                 await onSave({
                     type: 'PAYMENT',
                     paymentDirection: pagoCobroMode as PaymentDirection,
-                    productId: '', // No afecta producto específico
+                    productId: '',
                     date: formData.date,
-                    quantity: 0, // No afecta stock
+                    quantity: 0,
                     periodId,
                     ivaRate: 0,
                     ivaAmount: 0,
-                    subtotal: pagoCobro.amount,
-                    total: pagoCobro.amount,
+                    subtotal: paymentTotal,
+                    total: paymentTotal,
                     costMethod,
                     counterparty: pagoCobro.tercero || undefined,
                     paymentMethod: 'MIXTO',
-                    paymentSplits: pagoCobroSplits.map(s => ({ accountId: s.accountId, amount: s.amount, method: pagoCobroMode })),
+                    paymentSplits: paymentSplitsFinal,
                     notes: formData.notes || undefined,
                     reference: formData.reference || undefined,
                     autoJournal: formData.autoJournal,
                     sourceMovementId: pagoCobro.originMovementId || undefined,
+                    appliesToDocId: pagoCobro.originMovementId || undefined,
+                    descuentoFinancieroPct: pagoCobroCondicion.financialDiscountPct || undefined,
+                    descuentoFinancieroAmount: financialDiscountAmount || undefined,
                 })
                 onClose()
             } catch (e) {
@@ -1395,14 +1705,38 @@ export default function MovementModalV3({
                 setError('La cantidad a devolver debe ser mayor a 0')
                 return
             }
+            if (!isQuantityValidForPrecision(devolucion.cantidadDevolver, devolucionQuantityPrecision)) {
+                setError(devolucionQuantityPrecision === 0
+                    ? 'La cantidad a devolver debe ser entera para este producto'
+                    : `La cantidad a devolver admite hasta ${devolucionQuantityPrecision} decimales`)
+                return
+            }
             if (selectedOriginalMovement && devolucion.cantidadDevolver > selectedOriginalMovement.quantity) {
                 setError(`La cantidad a devolver no puede ser mayor a ${selectedOriginalMovement.quantity}`)
                 return
             }
 
-            const invalidSplit = devolucionSplits.find(s => !s.accountId || s.amount <= 0)
+            let normalizedDevolucionSplits = devolucionSplits
+            try {
+                if (devolucionContraMode === 'NOTA_CREDITO') {
+                    normalizedDevolucionSplits = await normalizeDevolucionSplitAccounts(devolucionSplits, devolucion.tipo)
+                }
+            } catch (err) {
+                setError(err instanceof Error ? err.message : 'No se pudo resolver la contrapartida de la devolución')
+                return
+            }
+
+            const invalidSplit = normalizedDevolucionSplits.find(s => !s.accountId || s.amount <= 0)
             if (invalidSplit) {
                 setError('Completa todas las cuentas de contrapartida con importe mayor a 0')
+                return
+            }
+            const hasHeaderSplit = !!accounts && normalizedDevolucionSplits.some(split => {
+                const account = accounts.find(a => a.id === split.accountId)
+                return !!account?.isHeader
+            })
+            if (hasHeaderSplit) {
+                setError('La contrapartida no puede imputarse a una cuenta madre. Selecciona un tercero o una subcuenta.')
                 return
             }
             if (Math.abs(devolucionSplitTotals.remaining) > 1) {
@@ -1431,7 +1765,7 @@ export default function MovementModalV3({
                     costMethod,
                     counterparty: formData.counterparty || undefined,
                     paymentMethod: 'MIXTO',
-                    paymentSplits: devolucionSplits.map(s => ({ accountId: s.accountId, amount: s.amount, method: 'DEVOLUCION' })),
+                    paymentSplits: normalizedDevolucionSplits.map(s => ({ accountId: s.accountId, amount: s.amount, method: 'DEVOLUCION' })),
                     notes: `Devolucion de ${isCompra ? 'compra' : 'venta'} - Mov. original: ${devolucion.originalMovementId}`,
                     reference: formData.reference || undefined,
                     autoJournal: formData.autoJournal,
@@ -1512,6 +1846,12 @@ export default function MovementModalV3({
         if (mainTab === 'ajuste' && ajusteSubTab === 'stock') {
             if (stockAjuste.quantity <= 0) {
                 setError('La cantidad debe ser mayor a 0')
+                return
+            }
+            if (!isQuantityValidForPrecision(stockAjuste.quantity, stockAjusteQuantityPrecision)) {
+                setError(stockAjusteQuantityPrecision === 0
+                    ? 'La cantidad debe ser entera para este producto'
+                    : `La cantidad admite hasta ${stockAjusteQuantityPrecision} decimales`)
                 return
             }
             if (stockAjuste.direction === 'IN' && stockAjuste.unitCost <= 0) {
@@ -1599,6 +1939,12 @@ export default function MovementModalV3({
         }
         if (!formData.isSoloGasto && formData.quantity <= 0) {
             setError('La cantidad debe ser mayor a 0')
+            return
+        }
+        if (!formData.isSoloGasto && !isQuantityValidForPrecision(formData.quantity, mainQuantityPrecision)) {
+            setError(mainQuantityPrecision === 0
+                ? 'La cantidad debe ser entera para este producto'
+                : `La cantidad admite hasta ${mainQuantityPrecision} decimales`)
             return
         }
         if (mainTab === 'compra' && !formData.isSoloGasto && formData.unitCost <= 0) {
@@ -2064,9 +2410,13 @@ export default function MovementModalV3({
                                                     type="number"
                                                     min="1"
                                                     max={selectedOriginalMovement.quantity}
-                                                    inputMode="numeric"
+                                                    step={devolucionQuantityPrecision === 0 ? '1' : `${1 / Math.pow(10, devolucionQuantityPrecision)}`}
+                                                    inputMode={devolucionQuantityPrecision === 0 ? 'numeric' : 'decimal'}
                                                     value={devolucion.cantidadDevolver || ''}
-                                                    onChange={(e) => setDevolucion(prev => ({ ...prev, cantidadDevolver: Number(e.target.value) }))}
+                                                    onChange={(e) => setDevolucion(prev => ({
+                                                        ...prev,
+                                                        cantidadDevolver: normalizeQuantityByPrecision(Number(e.target.value), devolucionQuantityPrecision),
+                                                    }))}
                                                     onFocus={selectOnFocus}
                                                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-orange-500 outline-none"
                                                 />
@@ -2177,6 +2527,11 @@ export default function MovementModalV3({
                                                     </div>
                                                 </div>
                                             </div>
+                                        )}
+                                        {devolucionContraMode === 'NOTA_CREDITO' && (
+                                            <p className="text-[11px] text-blue-600 mb-3">
+                                                Se imputará al auxiliar del tercero para que el Mayor y el Balance cierren.
+                                            </p>
                                         )}
                                         {devolucionContraMode === 'REEMBOLSO_EFECTIVO' && (
                                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-700">
@@ -2315,9 +2670,13 @@ export default function MovementModalV3({
                                             <input
                                                 type="number"
                                                 min="1"
-                                                inputMode="numeric"
+                                                step={stockAjusteQuantityPrecision === 0 ? '1' : `${1 / Math.pow(10, stockAjusteQuantityPrecision)}`}
+                                                inputMode={stockAjusteQuantityPrecision === 0 ? 'numeric' : 'decimal'}
                                                 value={stockAjuste.quantity || ''}
-                                                onChange={(e) => setStockAjuste(prev => ({ ...prev, quantity: Number(e.target.value) }))}
+                                                onChange={(e) => setStockAjuste(prev => ({
+                                                    ...prev,
+                                                    quantity: normalizeQuantityByPrecision(Number(e.target.value), stockAjusteQuantityPrecision),
+                                                }))}
                                                 onFocus={selectOnFocus}
                                                 className={`w-full px-3 py-2 bg-white border rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none ${submitted && validationErrors.quantity ? 'border-red-300' : 'border-slate-300'}`}
                                             />
@@ -2767,13 +3126,21 @@ export default function MovementModalV3({
                                     <select
                                         value={pagoCobro.originMovementId}
                                         onChange={(e) => {
-                                            setPagoCobro(prev => ({ ...prev, originMovementId: e.target.value }))
-                                            // Reset retention when changing document
+                                            const newDocId = e.target.value
+                                            // Reset derived state from previous document
                                             setPagoCobroRetencion(prev => ({ ...prev, enabled: false, amount: 0 }))
+                                            setPagoCobroCondicion({ commercialDiscountPct: 0, financialDiscountPct: 0 })
+                                            if (!newDocId) {
+                                                // "Sin vincular" selected: reset amount and splits
+                                                setPagoCobro(prev => ({ ...prev, originMovementId: '', amount: 0 }))
+                                                setPagoCobroSplits([{ id: 'pc-split-1', accountId: '', amount: 0 }])
+                                            } else {
+                                                setPagoCobro(prev => ({ ...prev, originMovementId: newDocId }))
+                                            }
                                         }}
                                         className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-violet-500"
                                     >
-                                        <option value="">— Sin vincular comprobante —</option>
+                                        <option value="">- Sin vincular comprobante -</option>
                                         {pendingDocs.map(doc => (
                                             <option key={doc.movementId} value={doc.movementId}>
                                                 {doc.date} | {doc.reference} | {doc.counterparty} | Saldo: {formatCurrency(doc.saldoPendiente)}
@@ -2783,6 +3150,11 @@ export default function MovementModalV3({
                                     {pendingDocs.length === 0 && (
                                         <p className="text-xs text-slate-400 mt-2 italic">
                                             No hay comprobantes pendientes de {pagoCobroMode === 'COBRO' ? 'cobro' : 'pago'}.
+                                        </p>
+                                    )}
+                                    {pendingDocsResult.hasUnlinked && (
+                                        <p className="text-xs text-amber-600 mt-2">
+                                            Hay movimientos no vinculados a comprobantes ({pendingDocsResult.unlinkedCount}).
                                         </p>
                                     )}
                                 </section>
@@ -2807,6 +3179,16 @@ export default function MovementModalV3({
                                                 <span className="font-mono font-semibold text-slate-700">{formatCurrency(selectedPendingDoc.originalTotal)}</span>
                                             </div>
                                         </div>
+                                        <div className="grid grid-cols-2 gap-3 text-xs mt-2 pt-2 border-t border-violet-200">
+                                            <div>
+                                                <span className="text-slate-500 block">Ajustes aplicados (NC/ND)</span>
+                                                <span className="font-mono font-semibold text-slate-700">{formatCurrency(selectedPendingDoc.ajustesAplicados)}</span>
+                                            </div>
+                                            <div>
+                                                <span className="text-slate-500 block">Pagos/Cobros aplicados</span>
+                                                <span className="font-mono font-semibold text-slate-700">{formatCurrency(selectedPendingDoc.pagosAplicados)}</span>
+                                            </div>
+                                        </div>
                                         {selectedPendingDoc.taxes && selectedPendingDoc.taxes.length > 0 && (
                                             <div className="mt-2 pt-2 border-t border-violet-200">
                                                 <span className="text-slate-500 text-[10px] uppercase">Percepciones del original:</span>
@@ -2823,6 +3205,116 @@ export default function MovementModalV3({
                                             <span className="text-violet-700 font-semibold text-sm">Saldo Pendiente</span>
                                             <span className="font-mono font-bold text-violet-800 text-lg">{formatCurrency(selectedPendingDoc.saldoPendiente)}</span>
                                         </div>
+                                    </section>
+                                )}
+
+                                {selectedPendingDoc && (
+                                    <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                        <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+                                            <Percent size={16} weight="duotone" className="text-violet-500" /> Condiciones comerciales (sobre este comprobante)
+                                        </h3>
+
+                                        {/* Bonificacion comercial (genera NC) */}
+                                        <div className="grid grid-cols-12 gap-4 mb-4">
+                                            <div className="col-span-5">
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1">Bonificacion comercial (%)</label>
+                                                <div className="relative">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        step="0.1"
+                                                        value={pagoCobroCondicion.commercialDiscountPct || ''}
+                                                        onChange={(e) => {
+                                                            const val = Number(e.target.value)
+                                                            setPagoCobroCondicion(prev => ({ ...prev, commercialDiscountPct: val }))
+                                                        }}
+                                                        onFocus={selectOnFocus}
+                                                        disabled={pagoCobroCondicion.financialDiscountPct > 0}
+                                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 pr-8 text-sm font-mono text-right outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-50 disabled:bg-slate-50"
+                                                        placeholder="0"
+                                                    />
+                                                    <span className="absolute right-3 top-2 text-slate-400 text-sm">%</span>
+                                                </div>
+                                                <p className="text-[10px] text-slate-500 mt-1">Genera NC automatica. Afecta base imponible, IVA y percepciones.</p>
+                                            </div>
+                                            <div className="col-span-7 bg-violet-50 border border-violet-200 rounded-lg p-3 text-xs">
+                                                <div className="flex justify-between mb-1">
+                                                    <span className="text-violet-700">Vista previa NC (neto)</span>
+                                                    <span className="font-mono font-semibold text-violet-800">{formatCurrency(pagoCobroNcPreview?.neto || 0)}</span>
+                                                </div>
+                                                <div className="flex justify-between mb-1">
+                                                    <span className="text-violet-700">IVA</span>
+                                                    <span className="font-mono font-semibold text-violet-800">{formatCurrency(pagoCobroNcPreview?.iva || 0)}</span>
+                                                </div>
+                                                {(pagoCobroNcPreview?.taxes || []).map(tax => (
+                                                    <div key={tax.id} className="flex justify-between mb-1">
+                                                        <span className="text-violet-700">{tax.taxType} ({tax.kind})</span>
+                                                        <span className="font-mono font-semibold text-violet-800">{formatCurrency(tax.amount)}</span>
+                                                    </div>
+                                                ))}
+                                                <div className="flex justify-between mt-2 pt-2 border-t border-violet-200">
+                                                    <span className="text-violet-800 font-semibold">Total NC</span>
+                                                    <span className="font-mono font-bold text-violet-900">{formatCurrency(pagoCobroNcPreview?.total || 0)}</span>
+                                                </div>
+                                                <div className="flex justify-between mt-1">
+                                                    <span className="text-violet-700 font-semibold">Saldo despues de NC</span>
+                                                    <span className="font-mono font-bold text-violet-900">{formatCurrency(pagoCobroNcPreview?.nuevoSaldo || selectedPendingDoc.saldoPendiente)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Separador */}
+                                        <div className="border-t border-slate-200 my-4" />
+
+                                        {/* Descuento financiero (no genera NC) */}
+                                        <div className="grid grid-cols-12 gap-4">
+                                            <div className="col-span-5">
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1">Descuento financiero (%)</label>
+                                                <div className="relative">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        step="0.1"
+                                                        value={pagoCobroCondicion.financialDiscountPct || ''}
+                                                        onChange={(e) => {
+                                                            const val = Number(e.target.value)
+                                                            setPagoCobroCondicion(prev => ({ ...prev, financialDiscountPct: val }))
+                                                        }}
+                                                        onFocus={selectOnFocus}
+                                                        disabled={pagoCobroCondicion.commercialDiscountPct > 0}
+                                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 pr-8 text-sm font-mono text-right outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50 disabled:bg-slate-50"
+                                                        placeholder="0"
+                                                    />
+                                                    <span className="absolute right-3 top-2 text-slate-400 text-sm">%</span>
+                                                </div>
+                                                <p className="text-[10px] text-slate-500 mt-1">
+                                                    NO genera NC. Resultado financiero ({pagoCobroMode === 'PAGO' ? 'Desc. obtenidos' : 'Desc. otorgados'}).
+                                                </p>
+                                            </div>
+                                            <div className="col-span-7 bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs">
+                                                <div className="flex justify-between mb-1">
+                                                    <span className="text-emerald-700">Importe a cancelar</span>
+                                                    <span className="font-mono font-semibold text-emerald-800">{formatCurrency(importeACancelar)}</span>
+                                                </div>
+                                                <div className="flex justify-between mb-1">
+                                                    <span className="text-emerald-700">{pagoCobroMode === 'PAGO' ? 'Descuento obtenido' : 'Descuento otorgado'}</span>
+                                                    <span className="font-mono font-semibold text-emerald-800">{formatCurrency(financialDiscountAmount)}</span>
+                                                </div>
+                                                <div className="flex justify-between mt-2 pt-2 border-t border-emerald-200">
+                                                    <span className="text-emerald-800 font-semibold">Efectivo a {pagoCobroMode === 'PAGO' ? 'pagar' : 'cobrar'}</span>
+                                                    <span className="font-mono font-bold text-emerald-900">{formatCurrency(maxPagoCobroAmount)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Warning when both are set */}
+                                        {pagoCobroCondicion.commercialDiscountPct > 0 && pagoCobroCondicion.financialDiscountPct > 0 && (
+                                            <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 flex items-center gap-2">
+                                                <Warning size={14} /> No se permite bonificacion comercial y descuento financiero simultaneamente.
+                                            </div>
+                                        )}
                                     </section>
                                 )}
 
@@ -2901,7 +3393,7 @@ export default function MovementModalV3({
                                                             <span className="text-[10px] uppercase font-bold text-violet-500">Pendientes</span>
                                                             {terceroPreview.pending.map((p, i) => (
                                                                 <div key={i} className="flex justify-between text-violet-700">
-                                                                    <span>{p.ref} ({p.date}){p.dueDate ? ` → Vto: ${p.dueDate}` : ''}</span>
+                                                                    <span>{p.ref} ({p.date}){p.dueDate ? ` -> Vto: ${p.dueDate}` : ''}</span>
                                                                     <span className="font-mono">{new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p.saldo)}</span>
                                                                 </div>
                                                             ))}
@@ -2914,27 +3406,66 @@ export default function MovementModalV3({
                                     </div>
                                     <div className="mt-4" data-field="amount">
                                         <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                            Importe a {pagoCobroMode === 'COBRO' ? 'Cobrar' : 'Pagar'} <span className="text-red-400">*</span>
+                                            {financialDiscountAmount > 0 ? 'Efectivo' : 'Importe'} a {pagoCobroMode === 'COBRO' ? 'Cobrar' : 'Pagar'} <span className="text-red-400">*</span>
                                             {selectedPendingDoc && (
-                                                <span className="text-slate-400 font-normal ml-2">(máx: {formatCurrency(selectedPendingDoc.saldoPendiente)})</span>
+                                                <span className="text-slate-400 font-normal ml-2">(max: {formatCurrency(maxPagoCobroAmount)})</span>
                                             )}
                                         </label>
                                         <input
                                             type="number"
                                             min="0"
-                                            max={selectedPendingDoc?.saldoPendiente || undefined}
+                                            max={selectedPendingDoc ? maxPagoCobroAmount : undefined}
                                             step="0.01"
                                             inputMode="decimal"
                                             value={pagoCobro.amount || ''}
                                             onChange={(e) => {
                                                 const val = Number(e.target.value)
-                                                const max = selectedPendingDoc?.saldoPendiente
-                                                setPagoCobro(prev => ({ ...prev, amount: max && val > max ? max : val }))
+                                                const max = selectedPendingDoc ? maxPagoCobroAmount : undefined
+                                                const nextAmount = max && val > max ? max : val
+                                                setPagoCobro(prev => ({ ...prev, amount: nextAmount }))
+                                                setPagoCobroSplits(prev => {
+                                                    if (prev.length === 1 && prev[0].accountId) {
+                                                        return [{ ...prev[0], amount: nextAmount }]
+                                                    }
+                                                    // With retention: adjust primary line
+                                                    return adjustSplitsWithRetention(prev, nextAmount)
+                                                })
                                             }}
                                             onFocus={selectOnFocus}
                                             placeholder="0.00"
                                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono text-right outline-none focus:ring-1 focus:ring-violet-500"
                                         />
+                                        {selectedPendingDoc && maxPagoCobroAmount > 0 && (
+                                            <div className="flex items-center gap-1.5 mt-1.5">
+                                                {[25, 50, 75, 100].map(pct => {
+                                                    const val = round2(maxPagoCobroAmount * pct / 100)
+                                                    const isActive = Math.abs(pagoCobro.amount - val) < 0.02
+                                                    return (
+                                                        <button
+                                                            key={pct}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setPagoCobro(prev => ({ ...prev, amount: val }))
+                                                                setPagoCobroSplits(prev => {
+                                                                    if (prev.length === 1 && prev[0].accountId) {
+                                                                        return [{ ...prev[0], amount: val }]
+                                                                    }
+                                                                    return adjustSplitsWithRetention(prev, val)
+                                                                })
+                                                            }}
+                                                            className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-colors ${isActive ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-500 border-slate-300 hover:border-violet-400 hover:text-violet-600'}`}
+                                                        >
+                                                            {pct}%
+                                                        </button>
+                                                    )
+                                                })}
+                                                {pagoCobro.amount > 0 && (
+                                                    <span className="text-[10px] text-slate-400 ml-auto font-mono">
+                                                        {round2(pagoCobro.amount / maxPagoCobroAmount * 100).toFixed(1)}% del saldo
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
                                         {submitted && <FieldError msg={validationErrors.amount} />}
                                     </div>
                                 </section>
@@ -3017,33 +3548,46 @@ export default function MovementModalV3({
                                                     <span className="text-xs text-amber-700">Retención calculada:</span>
                                                     <span className="font-mono font-bold text-amber-800">{formatCurrency(pagoCobroRetencion.amount)}</span>
                                                 </div>
+                                                {pagoCobroRetencion.amount > 0 && pagoCobro.amount > 0 && pagoCobroRetencion.amount > pagoCobro.amount && (
+                                                    <p className="text-[10px] text-red-600 mt-1 flex items-center gap-1">
+                                                        <Warning size={12} /> La retención supera el importe a cobrar. Se aplicará como máximo {formatCurrency(pagoCobro.amount)}.
+                                                    </p>
+                                                )}
                                                 <button
                                                     type="button"
                                                     onClick={() => {
-                                                        // Add retention as a split
+                                                        // Add retention as a split + auto-adjust primary line (Caja/Banco)
                                                         const retencionAccountCode = pagoCobroMode === 'COBRO' ? '1.1.03.07' : '2.1.03.03'
                                                         const retencionAcc = accounts?.find(a => a.code === retencionAccountCode)
                                                         if (retencionAcc && pagoCobroRetencion.amount > 0) {
-                                                            const existingRetIdx = pagoCobroSplits.findIndex(s => s.accountId === retencionAcc.id)
-                                                            if (existingRetIdx >= 0) {
-                                                                // Update existing
-                                                                setPagoCobroSplits(prev => prev.map((s, i) =>
-                                                                    i === existingRetIdx ? { ...s, amount: pagoCobroRetencion.amount } : s
-                                                                ))
-                                                            } else {
-                                                                // Add new
-                                                                setPagoCobroSplits(prev => [...prev, {
-                                                                    id: `pc-split-ret-${Date.now()}`,
-                                                                    accountId: retencionAcc.id,
-                                                                    amount: pagoCobroRetencion.amount,
-                                                                }])
-                                                            }
+                                                            // Cap retention at pagoCobro.amount
+                                                            const retAmount = round2(Math.min(pagoCobroRetencion.amount, pagoCobro.amount))
+                                                            setPagoCobroSplits(prev => {
+                                                                const existingRetIdx = prev.findIndex(s => s.accountId === retencionAcc.id)
+                                                                let newSplits: PaymentSplit[]
+                                                                if (existingRetIdx >= 0) {
+                                                                    newSplits = prev.map((s, i) =>
+                                                                        i === existingRetIdx ? { ...s, amount: retAmount } : s
+                                                                    )
+                                                                } else {
+                                                                    newSplits = [...prev, {
+                                                                        id: `pc-split-ret-${Date.now()}`,
+                                                                        accountId: retencionAcc.id,
+                                                                        amount: retAmount,
+                                                                    }]
+                                                                }
+                                                                return adjustSplitsWithRetention(newSplits, pagoCobro.amount)
+                                                            })
                                                         }
                                                     }}
-                                                    className="w-full bg-amber-600 text-white text-xs font-semibold py-2 rounded-lg hover:bg-amber-700 transition-colors"
+                                                    disabled={pagoCobroRetencion.amount <= 0 || pagoCobro.amount <= 0}
+                                                    className="w-full bg-amber-600 text-white text-xs font-semibold py-2 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
                                                     Agregar Retención a las Formas de {pagoCobroMode === 'COBRO' ? 'Cobro' : 'Pago'}
                                                 </button>
+                                                <p className="text-[10px] text-amber-600 mt-2 flex items-center gap-1">
+                                                    <Info size={12} /> La retención reduce el efectivo recibido. Caja/Banco se ajusta automáticamente.
+                                                </p>
                                             </div>
                                         )}
                                     </section>
@@ -3090,7 +3634,14 @@ export default function MovementModalV3({
                                                 />
                                                 <button
                                                     type="button"
-                                                    onClick={() => setPagoCobroSplits(prev => prev.filter(s => s.id !== split.id))}
+                                                    onClick={() => setPagoCobroSplits(prev => {
+                                                        const filtered = prev.filter(s => s.id !== split.id)
+                                                        // If only 1 split left, auto-set to target amount
+                                                        if (filtered.length === 1 && filtered[0].accountId) {
+                                                            return [{ ...filtered[0], amount: pagoCobro.amount }]
+                                                        }
+                                                        return filtered
+                                                    })}
                                                     className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
                                                 >
                                                     <Trash size={14} />
@@ -3245,9 +3796,11 @@ export default function MovementModalV3({
                                                     <input
                                                         type="number"
                                                         min="1"
-                                                        inputMode="numeric"
+                                                        step={mainQuantityPrecision === 0 ? '1' : `${1 / Math.pow(10, mainQuantityPrecision)}`}
+                                                        inputMode={mainQuantityPrecision === 0 ? 'numeric' : 'decimal'}
                                                         value={formData.quantity || ''}
                                                         onChange={(e) => handleChange('quantity', Number(e.target.value))}
+                                                        onBlur={(e) => handleChange('quantity', Number(e.target.value))}
                                                         onFocus={selectOnFocus}
                                                         className={`w-full px-3 py-2 bg-white border rounded-lg text-sm font-mono text-right focus:ring-2 focus:ring-blue-500 outline-none ${submitted && validationErrors.quantity ? 'border-red-300' : 'border-slate-300'}`}
                                                     />
@@ -3951,7 +4504,7 @@ export default function MovementModalV3({
                                                             <span className="text-[10px] uppercase font-bold text-blue-500">Pendientes</span>
                                                             {terceroPreview.pending.map((p, i) => (
                                                                 <div key={i} className="flex justify-between text-blue-700">
-                                                                    <span>{p.ref} ({p.date}){p.dueDate ? ` → Vto: ${p.dueDate}` : ''}</span>
+                                                                    <span>{p.ref} ({p.date}){p.dueDate ? ` -> Vto: ${p.dueDate}` : ''}</span>
                                                                     <span className="font-mono">{new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(p.saldo)}</span>
                                                                 </div>
                                                             ))}
@@ -4022,7 +4575,7 @@ export default function MovementModalV3({
 
                                         {formData.paymentCondition === 'CONTADO' && (
                                             <div className="text-xs text-slate-500 flex items-center gap-2">
-                                                <span className="text-blue-500">ℹ</span> Se registra el pago en la contrapartida seleccionada.
+                                                <span className="text-blue-500">â„¹</span> Se registra el pago en la contrapartida seleccionada.
                                             </div>
                                         )}
 
@@ -4366,7 +4919,7 @@ export default function MovementModalV3({
 
                                     <div className="mt-4 pt-3 border-t border-slate-300">
                                         <p className="text-xs text-slate-500">
-                                            Tipo: <span className="font-semibold">VALUE_ADJUSTMENT</span> — No modifica cantidad, solo valor.
+                                            Tipo: <span className="font-semibold">VALUE_ADJUSTMENT</span> - No modifica cantidad, solo valor.
                                         </p>
                                     </div>
                                 </div>
@@ -4462,7 +5015,7 @@ export default function MovementModalV3({
                                         </table>
                                     </div>
                                     <p className="text-[10px] text-slate-400 mt-2 text-center">
-                                        *Asiento automatico RT6 — Mercaderias vs RECPAM.
+                                        *Asiento automatico RT6 - Mercaderias vs RECPAM.
                                     </p>
                                 </div>
                             )}
@@ -4744,7 +5297,7 @@ export default function MovementModalV3({
                             )}
 
                             {/* PREVIEW ASIENTO - Pagos/Cobros */}
-                            {mainTab === 'pagos' && pagoCobro.amount > 0 && pagoCobroSplits.some(s => s.accountId && s.amount > 0) && (
+                            {mainTab === 'pagos' && (((pagoCobroNcPreview?.total || 0) > 0) || financialDiscountAmount > 0 || (pagoCobro.amount > 0 && pagoCobroSplits.some(s => s.accountId && s.amount > 0))) && (
                                 <div>
                                     <div className="flex items-center gap-2 mb-3">
                                         <div className="w-6 h-6 rounded bg-violet-600 text-white flex items-center justify-center text-xs">
@@ -4763,9 +5316,35 @@ export default function MovementModalV3({
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-700/50">
+                                                {(pagoCobroNcPreview?.total || 0) > 0.01 && (
+                                                    <>
+                                                        <tr>
+                                                            <td className="py-1.5 text-sky-300">NC bonificacion comercial ({pagoCobroNcPreview?.pct || 0}%)</td>
+                                                            <td className="py-1.5 text-right text-emerald-400">{pagoCobroMode === 'COBRO' ? (pagoCobroNcPreview?.neto || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 }) : '-'}</td>
+                                                            <td className="py-1.5 text-right text-sky-200">{pagoCobroMode === 'PAGO' ? (pagoCobroNcPreview?.neto || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 }) : '-'}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="py-1.5 text-sky-300">{pagoCobroMode === 'COBRO' ? 'IVA DF (reversion)' : 'IVA CF (reversion)'}</td>
+                                                            <td className="py-1.5 text-right text-emerald-400">{pagoCobroMode === 'COBRO' ? (pagoCobroNcPreview?.iva || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 }) : '-'}</td>
+                                                            <td className="py-1.5 text-right text-sky-200">{pagoCobroMode === 'PAGO' ? (pagoCobroNcPreview?.iva || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 }) : '-'}</td>
+                                                        </tr>
+                                                        {(pagoCobroNcPreview?.taxes || []).map(tax => (
+                                                            <tr key={`preview-tax-${tax.id}`}>
+                                                                <td className="py-1.5 text-sky-300">{tax.taxType} ({tax.kind})</td>
+                                                                <td className="py-1.5 text-right text-emerald-400">{pagoCobroMode === 'COBRO' ? tax.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 }) : '-'}</td>
+                                                                <td className="py-1.5 text-right text-sky-200">{pagoCobroMode === 'PAGO' ? tax.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 }) : '-'}</td>
+                                                            </tr>
+                                                        ))}
+                                                        <tr>
+                                                            <td className="py-1.5 text-white">{pagoCobroMode === 'COBRO' ? 'a Deudores por ventas' : 'Proveedores'}</td>
+                                                            <td className="py-1.5 text-right text-emerald-400">{pagoCobroMode === 'PAGO' ? (pagoCobroNcPreview?.total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 }) : '-'}</td>
+                                                            <td className="py-1.5 text-right text-white">{pagoCobroMode === 'COBRO' ? (pagoCobroNcPreview?.total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 }) : '-'}</td>
+                                                        </tr>
+                                                    </>
+                                                )}
                                                 {pagoCobroMode === 'COBRO' ? (
                                                     <>
-                                                        {/* COBRO: Debe splits (Caja/Banco/Ret), Haber Deudores */}
+                                                        {/* COBRO: Debe splits (Caja/Banco/Ret) + Desc otorgados, Haber Deudores */}
                                                         {pagoCobroSplits.filter(s => s.accountId && s.amount > 0).map((split) => {
                                                             const acc = accounts?.find(a => a.id === split.accountId)
                                                             return (
@@ -4776,18 +5355,25 @@ export default function MovementModalV3({
                                                                 </tr>
                                                             )
                                                         })}
+                                                        {financialDiscountAmount > 0 && (
+                                                            <tr>
+                                                                <td className="py-1.5 text-emerald-300">Descuentos otorgados (R-)</td>
+                                                                <td className="py-1.5 text-right text-emerald-400">{financialDiscountAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                            </tr>
+                                                        )}
                                                         <tr>
                                                             <td className="py-1.5 pl-4 text-slate-400">a Deudores por ventas</td>
                                                             <td className="py-1.5 text-right">-</td>
-                                                            <td className="py-1.5 text-right text-white">{pagoCobro.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                            <td className="py-1.5 text-right text-white">{amountToCancel.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
                                                         </tr>
                                                     </>
                                                 ) : (
                                                     <>
-                                                        {/* PAGO: Debe Proveedores, Haber splits (Caja/Banco/Ret) */}
+                                                        {/* PAGO: Debe Proveedores, Haber splits (Caja/Banco/Ret) + Desc obtenidos */}
                                                         <tr>
                                                             <td className="py-1.5 text-white">Proveedores</td>
-                                                            <td className="py-1.5 text-right text-emerald-400">{pagoCobro.amount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                            <td className="py-1.5 text-right text-emerald-400">{amountToCancel.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
                                                             <td className="py-1.5 text-right">-</td>
                                                         </tr>
                                                         {pagoCobroSplits.filter(s => s.accountId && s.amount > 0).map((split) => {
@@ -4800,6 +5386,13 @@ export default function MovementModalV3({
                                                                 </tr>
                                                             )
                                                         })}
+                                                        {financialDiscountAmount > 0 && (
+                                                            <tr>
+                                                                <td className="py-1.5 pl-4 text-emerald-300">a Descuentos obtenidos (R+)</td>
+                                                                <td className="py-1.5 text-right">-</td>
+                                                                <td className="py-1.5 text-right text-white">{financialDiscountAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
+                                                            </tr>
+                                                        )}
                                                     </>
                                                 )}
                                             </tbody>
@@ -4807,23 +5400,23 @@ export default function MovementModalV3({
                                                 <tr className="border-t border-slate-600">
                                                     <td className="py-2 text-slate-400 font-semibold">Total</td>
                                                     <td className="py-2 text-right text-emerald-400 font-semibold">
-                                                        {pagoCobroSplits.reduce((sum, s) => sum + (s.accountId ? s.amount : 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                                        {previewDebitTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                                                     </td>
                                                     <td className="py-2 text-right text-white font-semibold">
-                                                        {pagoCobroSplits.reduce((sum, s) => sum + (s.accountId ? s.amount : 0), 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                                        {previewCreditTotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                                                     </td>
                                                 </tr>
                                             </tfoot>
                                         </table>
                                         {/* Balance check */}
-                                        {Math.abs(pagoCobro.amount - pagoCobroSplits.reduce((sum, s) => sum + s.amount, 0)) > 0.01 && (
+                                        {Math.abs(previewDebitTotal - previewCreditTotal) > 0.01 && (
                                             <div className="mt-2 p-2 bg-red-900/50 rounded text-red-300 text-[10px] flex items-center gap-1">
                                                 <Warning size={12} /> Asiento desbalanceado: revisar totales
                                             </div>
                                         )}
                                     </div>
                                     <p className="text-[10px] text-slate-400 mt-2 text-center">
-                                        *{pagoCobroMode === 'COBRO' ? 'Cobro de cliente' : 'Pago a proveedor'} — Deudores/Proveedores vs Caja/Bancos.
+                                        *{pagoCobroMode === 'COBRO' ? 'Cobro de cliente' : 'Pago a proveedor'} - Deudores/Proveedores vs Caja/Bancos.
                                     </p>
                                 </div>
                             )}
@@ -4896,3 +5489,4 @@ export default function MovementModalV3({
         </div>
     )
 }
+

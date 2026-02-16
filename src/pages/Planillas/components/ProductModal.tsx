@@ -367,7 +367,7 @@ export default function ProductModal({
                                         filter={(acc) => (acc.kind === 'EQUITY' || acc.type === 'PatrimonioNeto') && !acc.isHeader}
                                     />
                                     <p className="text-xs text-slate-400 mt-1">
-                                        Por defecto: Capital Social si existe. PodÃ©s elegir otra cuenta de PN.
+                                        Por defecto: Capital Social si existe. Podés elegir otra cuenta de PN.
                                     </p>
                                 </div>
                             )}

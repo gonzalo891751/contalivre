@@ -363,8 +363,22 @@ export async function loadSeedDataIfNeeded(): Promise<boolean> {
             accountsToInsert.push(account)
         }
 
-        // Insertar todas las cuentas
-        await db.accounts.bulkAdd(accountsToInsert)
+        // Insertar todas las cuentas.
+        // En DEV (React StrictMode) la inicialización puede dispararse dos veces y
+        // provocar un race condition sobre el índice único `code`.
+        try {
+            await db.accounts.bulkAdd(accountsToInsert)
+        } catch (error) {
+            const name = error instanceof Error ? error.name : ''
+            if (name === 'ConstraintError' || name === 'BulkError') {
+                const currentCount = await db.accounts.count()
+                if (currentCount > 0) {
+                    console.warn('Seed concurrente detectado; se omite inserción duplicada de cuentas')
+                    return false
+                }
+            }
+            throw error
+        }
 
         // Guardar versión del seed
         await db.settings.put({
