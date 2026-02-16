@@ -31,7 +31,10 @@
       "Bash(npx vitest run:*)",
       "Bash(npm run lint:*)",
       "Bash(python fix_mojibake.py:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(ls -la \"d:\\\\Git\\\\ContaLivre\\\\src\\\\utils\"\" | grep -iE \"money)",
+      "Bash(amount)",
+      "Bash(expression \")"
     ]
   }
 }

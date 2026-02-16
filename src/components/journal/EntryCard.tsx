@@ -1,6 +1,12 @@
 /**
  * EntryCard - Premium journal entry card component
+ *
+ * Supports madre/subcuenta grouping: when a line references a subcuenta
+ * whose parent is a category-level account (e.g., "Equipos de computación"),
+ * the parent is shown as a visual header row with the subcuenta indented below.
+ * The header row does NOT participate in totals.
  */
+import { useMemo } from 'react'
 import { Edit2, Trash2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import type { JournalEntry, Account } from '../../core/models'
@@ -36,9 +42,74 @@ const formatDate = (dateStr: string) => {
     })
 }
 
+/** Control codes whose children are per-tercero subcuentas (handled by resolveAccountDisplay) */
+const CONTROL_CODES_WITH_TERCEROS = new Set([
+    '1.1.02.01', '1.1.02.02', '1.1.02.03', '1.1.01.04', '1.1.01.05',
+    '2.1.01.01', '2.1.01.02', '2.1.01.04', '2.1.01.05', '2.1.06.01',
+])
+
+interface DisplayRow {
+    type: 'madre-header' | 'line'
+    parentName?: string
+    parentCode?: string
+    lineIndex: number
+    indented?: boolean
+}
+
+/**
+ * Build display rows with madre headers for subcuentas.
+ * Groups lines by parent when the parent is a category-level account
+ * (code with 4+ segments) and NOT a tercero-control account.
+ */
+function buildDisplayRows(lines: JournalEntry['lines'], accounts: Account[], formalView: boolean): DisplayRow[] {
+    if (!formalView) {
+        return lines.map((_, i) => ({ type: 'line' as const, lineIndex: i }))
+    }
+
+    const rows: DisplayRow[] = []
+    const shownParents = new Set<string>()
+
+    lines.forEach((line, index) => {
+        const acc = accounts.find(a => a.id === line.accountId)
+        const display = resolveAccountDisplay(line.accountId, accounts)
+
+        // Check if this account should show a madre header
+        if (acc?.parentId && !display.terceroDetail) {
+            const parent = accounts.find(a => a.id === acc.parentId)
+            if (parent) {
+                const codeSegments = parent.code.split('.').length
+                const isTerceroControl = CONTROL_CODES_WITH_TERCEROS.has(parent.code)
+                // Show madre for category-level parents (4+ code segments) that aren't tercero controls
+                if (codeSegments >= 4 && !isTerceroControl && !shownParents.has(parent.id)) {
+                    shownParents.add(parent.id)
+                    rows.push({
+                        type: 'madre-header',
+                        parentName: parent.name,
+                        parentCode: parent.code,
+                        lineIndex: index,
+                    })
+                }
+                if (shownParents.has(parent.id)) {
+                    rows.push({ type: 'line', lineIndex: index, indented: true })
+                    return
+                }
+            }
+        }
+
+        rows.push({ type: 'line', lineIndex: index })
+    })
+
+    return rows
+}
+
 export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disabled, formalView = true }: EntryCardProps) {
     const totalDebit = entry.lines.reduce((sum, line) => sum + (line.debit || 0), 0)
     const totalCredit = entry.lines.reduce((sum, line) => sum + (line.credit || 0), 0)
+
+    const displayRows = useMemo(
+        () => buildDisplayRows(entry.lines, accounts, formalView),
+        [entry.lines, accounts, formalView]
+    )
 
     // Format entry number with leading zeros
     const formattedNumber = String(entryNumber).padStart(4, '0')
@@ -98,7 +169,23 @@ export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disa
                         </tr>
                     </thead>
                     <tbody>
-                        {entry.lines.map((line, index) => {
+                        {displayRows.map((row, rowIdx) => {
+                            if (row.type === 'madre-header') {
+                                return (
+                                    <tr key={`madre-${rowIdx}`} className="journal-entry-card-row" style={{ backgroundColor: 'rgba(0,0,0,0.02)' }}>
+                                        <td className="journal-entry-card-td-account">
+                                            <div className="journal-entry-card-account-name" style={{ fontWeight: 600, fontStyle: 'italic', opacity: 0.7, fontSize: '0.8rem' }}>
+                                                {row.parentName}
+                                                <span className="journal-entry-card-account-code">{row.parentCode}</span>
+                                            </div>
+                                        </td>
+                                        <td className="journal-entry-card-td-amount" style={{ opacity: 0.3 }}>-</td>
+                                        <td className="journal-entry-card-td-amount" style={{ opacity: 0.3 }}>-</td>
+                                    </tr>
+                                )
+                            }
+
+                            const line = entry.lines[row.lineIndex]
                             const display = formalView
                                 ? resolveAccountDisplay(line.accountId, accounts)
                                 : (() => {
@@ -108,8 +195,8 @@ export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disa
                                         : { name: 'Cuenta desconocida', code: '?', terceroDetail: null }
                                 })()
                             return (
-                            <tr key={index} className="journal-entry-card-row">
-                                <td className="journal-entry-card-td-account">
+                            <tr key={row.lineIndex} className="journal-entry-card-row">
+                                <td className="journal-entry-card-td-account" style={row.indented ? { paddingLeft: '2rem' } : undefined}>
                                     <div className="journal-entry-card-account-name">
                                         {display.name}
                                         <span className="journal-entry-card-account-code">{display.code}</span>
@@ -120,7 +207,7 @@ export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disa
                                         </div>
                                     )}
                                     {!display.terceroDetail && line.description && (
-                                        <div className="journal-entry-card-account-detail">
+                                        <div className="journal-entry-card-account-detail" style={row.indented ? { paddingLeft: '0' } : undefined}>
                                             {line.description}
                                         </div>
                                     )}

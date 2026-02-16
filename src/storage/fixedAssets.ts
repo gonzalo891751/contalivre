@@ -23,6 +23,11 @@ import {
 const OPENING_BALANCE_TAG = 'opening_balance'
 const OPENING_BALANCE_NAME = 'Apertura / Saldos Iniciales'
 const DISPOSAL_RESULT_ACCOUNT_CODE = '4.7.04'
+
+/** Account codes for deductions & withholdings */
+const DESCUENTO_OBTENIDO_CODE = '4.6.09'
+const RETENCION_PRACTICADA_CODE = '2.1.03.03'
+const PERCEPCION_SUFRIDA_CODE = '1.1.03.08'
 const DISPOSAL_RESULT_ACCOUNT_NAMES = [
     'Resultado venta bienes de uso',
     'Resultado venta bien de uso',
@@ -311,6 +316,7 @@ export async function deleteFixedAsset(id: string): Promise<{ success: boolean; 
     const entryIdsToDelete = new Set<string>()
     if (asset.openingJournalEntryId) entryIdsToDelete.add(asset.openingJournalEntryId)
     if (asset.acquisitionJournalEntryId) entryIdsToDelete.add(asset.acquisitionJournalEntryId)
+    if (asset.paymentJournalEntryId) entryIdsToDelete.add(asset.paymentJournalEntryId)
     if (asset.rt6JournalEntryId) entryIdsToDelete.add(asset.rt6JournalEntryId)
     for (const eid of asset.linkedJournalEntryIds) {
         entryIdsToDelete.add(eid)
@@ -824,16 +830,27 @@ async function findAcquisitionEntryByMeta(
 }
 
 /**
- * Build acquisition (purchase) journal entry for a fixed asset
+ * Resolve acreedores account: subcuenta per counterparty, or parent 2.1.06.01 for generic.
+ * Reuses the same pattern as ops.ts.
+ */
+async function resolveAcreedoresAccountForFA(counterpartyName?: string): Promise<string> {
+    const ACREEDORES_CODE = '2.1.06.01'
+    if (!counterpartyName?.trim()) {
+        const parent = await db.accounts.where('code').equals(ACREEDORES_CODE).first()
+        if (!parent) throw new Error(`Cuenta "${ACREEDORES_CODE}" no encontrada`)
+        return parent.id
+    }
+    const { findOrCreateChildAccountByName } = await import('./accounts')
+    return findOrCreateChildAccountByName(ACREEDORES_CODE, counterpartyName.trim())
+}
+
+/**
+ * Build acquisition (purchase) journal entry #1 — FACTURA / DEVENGAMIENTO
  *
- * Typical entry with VAT:
- *   Debit: Asset account (net amount)
- *   Debit: IVA Credito Fiscal (VAT amount)
- *   Credit: Payment accounts (splits - Bancos, Proveedores, etc.)
- *
- * Without VAT (IVA as cost):
- *   Debit: Asset account (total amount)
- *   Credit: Payment accounts (splits)
+ * ASIENTO #1 (siempre):
+ *   Debit:  Bien de Uso (subcuenta) por neto (o total si no discrimina IVA)
+ *   Debit:  IVA Crédito Fiscal (si discrimina)
+ *   Credit: Acreedores Varios (genérico o subcuenta tercero) por TOTAL
  */
 export async function buildFixedAssetAcquisitionEntry(
     asset: FixedAsset
@@ -843,10 +860,6 @@ export async function buildFixedAssetAcquisitionEntry(
     }
 
     const acq = asset.acquisition
-    if (!acq.splits || acq.splits.length === 0) {
-        return { entry: null, error: 'Debe agregar al menos una contrapartida de pago.' }
-    }
-
     const accounts = await db.accounts.toArray()
     const assetAccount = accounts.find(a => a.id === asset.accountId)
     const ivaCFAccount = resolveIvaCFAccount(accounts)
@@ -855,40 +868,26 @@ export async function buildFixedAssetAcquisitionEntry(
         return { entry: null, error: 'Falta cuenta del activo vinculada al bien.' }
     }
 
-    // Validate splits sum
-    const splitsTotal = round2(acq.splits.reduce((sum, s) => sum + s.amount, 0))
-    if (Math.abs(splitsTotal - acq.totalAmount) > 0.01) {
-        return {
-            entry: null,
-            error: `Las contrapartidas (${splitsTotal.toFixed(2)}) no suman el total (${acq.totalAmount.toFixed(2)}).`
-        }
-    }
-
-    // Validate split accounts exist
-    for (const split of acq.splits) {
-        const splitAccount = accounts.find(a => a.id === split.accountId)
-        if (!splitAccount) {
-            return { entry: null, error: `Cuenta de contrapartida no encontrada: ${split.accountId}` }
-        }
+    // Resolve acreedores account
+    let acreedoresAccountId: string
+    try {
+        acreedoresAccountId = await resolveAcreedoresAccountForFA(acq.counterpartyName)
+    } catch {
+        return { entry: null, error: 'Falta cuenta Acreedores Varios (2.1.06.01) en Plan de Cuentas.' }
     }
 
     const lines: EntryLine[] = []
 
     if (acq.withVat && acq.vatAmount > 0) {
-        // With VAT discrimination
         if (!ivaCFAccount) {
             return { entry: null, error: 'Falta cuenta IVA Credito Fiscal (1.1.03.01) en Plan de Cuentas.' }
         }
-
-        // Debit: Asset (net)
         lines.push({
             accountId: assetAccount.id,
             debit: round2(acq.netAmount),
             credit: 0,
             description: `Alta ${asset.name}`,
         })
-
-        // Debit: IVA CF
         lines.push({
             accountId: ivaCFAccount.id,
             debit: round2(acq.vatAmount),
@@ -896,7 +895,6 @@ export async function buildFixedAssetAcquisitionEntry(
             description: 'IVA Credito Fiscal',
         })
     } else {
-        // Without VAT (IVA as cost) or no VAT
         lines.push({
             accountId: assetAccount.id,
             debit: round2(acq.totalAmount),
@@ -905,15 +903,34 @@ export async function buildFixedAssetAcquisitionEntry(
         })
     }
 
-    // Credit: Payment splits
-    for (const split of acq.splits) {
-        lines.push({
-            accountId: split.accountId,
-            debit: 0,
-            credit: round2(split.amount),
-            description: split.description || 'Pago adquisicion',
-        })
+    // Debit: Percepciones sufridas (added to invoice, increases debt to acreedores)
+    const percepciones = (acq.withholdings || []).filter(w => w.kind === 'PERCEPCION' && w.amount > 0)
+    const percepcionesTotal = round2(percepciones.reduce((sum, p) => sum + p.amount, 0))
+    if (percepcionesTotal > 0) {
+        const percAccount = accounts.find(a => a.code === PERCEPCION_SUFRIDA_CODE)
+        if (percAccount) {
+            for (const perc of percepciones) {
+                lines.push({
+                    accountId: percAccount.id,
+                    debit: round2(perc.amount),
+                    credit: 0,
+                    description: `Percepcion ${perc.taxType} sufrida`,
+                })
+            }
+        }
     }
+
+    // Credit: Acreedores Varios por el TOTAL + percepciones
+    const acreedoresCredit = round2(acq.totalAmount + percepcionesTotal)
+    const cpLabel = acq.counterpartyName?.trim()
+        ? `Acreedor - ${acq.counterpartyName.trim()}`
+        : 'Acreedores Varios'
+    lines.push({
+        accountId: acreedoresAccountId,
+        debit: 0,
+        credit: acreedoresCredit,
+        description: cpLabel,
+    })
 
     const docRef = acq.docType && acq.docNumber
         ? ` - ${acq.docType} ${acq.docNumber}`
@@ -932,6 +949,17 @@ export async function buildFixedAssetAcquisitionEntry(
                 journalRole: 'acquisition',
                 assetId: asset.id,
                 assetName: asset.name,
+                counterparty: { name: acq.counterpartyName?.trim() || '', accountId: acreedoresAccountId },
+                totals: {
+                    net: acq.netAmount,
+                    vat: acq.vatAmount,
+                    percepciones: percepcionesTotal || undefined,
+                    total: acreedoresCredit,
+                },
+                discriminateVat: acq.withVat,
+                vatRate: acq.vatRate,
+                doc: { docType: acq.docType, number: acq.docNumber },
+                deductions: acq.deductions?.length ? acq.deductions : undefined,
                 externalId: buildFixedAssetAcquisitionExternalId(asset.id),
                 meta: {
                     source: 'fixedAssets',
@@ -944,8 +972,154 @@ export async function buildFixedAssetAcquisitionEntry(
     }
 }
 
+const buildFixedAssetPaymentExternalId = (assetId: string) =>
+    `FA_PAYMENT:${assetId}`
+
 /**
- * Sync (create or update) acquisition journal entry for a fixed asset
+ * Build payment journal entry #2 — PAGO INMEDIATO
+ *
+ * ASIENTO #2 (solo si pagadoAhora > 0):
+ *   Debit:  Acreedores Varios por monto cancelado (cash + desc.fin. + retenciones)
+ *   Credit: Banco / Caja / Valores / Documentos (cash según splits)
+ *   Credit: Descuentos Obtenidos (4.6.09) — descuento financiero
+ *   Credit: Retenciones a depositar (2.1.03.03) — retenciones practicadas
+ */
+export async function buildFixedAssetPaymentEntry(
+    asset: FixedAsset,
+    acquisitionEntryId?: string
+): Promise<JournalBuildResult> {
+    if (!asset.acquisition) {
+        return { entry: null, error: 'No hay datos de adquisicion.' }
+    }
+
+    const acq = asset.acquisition
+    if (!acq.splits || acq.splits.length === 0) {
+        return { entry: null, error: 'No hay pagos inmediatos registrados.' }
+    }
+
+    const splitsTotal = round2(acq.splits.reduce((sum, s) => sum + s.amount, 0))
+
+    // Retenciones (withheld from payment, credited to 2.1.03.03)
+    const retenciones = (acq.withholdings || []).filter(w => w.kind === 'RETENCION' && w.amount > 0)
+    const retencionesTotal = round2(retenciones.reduce((sum, r) => sum + r.amount, 0))
+
+    // Descuento financiero (financial discount, credited to 4.6.09)
+    const descFinDeductions = (acq.deductions || []).filter(d => d.type === 'DESCUENTO_FINANCIERO' && d.amount > 0)
+    const descFinTotal = round2(descFinDeductions.reduce((sum, d) => sum + d.amount, 0))
+
+    // Total that gets cancelled from Acreedores = cash + retenciones + desc.financiero
+    const paymentTotal = round2(splitsTotal + retencionesTotal + descFinTotal)
+    if (paymentTotal <= 0) {
+        return { entry: null, error: 'El total de pagos es 0.' }
+    }
+
+    const accounts = await db.accounts.toArray()
+
+    // Validate split accounts exist
+    for (const split of acq.splits) {
+        const splitAccount = accounts.find(a => a.id === split.accountId)
+        if (!splitAccount) {
+            return { entry: null, error: `Cuenta de pago no encontrada: ${split.accountId}` }
+        }
+    }
+
+    // Resolve acreedores account
+    let acreedoresAccountId: string
+    try {
+        acreedoresAccountId = await resolveAcreedoresAccountForFA(acq.counterpartyName)
+    } catch {
+        return { entry: null, error: 'Falta cuenta Acreedores Varios (2.1.06.01) en Plan de Cuentas.' }
+    }
+
+    const lines: EntryLine[] = []
+
+    // Debit: Acreedores por monto cancelado (includes desc.fin. + retenciones)
+    const cpLabel = acq.counterpartyName?.trim()
+        ? `Pago a ${acq.counterpartyName.trim()}`
+        : 'Pago Acreedores Varios'
+    lines.push({
+        accountId: acreedoresAccountId,
+        debit: paymentTotal,
+        credit: 0,
+        description: cpLabel,
+    })
+
+    // Credit: Cada medio de pago (cash)
+    for (const split of acq.splits) {
+        lines.push({
+            accountId: split.accountId,
+            debit: 0,
+            credit: round2(split.amount),
+            description: split.description || 'Pago adquisicion',
+        })
+    }
+
+    // Credit: Descuentos Obtenidos (4.6.09)
+    if (descFinTotal > 0) {
+        const descAccount = accounts.find(a => a.code === DESCUENTO_OBTENIDO_CODE)
+        if (descAccount) {
+            lines.push({
+                accountId: descAccount.id,
+                debit: 0,
+                credit: descFinTotal,
+                description: 'Descuento financiero obtenido',
+            })
+        }
+    }
+
+    // Credit: Retenciones a depositar (2.1.03.03)
+    if (retencionesTotal > 0) {
+        const retAccount = accounts.find(a => a.code === RETENCION_PRACTICADA_CODE)
+        if (retAccount) {
+            for (const ret of retenciones) {
+                lines.push({
+                    accountId: retAccount.id,
+                    debit: 0,
+                    credit: round2(ret.amount),
+                    description: `Retencion ${ret.taxType} a depositar`,
+                })
+            }
+        }
+    }
+
+    const docRef = acq.docType && acq.docNumber
+        ? ` - ${acq.docType} ${acq.docNumber}`
+        : ''
+
+    return {
+        entry: {
+            date: acq.date,
+            memo: `Pago Bien de Uso - ${asset.name}${docRef}`,
+            lines,
+            sourceModule: 'fixed-assets',
+            sourceId: asset.id,
+            sourceType: 'payment',
+            createdAt: new Date().toISOString(),
+            metadata: {
+                journalRole: 'payment',
+                assetId: asset.id,
+                assetName: asset.name,
+                counterparty: { name: acq.counterpartyName?.trim() || '', accountId: acreedoresAccountId },
+                paymentTotal,
+                retenciones: retencionesTotal || undefined,
+                descuentoFinanciero: descFinTotal || undefined,
+                applyTo: acquisitionEntryId
+                    ? { entryId: acquisitionEntryId, amount: paymentTotal }
+                    : undefined,
+                externalId: buildFixedAssetPaymentExternalId(asset.id),
+                meta: {
+                    source: 'fixedAssets',
+                    kind: 'payment',
+                    assetId: asset.id,
+                    periodId: asset.periodId,
+                },
+            },
+        },
+    }
+}
+
+/**
+ * Sync (create or update) acquisition journal entry #1 for a fixed asset
  */
 export async function syncFixedAssetAcquisitionEntry(
     asset: FixedAsset
@@ -981,6 +1155,42 @@ export async function syncFixedAssetAcquisitionEntry(
 
     const created = await createEntry(entry)
     await updateFixedAsset(asset.id, { acquisitionJournalEntryId: created.id })
+    return { success: true, entryId: created.id, status: 'generated' }
+}
+
+/**
+ * Sync (create or update) payment journal entry #2 for a fixed asset
+ * Only creates if there are immediate payments (splits with amount > 0)
+ */
+export async function syncFixedAssetPaymentEntry(
+    asset: FixedAsset
+): Promise<{ success: boolean; entryId?: string; error?: string; status?: 'generated' | 'updated' | 'skipped' }> {
+    if (!asset.acquisition) {
+        return { success: false, status: 'skipped' }
+    }
+
+    const paymentTotal = round2((asset.acquisition.splits || []).reduce((sum, s) => sum + s.amount, 0))
+    if (paymentTotal <= 0) {
+        return { success: true, status: 'skipped' }
+    }
+
+    const { entry, error } = await buildFixedAssetPaymentEntry(asset, asset.acquisitionJournalEntryId || undefined)
+    if (!entry) {
+        return { success: false, error: error || 'No se pudo generar el asiento de pago.' }
+    }
+
+    let existing: JournalEntry | undefined
+    if (asset.paymentJournalEntryId) {
+        existing = await db.entries.get(asset.paymentJournalEntryId)
+    }
+
+    if (existing) {
+        await updateEntry(existing.id, entry)
+        return { success: true, entryId: existing.id, status: 'updated' }
+    }
+
+    const created = await createEntry(entry)
+    await updateFixedAsset(asset.id, { paymentJournalEntryId: created.id })
     return { success: true, entryId: created.id, status: 'generated' }
 }
 

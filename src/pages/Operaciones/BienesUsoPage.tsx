@@ -33,8 +33,10 @@ import {
     Stamp,
     Lightning,
     ArrowsClockwise,
+    Info,
 } from '@phosphor-icons/react'
 import OperationsPageHeader from '../../components/OperationsPageHeader'
+import AmountInput from '../../components/AmountInput'
 import { db } from '../../storage/db'
 import type { JournalEntry } from '../../core/models'
 import {
@@ -52,6 +54,7 @@ import {
     buildFixedAssetOpeningEntry,
     syncFixedAssetOpeningEntry,
     syncFixedAssetAcquisitionEntry,
+    syncFixedAssetPaymentEntry,
     buildFixedAssetEventJournalEntry,
     createFixedAssetEvent,
     syncFixedAssetEventJournalEntry,
@@ -70,6 +73,8 @@ import {
     type FixedAssetEventType,
     type FixedAssetOriginType,
     type AcquisitionData,
+    type AcquisitionDeduction,
+    type AcquisitionTaxWithholding,
     type OpeningData,
     type PaymentSplit,
     FIXED_ASSET_CATEGORIES,
@@ -1747,17 +1752,9 @@ export default function BienesUsoPage() {
                                             ? 'Ajuste / Nuevo Valor'
                                             : 'Importe'}
                                 </label>
-                                <input
-                                    type="number"
-                                    value={eventForm.amount || ''}
-                                    onChange={e =>
-                                        setEventForm({
-                                            ...eventForm,
-                                            amount: parseFloat(e.target.value) || 0,
-                                        })
-                                    }
-                                    min="0"
-                                    step="0.01"
+                                <AmountInput
+                                    value={eventForm.amount}
+                                    onChange={v => setEventForm({ ...eventForm, amount: v })}
                                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                                 />
                             </div>
@@ -1836,6 +1833,11 @@ export default function BienesUsoPage() {
 const VAT_RATES = [21, 10.5, 27, 0] as const
 const DOC_TYPES = ['FC A', 'FC B', 'FC C', 'FC E', 'Ticket', 'Otro'] as const
 
+/** FC C / Ticket = emisor monotributo → NUNCA discrimina IVA */
+function docTypeAllowsVat(docType: string): boolean {
+    return docType !== 'FC C' && docType !== 'Ticket'
+}
+
 interface AssetModalProps {
     asset: FixedAsset | null
     periodId: string
@@ -1874,6 +1876,11 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
         asset?.originType || 'PURCHASE'
     )
 
+    // Counterparty name (proveedor)
+    const [counterpartyName, setCounterpartyName] = useState(
+        asset?.acquisition?.counterpartyName || ''
+    )
+
     // Acquisition data (for PURCHASE origin)
     const [acquisition, setAcquisition] = useState<AcquisitionData>(
         asset?.acquisition || createDefaultAcquisition()
@@ -1884,12 +1891,57 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
         asset?.opening || createDefaultOpening()
     )
 
+    // Deductions & Withholdings (for PURCHASE)
+    const [bonificacion, setBonificacion] = useState(0)
+    const [percepcionSufrida, setPercepcionSufrida] = useState(0)
+    const [descuentoFinanciero, setDescuentoFinanciero] = useState(0)
+    const [enableRetenciones, setEnableRetenciones] = useState(false)
+    const [retenciones, setRetenciones] = useState<AcquisitionTaxWithholding[]>([])
+    const [showRetForm, setShowRetForm] = useState(false)
+    const [newRetForm, setNewRetForm] = useState({ taxType: 'IVA' as AcquisitionTaxWithholding['taxType'], rate: 0, amount: 0 })
+
+    const retencionesTotal = retenciones.reduce((sum, r) => sum + r.amount, 0)
+
+    const addRetencion = () => {
+        if (newRetForm.amount <= 0) return
+        setRetenciones(prev => [...prev, {
+            id: `wh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            kind: 'RETENCION',
+            taxType: newRetForm.taxType,
+            rate: newRetForm.rate || undefined,
+            amount: Math.round(newRetForm.amount * 100) / 100,
+        }])
+        setNewRetForm({ taxType: 'IVA', rate: 0, amount: 0 })
+        setShowRetForm(false)
+    }
+    const removeRetencion = (id: string) => setRetenciones(prev => prev.filter(r => r.id !== id))
+
+    // Auto-compute retention amount when rate changes (% of IVA)
+    const handleRetRateChange = (rate: number) => {
+        const base = acquisition.withVat ? acquisition.vatAmount : 0
+        setNewRetForm(prev => ({
+            ...prev,
+            rate,
+            amount: rate > 0 && base > 0 ? Math.round(base * rate / 100 * 100) / 100 : prev.amount,
+        }))
+    }
+
     // Update lifeMonths when lifeYears changes
     useEffect(() => {
         if (formData.method === 'lineal-year') {
             setFormData(prev => ({ ...prev, lifeMonths: prev.lifeYears * 12 }))
         }
     }, [formData.lifeYears, formData.method])
+
+    // Auto-set withVat based on docType (FC C/Ticket → forced OFF)
+    useEffect(() => {
+        if (originType === 'PURCHASE') {
+            const allows = docTypeAllowsVat(acquisition.docType)
+            if (!allows) {
+                setAcquisition(prev => ({ ...prev, withVat: false }))
+            }
+        }
+    }, [acquisition.docType, originType])
 
     // Update acquisition amounts when values change
     useEffect(() => {
@@ -1934,16 +1986,6 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
         }))
     }
 
-    // Auto-distribute remaining amount to first split
-    const handleDistributeRemaining = () => {
-        const total = acquisition.totalAmount
-        const currentSum = acquisition.splits.reduce((sum, s) => sum + s.amount, 0)
-        const remaining = Math.round((total - currentSum) * 100) / 100
-        if (remaining > 0 && acquisition.splits.length > 0) {
-            handleUpdateSplit(0, 'amount', acquisition.splits[0].amount + remaining)
-        }
-    }
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
@@ -1963,18 +2005,16 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
 
         // Validate acquisition data for PURCHASE
         if (!isEditing && originType === 'PURCHASE') {
-            if (acquisition.splits.length === 0) {
-                onError('Debe agregar al menos una contrapartida de pago')
-                return
-            }
             const splitsTotal = acquisition.splits.reduce((sum, s) => sum + s.amount, 0)
-            if (Math.abs(splitsTotal - acquisition.totalAmount) > 0.01) {
-                onError(`Las contrapartidas (${splitsTotal.toFixed(2)}) no suman el total (${acquisition.totalAmount.toFixed(2)})`)
+            const debt = acquisition.totalAmount + percepcionSufrida
+            const paying = splitsTotal + descuentoFinanciero + retencionesTotal
+            if (paying > debt + 0.01) {
+                onError(`Pagos + retenciones + descuento ($${paying.toFixed(2)}) superan la deuda ($${debt.toFixed(2)})`)
                 return
             }
             for (const split of acquisition.splits) {
-                if (!split.accountId) {
-                    onError('Todas las contrapartidas deben tener una cuenta seleccionada')
+                if (split.amount > 0 && !split.accountId) {
+                    onError('Todos los medios de pago deben tener una cuenta seleccionada')
                     return
                 }
             }
@@ -2040,10 +2080,22 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                     lifeMonths: formData.method === 'lineal-month'
                         ? formData.lifeMonths
                         : formData.lifeYears * 12,
-                    acquisition: originType === 'PURCHASE' ? {
-                        ...acquisition,
-                        date: formData.acquisitionDate,
-                    } : undefined,
+                    acquisition: originType === 'PURCHASE' ? (() => {
+                        const deductions: AcquisitionDeduction[] = []
+                        if (bonificacion > 0) deductions.push({ type: 'BONIFICACION', amount: bonificacion })
+                        if (descuentoFinanciero > 0) deductions.push({ type: 'DESCUENTO_FINANCIERO', amount: descuentoFinanciero })
+                        const withholdings: AcquisitionTaxWithholding[] = [...retenciones]
+                        if (percepcionSufrida > 0) withholdings.push({
+                            id: `wh-perc-${Date.now()}`, kind: 'PERCEPCION', taxType: 'IVA', amount: percepcionSufrida,
+                        })
+                        return {
+                            ...acquisition,
+                            date: formData.acquisitionDate,
+                            counterpartyName: counterpartyName.trim(),
+                            deductions: deductions.length > 0 ? deductions : undefined,
+                            withholdings: withholdings.length > 0 ? withholdings : undefined,
+                        }
+                    })() : undefined,
                     opening: originType === 'OPENING' ? opening : undefined,
                 })
             }
@@ -2051,10 +2103,19 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
             // Generate appropriate journal entry
             if (savedAsset && Number.isFinite(fiscalYear)) {
                 if (originType === 'PURCHASE' && !isEditing) {
-                    // Generate acquisition entry
+                    // Generate acquisition entry #1 (factura → Acreedores)
                     const acqResult = await syncFixedAssetAcquisitionEntry(savedAsset)
                     if (!acqResult.success && acqResult.status !== 'skipped') {
                         onError(acqResult.error || 'No se pudo generar el asiento de adquisicion')
+                    }
+                    // Generate payment entry #2 (pagos inmediatos → Banco/Caja)
+                    // Refresh asset to get updated acquisitionJournalEntryId
+                    const refreshed = await db.fixedAssets.get(savedAsset.id)
+                    if (refreshed) {
+                        const payResult = await syncFixedAssetPaymentEntry(refreshed)
+                        if (!payResult.success && payResult.status !== 'skipped') {
+                            console.warn('Payment entry:', payResult.error)
+                        }
                     }
                 } else {
                     // Generate opening entry (for OPENING origin or editing)
@@ -2076,7 +2137,11 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
 
     // Calculate splits total for display
     const splitsTotal = acquisition.splits.reduce((sum, s) => sum + s.amount, 0)
-    const splitsRemaining = Math.round((acquisition.totalAmount - splitsTotal) * 100) / 100
+    // Total debt = invoice total + percepciones
+    const totalDebt = Math.round((acquisition.totalAmount + percepcionSufrida) * 100) / 100
+    // What's being paid off = cash + descuento financiero + retenciones
+    const totalPaidOff = Math.round((splitsTotal + descuentoFinanciero + retencionesTotal) * 100) / 100
+    const splitsRemaining = Math.round((totalDebt - totalPaidOff) * 100) / 100
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -2216,22 +2281,14 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-slate-500 mb-1.5">
-                                {originType === 'PURCHASE' && acquisition.withVat
-                                    ? 'Valor Neto (sin IVA) *'
+                                {originType === 'PURCHASE'
+                                    ? (acquisition.withVat ? 'Valor Neto (sin IVA) *' : 'Importe Total *')
                                     : 'Valor de Origen *'}
                             </label>
-                            <input
-                                type="number"
-                                value={formData.originalValue || ''}
-                                onChange={e =>
-                                    setFormData({
-                                        ...formData,
-                                        originalValue: parseFloat(e.target.value) || 0,
-                                    })
-                                }
-                                placeholder="0"
-                                min="0"
-                                step="0.01"
+                            <AmountInput
+                                value={formData.originalValue}
+                                onChange={v => setFormData({ ...formData, originalValue: v })}
+                                placeholder="0 o =expr"
                                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                             />
                         </div>
@@ -2242,17 +2299,20 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                         <div className="bg-blue-50 rounded-xl p-4 border border-blue-100 space-y-4">
                             <div className="flex items-center justify-between">
                                 <span className="text-sm font-semibold text-blue-800">Datos de la Compra</span>
-                                <label className="flex items-center gap-2 text-sm">
+                                <label className={`flex items-center gap-2 text-sm ${!docTypeAllowsVat(acquisition.docType) ? 'opacity-50 cursor-not-allowed' : ''}`}>
                                     <input
                                         type="checkbox"
                                         checked={acquisition.withVat}
+                                        disabled={!docTypeAllowsVat(acquisition.docType)}
                                         onChange={e => setAcquisition({
                                             ...acquisition,
                                             withVat: e.target.checked,
                                         })}
                                         className="w-4 h-4 text-blue-600 rounded"
                                     />
-                                    <span className="text-blue-700">Discrimina IVA</span>
+                                    <span className="text-blue-700">
+                                        {!docTypeAllowsVat(acquisition.docType) ? 'No discrimina IVA (Monotributo)' : 'Discrimina IVA'}
+                                    </span>
                                 </label>
                             </div>
 
@@ -2294,6 +2354,56 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                                 </div>
                             )}
 
+                            {/* Bonificación y Percepción (afectan factura) */}
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-blue-700 mb-1">
+                                        Bonificación (reduce valor del bien)
+                                    </label>
+                                    <AmountInput
+                                        value={bonificacion}
+                                        onChange={setBonificacion}
+                                        placeholder="0"
+                                        className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm"
+                                    />
+                                    {bonificacion > 0 && (
+                                        <p className="text-[10px] text-blue-500 mt-0.5 flex items-center gap-1">
+                                            <Info size={10} /> El valor de origen ya debe reflejar la bonificación
+                                        </p>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-blue-700 mb-1">
+                                        Percepción sufrida (s/neto)
+                                    </label>
+                                    <AmountInput
+                                        value={percepcionSufrida}
+                                        onChange={setPercepcionSufrida}
+                                        placeholder="0"
+                                        className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm"
+                                    />
+                                    {percepcionSufrida > 0 && (
+                                        <p className="text-[10px] text-blue-500 mt-0.5">
+                                            Deuda total: ${(acquisition.totalAmount + percepcionSufrida).toFixed(2)} (factura + percepción)
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Proveedor */}
+                            <div>
+                                <label className="block text-xs font-medium text-blue-700 mb-1">
+                                    Proveedor (vacío = Acreedores Varios genérico)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={counterpartyName}
+                                    onChange={e => setCounterpartyName(e.target.value)}
+                                    placeholder="Nombre del proveedor (opcional)"
+                                    className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm"
+                                />
+                            </div>
+
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs font-medium text-blue-700 mb-1">
@@ -2329,24 +2439,24 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                                 </div>
                             </div>
 
-                            {/* Payment Splits */}
+                            {/* Medios de Pago Inmediato */}
                             <div>
                                 <div className="flex items-center justify-between mb-2">
                                     <label className="text-xs font-medium text-blue-700">
-                                        Contrapartidas de Pago
+                                        Medios de Pago Inmediato
                                     </label>
                                     <button
                                         type="button"
                                         onClick={handleAddSplit}
                                         className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                                     >
-                                        + Agregar
+                                        + Agregar pago
                                     </button>
                                 </div>
 
                                 {acquisition.splits.length === 0 ? (
                                     <div className="text-xs text-blue-600 bg-blue-100 rounded-lg p-3 text-center">
-                                        Agrega al menos una cuenta de pago (ej: Bancos, Proveedores)
+                                        Sin pagos inmediatos — el total queda como deuda en Acreedores
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
@@ -2357,16 +2467,14 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                                                         accounts={modalAccounts}
                                                         value={split.accountId}
                                                         onChange={id => handleUpdateSplit(idx, 'accountId', id)}
-                                                        placeholder="Buscar cuenta..."
+                                                        placeholder="Banco / Caja / Valores..."
                                                     />
                                                 </div>
-                                                <input
-                                                    type="number"
-                                                    value={split.amount || ''}
-                                                    onChange={e => handleUpdateSplit(idx, 'amount', parseFloat(e.target.value) || 0)}
+                                                <AmountInput
+                                                    value={split.amount}
+                                                    onChange={v => handleUpdateSplit(idx, 'amount', v)}
                                                     placeholder="Monto"
                                                     className="w-28 px-2 py-1.5 bg-white border border-blue-200 rounded text-sm"
-                                                    step="0.01"
                                                 />
                                                 <button
                                                     type="button"
@@ -2378,22 +2486,155 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                                             </div>
                                         ))}
 
-                                        {/* Splits summary */}
-                                        <div className="flex justify-between text-xs pt-2 border-t border-blue-200">
-                                            <span className="text-blue-700">
-                                                Total contrapartidas: <span className="font-mono">${splitsTotal.toFixed(2)}</span>
-                                            </span>
-                                            {Math.abs(splitsRemaining) > 0.01 && (
-                                                <button
-                                                    type="button"
-                                                    onClick={handleDistributeRemaining}
-                                                    className={`font-medium ${splitsRemaining > 0 ? 'text-amber-600' : 'text-red-600'}`}
-                                                >
-                                                    {splitsRemaining > 0
-                                                        ? `Faltan $${splitsRemaining.toFixed(2)} - Completar`
-                                                        : `Exceso $${Math.abs(splitsRemaining).toFixed(2)}`
-                                                    }
-                                                </button>
+                                        {/* Descuento Financiero */}
+                                        <div className="flex gap-2 items-end pt-1">
+                                            <div className="flex-1">
+                                                <label className="text-[10px] font-medium text-blue-600">Descuento Financiero (pronto pago)</label>
+                                                <AmountInput
+                                                    value={descuentoFinanciero}
+                                                    onChange={setDescuentoFinanciero}
+                                                    placeholder="0"
+                                                    className="w-full px-2 py-1.5 bg-white border border-blue-200 rounded text-sm"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* Retenciones (agente de retención) */}
+                                        <div className="pt-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <label className="text-[10px] font-medium text-blue-600">Retenciones (s/IVA al pagar)</label>
+                                                <label className="flex items-center gap-1 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={enableRetenciones}
+                                                        onChange={e => {
+                                                            setEnableRetenciones(e.target.checked)
+                                                            if (!e.target.checked) { setRetenciones([]); setShowRetForm(false) }
+                                                        }}
+                                                        disabled={!acquisition.withVat}
+                                                        className="rounded border-blue-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                                                    />
+                                                    <span className="text-[10px] text-blue-500">Practicar</span>
+                                                </label>
+                                            </div>
+
+                                            {!acquisition.withVat && enableRetenciones === false && (
+                                                <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                                                    <Info size={10} /> No aplica: sin IVA discriminado.
+                                                </p>
+                                            )}
+
+                                            {enableRetenciones && acquisition.withVat && (
+                                                <>
+                                                    {acquisition.vatAmount > 0 && (
+                                                        <p className="text-[10px] text-blue-500 mb-1">
+                                                            Base IVA: ${acquisition.vatAmount.toFixed(2)}
+                                                        </p>
+                                                    )}
+
+                                                    {retenciones.length > 0 && (
+                                                        <div className="space-y-1 mb-1">
+                                                            {retenciones.map(r => (
+                                                                <div key={r.id} className="flex items-center justify-between bg-white px-2 py-1 rounded text-[10px]">
+                                                                    <span className="font-medium text-slate-700">
+                                                                        Ret. {r.taxType}{r.rate ? ` (${r.rate}%)` : ''}
+                                                                    </span>
+                                                                    <div className="flex items-center gap-1">
+                                                                        <span className="font-mono tabular-nums">${r.amount.toFixed(2)}</span>
+                                                                        <button type="button" onClick={() => removeRetencion(r.id)} className="text-slate-400 hover:text-red-500">
+                                                                            <Trash size={10} />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+
+                                                    <button type="button" onClick={() => setShowRetForm(!showRetForm)} className="text-blue-600 text-[10px] font-semibold flex items-center gap-1 hover:text-blue-700 mb-1">
+                                                        <Plus size={10} weight="bold" /> Agregar retención
+                                                    </button>
+
+                                                    {showRetForm && (
+                                                        <div className="bg-white rounded p-2 flex items-end gap-2 border border-blue-100">
+                                                            <div>
+                                                                <label className="text-[10px] font-medium text-slate-500">Impuesto</label>
+                                                                <select
+                                                                    value={newRetForm.taxType}
+                                                                    onChange={e => setNewRetForm(prev => ({ ...prev, taxType: e.target.value as AcquisitionTaxWithholding['taxType'] }))}
+                                                                    className="block w-full h-7 text-[10px] border border-slate-200 rounded px-1 cursor-pointer"
+                                                                >
+                                                                    <option value="IVA">IVA</option>
+                                                                    <option value="GANANCIAS">Ganancias</option>
+                                                                    <option value="IIBB">IIBB</option>
+                                                                    <option value="SUSS">SUSS</option>
+                                                                    <option value="OTRO">Otro</option>
+                                                                </select>
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-[10px] font-medium text-slate-500">% s/IVA</label>
+                                                                <input
+                                                                    type="number"
+                                                                    value={newRetForm.rate || ''}
+                                                                    onChange={e => handleRetRateChange(Number(e.target.value))}
+                                                                    className="block w-14 h-7 text-[10px] border border-slate-200 rounded px-1 font-mono text-right"
+                                                                    min={0} step={0.01} placeholder="%"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-[10px] font-medium text-slate-500">Importe</label>
+                                                                <input
+                                                                    type="number"
+                                                                    value={newRetForm.amount || ''}
+                                                                    onChange={e => setNewRetForm(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                                                                    className="block w-20 h-7 text-[10px] border border-slate-200 rounded px-1 font-mono text-right"
+                                                                    min={0} step={0.01}
+                                                                />
+                                                            </div>
+                                                            <button type="button" onClick={addRetencion} className="h-7 px-2 bg-blue-600 text-white text-[10px] font-semibold rounded hover:bg-blue-700">
+                                                                OK
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {/* Payment summary */}
+                                        <div className="space-y-1 text-xs pt-2 border-t border-blue-200">
+                                            <div className="flex justify-between text-blue-700">
+                                                <span>Efectivo/Banco:</span>
+                                                <span className="font-mono font-semibold">${splitsTotal.toFixed(2)}</span>
+                                            </div>
+                                            {descuentoFinanciero > 0 && (
+                                                <div className="flex justify-between text-blue-600">
+                                                    <span>Desc. financiero:</span>
+                                                    <span className="font-mono">${descuentoFinanciero.toFixed(2)}</span>
+                                                </div>
+                                            )}
+                                            {retencionesTotal > 0 && (
+                                                <div className="flex justify-between text-blue-600">
+                                                    <span>Retenciones:</span>
+                                                    <span className="font-mono">${retencionesTotal.toFixed(2)}</span>
+                                                </div>
+                                            )}
+                                            {percepcionSufrida > 0 && (
+                                                <div className="flex justify-between text-blue-500">
+                                                    <span>Deuda total (c/percep.):</span>
+                                                    <span className="font-mono">${totalDebt.toFixed(2)}</span>
+                                                </div>
+                                            )}
+                                            <div className="flex justify-between font-medium">
+                                                <span className={splitsRemaining > 0.01 ? 'text-amber-700' : 'text-emerald-700'}>
+                                                    Saldo pendiente:
+                                                </span>
+                                                <span className={`font-mono font-semibold ${splitsRemaining > 0.01 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                                                    ${Math.max(0, splitsRemaining).toFixed(2)}
+                                                </span>
+                                            </div>
+                                            {splitsRemaining < -0.01 && (
+                                                <div className="text-red-600 font-medium">
+                                                    Los pagos superan la deuda en ${Math.abs(splitsRemaining).toFixed(2)}
+                                                </div>
                                             )}
                                         </div>
                                     </div>
@@ -2412,17 +2653,12 @@ function AssetModal({ asset, periodId, onClose, onSuccess, onError }: AssetModal
                                     <label className="block text-xs font-medium text-emerald-700 mb-1">
                                         Amort. Acum. Inicial
                                     </label>
-                                    <input
-                                        type="number"
-                                        value={opening.initialAccumDep || ''}
-                                        onChange={e => setOpening({
-                                            ...opening,
-                                            initialAccumDep: parseFloat(e.target.value) || 0,
-                                        })}
-                                        placeholder="0"
-                                        min="0"
-                                        step="0.01"
+                                    <AmountInput
+                                        value={opening.initialAccumDep}
+                                        onChange={v => setOpening({ ...opening, initialAccumDep: v })}
+                                        placeholder="0 o =expr"
                                         className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-lg text-sm"
+                                        hintColor="text-emerald-500"
                                     />
                                     <p className="text-xs text-emerald-600 mt-1">
                                         Amortizacion acumulada al 01/01/{fiscalYear}

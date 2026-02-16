@@ -49,6 +49,36 @@ export interface PaymentSplit {
     amount: number
     percentage?: number
     description?: string
+    /** Instrumento: transferencia, efectivo, cheque, cheque_diferido, pagare */
+    instrumentType?: 'transferencia' | 'efectivo' | 'cheque' | 'cheque_diferido' | 'pagare'
+    /** Fecha de vencimiento (para cheque diferido, pagaré) */
+    dueDate?: string
+}
+
+/**
+ * Deduction on acquisition invoice
+ *
+ * - BONIFICACION: commercial discount → reduces asset value (lowers netAmount)
+ * - DESCUENTO_FINANCIERO: financial discount → exposed separately (Descuentos Obtenidos 4.6.09)
+ */
+export interface AcquisitionDeduction {
+    type: 'BONIFICACION' | 'DESCUENTO_FINANCIERO'
+    amount: number
+    description?: string
+}
+
+/**
+ * Retention/perception line on immediate payment (asiento #2)
+ *
+ * - RETENCION: withheld on IVA (when paying). Cr: Retenciones a depositar (2.1.03.03)
+ * - PERCEPCION: charged on neto (if applicable). Dr: Percepciones sufridas (1.1.03.08)
+ */
+export interface AcquisitionTaxWithholding {
+    id: string
+    kind: 'RETENCION' | 'PERCEPCION'
+    taxType: 'IVA' | 'IIBB' | 'GANANCIAS' | 'SUSS' | 'OTRO'
+    rate?: number    // % applied (informational)
+    amount: number
 }
 
 /**
@@ -58,12 +88,18 @@ export interface AcquisitionData {
     date: string           // Fecha del asiento de compra
     docType: string        // Tipo comprobante (FC A, FC B, etc)
     docNumber: string      // Numero comprobante
-    netAmount: number      // Neto gravado
+    netAmount: number      // Neto gravado (after bonificación)
     vatRate: number        // Alicuota IVA (21, 10.5, 27, 0)
     vatAmount: number      // Monto IVA
-    totalAmount: number    // Total factura
+    totalAmount: number    // Total factura (net + IVA - descto financiero)
     withVat: boolean       // true=discrimina IVA, false=sin IVA (IVA como costo)
-    splits: PaymentSplit[] // Contrapartidas (cuentas de pago)
+    splits: PaymentSplit[] // Pagos inmediatos (asiento #2); sum <= totalAmount
+    counterpartyName?: string // Nombre del proveedor (empty = genérico → Acreedores Varios)
+
+    /** Bonificación / Descuento financiero (asiento #1) */
+    deductions?: AcquisitionDeduction[]
+    /** Retenciones / Percepciones (asiento #2 — pago) */
+    withholdings?: AcquisitionTaxWithholding[]
 }
 
 /**
@@ -133,7 +169,8 @@ export interface FixedAsset {
     // Journal Linkage (prevents duplicates)
     linkedJournalEntryIds: string[]
     openingJournalEntryId?: string | null
-    acquisitionJournalEntryId?: string | null  // ID del asiento de compra
+    acquisitionJournalEntryId?: string | null  // ID del asiento de factura (devengamiento)
+    paymentJournalEntryId?: string | null      // ID del asiento de pago inmediato
 
     // Metadata
     notes?: string
@@ -189,11 +226,11 @@ export const CATEGORY_ACCOUNT_CODES: Record<FixedAssetCategory, {
         contraName: 'Amort. Acum. Instalaciones',
         assetType: 'TANGIBLE',
     },
-    'Maquinarias': {
+    'Muebles y Utiles': {
         asset: '1.2.01.03',
         contra: '1.2.01.93',
-        name: 'Maquinarias',
-        contraName: 'Amort. Acum. Maquinarias',
+        name: 'Muebles y Utiles',
+        contraName: 'Amort. Acum. Muebles y Utiles',
         assetType: 'TANGIBLE',
     },
     'Rodados': {
@@ -203,30 +240,30 @@ export const CATEGORY_ACCOUNT_CODES: Record<FixedAssetCategory, {
         contraName: 'Amort. Acum. Rodados',
         assetType: 'TANGIBLE',
     },
-    'Muebles y Utiles': {
+    'Equipos de Computacion': {
         asset: '1.2.01.05',
         contra: '1.2.01.95',
-        name: 'Muebles y Utiles',
-        contraName: 'Amort. Acum. Muebles y Utiles',
-        assetType: 'TANGIBLE',
-    },
-    'Equipos de Computacion': {
-        asset: '1.2.01.06',
-        contra: '1.2.01.96',
         name: 'Equipos de Computacion',
         contraName: 'Amort. Acum. Equipos Computacion',
         assetType: 'TANGIBLE',
     },
     'Terrenos': {
-        asset: '1.2.01.07',
-        contra: '1.2.01.97',
+        asset: '1.2.01.06',
+        contra: '1.2.01.96',
         name: 'Terrenos',
         contraName: 'Amort. Acum. Terrenos',
         assetType: 'TANGIBLE',
     },
-    'Otros': {
+    'Maquinarias': {
         asset: '1.2.01.08',
         contra: '1.2.01.98',
+        name: 'Maquinarias',
+        contraName: 'Amort. Acum. Maquinarias',
+        assetType: 'TANGIBLE',
+    },
+    'Otros': {
+        asset: '1.2.01.09',
+        contra: '1.2.01.99',
         name: 'Otros Bienes de Uso',
         contraName: 'Amort. Acum. Otros Bienes',
         assetType: 'TANGIBLE',

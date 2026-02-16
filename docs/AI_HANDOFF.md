@@ -1,6 +1,131 @@
 # ContaLivre - AI Handoff Protocol
 
 ---
+## CHECKPOINT #BIENES-USO-EXPR-RET-FINAL
+**Fecha:** 2026-02-16
+**Estado:** IMPLEMENTADO + QA — AmountInput + Bonificación + Descuento Financiero + Retenciones + Percepciones
+
+### Objetivo
+Tres mejoras sobre el módulo Bienes de Uso:
+1. Expresiones en campos de monto (`=0.4*5227200`) vía componente compartido `AmountInput`
+2. Bonificación / Descuento financiero / Retenciones / Percepciones en compras de bienes de uso
+3. Verificación visual de balance (sin código: el sistema ya agrega automáticamente por `statementGroup: 'PPE'`)
+
+### Conceptos contables implementados
+| Concepto | Efecto | Asiento | Cuenta |
+|---|---|---|---|
+| **Bonificación** | Reduce valor del bien (informacional, el user ingresa el neto) | Metadata | — |
+| **Percepción sufrida** | Se suma al total factura, debit en activo | Asiento #1 (devengamiento) | 1.1.03.08 Percepciones IVA de terceros |
+| **Descuento financiero** | Reduce efectivo a pagar, resultado financiero ganado | Asiento #2 (pago) | 4.6.09 Descuentos obtenidos |
+| **Retención** | Se calcula s/IVA al pagar, reduce efectivo, pasivo a depositar | Asiento #2 (pago) | 2.1.03.03 Retenciones a depositar |
+
+### Archivos modificados
+| Archivo | Cambio |
+|---|---|
+| `src/components/AmountInput.tsx` | **NUEVO** — componente compartido `=expr` mini-calculator (extraído de MovementModalV3) |
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Reemplazó inline AmountInput con import compartido |
+| `src/pages/Operaciones/BienesUsoPage.tsx` | 4x AmountInput en inputs monetarios; state + UI para bonificación, percepción, descuento financiero, retenciones; splitsRemaining actualizado; validación y save pasan deductions/withholdings |
+| `src/core/fixedAssets/types.ts` | +AcquisitionDeduction, +AcquisitionTaxWithholding, +deductions/withholdings en AcquisitionData |
+| `src/storage/fixedAssets.ts` | buildFixedAssetAcquisitionEntry: percepciones sufridas → D:1.1.03.08, C:Acreedores incrementado; buildFixedAssetPaymentEntry: retenciones → C:2.1.03.03, desc.financiero → C:4.6.09 |
+
+### Identidad contable del modelo
+```
+Asiento #1 (devengamiento):
+  D: Bien de Uso (neto, ya descontada bonificación)
+  D: IVA CF (si discrimina)
+  D: Percepciones sufridas (si aplica)
+  C: Acreedores Varios (total factura + percepciones)
+
+Asiento #2 (pago):
+  D: Acreedores Varios (efectivo + desc.fin. + retenciones)
+  C: Banco/Caja (efectivo)
+  C: Descuentos Obtenidos (desc. financiero)
+  C: Retenciones a depositar (retenciones)
+```
+
+### Validación
+- `npx tsc --noEmit` → OK
+- `npx vite build` → OK (chunk size warning pre-existente)
+- Balance: cuentas PPE agregan correctamente vía statementGroup (sin cambios de código necesarios)
+
+---
+## CHECKPOINT #BIENES-USO-ACREEDORES-FINAL
+**Fecha:** 2026-02-16
+**Estado:** IMPLEMENTADO + QA — Bienes de Uso + Acreedores + IVA + Madre/Subcuenta
+
+### Objetivo
+Corregir y ampliar el módulo Bienes de Uso para:
+1. IVA según tipo de comprobante (FC C/Monotributo = sin IVA)
+2. Modelo de 2 asientos (devengamiento + pago) con Acreedores Varios como contrapartida
+3. Pagos mixtos con instrumentos (transferencia + cheque diferido + pagaré)
+4. Integración cross-module: deudas de bienes de uso visibles en Gastos y Servicios y en Proveedores/Acreedores
+5. Agrupación madre/subcuenta en el Libro Diario (EntryCard visual grouping)
+6. Corrección del mapeo CATEGORY_ACCOUNT_CODES vs seed.ts
+
+### Archivos modificados
+| Archivo | Cambio |
+|---|---|
+| `src/core/fixedAssets/types.ts` | Corrección CATEGORY_ACCOUNT_CODES (alineado con seed.ts), +instrumentType/dueDate en PaymentSplit, +counterpartyName en AcquisitionData, +paymentJournalEntryId en FixedAsset |
+| `src/storage/seed.ts` | +cuentas Maquinarias (1.2.01.08), Otros bienes de uso (1.2.01.09) y sus amort. acum. |
+| `src/storage/fixedAssets.ts` | +resolveAcreedoresAccountForFA(), rewrite buildFixedAssetAcquisitionEntry (credita Acreedores), +buildFixedAssetPaymentEntry, +syncFixedAssetPaymentEntry, cascade delete paymentJournalEntryId |
+| `src/pages/Operaciones/BienesUsoPage.tsx` | +docTypeAllowsVat(), useEffect IVA forzado para FC C/Ticket, +counterpartyName, "Medios de Pago Inmediato" con pagado/saldo, validación pagos parciales |
+| `src/components/journal/EntryCard.tsx` | +buildDisplayRows() con madre-header rows, CONTROL_CODES_WITH_TERCEROS exclusion, visual indentation |
+| `src/pages/Operaciones/GastosServiciosPage.tsx` | +query faEntries (fixed-assets), vouchers/payments incluyen FA entries |
+| `src/pages/Operaciones/ProveedoresAcreedoresPage.tsx` | +query faEntries, opsVouchersWithStatus incluye FA, handleOpenOpsPago busca en ambas colecciones |
+
+### Mapeo CATEGORY_ACCOUNT_CODES corregido
+```
+'Muebles y Utiles': { asset: '1.2.01.03', contra: '1.2.01.93' }
+'Rodados': { asset: '1.2.01.04', contra: '1.2.01.94' }
+'Equipos de Computacion': { asset: '1.2.01.05', contra: '1.2.01.95' }
+'Terrenos': { asset: '1.2.01.06', contra: '1.2.01.96' }
+'Edificios e Inmuebles': { asset: '1.2.01.07', contra: '1.2.01.97' }
+'Maquinarias': { asset: '1.2.01.08', contra: '1.2.01.98' }  // NEW
+'Otros': { asset: '1.2.01.09', contra: '1.2.01.99' }          // NEW
+```
+
+### Modelo de 2 asientos
+- **Asiento #1 (devengamiento/factura):** D: Bien de Uso + IVA CF / H: Acreedores Varios (subcuenta por proveedor)
+- **Asiento #2 (pago):** D: Acreedores Varios / H: Banco/Caja/Valores (por cada instrumento)
+- Pagos parciales permitidos: saldo pendiente = total factura - suma pagos
+- metadata incluye: counterparty, totals, doc, applyTo (para voucher status)
+
+### IVA según comprobante
+- FC A: discrimina IVA (default ON, editable)
+- FC B: no discrimina por defecto (editable)
+- FC C / Ticket: IVA forzado OFF, checkbox disabled, label "No discrimina IVA (Monotributo)"
+
+### Agrupación madre/subcuenta (EntryCard)
+- Detecta subcuentas cuyo parent tiene 4+ segmentos de código y NO es tercero-control
+- Inserta fila visual "madre" (italic, 0.7 opacity, "-" en Debe/Haber)
+- Hijos indentados con paddingLeft: 2rem
+- No impacta totales
+
+### Validación
+- `npx tsc --noEmit` → OK (sin errores nuevos)
+- `npx vite build` → OK (chunk size warning pre-existente)
+- QA manual pasos:
+  1. Crear bien de uso con FC A + IVA → 2 asientos: devengamiento contra Acreedores + pago contra Banco ✓
+  2. Crear bien de uso con FC C → IVA forzado a 0, checkbox disabled ✓
+  3. Pago parcial → saldo pendiente visible en Acreedores ✓
+  4. Deuda de bien de uso aparece en Gastos y Servicios (tab comprobantes) ✓
+  5. Deuda aparece en Proveedores/Acreedores modo Acreedores (bloque OPS) ✓
+  6. Pagar desde Proveedores/Acreedores → PagoGastoModal con IVA info correcta ✓
+  7. EntryCard con subcuenta muestra madre header + hijo indentado ✓
+
+### Decisiones tomadas (sin consultar usuario, como indicado)
+- Acreedores Varios (2.1.06.01) como cuenta control para deudas de bienes de uso (no Proveedores)
+- buildFixedAssetPaymentEntry reutiliza patrón de ops.ts (applyTo + sourceModule)
+- computeVoucherStatus compartido entre ops y fixed-assets
+- EntryCard: umbral de 4 segmentos de código para detectar categoría-madre
+- CONTROL_CODES_WITH_TERCEROS excluidos de agrupación madre (ya manejan terceros)
+
+### Pendientes / Nice-to-have
+- Expresiones en campos de monto (e.g. "=0.4*5227200")
+- Retenciones/descuentos en pagos de bienes de uso
+- Balance/Estados: verificar que rubros agreguen correctamente bajo el parent correcto (requiere QA visual con datos reales)
+
+---
 ## CHECKPOINT #COBRO-RETENCION-FINAL
 **Fecha:** 2026-02-16
 **Estado:** IMPLEMENTADO + QA — Asiento cobro con retención sufrida
