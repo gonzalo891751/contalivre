@@ -340,6 +340,7 @@ export default function MovementModalV3({
 
     // P2: Pagos/Cobros posteriores
     const [pagoCobroMode, setPagoCobroMode] = useState<PagoCobroMode>('COBRO')
+    const [showAllPagoTerceros, setShowAllPagoTerceros] = useState(false)
     const [pagoCobro, setPagoCobro] = useState({
         tercero: '',
         originMovementId: '',
@@ -368,6 +369,7 @@ export default function MovementModalV3({
         setPagoCobroCondicion({ commercialDiscountPct: 0, financialDiscountPct: 0 })
         setPagoCobroSplits([{ id: 'pc-split-1', accountId: '', amount: 0 }])
         setPagoCobroRetencion({ enabled: false, calcMode: 'PERCENT', rate: 100, base: 'IVA', taxType: 'IVA', amount: 0 })
+        setShowAllPagoTerceros(false)
     }, [pagoCobroMode])
 
     // Pending documents for payment/collection selection (Open Items)
@@ -549,12 +551,16 @@ export default function MovementModalV3({
         let baseList = existingTerceros
         if (mainTab === 'venta') baseList = clienteTerceros
         else if (mainTab === 'compra') baseList = proveedorTerceros
-        // For pagos, show all
+        else if (mainTab === 'pagos') {
+            const roleScoped = pagoCobroMode === 'COBRO' ? clienteTerceros : proveedorTerceros
+            const allowAll = !pagoCobro.originMovementId && showAllPagoTerceros
+            baseList = allowAll ? existingTerceros : roleScoped
+        }
 
         if (!query?.trim()) return baseList
         const q = query.toLowerCase().trim()
         return baseList.filter(t => t.name.toLowerCase().includes(q))
-    }, [mainTab, pagoCobro.tercero, formData.counterparty, existingTerceros, clienteTerceros, proveedorTerceros])
+    }, [mainTab, pagoCobroMode, pagoCobro.tercero, pagoCobro.originMovementId, showAllPagoTerceros, formData.counterparty, existingTerceros, clienteTerceros, proveedorTerceros])
 
     // Sync pagoCobro amount when selecting a pending document
     useEffect(() => {
@@ -3273,6 +3279,17 @@ export default function MovementModalV3({
                                             <label className="block text-xs font-semibold text-slate-700 mb-1">
                                                 {pagoCobroMode === 'COBRO' ? 'Cliente' : 'Proveedor'} <span className="text-red-400">*</span>
                                             </label>
+                                            {!pagoCobro.originMovementId && (
+                                                <label className="mb-2 inline-flex items-center gap-2 text-[11px] text-slate-500">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={showAllPagoTerceros}
+                                                        onChange={(e) => setShowAllPagoTerceros(e.target.checked)}
+                                                        className="h-3.5 w-3.5 rounded border-slate-300"
+                                                    />
+                                                    Ver todos
+                                                </label>
+                                            )}
                                             <input
                                                 type="text"
                                                 value={pagoCobro.tercero}
@@ -5423,4 +5440,3 @@ export default function MovementModalV3({
         </div>
     )
 }
-

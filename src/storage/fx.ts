@@ -102,6 +102,7 @@ const isValidDate = (value: string) => {
     const time = Date.parse(value)
     return !Number.isNaN(time)
 }
+const round2 = (value: number) => Math.round(value * 100) / 100
 
 const parseISODateLocal = (value: string): Date | null => {
     const [y, m, d] = value.split('-').map(Number)
@@ -119,6 +120,17 @@ const addMonths = (dateISO: string, months: number): string => {
     const day = base.getDate()
     const next = new Date(year, month + months, day)
     return getLocalDateISO(next)
+}
+
+async function calculateDebtInterestPendingARS(debtId: string): Promise<number> {
+    const movements = await db.fxMovements.where('debtId').equals(debtId).toArray()
+    const accrued = movements
+        .filter(m => m.type === 'DEVENGO_INTERES')
+        .reduce((sum, m) => sum + (m.arsAmount || 0), 0)
+    const paid = movements
+        .filter(m => m.type === 'PAGO_DEUDA')
+        .reduce((sum, m) => sum + (m.interestAppliedARS ?? m.interestARS ?? 0), 0)
+    return round2(Math.max(0, accrued - paid))
 }
 
 function generateFxDebtSchedule(params: {
@@ -425,9 +437,6 @@ async function buildJournalEntriesForFxMovement(
     // 4. Diferencia de cambio account
     const difCambioId = resolveMappedAccountId(accounts, settings, 'diferenciaCambio')
 
-    // 5. Intereses account
-    const interesesId = resolveMappedAccountId(accounts, settings, 'interesesPerdidos')
-
     // 6. Debt disbursement accounts (liability + asset target)
     let debtLiabilityAccountId: string | null = null
     let debtAssetAccountId: string | null = null
@@ -593,13 +602,17 @@ async function buildJournalEntriesForFxMovement(
     // === PAGO_DEUDA: Debit Pasivo + Intereses, Credit Contrapartida ===
     if (movement.type === 'PAGO_DEUDA' && fxAccount.type === 'LIABILITY') {
         const capitalME = movement.capitalAmount || movement.amount
-        const interestARS = movement.interestARS || 0
-        const capitalARS = capitalME * movement.rate
+        const interestARS = movement.interestAppliedARS ?? movement.interestARS ?? 0
+        const capitalARS = movement.capitalAppliedARS ?? (capitalME * movement.rate)
         const totalARS = capitalARS + interestARS + comisionARS
+        const interesesDevengarId = resolveAccountId(accounts, {
+            code: '2.1.05.90',
+            names: ['Intereses a devengar', 'Intereses devengados'],
+        })
 
         addLine(meAccountId!, capitalARS, 0, `Pago capital ${capitalME} ${movement.currency}`)
-        if (interestARS > 0 && interesesId) {
-            addLine(interesesId, interestARS, 0, 'Intereses')
+        if (interestARS > 0 && interesesDevengarId) {
+            addLine(interesesDevengarId, interestARS, 0, 'Cancelación intereses devengados')
         }
         if (comisionARS > 0 && comisionId) {
             addLine(comisionId, comisionARS, 0, 'Comisión')
@@ -1740,8 +1753,7 @@ export async function addFxDebtDisbursement(params: {
 
 export async function addFxDebtPayment(params: {
     debtId: string
-    capitalME: number
-    interestARS?: number
+    totalARS: number
     rate: number
     date: string
     contrapartidaAccountId?: string
@@ -1753,17 +1765,25 @@ export async function addFxDebtPayment(params: {
     if (!debt) {
         throw new Error('Deuda no encontrada')
     }
-    if (params.capitalME <= 0) {
-        throw new Error('El capital a pagar debe ser mayor a 0.')
-    }
-    if (params.capitalME > debt.saldoME) {
-        throw new Error('El pago excede el saldo de la deuda.')
+    if (params.totalARS <= 0) {
+        throw new Error('El pago debe ser mayor a 0.')
     }
     if (params.rate <= 0) {
         throw new Error('El tipo de cambio debe ser mayor a 0.')
     }
     if (!isValidDate(params.date)) {
         throw new Error('Fecha de pago inválida.')
+    }
+
+    const interestPendingARS = await calculateDebtInterestPendingARS(debt.id)
+    const interestPaidARS = round2(Math.min(params.totalARS, interestPendingARS))
+    const capitalPaidARS = round2(params.totalARS - interestPaidARS)
+    const capitalME = debt.currency === 'ARS'
+        ? round2(capitalPaidARS)
+        : round2(capitalPaidARS / params.rate)
+
+    if (capitalME > debt.saldoME + 0.01) {
+        throw new Error('El pago excede el saldo pendiente de capital + intereses devengados.')
     }
 
     const autoJournal = params.autoJournal ?? debt.autoJournal
@@ -1775,19 +1795,21 @@ export async function addFxDebtPayment(params: {
         type: 'PAGO_DEUDA',
         accountId: debt.accountId,
         periodId: debt.periodId,
-        amount: params.capitalME,
+        amount: capitalME,
         currency: debt.currency,
         rate: params.rate,
         rateType: debt.rateType,
         rateSide: debt.rateSide,
         rateSource: 'Manual',
-        arsAmount: params.capitalME * params.rate,
+        arsAmount: capitalPaidARS,
         autoJournal,
         linkedJournalEntryIds: [],
         journalStatus: autoJournal ? 'generated' : 'none',
         debtId: debt.id,
-        capitalAmount: params.capitalME,
-        interestARS: params.interestARS || 0,
+        capitalAmount: capitalME,
+        interestARS: interestPaidARS,
+        capitalAppliedARS: capitalPaidARS,
+        interestAppliedARS: interestPaidARS,
         contrapartidaAccountId: params.contrapartidaAccountId,
         comisionARS: params.comisionARS,
         comisionAccountId: params.comisionAccountId,
@@ -1796,11 +1818,11 @@ export async function addFxDebtPayment(params: {
         updatedAt: now,
     }
 
-    const nextSaldoME = Math.max(0, debt.saldoME - params.capitalME)
+    const nextSaldoME = Math.max(0, round2(debt.saldoME - capitalME))
     let nextPaidInstallments = debt.paidInstallments || 0
     let nextSchedule = debt.schedule || []
     const unpaidIndex = nextSchedule.findIndex(item => !item.paid)
-    if (unpaidIndex >= 0 && params.capitalME >= (nextSchedule[unpaidIndex].capitalME || 0)) {
+    if (unpaidIndex >= 0 && capitalME >= (nextSchedule[unpaidIndex].capitalME || 0)) {
         nextSchedule = nextSchedule.map((item, index) => {
             if (index !== unpaidIndex) return item
             return {
@@ -1814,7 +1836,8 @@ export async function addFxDebtPayment(params: {
         nextPaidInstallments = Math.max(nextPaidInstallments, unpaidIndex + 1)
     }
 
-    const nextStatus: FxDebt['status'] = nextSaldoME <= 0 ? 'PAID' : 'ACTIVE'
+    const remainingInterestPendingARS = round2(Math.max(0, interestPendingARS - interestPaidARS))
+    const nextStatus: FxDebt['status'] = nextSaldoME <= 0 && remainingInterestPendingARS <= 0 ? 'PAID' : 'ACTIVE'
 
     const fxAccount = await getFxAccountById(movement.accountId)
     const createdEntries: JournalEntry[] = []
