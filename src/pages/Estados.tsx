@@ -301,18 +301,24 @@ export default function Estados() {
     // Data Loading
     // ============================================
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
-    // Aislamiento por contexto (Fase 2A): el ESP es un stock a la fecha de
-    // corte, por lo que incluye asientos hasta globalEnd (los saldos previos
-    // al ejercicio ingresan por este mecanismo explícito de acumulación,
-    // mientras no exista refundición/apertura formal). Nunca incluye asientos
-    // posteriores al corte ni borradores. El ER filtra su propio rango.
+    // Aislamiento por contexto: el ESP es un stock a la fecha de corte.
+    // - Sin apertura formal: incluye la historia acumulada hasta globalEnd
+    //   (mecanismo explícito de la Fase 2A).
+    // - Con asiento de apertura formal contabilizado (cierre Fase 2B): los
+    //   saldos iniciales ya están DENTRO del ejercicio; incluir la historia
+    //   previa duplicaría, así que se limita al rango del ejercicio.
+    // Nunca incluye asientos posteriores al corte ni borradores.
     const entries = useLiveQuery(
-        () => db.entries
-            .where('date')
-            .belowOrEqual(globalEnd)
-            .toArray()
-            .then(list => list.filter(e => e.status !== 'DRAFT')),
-        [globalEnd]
+        async () => {
+            const list = (await db.entries
+                .where('date')
+                .belowOrEqual(globalEnd)
+                .toArray()).filter(e => e.status !== 'DRAFT')
+            const hasOpening = list.some(e =>
+                e.date >= globalStart && e.sourceModule === 'closing' && e.sourceType === 'apertura')
+            return hasOpening ? list.filter(e => e.date >= globalStart) : list
+        },
+        [globalStart, globalEnd]
     )
 
     // Compute ledger and trial balance for statements

@@ -40,6 +40,8 @@ export const TEST_ACCOUNTS: Account[] = [
     makeAccount({ id: 'proveedores', code: '2.1.01.01', name: 'Proveedores', kind: 'LIABILITY', statementGroup: 'TRADE_PAYABLES', group: 'Deudas comerciales' }),
     makeAccount({ id: 'gastos-a-pagar', code: '2.1.06.03', name: 'Gastos a pagar', kind: 'LIABILITY', statementGroup: 'OTHER_PAYABLES', group: 'Otras deudas' }),
     makeAccount({ id: 'capital', code: '3.1.01', name: 'Capital social', kind: 'EQUITY', statementGroup: 'CAPITAL', group: 'Capital' }),
+    makeAccount({ id: 'resultado-ejercicio', code: '3.2.01', name: 'Resultado del ejercicio', kind: 'EQUITY', statementGroup: 'RETAINED_EARNINGS', group: 'Resultados acumulados' }),
+    makeAccount({ id: 'resultados-no-asignados', code: '3.2.02', name: 'Resultados no asignados', kind: 'EQUITY', statementGroup: 'RETAINED_EARNINGS', group: 'Resultados acumulados' }),
     makeAccount({ id: 'ventas', code: '4.1.01', name: 'Ventas', kind: 'INCOME', statementGroup: 'SALES', group: 'Ventas', section: 'OPERATING' }),
     makeAccount({ id: 'cmv', code: '4.2.01', name: 'Costo de mercaderías vendidas', kind: 'EXPENSE', statementGroup: 'COGS', group: 'Costo de ventas', section: 'COST' }),
     makeAccount({ id: 'gastos', code: '4.3.01', name: 'Gastos de administración', kind: 'EXPENSE', statementGroup: 'ADMIN_EXPENSES', group: 'Gastos', section: 'ADMIN' }),

@@ -63,12 +63,32 @@ export async function getEntriesForContext(ctx: ReportingContext): Promise<Journ
 }
 
 /**
+ * ¿El ejercicio del contexto tiene contabilizado su asiento de apertura
+ * formal (generado por el servicio de cierre)?
+ */
+export async function hasFormalOpeningEntry(ctx: ReportingContext): Promise<boolean> {
+    const entries = await db.entries
+        .where('date')
+        .between(ctx.periodStart, ctx.periodEnd, true, true)
+        .toArray()
+    return entries.some(e =>
+        e.status !== 'DRAFT' && e.sourceModule === 'closing' && e.sourceType === 'apertura')
+}
+
+/**
  * Saldos de apertura: mecanismo EXPLÍCITO para incorporar al ESP los saldos
  * acumulados de ejercicios anteriores mientras no exista refundición formal.
  * Devuelve neto Debe-Haber por cuenta de los asientos previos al inicio del
  * contexto. El ER nunca debe usar esto.
+ *
+ * Fase 2B: si el ejercicio tiene ASIENTO DE APERTURA formal contabilizado,
+ * los saldos iniciales ya están DENTRO del ejercicio y este mecanismo
+ * devuelve vacío (evita la doble contabilización de la historia previa).
  */
 export async function getOpeningBalances(ctx: ReportingContext): Promise<Map<string, { debit: number; credit: number }>> {
+    if (await hasFormalOpeningEntry(ctx)) {
+        return new Map()
+    }
     const prior = await db.entries
         .where('date')
         .below(ctx.periodStart)

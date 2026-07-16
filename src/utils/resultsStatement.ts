@@ -67,12 +67,24 @@ export function getClosingEntryIds(entries: JournalEntry[], accounts: Account[])
 }
 
 /**
- * Filtra los asientos excluyendo los de cierre
+ * ¿Es un asiento de refundición/transferencia del servicio de cierre?
+ * (Fase 2B: identificación ESTRUCTURAL por sourceModule/sourceType,
+ * no heurística). La apertura NO se excluye: integra saldos patrimoniales.
+ */
+export function isStructuralClosingEntry(entry: JournalEntry): boolean {
+    return entry.sourceModule === 'closing' && entry.sourceType !== 'apertura'
+}
+
+/**
+ * Filtra los asientos excluyendo los de cierre.
+ * Primero excluye los estructurales (servicio de cierre Fase 2B) y luego
+ * aplica la heurística legacy para cierres manuales históricos.
  */
 export function excludeClosingEntries(entries: JournalEntry[], accounts: Account[]): JournalEntry[] {
-    const closingIds = getClosingEntryIds(entries, accounts)
-    if (closingIds.length === 0) return entries
-    return entries.filter(e => !closingIds.includes(e.id))
+    const withoutStructural = entries.filter(e => !isStructuralClosingEntry(e))
+    const closingIds = getClosingEntryIds(withoutStructural, accounts)
+    if (closingIds.length === 0) return withoutStructural
+    return withoutStructural.filter(e => !closingIds.includes(e.id))
 }
 
 /**

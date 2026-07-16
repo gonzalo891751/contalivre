@@ -25,17 +25,22 @@ export interface FinancialData {
 }
 
 export function useIndicatorsMetrics() {
-    // Aislamiento por contexto (Fase 2A): stock a la fecha de corte del
-    // ejercicio seleccionado; sin asientos posteriores ni borradores.
-    const { end } = usePeriodYear();
+    // Aislamiento por contexto: stock a la fecha de corte del ejercicio
+    // seleccionado; sin asientos posteriores ni borradores. Con apertura
+    // formal contabilizada, se limita al rango del ejercicio (Fase 2B).
+    const { start, end } = usePeriodYear();
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray());
     const entries = useLiveQuery(
-        () => db.entries
-            .where('date')
-            .belowOrEqual(end)
-            .toArray()
-            .then(list => list.filter(e => e.status !== 'DRAFT')),
-        [end]
+        async () => {
+            const list = (await db.entries
+                .where('date')
+                .belowOrEqual(end)
+                .toArray()).filter(e => e.status !== 'DRAFT');
+            const hasOpening = list.some(e =>
+                e.date >= start && e.sourceModule === 'closing' && e.sourceType === 'apertura');
+            return hasOpening ? list.filter(e => e.date >= start) : list;
+        },
+        [start, end]
     );
 
     const metrics = useMemo<FinancialData | null>(() => {
