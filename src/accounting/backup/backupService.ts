@@ -9,7 +9,7 @@
  */
 
 import { db } from '../../storage/db'
-import { APP_VERSION, SCHEMA_VERSION } from '../migration/migrateV17'
+import { APP_VERSION, CURRENT_SCHEMA_VERSION as SCHEMA_VERSION } from '../migration/versions'
 import { getSystemMeta } from '../application/contextService'
 import { appendAuditEvent } from '../audit/auditLog'
 import { LOCAL_ACTOR } from '../domain/types'

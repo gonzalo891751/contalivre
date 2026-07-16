@@ -11,7 +11,7 @@
 
 import type { Account, JournalEntry } from '../../core/models'
 import type { AccountingExercise, AccountingPeriod } from '../domain/types'
-import { moneyEquals, sumMoney, validateAmount } from '../domain/money'
+import { isCentExact, moneyEquals, sumMoney, validateAmount } from '../domain/money'
 import { isActiveAccount, isPostableAccount } from '../taxonomy/taxonomy'
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -115,6 +115,15 @@ export function validateForPosting(
         const creditError = validateAmount(line.credit, `Línea ${n} (Haber)`)
         if (creditError) errors.push(creditError)
         if (debitError || creditError) return
+
+        // Integridad de centavos (ADR modelo monetario): el importe debe ser
+        // exactamente la representación de sus centavos (escala 2)
+        if (line.debit !== 0 && !isCentExact(line.debit)) {
+            errors.push(`Línea ${n} (Debe): el importe ${line.debit} tiene más decimales que la escala contable (2); redondealo antes de contabilizar`)
+        }
+        if (line.credit !== 0 && !isCentExact(line.credit)) {
+            errors.push(`Línea ${n} (Haber): el importe ${line.credit} tiene más decimales que la escala contable (2); redondealo antes de contabilizar`)
+        }
 
         // Ni Debe ni Haber / ambos
         if (line.debit > 0 && line.credit > 0) {

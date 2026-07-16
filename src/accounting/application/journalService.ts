@@ -48,7 +48,7 @@ import {
     ensureExerciseForDate,
     getPeriodForDate,
 } from './contextService'
-import { SCHEMA_VERSION } from '../migration/migrateV17'
+import { CURRENT_SCHEMA_VERSION as SCHEMA_VERSION } from '../migration/versions'
 import { inWriteTx } from './txUtils'
 
 /**

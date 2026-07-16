@@ -17,6 +17,32 @@
 export const MONEY_SCALE = 2
 const CENT_FACTOR = 100
 
+/**
+ * Máximo importe contable admitido (política, por debajo del límite técnico
+ * de centavos enteros seguros 2^53−1): ± 90 billones de pesos.
+ */
+export const MAX_AMOUNT = 90_000_000_000_000
+export const MAX_AMOUNT_CENTS = MAX_AMOUNT * CENT_FACTOR
+
+/**
+ * Escalas por tipo de magnitud (ADR_MODELO_MONETARIO.md §4).
+ * El importe contable se redondea UNA sola vez en la frontera de
+ * contabilización; las demás magnitudes conservan su escala y solo se
+ * redondean al producir un importe.
+ */
+export const SCALES = {
+    /** Importe contable del Diario */
+    amount: 2,
+    /** Cantidades físicas, nominales, moneda extranjera */
+    quantity: 6,
+    /** Cotizaciones y precios unitarios */
+    rate: 8,
+    /** Tasas y porcentajes */
+    percentage: 8,
+    /** Índices: se conservan exactos según la fuente (sin redondeo propio) */
+    index: null,
+} as const
+
 /** Verifica que un importe sea un número finito */
 export function isFiniteAmount(value: unknown): value is number {
     return typeof value === 'number' && Number.isFinite(value)
@@ -43,7 +69,45 @@ export function validateAmount(
     if (!opts.allowNegative && value < 0) {
         return `${label}: el importe no puede ser negativo (${value})`
     }
+    if (Math.abs(value) > MAX_AMOUNT) {
+        return `${label}: el importe excede el máximo admitido de $${MAX_AMOUNT.toLocaleString('es-AR')} (recibido: ${value})`
+    }
     return null
+}
+
+// ─────────────────────────────────────────────────────────────
+// Integridad de centavos y aritmética exacta (ADR Fase 2B)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * ¿El double es exactamente la representación de sus centavos enteros?
+ * (invariante de integridad de centavos del Diario)
+ */
+export function isCentExact(value: number): boolean {
+    if (!Number.isFinite(value)) return false
+    if (Object.is(value, -0)) return false
+    const cents = toCents(value)
+    if (!Number.isSafeInteger(cents)) return false
+    return shift10(cents, -2) === value
+}
+
+/** Suma exacta de dos importes (en centavos) */
+export function addAmounts(a: number, b: number): number {
+    return shift10(toCents(a) + toCents(b), -2)
+}
+
+/** Resta exacta de dos importes (en centavos) */
+export function subAmounts(a: number, b: number): number {
+    return shift10(toCents(a) - toCents(b), -2)
+}
+
+/**
+ * Importe × tasa/coeficiente, con UN solo redondeo al producir el importe.
+ * (la tasa conserva su precisión; el resultado es cent-exacto)
+ */
+export function multiplyAmountByRate(amount: number, rate: number): number {
+    if (!Number.isFinite(amount) || !Number.isFinite(rate)) return NaN
+    return roundMoney(amount * rate)
 }
 
 /**

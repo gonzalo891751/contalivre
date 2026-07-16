@@ -7,7 +7,9 @@ import type {
     Company,
     SystemMeta,
 } from '../accounting/domain/types'
+import type { InflationIndexSet } from '../accounting/inflation/types'
 import { migrateToV17 } from '../accounting/migration/migrateV17'
+import { migrateToV18 } from '../accounting/migration/migrateV18'
 import type {
     InventoryProduct,
     InventoryMovement,
@@ -117,6 +119,8 @@ class ContableDatabase extends Dexie {
     periods!: EntityTable<AccountingPeriod, 'id'>
     auditLog!: EntityTable<AuditEvent, 'id'>
     systemMeta!: EntityTable<SystemMeta, 'id'>
+    // ── Fase 2B: índices de inflación versionados ────────────
+    inflationIndexSets!: EntityTable<InflationIndexSet, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -548,6 +552,13 @@ class ContableDatabase extends Dexie {
             auditLog: 'id, eventType, entityType, entityId, companyId, exerciseId, timestamp',
             systemMeta: 'id',
         }).upgrade(migrateToV17)
+
+        // Version 18 (Fase 2B): modelo monetario definitivo (integridad de
+        // centavos) + registro versionado de índices de inflación.
+        // Mismos stores que v17 + inflationIndexSets.
+        this.version(18).stores({
+            inflationIndexSets: 'id, status, createdAt',
+        }).upgrade(migrateToV18)
     }
 }
 

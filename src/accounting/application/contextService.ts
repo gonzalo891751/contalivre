@@ -21,14 +21,13 @@ import type {
 } from '../domain/types'
 import { LOCAL_ACTOR } from '../domain/types'
 import {
-    APP_VERSION,
     DEFAULT_COMPANY_ID,
-    SCHEMA_VERSION,
     SYSTEM_META_ID,
     buildAnnualExercise,
     buildAnnualPeriod,
     exerciseIdForYear,
 } from '../migration/migrateV17'
+import { APP_VERSION, CURRENT_SCHEMA_VERSION as SCHEMA_VERSION } from '../migration/versions'
 import { appendAuditEvent } from '../audit/auditLog'
 import { inWriteTx } from './txUtils'
 

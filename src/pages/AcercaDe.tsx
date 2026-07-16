@@ -16,7 +16,7 @@ import {
     restoreBackup,
     type BackupPreview,
 } from '../accounting/backup/backupService'
-import { APP_VERSION, SCHEMA_VERSION } from '../accounting/migration/migrateV17'
+import { APP_VERSION, CURRENT_SCHEMA_VERSION as SCHEMA_VERSION } from '../accounting/migration/versions'
 import type { SystemMeta } from '../accounting/domain/types'
 
 const COMMIT_SHA: string =

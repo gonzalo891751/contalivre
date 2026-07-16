@@ -52,4 +52,11 @@ export {
     type ReportingContext,
 } from './reporting/reportingContext'
 export { exportBackup, previewBackup, restoreBackup, type BackupFile } from './backup/backupService'
-export { SCHEMA_VERSION, APP_VERSION, MIGRATION_ID } from './migration/migrateV17'
+export { MIGRATION_ID } from './migration/migrateV17'
+export { MIGRATION_V18_ID } from './migration/migrateV18'
+export {
+    CURRENT_SCHEMA_VERSION as SCHEMA_VERSION,
+    APP_VERSION,
+    ACCOUNTING_ENGINE_VERSION,
+    NORMATIVE_BASELINE,
+} from './migration/versions'

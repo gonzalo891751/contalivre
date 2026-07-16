@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { resetDb, seedTestAccounts, simpleLines } from './helpers'
 import { postNewEntry } from '../../src/accounting/application/journalService'
 import { exportBackup, previewBackup, restoreBackup } from '../../src/accounting/backup/backupService'
+import { CURRENT_SCHEMA_VERSION } from '../../src/accounting/migration/versions'
 import { db } from '../../src/storage/db'
 
 describe('Fase 2A — backup/restore', () => {
@@ -21,7 +22,7 @@ describe('Fase 2A — backup/restore', () => {
         const backup = await exportBackup()
         expect(backup.format).toBe('contalivre-backup')
         expect(backup.formatVersion).toBe(1)
-        expect(backup.schemaVersion).toBe(17)
+        expect(backup.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
         expect(backup.installationId).toBeTruthy()
         expect(backup.createdAt).toBeTruthy()
         expect(Object.keys(backup.tables)).toContain('entries')
