@@ -1,0 +1,162 @@
+/**
+ * Motor único de reporting — dominio (Fase 2B, §8).
+ *
+ * Núcleo PURO: sin React, sin Dexie, sin PDF/XLSX. Todos los estados parten
+ * del mismo modelo canónico (NormalizedTrialBalance) construido desde
+ * asientos POSTED/REVERSED del contexto + saldos de apertura explícitos.
+ * Cada línea lleva linaje (cuentas y asientos que la forman).
+ */
+
+import type { Account, JournalEntry } from '../../core/models'
+
+export interface EngineContext {
+    companyId: string
+    exerciseId: string
+    exerciseLabel: string
+    periodStart: string
+    periodEnd: string
+}
+
+export interface ReportingInput {
+    context: EngineContext
+    /** Asientos del ejercicio que integran los libros (sin DRAFT) */
+    entries: JournalEntry[]
+    /** Saldos previos explícitos (vacío si existe apertura formal) */
+    openingBalances: Map<string, { debit: number; credit: number }>
+    accounts: Account[]
+    /** Bundle comparativo (ejercicio anterior, derivado con el mismo motor) */
+    comparative?: StatementsBundle | null
+}
+
+// ─────────────────────────────────────────────────────────────
+// Balance de comprobación normalizado (modelo canónico)
+// ─────────────────────────────────────────────────────────────
+
+export interface TrialBalanceRow2B {
+    accountId: string
+    code: string
+    name: string
+    kind: Account['kind']
+    isContra: boolean
+    /** apertura neta Debe−Haber */
+    opening: number
+    periodDebit: number
+    periodCredit: number
+    /** cierre neto Debe−Haber (opening + debit − credit) */
+    closing: number
+    /** ids de asientos que movieron la cuenta en el período (linaje) */
+    entryIds: string[]
+    /** true si la cuenta no existe en el plan (nunca se omite) */
+    unknownAccount: boolean
+}
+
+export interface NormalizedTrialBalance {
+    context: EngineContext
+    rows: TrialBalanceRow2B[]
+    totalPeriodDebit: number
+    totalPeriodCredit: number
+    totalOpeningDebit: number
+    totalOpeningCredit: number
+    isBalanced: boolean
+}
+
+// ─────────────────────────────────────────────────────────────
+// Líneas de reporte con linaje
+// ─────────────────────────────────────────────────────────────
+
+export interface ReportLine {
+    id: string
+    label: string
+    /** 0 = título/total mayor, 1 = rubro, 2 = cuenta */
+    level: number
+    amount: number
+    comparativeAmount?: number | null
+    /** linaje: cuentas que forman el importe */
+    accountIds: string[]
+    noteRef?: string
+    children?: ReportLine[]
+}
+
+export interface BalanceSheet2B {
+    currentAssets: ReportLine
+    nonCurrentAssets: ReportLine
+    totalAssets: ReportLine
+    currentLiabilities: ReportLine
+    nonCurrentLiabilities: ReportLine
+    totalLiabilities: ReportLine
+    equity: ReportLine
+    totalLiabilitiesAndEquity: ReportLine
+    /** Activo − (Pasivo + PN); 0 si la ecuación cierra */
+    equationDifference: number
+}
+
+export interface IncomeStatement2B {
+    sales: ReportLine
+    costOfSales: ReportLine
+    grossProfit: ReportLine
+    adminExpenses: ReportLine
+    sellingExpenses: ReportLine
+    operatingResult: ReportLine
+    financialResults: ReportLine
+    otherResults: ReportLine
+    netIncome: ReportLine
+}
+
+export interface EquityStatement2B {
+    openingBalance: ReportLine
+    contributions: ReportLine
+    distributions: ReportLine
+    reservesMovements: ReportLine
+    otherMovements: ReportLine
+    periodResult: ReportLine
+    closingBalance: ReportLine
+}
+
+export type CashFlowMethod = 'DIRECT' | 'INDIRECT'
+
+export interface CashFlowStatement2B {
+    method: CashFlowMethod
+    openingCash: ReportLine
+    operating: ReportLine
+    investing: ReportLine
+    financing: ReportLine
+    netChange: ReportLine
+    closingCash: ReportLine
+    /** flujos sin clasificar (bloquean la publicación si son materiales) */
+    unclassified: ReportLine
+    /** transacciones sin efecto en efectivo (se revelan, no integran flujos) */
+    nonMonetaryDisclosures: ReportLine[]
+}
+
+// ─────────────────────────────────────────────────────────────
+// Validación automática (§8.5)
+// ─────────────────────────────────────────────────────────────
+
+export interface ValidationCheck {
+    id: string
+    label: string
+    passed: boolean
+    expected?: number
+    actual?: number
+    difference?: number
+    detail?: string
+}
+
+export interface StatementValidationReport {
+    context: EngineContext
+    checks: ValidationCheck[]
+    allPassed: boolean
+    /** los estados no pueden marcarse "Validados" si esto es false */
+    canPublish: boolean
+}
+
+export interface StatementsBundle {
+    context: EngineContext
+    trialBalance: NormalizedTrialBalance
+    balanceSheet: BalanceSheet2B
+    incomeStatement: IncomeStatement2B
+    equityStatement: EquityStatement2B
+    cashFlowDirect: CashFlowStatement2B | null
+    cashFlowIndirect: CashFlowStatement2B | null
+    validation: StatementValidationReport
+}

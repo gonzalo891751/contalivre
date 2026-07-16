@@ -19,6 +19,7 @@ import { usePeriodYear } from '../hooks/usePeriodYear'
 
 // New components for redesigned header/toolbar
 import { EstadosHeader, type EstadosTab } from '../components/Estados/EstadosHeader'
+import FlujoEfectivoTab from '../components/Estados/FlujoEfectivoTab'
 import { DocumentToolbar } from '../components/Estados/DocumentToolbar'
 import { ESPImportComparativeModal } from '../components/Estados/ESPImportComparativeModal'
 import {
@@ -156,7 +157,7 @@ function adaptBalanceSheetToGemini(bs: BalanceSheet, comparativeData?: Map<strin
 export default function Estados() {
     // Tab control (extended to support all 5 states)
     const [activeTab, setActiveTab] = useState<EstadosTab>('ESP')
-    const viewMode = activeTab === 'ESP' ? 'ESP' : activeTab === 'ER' ? 'ER' : activeTab === 'EPN' ? 'EPN' : activeTab === 'NA' ? 'NA' : 'ESP'
+    const viewMode = activeTab
 
     const [isExporting, setIsExporting] = useState(false)
 
@@ -548,6 +549,13 @@ export default function Estados() {
                 )}
 
                 {/* ER View (existing, with minimal changes) */}
+                {/* EFE View (Fase 2B: motor único de reporting) */}
+                {viewMode === 'EFE' && (
+                    <div className="animate-slide-up">
+                        <FlujoEfectivoTab />
+                    </div>
+                )}
+
                 {viewMode === 'ER' && estadoResultadosData && (
                     <div className="animate-slide-up">
                         <EstadoResultadosDocument

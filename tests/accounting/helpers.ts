@@ -36,6 +36,7 @@ export const TEST_ACCOUNTS: Account[] = [
     makeAccount({ id: 'deudores', code: '1.1.02.01', name: 'Deudores por ventas', kind: 'ASSET', statementGroup: 'TRADE_RECEIVABLES', group: 'Créditos por ventas' }),
     makeAccount({ id: 'mercaderias', code: '1.1.04.01', name: 'Mercaderías', kind: 'ASSET', statementGroup: 'INVENTORIES', group: 'Bienes de cambio' }),
     makeAccount({ id: 'bienes-uso', code: '1.2.01.01', name: 'Rodados', kind: 'ASSET', statementGroup: 'PPE', group: 'Bienes de uso', section: 'NON_CURRENT' }),
+    makeAccount({ id: 'amort-acum', code: '1.2.01.90', name: 'Amortización acumulada rodados', kind: 'ASSET', statementGroup: 'PPE', group: 'Bienes de uso', section: 'NON_CURRENT', isContra: true, normalSide: 'CREDIT' }),
     makeAccount({ id: 'intangibles', code: '1.2.02.01', name: 'Marcas y patentes', kind: 'ASSET', statementGroup: 'INTANGIBLES', group: 'Intangibles', section: 'NON_CURRENT' }),
     makeAccount({ id: 'proveedores', code: '2.1.01.01', name: 'Proveedores', kind: 'LIABILITY', statementGroup: 'TRADE_PAYABLES', group: 'Deudas comerciales' }),
     makeAccount({ id: 'gastos-a-pagar', code: '2.1.06.03', name: 'Gastos a pagar', kind: 'LIABILITY', statementGroup: 'OTHER_PAYABLES', group: 'Otras deudas' }),
@@ -45,6 +46,8 @@ export const TEST_ACCOUNTS: Account[] = [
     makeAccount({ id: 'ventas', code: '4.1.01', name: 'Ventas', kind: 'INCOME', statementGroup: 'SALES', group: 'Ventas', section: 'OPERATING' }),
     makeAccount({ id: 'cmv', code: '4.2.01', name: 'Costo de mercaderías vendidas', kind: 'EXPENSE', statementGroup: 'COGS', group: 'Costo de ventas', section: 'COST' }),
     makeAccount({ id: 'gastos', code: '4.3.01', name: 'Gastos de administración', kind: 'EXPENSE', statementGroup: 'ADMIN_EXPENSES', group: 'Gastos', section: 'ADMIN' }),
+    makeAccount({ id: 'deprec', code: '4.3.02', name: 'Depreciación de bienes de uso', kind: 'EXPENSE', statementGroup: 'ADMIN_EXPENSES', group: 'Gastos', section: 'ADMIN' }),
+    makeAccount({ id: 'prestamos', code: '2.1.05.02', name: 'Préstamos bancarios', kind: 'LIABILITY', statementGroup: 'LOANS', group: 'Préstamos' }),
     // Cuenta agrupadora (no imputable)
     makeAccount({ id: 'header-activo', code: '1.1', name: 'Activo Corriente', kind: 'ASSET', isHeader: true, isPostable: false }),
     // Cuenta inactiva

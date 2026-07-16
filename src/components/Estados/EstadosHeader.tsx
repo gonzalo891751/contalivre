@@ -22,7 +22,7 @@ interface EstadosHeaderProps {
 const TABS: TabConfig[] = [
     { id: 'ESP', label: 'Situación Patrimonial', icon: Scale },
     { id: 'ER', label: 'Resultados', icon: TrendingUp },
-    { id: 'EFE', label: 'Flujo de Efectivo', icon: Coins, disabled: true, tooltip: 'Próximamente' },
+    { id: 'EFE', label: 'Flujo de Efectivo', icon: Coins },
     { id: 'EPN', label: 'Evolución PN', icon: PieChart },
     { id: 'NA', label: 'Notas y Anexos', icon: FileText },
 ]
