@@ -12,6 +12,7 @@
 
 import { db } from './db'
 import { createEntry, deleteEntry } from './entries'
+import { replaceOperationEntry } from '../accounting/application/journalService'
 import { findOrCreateChildAccountByName } from './accounts'
 import { ACCOUNT_FALLBACKS, resolveAccountId } from './bienes'
 import type { JournalEntry, EntryLine, Account } from '../core/models'
@@ -452,5 +453,7 @@ export async function updateVoucherMemo(
         }
     }
 
-    await db.entries.update(voucherId, patch)
+    await replaceOperationEntry(voucherId, patch, {
+        reason: 'Actualización de memo/número de comprobante del gasto',
+    })
 }

@@ -57,6 +57,18 @@ export interface AccountOverride {
  * @returns Monetary classification
  */
 export function getInitialMonetaryClass(account: Account): MonetaryClass {
+    // Rule 0 (Fase 2A): la metadata persistida en la cuenta manda SIEMPRE.
+    // Es la única clasificación válida; las heurísticas siguientes son solo
+    // respaldo documentado para cuentas importadas sin metadata.
+    if (account.monetaryClassification) {
+        switch (account.monetaryClassification) {
+            case 'MONETARY': return 'MONETARY';
+            case 'NON_MONETARY': return 'NON_MONETARY';
+            case 'MIXED': return 'INDEFINIDA'; // requiere decisión por cuenta
+            case 'NOT_APPLICABLE': break; // continuar con heurísticas
+        }
+    }
+
     // Rule 1: Kind-based classification (highest priority)
     if (account.kind === 'EQUITY') return 'NON_MONETARY'; // PN always non-monetary
     if (account.kind === 'INCOME' || account.kind === 'EXPENSE') {
@@ -167,7 +179,12 @@ function getMonetaryClassByCodePrefix(code: string): MonetaryClass | null {
 
     // Otros Créditos / IVA Crédito Fiscal (MONETARY)
     if (c.startsWith('1.1.03')) return 'MONETARY';
-    if (c.startsWith('1.1.04')) return 'MONETARY'; // Anticipos, más créditos
+    // ACC-009: en el plan seed, 1.1.04 es Bienes de Cambio (NO monetario).
+    // El prefijo es ambiguo entre planes (otros lo usan para anticipos), por
+    // lo que NO se clasifica por código: decide el statementGroup (Regla 2)
+    // o la metadata de la cuenta (Regla 0). Sin metadata queda INDEFINIDA
+    // y exige clasificación explícita del usuario.
+    if (c.startsWith('1.1.04')) return null;
 
     // ==========================================
     // ACTIVO NO CORRIENTE

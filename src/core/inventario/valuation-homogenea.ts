@@ -111,7 +111,11 @@ export function reexpressLayer(
     // If layer is already in closing currency (post RT6), use coef=1
     // This prevents double reexpression when RT6 adjustments have been applied
     const isAlreadyReexpressed = layer.currencyBasis === 'CIERRE'
-    const coef = isAlreadyReexpressed ? 1 : calculateCoef(indexCierre ?? undefined, indexOrigen ?? undefined)
+    // Índice faltante => coef 1 SOLO para visualización; el faltante ya queda
+    // registrado vía indexOrigen/indexCierre null y missingPeriods bloquea el uso.
+    const coef = isAlreadyReexpressed
+        ? 1
+        : (calculateCoef(indexCierre ?? undefined, indexOrigen ?? undefined) ?? 1)
 
     return {
         date: layer.date,

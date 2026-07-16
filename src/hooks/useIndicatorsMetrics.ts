@@ -5,6 +5,7 @@ import { computeLedger } from '../core/ledger';
 import { computeTrialBalance } from '../core/balance';
 import { computeStatements } from '../core/statements';
 import { excludeClosingEntries } from '../utils/resultsStatement';
+import { usePeriodYear } from './usePeriodYear';
 
 export interface FinancialData {
     activoCorriente: number;
@@ -24,8 +25,18 @@ export interface FinancialData {
 }
 
 export function useIndicatorsMetrics() {
+    // Aislamiento por contexto (Fase 2A): stock a la fecha de corte del
+    // ejercicio seleccionado; sin asientos posteriores ni borradores.
+    const { end } = usePeriodYear();
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray());
-    const entries = useLiveQuery(() => db.entries.toArray());
+    const entries = useLiveQuery(
+        () => db.entries
+            .where('date')
+            .belowOrEqual(end)
+            .toArray()
+            .then(list => list.filter(e => e.status !== 'DRAFT')),
+        [end]
+    );
 
     const metrics = useMemo<FinancialData | null>(() => {
         if (!accounts || !entries) return null;
@@ -136,9 +147,8 @@ export function useIndicatorsMetrics() {
         return {
             activoCorriente,
             pasivoCorriente,
-            inventarios: finalInventarios as any, // Cast to handle the null (interface might expect number, need verification) -> Interface says number.
-            // Wait, previous interface said number. Task says "Set inventarios = null". unique fix needed in interface.
-            disponibilidades: finalDisponibilidades as any,
+            inventarios: finalInventarios,
+            disponibilidades: finalDisponibilidades,
             activoNoCorriente,
             activoTotal,
             pasivoTotal,

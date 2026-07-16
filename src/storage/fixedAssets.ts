@@ -7,6 +7,7 @@
 
 import { db } from './db'
 import { createEntry, updateEntry } from './entries'
+import { voidOperationEntries } from '../accounting/application/journalService'
 import { createAccount, generateNextCode } from './accounts'
 import type { Account, JournalEntry, EntryLine } from '../core/models'
 import { resolveOpeningEquityAccountId } from './openingEquity'
@@ -340,10 +341,12 @@ export async function deleteFixedAsset(id: string): Promise<{ success: boolean; 
         if (evt.linkedJournalEntryId) entryIdsToDelete.add(evt.linkedJournalEntryId)
     }
 
-    // Delete all linked entries
+    // Delete all linked entries (baja auditada vía servicio único)
     const idsArray = Array.from(entryIdsToDelete)
     if (idsArray.length > 0) {
-        await db.entries.bulkDelete(idsArray)
+        await voidOperationEntries(idsArray, {
+            reason: 'Baja de bien de uso con sus asientos vinculados',
+        })
     }
 
     // Delete all events for this asset
@@ -1400,7 +1403,7 @@ export async function buildAmortizationJournalEntry(
     const accounts = await db.accounts.toArray()
 
     // Resolve expense account (Amortizaciones Bienes de Uso)
-    let expenseAccount = accounts.find(a => a.code === DEPRECIATION_EXPENSE_CODE)
+    const expenseAccount = accounts.find(a => a.code === DEPRECIATION_EXPENSE_CODE)
 
     // If expense account doesn't exist, try to create it
     if (!expenseAccount) {

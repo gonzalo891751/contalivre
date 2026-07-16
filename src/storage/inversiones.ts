@@ -7,6 +7,7 @@
 
 import { db } from './db'
 import { createEntry } from './entries'
+import { voidOperationEntry } from '../accounting/application/journalService'
 import { createAccount, generateNextCode } from './accounts'
 import type { Account, JournalEntry, EntryLine } from '../core/models'
 import { resolveOpeningEquityAccountId } from './openingEquity'
@@ -371,9 +372,11 @@ export async function deleteMovement(id: string): Promise<{ success: boolean; er
     const movement = await db.invMovements.get(id)
     if (!movement) return { success: false, error: 'Movimiento no encontrado' }
 
-    // Delete linked journal entry if exists
+    // Delete linked journal entry if exists (baja auditada vía servicio único)
     if (movement.journalEntryId) {
-        await db.entries.delete(movement.journalEntryId)
+        await voidOperationEntry(movement.journalEntryId, {
+            reason: 'Baja de movimiento de inversiones',
+        })
     }
 
     await db.invMovements.delete(id)

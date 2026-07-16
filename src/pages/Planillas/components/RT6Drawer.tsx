@@ -171,7 +171,9 @@ export function RT6Drawer({
     const computedItems = useMemo(() => {
         if (!temp) return [];
         return temp.items.map((item) => {
-            const coef = getCoefForDate(item.fechaOrigen);
+            // Índice faltante => coef 1 solo para visualización; la partida
+            // queda bloqueada para contabilizar (status 'error' en calc.ts).
+            const coef = getCoefForDate(item.fechaOrigen) ?? 1;
             const homog = item.importeBase * coef;
             return { ...item, coef, homog, recpam: homog - item.importeBase };
         });

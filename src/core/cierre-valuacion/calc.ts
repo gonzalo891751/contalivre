@@ -49,21 +49,29 @@ export function getIndexForPeriod(indices: IndexRow[], period: string): number |
 }
 
 /**
- * Calculate coefficient (indexClose / indexBase)
+ * Calculate coefficient (indexClose / indexBase).
+ *
+ * Fase 2A (NOR-004): un índice faltante YA NO se sustituye silenciosamente
+ * por coeficiente 1. Devuelve null y el llamador debe bloquear la
+ * contabilización informando qué período falta.
  */
-export function calculateCoef(indexClose: number | undefined, indexBase: number | undefined): number {
-    if (!indexClose || !indexBase || indexBase === 0) return 1;
+export function calculateCoef(
+    indexClose: number | undefined,
+    indexBase: number | undefined
+): number | null {
+    if (!indexClose || !indexBase || indexBase === 0) return null;
     return indexClose / indexBase;
 }
 
 /**
- * Calculate coefficient from date to closing period
+ * Calculate coefficient from date to closing period.
+ * Devuelve null si falta algún índice (bloqueo, no coeficiente 1).
  */
 export function calculateCoefFromDate(
     indices: IndexRow[],
     originDate: string,
     closingPeriod: string
-): number {
+): number | null {
     const originPeriod = getPeriodFromDate(originDate);
     const indexBase = getIndexForPeriod(indices, originPeriod);
     const indexClose = getIndexForPeriod(indices, closingPeriod);
@@ -88,23 +96,29 @@ export function computeRT6Partida(
     let totalBase = 0;
     let totalHomog = 0;
     let status: PartidaStatus = 'ok';
+    const missingPeriods = new Set<string>();
 
     const itemsComputed: ComputedLotRT6[] = partida.items.map((item) => {
         const originPeriod = getPeriodFromDate(item.fechaOrigen);
         const indexBase = getIndexForPeriod(indices, originPeriod);
 
-        // Check for missing indices
-        if (!indexBase) {
-            status = 'warning';
-        }
-
         const coef = calculateCoef(indexClose, indexBase);
-        const homog = item.importeBase * coef;
+
+        // Fase 2A (NOR-004): índice faltante = ERROR bloqueante, nunca
+        // coeficiente 1 silencioso. Se registra qué período falta.
+        if (coef === null) {
+            status = 'error';
+            if (!indexBase && originPeriod) missingPeriods.add(originPeriod);
+            if (isMissingClosingIndex) missingPeriods.add(closingPeriod);
+            // El valor base se muestra sin reexpresar SOLO a fines de
+            // visualización; la partida queda bloqueada para contabilizar.
+            return { ...item, coef: 1, homog: item.importeBase };
+        }
 
         return {
             ...item,
             coef,
-            homog,
+            homog: item.importeBase * coef,
         };
     });
 
@@ -113,6 +127,7 @@ export function computeRT6Partida(
 
     if (isMissingClosingIndex) {
         status = 'error';
+        missingPeriods.add(closingPeriod);
     }
 
     const delta = totalHomog - totalBase;
@@ -126,6 +141,7 @@ export function computeRT6Partida(
         totalHomog,
         totalRecpam,
         status,
+        missingPeriods: Array.from(missingPeriods).sort(),
     };
 }
 

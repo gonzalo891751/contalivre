@@ -116,7 +116,11 @@ export function calculateRecpamIndirecto(
         if (!monthIndex || !closingIndex) {
             missingIndices.push(month);
         }
-        const coef = calculateCoef(closingIndex, monthIndex);
+        // Fase 2A (NOR-004): índice faltante NO se sustituye por coeficiente 1.
+        // El mes queda con coef 1 y RECPAM 0 SOLO para visualización, y el
+        // resultado se marca con missingIndices: el llamador debe bloquear
+        // cualquier contabilización mientras missingIndices no esté vacío.
+        const coef = calculateCoef(closingIndex, monthIndex) ?? 1;
 
         // Calculate RECPAM for month
         // RECPAM = PMN * (Coef - 1) * -1
@@ -230,7 +234,7 @@ function generateMonthRange(startDate: string, endDate: string): string[] {
     const start = new Date(startDate + '-01');
     const end = new Date(endDate);
 
-    let current = new Date(start);
+    const current = new Date(start);
     while (current <= end) {
         const year = current.getFullYear();
         const month = String(current.getMonth() + 1).padStart(2, '0');

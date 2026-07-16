@@ -226,8 +226,8 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
         if (clean.match(/^\d{4}-\d{2}-\d{2}/)) return clean.substring(0, 10)
         const parts = clean.split(/[-/]/)
         if (parts.length === 3) {
-            let d = parts[0]
-            let m = parts[1]
+            const d = parts[0]
+            const m = parts[1]
             let y = parts[2]
             if (y.length === 2) y = '20' + y
             return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`

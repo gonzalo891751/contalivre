@@ -64,6 +64,21 @@ export type NormalSide = 'DEBIT' | 'CREDIT'
 export type AccountType = 'Activo' | 'Pasivo' | 'PatrimonioNeto' | 'Ingreso' | 'Gasto'
 
 /**
+ * Clase fundamental de la cuenta (taxonomía estructurada Fase 2A)
+ */
+export type AccountClass = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE' | 'OTHER'
+
+/**
+ * Clasificación corriente / no corriente
+ */
+export type CurrentClassification = 'CURRENT' | 'NON_CURRENT' | 'NOT_APPLICABLE'
+
+/**
+ * Clasificación monetaria a efectos de reexpresión (RT 6 / RT 54 TO RT 59)
+ */
+export type MonetaryClassification = 'MONETARY' | 'NON_MONETARY' | 'MIXED' | 'NOT_APPLICABLE'
+
+/**
  * Cuenta contable con jerarquía y clasificación
  */
 export interface Account {
@@ -88,9 +103,42 @@ export interface Account {
     isHeader: boolean         // Cuenta cabecera (no se puede imputar)
     tags?: string[]           // Optional tags for account classification
 
+    // ── Taxonomía estructurada (Fase 2A) ─────────────────────
+    // Campos opcionales para compatibilidad con datos previos a schema v17.
+    // La migración v17 los materializa; usar helpers de accounting/taxonomy
+    // para leerlos con derivación de respaldo.
+    companyId?: string
+    active?: boolean                 // false = no admite nuevas imputaciones
+    isPostable?: boolean             // false = agrupadora, no imputable (equivale a !isHeader)
+    normalBalance?: NormalSide       // alias estructurado de normalSide
+    accountClass?: AccountClass
+    currentClassification?: CurrentClassification
+    monetaryClassification?: MonetaryClassification
+    statementSection?: string        // sección de exposición (ej: 'ACTIVO_CORRIENTE')
+    resultFunction?: string          // función del resultado (admin/comercial/financiera)
+    cashFlowCategory?: 'OPERATING' | 'INVESTING' | 'FINANCING' | 'CASH_EQUIVALENT' | 'NOT_APPLICABLE'
+    cashFlowSubcategory?: string
+    notesGroup?: string
+    annexGroup?: string
+    currency?: string
+    validFrom?: string               // ISO date
+    validTo?: string                 // ISO date
+    systemAccount?: boolean          // cuenta de sistema, no eliminable
+    metadataVersion?: number
+
     // Legacy compatibility
     type?: AccountType        // Mantenido para compatibilidad con MVP 0.1
 }
+
+/**
+ * Estado del ciclo de vida de un asiento (Fase 2A)
+ *
+ * - DRAFT: borrador editable, NO impacta Mayor/Balance/Estados
+ * - POSTED: contabilizado, inmutable, numerado
+ * - REVERSED: contabilizado que fue revertido por un asiento inverso enlazado
+ *   (sus líneas siguen integrando los libros; el reverso las neutraliza)
+ */
+export type EntryStatus = 'DRAFT' | 'POSTED' | 'REVERSED'
 
 /**
  * Línea de un asiento contable
@@ -100,10 +148,20 @@ export interface EntryLine {
     debit: number
     credit: number
     description?: string
+    // Fase 2A (opcionales, para moneda extranjera / futuro)
+    currency?: string
+    foreignAmount?: number
+    exchangeRate?: number
+    costCenterId?: string
+    metadata?: Record<string, unknown>
 }
 
 /**
  * Asiento contable (journal entry)
+ *
+ * Los campos de contexto (companyId/exerciseId/periodId/status/...) son
+ * opcionales en el tipo por compatibilidad con datos anteriores a schema v17,
+ * pero el servicio único de contabilización los completa siempre.
  */
 export interface JournalEntry {
     id: string
@@ -116,6 +174,25 @@ export interface JournalEntry {
     sourceType?: string
     createdAt?: string
     metadata?: Record<string, any>
+
+    // ── Ciclo de vida y contexto contable (Fase 2A) ─────────
+    status?: EntryStatus
+    companyId?: string
+    exerciseId?: string
+    periodId?: string
+    entryNumber?: number          // secuencial por empresa/ejercicio; se asigna al contabilizar
+    idempotencyKey?: string       // clave estable de origen para operaciones automáticas
+    createdBy?: string
+    updatedAt?: string
+    updatedBy?: string
+    postedAt?: string
+    postedBy?: string
+    reversedAt?: string
+    reversedBy?: string
+    reversalEntryId?: string      // en el original: id del asiento reverso
+    reversedEntryId?: string      // en el reverso: id del asiento original
+    reversalReason?: string
+    schemaVersion?: number
 }
 
 /**

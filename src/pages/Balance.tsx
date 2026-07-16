@@ -1,8 +1,6 @@
 import { useMemo } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../storage/db'
-import { computeLedger } from '../core/ledger'
 import { computeTrialBalance, getBalanceStatusMessage } from '../core/balance'
+import { useLedger } from '../hooks/useLedger'
 import { HelpPanel } from '../ui/HelpPanel'
 
 const KIND_BADGES: Record<string, string> = {
@@ -22,14 +20,14 @@ const KIND_LABELS: Record<string, string> = {
 }
 
 export default function Balance() {
-    const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
-    const entries = useLiveQuery(() => db.entries.toArray())
+    // Aislado por ejercicio: useLedger filtra por el ejercicio seleccionado
+    // y excluye borradores (Fase 2A)
+    const { accounts, ledger } = useLedger()
 
     const trialBalance = useMemo(() => {
-        if (!accounts || !entries) return null
-        const ledger = computeLedger(entries, accounts)
+        if (!accounts || !ledger) return null
         return computeTrialBalance(ledger, accounts)
-    }, [accounts, entries])
+    }, [accounts, ledger])
 
     const formatAmount = (n: number) =>
         n.toLocaleString('es-AR', { minimumFractionDigits: 2 })

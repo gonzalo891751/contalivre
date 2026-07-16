@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
 import { createEntry } from '../storage/entries'
 import { getPostableAccounts } from '../storage/accounts'
+import { validateImportFile, validateImportShape } from '../accounting/importLimits'
 import type { Account } from '../core/models'
 
 type Step = 1 | 2 | 3 | 4
@@ -434,7 +435,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
     const parseARNumber = (val: any): number => {
         if (typeof val === 'number') return val
         if (!val) return 0
-        let str = String(val).trim().replace('$', '').trim()
+        const str = String(val).trim().replace('$', '').trim()
         if (str.includes(',') && str.includes('.')) {
             if (str.indexOf('.') < str.indexOf(',')) return parseFloat(str.replace(/\./g, '').replace(',', '.'))
             else return parseFloat(str.replace(/,/g, ''))
@@ -491,10 +492,25 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
     // Step 1: File Parsing
     const onPickFile = async (f: File | null) => {
         if (!f) return
+
+        // Límites de importación (Fase 2A, SEC-002): extensión y tamaño
+        const fileError = validateImportFile(f)
+        if (fileError) {
+            alert(fileError)
+            return
+        }
+
         setFile(f)
         const ext = f.name.split('.').pop()?.toLowerCase()
 
         const finish = (data: any[], headers: string[]) => {
+            // Límites de filas/columnas después de parsear
+            const shapeError = validateImportShape(data.length, headers.length)
+            if (shapeError) {
+                alert(shapeError)
+                setFile(null)
+                return
+            }
             setRawRows(data)
             setRawHeaders(headers)
             setMapping(detectMapping(headers))
@@ -633,7 +649,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
             let nro = String(row[mapping.nro_asiento] || '').trim()
             const rawFecha = row[mapping.fecha]
             let fecha = parseDateStrict(rawFecha)
-            let concepto = String(row[mapping.concepto] || '').trim()
+            const concepto = String(row[mapping.concepto] || '').trim()
 
             if (!nro && lastNro) nro = lastNro
             if (!fecha && lastFecha) fecha = lastFecha

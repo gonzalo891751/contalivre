@@ -324,7 +324,7 @@ export async function listDueNotifications(options?: {
     to?: string
     unseenOnly?: boolean
 }): Promise<TaxDueNotification[]> {
-    let query = db.taxDueNotifications.toCollection()
+    const query = db.taxDueNotifications.toCollection()
 
     const results = await query.toArray()
 

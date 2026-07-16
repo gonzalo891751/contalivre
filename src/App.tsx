@@ -24,6 +24,7 @@ import ConciliacionesPage from './pages/Planillas/Conciliaciones/ConciliacionesP
 import CierreValuacionPage from './pages/Planillas/CierreValuacionPage'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
 import PlanillasHome from './pages/Planillas/PlanillasHome'
+import AcercaDe from './pages/AcercaDe'
 
 function MainLayoutRoute() {
     return (
@@ -62,6 +63,7 @@ function App() {
                 <Route path="/mayor" element={<Mayor />} />
                 <Route path="/balance" element={<Balance />} />
                 <Route path="/estados" element={<Estados />} />
+                <Route path="/acerca" element={<AcercaDe />} />
                 <Route path="/practica" element={<Navigate to="/" replace />} />
                 <Route path="/planillas" element={<PlanillasLayout />}>
                     <Route index element={<PlanillasHome />} />

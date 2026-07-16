@@ -42,6 +42,31 @@ export function calculateBalance(account: Account, totalDebit: number, totalCred
 }
 
 /**
+ * Cuenta sintética para líneas cuya cuenta no existe en el plan.
+ * El servicio de contabilización impide que esto ocurra en asientos nuevos;
+ * para datos históricos, la línea NUNCA se omite silenciosamente: se expone
+ * en este bucket para que Diario = Mayor siempre.
+ */
+export const UNKNOWN_ACCOUNT_ID = '__cuenta-inexistente__'
+
+function buildUnknownAccount(accountId: string): Account {
+    return {
+        id: UNKNOWN_ACCOUNT_ID,
+        code: '?',
+        name: `⚠ Cuenta inexistente (${accountId})`,
+        kind: 'ASSET',
+        section: 'CURRENT',
+        group: 'Cuentas inexistentes',
+        statementGroup: null,
+        parentId: null,
+        level: 0,
+        normalSide: 'DEBIT',
+        isContra: false,
+        isHeader: false,
+    }
+}
+
+/**
  * Mayoriza un asiento: agrega los movimientos al libro mayor
  * Retorna el mayor actualizado (nueva instancia)
  */
@@ -50,13 +75,16 @@ export function postEntryToLedger(
     ledger: Ledger,
     accounts: Account[]
 ): Ledger {
+    // Los borradores no integran los libros
+    if (entry.status === 'DRAFT') return ledger
+
     // Crear copia del ledger
     const newLedger: Ledger = new Map(ledger)
 
     // Procesar cada línea del asiento
     for (const line of entry.lines) {
         const account = accounts.find((a) => a.id === line.accountId)
-        if (!account) continue
+            ?? buildUnknownAccount(line.accountId)
 
         ensureAccountInLedger(newLedger, account)
         const ledgerAccount = newLedger.get(account.id)!

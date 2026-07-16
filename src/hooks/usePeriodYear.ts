@@ -1,4 +1,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '../storage/db'
+import type { AccountingExercise } from '../accounting/domain/types'
 
 const LS_KEY = 'contalivre_period_year'
 const DEFAULT_YEAR = 2026
@@ -78,7 +81,20 @@ interface UsePeriodYearReturn extends PeriodState {
    * Convenience wrapper to set year and reset dates to Jan 1 - Dec 31
    */
   setYear: (year: number) => void
+  /**
+   * Años con ejercicio persistido en la base (Fase 2A). Ya no es una lista
+   * fija: proviene de la tabla `exercises`, más el año seleccionado y el
+   * año actual como opciones mínimas.
+   */
   availableYears: number[]
+  /**
+   * Ejercicios persistidos (para mostrar fechas y estado en el selector)
+   */
+  exercises: AccountingExercise[]
+  /**
+   * Ejercicio persistido que corresponde al año seleccionado (si existe)
+   */
+  currentExercise: AccountingExercise | null
   /**
    * Returns YYYY-MM string for the end of the period (useful for closing index lookup)
    */
@@ -87,6 +103,14 @@ interface UsePeriodYearReturn extends PeriodState {
 
 export function usePeriodYear(): UsePeriodYearReturn {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+
+  const exercises = useLiveQuery(
+    () => db.exercises.toArray().then(list =>
+      list.sort((a, b) => b.startDate.localeCompare(a.startDate))
+    ),
+    [],
+    [] as AccountingExercise[]
+  )
 
   const setPeriod = useCallback((year: number, start: string, end: string) => {
     const newState: PeriodState = { year, start, end }
@@ -101,7 +125,23 @@ export function usePeriodYear(): UsePeriodYearReturn {
     setPeriod(year, defaults.start, defaults.end)
   }, [setPeriod])
 
-  const availableYears = useMemo(() => [2027, 2026, 2025, 2024, 2023], [])
+  const availableYears = useMemo(() => {
+    const years = new Set<number>()
+    for (const ex of exercises ?? []) {
+      years.add(Number(ex.startDate.slice(0, 4)))
+    }
+    // Siempre ofrecer el año seleccionado y el actual
+    years.add(state.year)
+    years.add(new Date().getFullYear())
+    return Array.from(years).sort((a, b) => b - a)
+  }, [exercises, state.year])
+
+  const currentExercise = useMemo(() => {
+    const list = exercises ?? []
+    return list.find(ex =>
+      state.start >= ex.startDate && state.start <= ex.endDate
+    ) ?? list.find(ex => Number(ex.startDate.slice(0, 4)) === state.year) ?? null
+  }, [exercises, state.year, state.start])
 
   const periodEndMonth = useMemo(() => {
     return state.end.slice(0, 7) // YYYY-MM
@@ -112,6 +152,8 @@ export function usePeriodYear(): UsePeriodYearReturn {
     setPeriod,
     setYear,
     availableYears,
+    exercises: exercises ?? [],
+    currentExercise,
     periodEndMonth
   }
 }

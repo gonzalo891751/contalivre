@@ -229,7 +229,7 @@ export function useDashboardMetrics(): DashboardMetrics {
             equity: 0,
         }
 
-        let charts = {
+        const charts = {
             equation: [] as Array<{
                 name: string
                 activoCorriente: number

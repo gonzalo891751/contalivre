@@ -136,20 +136,21 @@ function CollapsibleSection({
     onToggle: () => void
     isSubtraction?: boolean
 }) {
-    // Don't render if no rows
-    if (section.rows.length === 0 && Math.abs(section.subtotal) < 0.01) {
-        return null
-    }
-
-    const isExpanded = showDetails && !collapsed
-
     // Build a map for comparative amounts
+    // (antes del early return: los hooks deben llamarse incondicionalmente)
     const comparativeAmounts = useMemo(() => {
         if (!comparativeSection) return new Map<string, number>()
         const map = new Map<string, number>()
         comparativeSection.rows.forEach(r => map.set(r.accountId, r.amount * (r.isNegative ? -1 : 1)))
         return map
     }, [comparativeSection])
+
+    // Don't render if no rows
+    if (section.rows.length === 0 && Math.abs(section.subtotal) < 0.01) {
+        return null
+    }
+
+    const isExpanded = showDetails && !collapsed
 
     // Format amounts
     const sectionFormatted = formatAccounting(section.subtotal)

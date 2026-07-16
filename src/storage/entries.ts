@@ -1,9 +1,32 @@
-import { db, generateId } from './db'
+/**
+ * storage/entries.ts — capa de compatibilidad (Fase 2A)
+ *
+ * Este archivo YA NO escribe en la tabla de asientos: delega todo en el
+ * servicio único de contabilización (src/accounting). Se conserva la firma
+ * de las funciones históricas para no romper a los consumidores mientras
+ * migran a la API nueva.
+ *
+ * - createEntry: valida TODO (cuentas existentes/imputables/activas, importes
+ *   finitos, partida doble, ejercicio/período abiertos) y contabiliza.
+ * - updateEntry: solo borradores (manuales) o regeneración auditada de
+ *   asientos de módulos operativos.
+ * - deleteEntry: solo borradores o baja auditada en cascada de operaciones.
+ */
+
+import { db } from './db'
 import type { JournalEntry, EntryLine } from '../core/models'
-import { validateEntry } from '../core/validation'
+import {
+    deleteDraftEntry,
+    postNewEntry,
+    replaceOperationEntry,
+    resetJournal,
+    updateDraftEntry,
+    voidOperationEntry,
+} from '../accounting/application/journalService'
 
 /**
- * Obtiene todos los asientos ordenados por fecha
+ * Obtiene todos los asientos ordenados por fecha.
+ * Preferir getEntriesForContext(ctx) de src/accounting para reportes.
  */
 export async function getAllEntries(): Promise<JournalEntry[]> {
     return db.entries.orderBy('date').reverse().toArray()
@@ -17,29 +40,30 @@ export async function getEntryById(id: string): Promise<JournalEntry | undefined
 }
 
 /**
- * Crea un nuevo asiento
+ * Crea y contabiliza un asiento a través del servicio único.
+ * Lanza PostingError con mensajes concretos si la validación falla.
  */
 export async function createEntry(
     entry: Omit<JournalEntry, 'id'>
 ): Promise<JournalEntry> {
-    const newEntry: JournalEntry = {
-        ...entry,
-        id: generateId(),
-        createdAt: entry.createdAt || new Date().toISOString(),
-    }
-
-    // Validar antes de guardar
-    const validation = validateEntry(newEntry)
-    if (!validation.ok) {
-        throw new Error(validation.errors.join('\n'))
-    }
-
-    await db.entries.add(newEntry)
-    return newEntry
+    return postNewEntry({
+        date: entry.date,
+        memo: entry.memo,
+        lines: entry.lines,
+        sourceModule: entry.sourceModule,
+        sourceType: entry.sourceType,
+        sourceId: entry.sourceId,
+        metadata: entry.metadata,
+        createdAt: entry.createdAt,
+        idempotencyKey: entry.idempotencyKey,
+    })
 }
 
 /**
- * Actualiza un asiento existente
+ * Actualiza un asiento existente.
+ * - Borradores: edición libre (validación estructural).
+ * - Asientos de módulos operativos: regeneración auditada (ENTRY_REPLACED).
+ * - Asientos manuales contabilizados: rechazado; corresponde reversión.
  */
 export async function updateEntry(
     id: string,
@@ -49,29 +73,31 @@ export async function updateEntry(
     if (!existing) {
         throw new Error('Asiento no encontrado')
     }
-
-    const updated: JournalEntry = { ...existing, ...updates }
-
-    // Validar antes de guardar
-    const validation = validateEntry(updated)
-    if (!validation.ok) {
-        throw new Error(validation.errors.join('\n'))
+    if (existing.status === 'DRAFT') {
+        return updateDraftEntry(id, updates)
     }
-
-    await db.entries.put(updated)
-    return updated
+    return replaceOperationEntry(id, updates)
 }
 
 /**
  * Elimina un asiento.
- * Si el asiento fue generado por un módulo (sourceModule='fx'),
+ * - Borradores: eliminación directa (auditada).
+ * - Asientos de módulos: baja auditada en cascada (ENTRY_VOIDED).
+ * - Asientos manuales contabilizados: rechazado; corresponde reversión.
+ * Si el asiento fue generado por moneda extranjera (sourceModule='fx'),
  * se desvincula del movimiento origen para mantener consistencia bidireccional.
  */
 export async function deleteEntry(id: string): Promise<void> {
     const entry = await db.entries.get(id)
-    await db.entries.delete(id)
+    if (!entry) return
 
-    if (entry?.sourceModule === 'fx' && entry.sourceId) {
+    if (entry.status === 'DRAFT') {
+        await deleteDraftEntry(id)
+    } else {
+        await voidOperationEntry(id)
+    }
+
+    if (entry.sourceModule === 'fx' && entry.sourceId) {
         try {
             const movement = await db.fxMovements.get(entry.sourceId)
             if (movement) {
@@ -129,13 +155,12 @@ export function createEmptyLine(): EntryLine {
         description: '',
     }
 }
+
 /**
- * Elimina TODOS los asientos (Reiniciar ejercicio)
+ * Elimina TODOS los asientos (Reiniciar ejercicio). Auditado.
  */
 export async function resetExercise(): Promise<{ deletedEntries: number }> {
-    const count = await db.entries.count()
-    await db.entries.clear()
-    return { deletedEntries: count }
+    return resetJournal()
 }
 
 /**

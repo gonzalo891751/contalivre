@@ -115,6 +115,11 @@ export interface ComputedPartidaRT6 extends PartidaRT6 {
     totalRecpam: number;
     /** Status */
     status: PartidaStatus;
+    /**
+     * Períodos (YYYY-MM) sin índice cargado. Si no está vacío, la partida
+     * queda BLOQUEADA para contabilizar (Fase 2A, NOR-004).
+     */
+    missingPeriods?: string[];
 }
 
 // ============================================
@@ -336,7 +341,14 @@ export interface CierreValuacionState {
 // Factory Functions
 // ============================================
 
-/** Default indices with sample data */
+/**
+ * ⚠ DATOS DE EJEMPLO — NO OFICIALES — NO APTOS PARA CIERRE REAL.
+ *
+ * Estos índices son ficticios y existen solo para explorar la herramienta en
+ * modo educativo. NO son la serie FACPCE. Para un cierre real deben cargarse
+ * los índices oficiales (fuente, período, valor y fecha de consulta) desde
+ * https://www.facpce.org.ar/indices-facpce/ mediante la importación validada.
+ */
 export const INITIAL_INDICES: IndexRow[] = [
     { period: '2024-12', value: 1250.5 },
     { period: '2025-01', value: 1400.2 },

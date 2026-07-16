@@ -301,7 +301,19 @@ export default function Estados() {
     // Data Loading
     // ============================================
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
-    const entries = useLiveQuery(() => db.entries.toArray())
+    // Aislamiento por contexto (Fase 2A): el ESP es un stock a la fecha de
+    // corte, por lo que incluye asientos hasta globalEnd (los saldos previos
+    // al ejercicio ingresan por este mecanismo explícito de acumulación,
+    // mientras no exista refundición/apertura formal). Nunca incluye asientos
+    // posteriores al corte ni borradores. El ER filtra su propio rango.
+    const entries = useLiveQuery(
+        () => db.entries
+            .where('date')
+            .belowOrEqual(globalEnd)
+            .toArray()
+            .then(list => list.filter(e => e.status !== 'DRAFT')),
+        [globalEnd]
+    )
 
     // Compute ledger and trial balance for statements
     const statementsData = useMemo(() => {

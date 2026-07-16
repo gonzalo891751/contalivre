@@ -1,4 +1,5 @@
 import { db, generateId, cleanupDuplicateAccounts } from './db'
+import { resetJournal } from '../accounting/application/journalService'
 import type { Account, AccountKind, AccountSection, StatementGroup, NormalSide } from '../core/models'
 
 // Current seed version - increment when seed structure changes
@@ -404,7 +405,8 @@ export async function loadSeedDataIfNeeded(): Promise<boolean> {
  */
 export async function resetDatabase(): Promise<void> {
     await db.accounts.clear()
-    await db.entries.clear()
+    // La tabla de asientos solo se limpia a través del servicio único (auditado)
+    await resetJournal()
     await db.settings.clear()
     await loadSeedDataIfNeeded()
 }

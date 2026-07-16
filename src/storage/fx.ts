@@ -25,6 +25,11 @@ import {
     DEFAULT_FX_ACCOUNT_CODES,
 } from '../core/monedaExtranjera/types'
 import { createEntry, getLocalDateISO } from './entries'
+import {
+    JOURNAL_TX_TABLES,
+    updateEntrySourceLink,
+    voidOperationEntries,
+} from '../accounting/application/journalService'
 
 // ========================================
 // Account Resolution Helpers
@@ -905,7 +910,7 @@ export async function createFxMovement(
     }
 
     const createdEntries: JournalEntry[] = []
-    await db.transaction('rw', db.fxMovements, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const entryData of entries) {
             const created = await createEntry(entryData)
             createdEntries.push(created)
@@ -990,7 +995,7 @@ export async function updateFxMovementWithJournal(
         }
     }
 
-    let createdEntries: JournalEntry[] = []
+    const createdEntries: JournalEntry[] = []
 
     if (shouldRegenerate) {
         const { entries, error } = await buildJournalEntriesForFxMovement(baseMovement, fxAccount)
@@ -998,15 +1003,22 @@ export async function updateFxMovementWithJournal(
             throw new Error(error)
         }
 
-        await db.transaction('rw', db.fxMovements, db.entries, async () => {
+        await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
             if (autoEntries.length > 0) {
-                await db.entries.bulkDelete(autoEntries.map(e => e.id))
+                await voidOperationEntries(autoEntries.map(e => e.id), {
+                    reason: 'Regeneración de asientos del movimiento de moneda extranjera',
+                })
             }
 
             if (hasManualEntries) {
                 for (const entry of manualEntries) {
                     const cleaned = stripFxLinkFromEntry(entry, id)
-                    await db.entries.put(cleaned)
+                    await updateEntrySourceLink(entry.id, {
+                        sourceModule: cleaned.sourceModule,
+                        sourceId: cleaned.sourceId,
+                        sourceType: cleaned.sourceType,
+                        metadata: cleaned.metadata,
+                    }, { reason: 'Desvinculación de movimiento de moneda extranjera' })
                 }
             }
 
@@ -1072,7 +1084,7 @@ export async function generateJournalForFxMovement(
     }
 
     const createdEntries: JournalEntry[] = []
-    await db.transaction('rw', db.fxMovements, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const entryData of entries) {
             const created = await createEntry(entryData)
             createdEntries.push(created)
@@ -1114,14 +1126,13 @@ export async function linkFxMovementToEntries(
 
     const uniqueIds = Array.from(new Set([...(movement.linkedJournalEntryIds || []), ...entryIds]))
 
-    await db.transaction('rw', db.fxMovements, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const entryId of entryIds) {
             const entry = await db.entries.get(entryId)
             if (!entry) {
                 throw new Error('Asiento no encontrado')
             }
-            const updated: JournalEntry = {
-                ...entry,
+            await updateEntrySourceLink(entryId, {
                 sourceModule: entry.sourceModule || 'fx',
                 sourceId: entry.sourceId || movement.id,
                 sourceType: entry.sourceType || movement.type.toLowerCase(),
@@ -1132,8 +1143,7 @@ export async function linkFxMovementToEntries(
                     sourceType: movement.type.toLowerCase(),
                     linkedBy: 'fx',
                 },
-            }
-            await db.entries.put(updated)
+            }, { reason: 'Vinculación manual de asiento a movimiento de moneda extranjera' })
         }
 
         await db.fxMovements.update(movementId, {
@@ -1207,14 +1217,21 @@ export async function deleteFxMovementWithJournal(
         }
     }
 
-    await db.transaction('rw', db.fxMovements, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
         if (autoEntries.length > 0) {
-            await db.entries.bulkDelete(autoEntries.map(e => e.id))
+            await voidOperationEntries(autoEntries.map(e => e.id), {
+                reason: 'Baja de movimiento de moneda extranjera',
+            })
         }
         if (manualEntries.length > 0 && options?.keepManualEntries) {
             for (const entry of manualEntries) {
                 const cleaned = stripFxLinkFromEntry(entry, id)
-                await db.entries.put(cleaned)
+                await updateEntrySourceLink(entry.id, {
+                    sourceModule: cleaned.sourceModule,
+                    sourceId: cleaned.sourceId,
+                    sourceType: cleaned.sourceType,
+                    metadata: cleaned.metadata,
+                }, { reason: 'Desvinculación por baja de movimiento de moneda extranjera' })
             }
         }
         await db.fxMovements.delete(id)
@@ -1557,7 +1574,7 @@ export async function createFxDebt(
     }
 
     const fxAccount = await getFxAccountById(movement.accountId)
-    let createdEntries: JournalEntry[] = []
+    const createdEntries: JournalEntry[] = []
 
     // Include all stores that may be accessed during journal generation:
     // - fxDebts: main debt record
@@ -1565,7 +1582,7 @@ export async function createFxDebt(
     // - fxAccounts: lookup for target account
     // - accounts: ledger accounts for journal building
     // - entries: journal entries
-    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries], async () => {
+    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, ...JOURNAL_TX_TABLES], async () => {
         await db.fxDebts.add(newDebt)
 
         if (!autoJournal) {
@@ -1700,7 +1717,7 @@ export async function addFxDebtDisbursement(params: {
     const createdEntries: JournalEntry[] = []
 
     // Include all stores for journal generation (accounts lookup + entries)
-    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries], async () => {
+    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, ...JOURNAL_TX_TABLES], async () => {
         await db.fxDebts.update(debt.id, {
             principalME: nextPrincipalME,
             saldoME: nextSaldoME,
@@ -1843,7 +1860,7 @@ export async function addFxDebtPayment(params: {
     const createdEntries: JournalEntry[] = []
 
     // Include all stores for journal generation (accounts lookup + entries)
-    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries], async () => {
+    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, ...JOURNAL_TX_TABLES], async () => {
         await db.fxDebts.update(debt.id, {
             saldoME: nextSaldoME,
             paidInstallments: nextPaidInstallments,
@@ -2051,21 +2068,33 @@ export async function clearFxPeriodData(
     const autoEntries = linkedEntries.filter(e => isAutoGeneratedEntryForMovement(e, e.sourceId || ''))
     const manualEntries = linkedEntries.filter(e => !isAutoGeneratedEntryForMovement(e, e.sourceId || ''))
 
-    await db.transaction('rw', db.fxMovements, db.fxDebts, db.fxLiabilities, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, db.fxDebts, db.fxLiabilities, ...JOURNAL_TX_TABLES], async () => {
         if (options.deleteGeneratedEntries) {
             if (autoEntries.length > 0) {
-                await db.entries.bulkDelete(autoEntries.map(e => e.id))
+                await voidOperationEntries(autoEntries.map(e => e.id), {
+                    reason: 'Limpieza de datos de moneda extranjera del período',
+                })
             }
             if (manualEntries.length > 0) {
                 for (const entry of manualEntries) {
                     const cleaned = stripFxLinkFromEntry(entry, entry.sourceId || '')
-                    await db.entries.put(cleaned)
+                    await updateEntrySourceLink(entry.id, {
+                        sourceModule: cleaned.sourceModule,
+                        sourceId: cleaned.sourceId,
+                        sourceType: cleaned.sourceType,
+                        metadata: cleaned.metadata,
+                    }, { reason: 'Desvinculación por limpieza de período de moneda extranjera' })
                 }
             }
         } else {
             for (const entry of linkedEntries) {
                 const cleaned = stripFxLinkFromEntry(entry, entry.sourceId || '')
-                await db.entries.put(cleaned)
+                await updateEntrySourceLink(entry.id, {
+                    sourceModule: cleaned.sourceModule,
+                    sourceId: cleaned.sourceId,
+                    sourceType: cleaned.sourceType,
+                    metadata: cleaned.metadata,
+                }, { reason: 'Desvinculación por limpieza de período de moneda extranjera' })
             }
         }
 
