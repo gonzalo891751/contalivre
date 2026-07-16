@@ -1465,8 +1465,10 @@ export async function saveTaxEntryFromPreview(
     try {
         let entryId: string
         if (existing) {
-            await updateEntry(existing.id, entryData)
-            entryId = existing.id
+            // Reversión uniforme (Fase 2B): un cambio económico devuelve un
+            // asiento sustituto con nuevo id
+            const updated = await updateEntry(existing.id, entryData)
+            entryId = updated.id
         } else {
             const created = await createEntry(entryData)
             entryId = created.id

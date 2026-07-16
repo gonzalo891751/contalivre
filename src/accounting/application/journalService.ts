@@ -499,10 +499,29 @@ async function assertPeriodOpenForEntry(entry: JournalEntry): Promise<void> {
     }
 }
 
+/** ¿Las líneas son económicamente idénticas? (cuentas e importes) */
+function linesEconomicallyEqual(a: EntryLine[], b: EntryLine[]): boolean {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+        if (a[i].accountId !== b[i].accountId) return false
+        if (roundMoney(a[i].debit) !== roundMoney(b[i].debit)) return false
+        if (roundMoney(a[i].credit) !== roundMoney(b[i].credit)) return false
+    }
+    return true
+}
+
 /**
- * Regeneración auditada del asiento de una operación de módulo
- * (ej: el usuario editó un movimiento y el módulo reconstruye las líneas).
- * Validación completa + audit ENTRY_REPLACED con before/after.
+ * Edición del asiento de una operación de módulo — Fase 2B: REVERSIÓN UNIFORME.
+ *
+ * Regla (§6.1): todo asiento POSTED es inmutable en su contenido económico
+ * (fecha y líneas). Cuando la operación de origen se edita:
+ * - si el cambio es solo descriptivo (memo/metadata/vínculo), se actualiza
+ *   in place con auditoría (no altera los libros);
+ * - si el cambio es económico, en UNA transacción se crea el asiento de
+ *   reversión del original, el original queda REVERSED y se contabiliza un
+ *   asiento sustituto nuevo, enlazados por metadata.replacesEntryId y
+ *   operationVersion. Devuelve el sustituto.
+ * - los borradores siguen editándose libremente.
  */
 export async function replaceOperationEntry(
     entryId: string,
@@ -519,33 +538,165 @@ export async function replaceOperationEntry(
     }
     await assertPeriodOpenForEntry(existing)
 
-    const updated: JournalEntry = {
-        ...existing,
-        ...input,
-        lines: input.lines ? normalizeLines(input.lines) : existing.lines,
-        updatedAt: nowISO(),
-        updatedBy: actorId,
+    // Borrador: edición directa (no impacta libros)
+    if (existing.status === 'DRAFT') {
+        const updatedDraft: JournalEntry = {
+            ...existing,
+            ...input,
+            lines: input.lines ? normalizeLines(input.lines) : existing.lines,
+            updatedAt: nowISO(),
+            updatedBy: actorId,
+        }
+        const validation = validateDraftStructure(updatedDraft)
+        if (!validation.ok) throw new PostingError(validation.errors)
+        await inWriteTx([db.entries, db.auditLog], async () => {
+            await putEntryRecord(updatedDraft)
+            await appendAuditEvent({
+                eventType: 'DRAFT_UPDATED',
+                entityType: 'journalEntry',
+                entityId: entryId,
+                companyId: existing.companyId,
+                actorId,
+                before: existing,
+                after: updatedDraft,
+            })
+        })
+        return updatedDraft
     }
 
-    const ctx = await validateAndResolveContext(updated, actorId)
+    const newLines = input.lines ? normalizeLines(input.lines) : existing.lines
+    const newDate = input.date ?? existing.date
+    const isEconomicChange =
+        newDate !== existing.date || !linesEconomicallyEqual(existing.lines, newLines)
 
-    let saved: JournalEntry | undefined
+    // Cambio solo descriptivo: memo/metadata/vínculo no alteran los libros
+    if (!isEconomicChange) {
+        const updated: JournalEntry = {
+            ...existing,
+            memo: input.memo ?? existing.memo,
+            metadata: input.metadata ?? existing.metadata,
+            sourceId: input.sourceId ?? existing.sourceId,
+            sourceType: input.sourceType ?? existing.sourceType,
+            updatedAt: nowISO(),
+            updatedBy: actorId,
+        }
+        await inWriteTx([db.entries, db.auditLog], async () => {
+            await putEntryRecord(updated)
+            await appendAuditEvent({
+                eventType: 'ENTRY_REPLACED',
+                entityType: 'journalEntry',
+                entityId: entryId,
+                companyId: existing.companyId ?? DEFAULT_COMPANY_ID,
+                exerciseId: existing.exerciseId,
+                actorId,
+                reason: options.reason ?? 'Actualización descriptiva (sin cambio económico)',
+                before: { memo: existing.memo, metadata: existing.metadata },
+                after: { memo: updated.memo, metadata: updated.metadata },
+            })
+        })
+        return updated
+    }
+
+    // Cambio económico: reversión + asiento sustituto, atómicos
+    const version = Number((existing.metadata as Record<string, unknown> | undefined)?.operationVersion ?? 1) + 1
+    const substituteCandidate: JournalEntry = {
+        id: generateId(),
+        date: newDate,
+        memo: input.memo ?? existing.memo,
+        lines: newLines,
+        sourceModule: existing.sourceModule,
+        sourceType: input.sourceType ?? existing.sourceType,
+        sourceId: input.sourceId ?? existing.sourceId,
+        metadata: {
+            ...(input.metadata ?? existing.metadata ?? {}),
+            replacesEntryId: existing.id,
+            operationVersion: version,
+        },
+        idempotencyKey: existing.idempotencyKey ? `${existing.idempotencyKey}#v${version}` : undefined,
+        status: 'POSTED',
+        companyId: existing.companyId ?? DEFAULT_COMPANY_ID,
+        createdAt: nowISO(),
+        createdBy: actorId,
+        schemaVersion: SCHEMA_VERSION,
+    }
+
+    const reversalCandidate = buildReversalCandidate(existing, actorId,
+        options.reason ?? 'Reversión por edición de la operación de origen')
+
+    const ctxReversal = await validateAndResolveContext(reversalCandidate, actorId)
+    const ctxSubstitute = await validateAndResolveContext(substituteCandidate, actorId)
+
+    let substitute: JournalEntry | undefined
     await inWriteTx(POSTING_TABLES, async () => {
-        saved = { ...updated, exerciseId: ctx.exerciseId, periodId: ctx.periodId }
-        await putEntryRecord(saved)
+        const fresh = await getEntryRecord(entryId)
+        if (!fresh || fresh.status === 'REVERSED' || fresh.reversalEntryId) {
+            throw new PostingError([`El asiento N° ${existing.entryNumber ?? entryId} ya fue revertido.`])
+        }
+        const companyId = existing.companyId ?? DEFAULT_COMPANY_ID
+        const n1 = (await getMaxEntryNumber(companyId, ctxReversal.exerciseId)) + 1
+        const reversal: JournalEntry = {
+            ...reversalCandidate,
+            exerciseId: ctxReversal.exerciseId,
+            periodId: ctxReversal.periodId,
+            entryNumber: n1,
+            postedAt: nowISO(),
+            postedBy: actorId,
+        }
+        await insertEntryRecord(reversal)
+        await updateEntryRecord(entryId, {
+            status: 'REVERSED',
+            reversedAt: nowISO(),
+            reversedBy: actorId,
+            reversalEntryId: reversal.id,
+            reversalReason: reversalCandidate.reversalReason,
+        })
+
+        const n2 = (await getMaxEntryNumber(companyId, ctxSubstitute.exerciseId)) + 1
+        substitute = {
+            ...substituteCandidate,
+            exerciseId: ctxSubstitute.exerciseId,
+            periodId: ctxSubstitute.periodId,
+            entryNumber: n2,
+            postedAt: nowISO(),
+            postedBy: actorId,
+        }
+        await insertEntryRecord(substitute)
+
         await appendAuditEvent({
             eventType: 'ENTRY_REPLACED',
             entityType: 'journalEntry',
             entityId: entryId,
-            companyId: saved.companyId ?? DEFAULT_COMPANY_ID,
-            exerciseId: ctx.exerciseId,
+            companyId,
+            exerciseId: ctxSubstitute.exerciseId,
             actorId,
-            reason: options.reason ?? 'Regeneración desde la operación de origen',
+            reason: options.reason ?? 'Edición de la operación de origen (reversión + sustituto)',
             before: existing,
-            after: saved,
+            after: substitute,
+            metadata: { reversalEntryId: reversal.id, substituteEntryId: substitute.id, operationVersion: version },
         })
     })
-    return saved!
+    return substitute!
+}
+
+/** Construye el asiento de reversión (sin persistir) */
+function buildReversalCandidate(original: JournalEntry, actorId: string, reason: string): JournalEntry {
+    return {
+        id: generateId(),
+        date: original.date,
+        memo: `Reversión de asiento N° ${original.entryNumber ?? original.id}: ${original.memo}`,
+        lines: original.lines.map(l => ({ ...l, debit: l.credit, credit: l.debit })),
+        sourceModule: original.sourceModule,
+        sourceType: 'reversal',
+        sourceId: original.id,
+        metadata: { reversalOf: original.id },
+        status: 'POSTED',
+        companyId: original.companyId ?? DEFAULT_COMPANY_ID,
+        reversedEntryId: original.id,
+        reversalReason: reason,
+        createdAt: nowISO(),
+        createdBy: actorId,
+        schemaVersion: SCHEMA_VERSION,
+    }
 }
 
 /**
@@ -588,9 +739,11 @@ export async function updateEntrySourceLink(
 }
 
 /**
- * Baja auditada del asiento de una operación de módulo (cascada al eliminar
- * la operación de origen). Bloqueada en períodos cerrados y para asientos
- * manuales contabilizados.
+ * Anulación del asiento de una operación de módulo — Fase 2B: REVERSIÓN
+ * UNIFORME (§6.1). El asiento POSTED NO se elimina físicamente: se crea su
+ * reversión, queda REVERSED y la trazabilidad se conserva completa.
+ * Los borradores sí se eliminan físicamente (nunca integraron los libros).
+ * Bloqueada en períodos cerrados y para asientos manuales contabilizados.
  */
 export async function voidOperationEntry(
     entryId: string,
@@ -606,17 +759,63 @@ export async function voidOperationEntry(
     }
     await assertPeriodOpenForEntry(existing)
 
-    await inWriteTx([db.entries, db.periods, db.auditLog], async () => {
-        await deleteEntryRecord(entryId)
+    // Borrador: eliminación física (no impactó libros)
+    if (existing.status === 'DRAFT') {
+        await inWriteTx([db.entries, db.periods, db.auditLog], async () => {
+            await deleteEntryRecord(entryId)
+            await appendAuditEvent({
+                eventType: 'ENTRY_VOIDED',
+                entityType: 'journalEntry',
+                entityId: entryId,
+                companyId: existing.companyId ?? DEFAULT_COMPANY_ID,
+                exerciseId: existing.exerciseId,
+                actorId,
+                reason: options.reason ?? 'Baja de borrador por eliminación de la operación de origen',
+                before: existing,
+            })
+        })
+        return
+    }
+
+    // Ya revertido: idempotente
+    if (existing.status === 'REVERSED' || existing.reversalEntryId) return
+
+    // POSTED: anulación por reversión (nunca delete físico)
+    const reversalCandidate = buildReversalCandidate(existing, actorId,
+        options.reason ?? 'Anulación por baja de la operación de origen')
+    const ctx = await validateAndResolveContext(reversalCandidate, actorId)
+
+    await inWriteTx(POSTING_TABLES, async () => {
+        const fresh = await getEntryRecord(entryId)
+        if (!fresh || fresh.status === 'REVERSED' || fresh.reversalEntryId) return
+        const companyId = existing.companyId ?? DEFAULT_COMPANY_ID
+        const n = (await getMaxEntryNumber(companyId, ctx.exerciseId)) + 1
+        const reversal: JournalEntry = {
+            ...reversalCandidate,
+            exerciseId: ctx.exerciseId,
+            periodId: ctx.periodId,
+            entryNumber: n,
+            postedAt: nowISO(),
+            postedBy: actorId,
+        }
+        await insertEntryRecord(reversal)
+        await updateEntryRecord(entryId, {
+            status: 'REVERSED',
+            reversedAt: nowISO(),
+            reversedBy: actorId,
+            reversalEntryId: reversal.id,
+            reversalReason: reversalCandidate.reversalReason,
+        })
         await appendAuditEvent({
             eventType: 'ENTRY_VOIDED',
             entityType: 'journalEntry',
             entityId: entryId,
-            companyId: existing.companyId ?? DEFAULT_COMPANY_ID,
+            companyId,
             exerciseId: existing.exerciseId,
             actorId,
-            reason: options.reason ?? 'Baja de la operación de origen',
+            reason: options.reason ?? 'Anulación por baja de la operación de origen',
             before: existing,
+            metadata: { reversalEntryId: reversal.id, mode: 'reversed-not-deleted' },
         })
     })
 }

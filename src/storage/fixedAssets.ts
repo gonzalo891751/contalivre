@@ -1149,11 +1149,13 @@ export async function syncFixedAssetAcquisitionEntry(
     }
 
     if (existing) {
-        await updateEntry(existing.id, entry)
-        if (asset.acquisitionJournalEntryId !== existing.id) {
-            await updateFixedAsset(asset.id, { acquisitionJournalEntryId: existing.id })
+        // Reversión uniforme (Fase 2B): la edición económica devuelve un
+        // asiento sustituto con nuevo id; el vínculo debe adoptar ese id.
+        const updated = await updateEntry(existing.id, entry)
+        if (asset.acquisitionJournalEntryId !== updated.id) {
+            await updateFixedAsset(asset.id, { acquisitionJournalEntryId: updated.id })
         }
-        return { success: true, entryId: existing.id, status: 'updated' }
+        return { success: true, entryId: updated.id, status: 'updated' }
     }
 
     const created = await createEntry(entry)
@@ -1188,8 +1190,11 @@ export async function syncFixedAssetPaymentEntry(
     }
 
     if (existing) {
-        await updateEntry(existing.id, entry)
-        return { success: true, entryId: existing.id, status: 'updated' }
+        const updated = await updateEntry(existing.id, entry)
+        if (asset.paymentJournalEntryId !== updated.id) {
+            await updateFixedAsset(asset.id, { paymentJournalEntryId: updated.id })
+        }
+        return { success: true, entryId: updated.id, status: 'updated' }
     }
 
     const created = await createEntry(entry)
@@ -1367,11 +1372,11 @@ export async function syncFixedAssetOpeningEntry(
     }
 
     if (existing) {
-        await updateEntry(existing.id, entry)
-        if (asset.openingJournalEntryId !== existing.id) {
-            await updateFixedAsset(asset.id, { openingJournalEntryId: existing.id })
+        const updated = await updateEntry(existing.id, entry)
+        if (asset.openingJournalEntryId !== updated.id) {
+            await updateFixedAsset(asset.id, { openingJournalEntryId: updated.id })
         }
-        return { success: true, entryId: existing.id, status: 'updated' }
+        return { success: true, entryId: updated.id, status: 'updated' }
     }
 
     const created = await createEntry(entry)
@@ -1733,11 +1738,11 @@ export async function syncFixedAssetEventJournalEntry(
     }
 
     if (existing) {
-        await updateEntry(existing.id, entry)
-        if (event.linkedJournalEntryId !== existing.id) {
-            await updateFixedAssetEvent(event.id, { linkedJournalEntryId: existing.id })
+        const updated = await updateEntry(existing.id, entry)
+        if (event.linkedJournalEntryId !== updated.id) {
+            await updateFixedAssetEvent(event.id, { linkedJournalEntryId: updated.id })
         }
-        return { success: true, entryId: existing.id, status: 'updated' }
+        return { success: true, entryId: updated.id, status: 'updated' }
     }
 
     const created = await createEntry(entry)
@@ -1900,11 +1905,11 @@ export async function syncFixedAssetRT6Entry(
     }
 
     if (existing) {
-        await updateEntry(existing.id, entry)
-        if (asset.rt6JournalEntryId !== existing.id) {
-            await updateFixedAsset(asset.id, { rt6JournalEntryId: existing.id })
+        const updated = await updateEntry(existing.id, entry)
+        if (asset.rt6JournalEntryId !== updated.id) {
+            await updateFixedAsset(asset.id, { rt6JournalEntryId: updated.id })
         }
-        return { success: true, entryId: existing.id, status: 'updated' }
+        return { success: true, entryId: updated.id, status: 'updated' }
     }
 
     const created = await createEntry(entry)
