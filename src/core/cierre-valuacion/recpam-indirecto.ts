@@ -1,8 +1,15 @@
 /**
  * RECPAM - Método Indirecto
  *
- * Calculates RECPAM (Resultado por Exposición a la Inflación) using the
- * indirect method based on monthly monetary position.
+ * @deprecated OBSOLETO (Fase 2B): este algoritmo suma posiciones monetarias
+ * completas de fin de cada mes reexpresadas, lo que DUPLICA exposiciones
+ * persistentes (hallazgo ACC-010 de la auditoría). El cálculo correcto vive
+ * en src/accounting/inflation/engine.ts (RECPAM indirecto como partida de
+ * conciliación + método directo de control, conciliados y con golden tests).
+ * Este módulo se conserva únicamente para la pantalla legacy de
+ * Cierre/Valuación, que está contenida (solo borradores + advertencia
+ * "módulo en revisión normativa") y NO debe usarse para cierres reales.
+ * No agregar nuevos consumidores.
  */
 
 import type { Account, JournalEntry } from '../models';
