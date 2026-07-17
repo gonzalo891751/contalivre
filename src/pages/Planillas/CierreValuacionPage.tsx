@@ -38,9 +38,9 @@ import { Step3RT17Panel } from './components/Step3RT17Panel';
 import { RecpamIndirectoDrawer } from './components/RecpamIndirectoDrawer';
 import { useLedgerBalances } from '../../hooks/useLedgerBalances';
 import { autoGeneratePartidasRT6 } from '../../core/cierre-valuacion/auto-partidas-rt6';
-import { calculateRecpamIndirecto, type RecpamIndirectoResult } from '../../core/cierre-valuacion/recpam-indirecto';
+import { computeInflationAdjustment, type InflationResult } from '../../accounting/inflation/engine';
+import { toCents } from '../../accounting/domain/money';
 import type { MonetaryClass } from '../../core/cierre-valuacion/monetary-classification';
-import { getInitialMonetaryClass, applyOverrides, isExcluded, getAccountType } from '../../core/cierre-valuacion/monetary-classification';
 import { computeBalances } from '../../core/ledger/computeBalances';
 import { updateEntry } from '../../storage/entries';
 import { createDraftEntry } from '../../accounting/application/journalService';
@@ -167,7 +167,7 @@ export default function CierreValuacionPage() {
     const [isMetodoIndirectoOpen, setMetodoIndirectoOpen] = useState(false);
     const [isAnalyzingMayor, setAnalyzingMayor] = useState(false);
     const [lastMayorAnalysis, setLastMayorAnalysis] = useState<string | undefined>(undefined);
-    const [recpamIndirectoResult, setRecpamIndirectoResult] = useState<RecpamIndirectoResult | null>(null);
+    const [recpamIndirectoResult, setRecpamIndirectoResult] = useState<InflationResult | null>(null);
     const [recpamIndirectoLoading, setRecpamIndirectoLoading] = useState(false);
 
     // Refs
@@ -343,37 +343,8 @@ export default function CierreValuacionPage() {
     // Ledger balances for RT6 classification
     const ledgerBalances = useLedgerBalances(allJournalEntries, allAccounts, { closingDate });
 
-    // Compute monetary totals for drawer fallback
-    const monetaryFallbackTotals = useMemo(() => {
-        const overrides = state?.accountOverrides || {};
-        let totalActivosMon = 0;
-        let totalPasivosMon = 0;
-
-        for (const account of allAccounts) {
-            if (account.isHeader) continue;
-            if (isExcluded(account.id, overrides)) continue;
-
-            const initialClass = getInitialMonetaryClass(account);
-            const finalClass = applyOverrides(account.id, initialClass, overrides);
-            if (finalClass !== 'MONETARY') continue;
-
-            const balance = ledgerBalances.byAccount.get(account.id)?.balance || 0;
-            if (balance === 0) continue;
-
-            const type = getAccountType(account);
-            if (type === 'ACTIVO') {
-                totalActivosMon += balance;
-            } else if (type === 'PASIVO') {
-                totalPasivosMon += balance;
-            }
-        }
-
-        return {
-            totalActivosMon,
-            totalPasivosMon,
-            netoMon: totalActivosMon - totalPasivosMon,
-        };
-    }, [allAccounts, ledgerBalances.byAccount, state?.accountOverrides]);
+    // (Fase 2C: el fallback de totales monetarios del drawer legacy fue
+    // retirado; el drawer consume el resultado del motor de inflación.)
 
     // Compute Sync Status for each voucher
     const voucherSyncData = useMemo(() => {
@@ -686,28 +657,49 @@ export default function CierreValuacionPage() {
         showToast('Coeficientes recalculados');
     }, []);
 
+    // Fase 2C: el RECPAM se calcula con el MOTOR NUEVO (anticuación real +
+    // partida de conciliación + control directo). El algoritmo legacy de
+    // posiciones mensuales quedó sin consumidores (ACC-010).
     const handleOpenMetodoIndirecto = useCallback(() => {
         if (!state || !allJournalEntries) return;
 
         setMetodoIndirectoOpen(true);
         setRecpamIndirectoLoading(true);
 
-        // Default to start of year based on closingDate
         const year = closingDate.substring(0, 4);
         const startOfPeriod = `${year}-01-01`;
 
         try {
-            const result = calculateRecpamIndirecto(
-                allJournalEntries,
-                allAccounts,
-                state.accountOverrides || {},
-                indices,
-                startOfPeriod,
-                closingDate
-            );
+            const indexes = new Map(indices.map(i => [i.period, i.value]));
+            const bookEntries = allJournalEntries.filter(e => e.status !== 'DRAFT');
+            const exerciseEntries = bookEntries.filter(e => e.date >= startOfPeriod && e.date <= closingDate);
+
+            // Saldos previos al ejercicio SIN anticuación: el motor los marca
+            // honestamente como origen insuficiente si son no monetarios.
+            const openingBalances = new Map<string, { debit: number; credit: number }>();
+            for (const entry of bookEntries) {
+                if (entry.date >= startOfPeriod) continue;
+                for (const l of entry.lines) {
+                    const prev = openingBalances.get(l.accountId) ?? { debit: 0, credit: 0 };
+                    prev.debit += l.debit || 0;
+                    prev.credit += l.credit || 0;
+                    openingBalances.set(l.accountId, prev);
+                }
+            }
+            for (const [id, ob] of openingBalances) {
+                if (toCents(ob.debit) === toCents(ob.credit)) openingBalances.delete(id);
+            }
+
+            const result = computeInflationAdjustment({
+                entries: exerciseEntries,
+                accounts: allAccounts,
+                openingBalances,
+                closePeriod: closingDate.substring(0, 7),
+                indexes,
+            });
             setRecpamIndirectoResult(result);
         } catch (err) {
-            console.error('Error calculating RECPAM indirecto:', err);
+            console.error('Error calculating RECPAM (motor):', err);
             setRecpamIndirectoResult(null);
         } finally {
             setRecpamIndirectoLoading(false);
@@ -1246,7 +1238,6 @@ export default function CierreValuacionPage() {
                 onClose={() => setMetodoIndirectoOpen(false)}
                 result={recpamIndirectoResult}
                 loading={recpamIndirectoLoading}
-                fallbackTotals={monetaryFallbackTotals}
             />
 
             {/* INDEX EDIT MODAL */}
