@@ -1,587 +1,192 @@
-import { useState, useMemo } from 'react';
-import {
-    Info,
-    Coins,
-    Landmark,
-    TrendingUp,
-    CheckCircle2,
-    AlertTriangle
-} from 'lucide-react';
-import styles from './IndicatorsDashboard.module.css';
-import { useIndicatorsMetrics, type FinancialData } from '../../hooks/useIndicatorsMetrics';
-import {
-    getStatus,
-    formatCurrency,
-    formatNumber,
-    formatPercent,
-    safeDiv,
-    type GroupId,
-    type ChartType,
-    type Sentiment
-} from '../../utils/indicators';
+/**
+ * IndicatorsDashboard — rediseño Fase 2D (§8): consume EXCLUSIVAMENTE el catálogo
+ * canónico de indicadores del ReportingBundle (bundle.metrics). Cada MetricResult
+ * ya declara su estado, fórmula, sustitución, interpretación y advertencias, sin
+ * heurísticas por nombre, sin ∞/NaN y sin puntaje universal de "salud".
+ */
 
-// --- 1. TYPES & INTERFACES ---
-interface IndicatorResult {
-    id: string;
-    title: string;
-    value: number | null;
-    formattedValue: string;
-    group: GroupId;
-    sentiment: Sentiment;
-    statusLabel: string; // "Sólido", "Alerta", etc.
-    formula: string;
-    explanation: string;
-    interpretation: string;
-    chartType: ChartType;
-    thresholdMin?: number;
-    thresholdMax?: number;
+import { useMemo, useState } from 'react'
+import { Coins, Landmark, TrendingUp, Activity, Droplets, Info } from 'lucide-react'
+import { usePeriodYear } from '../../hooks/usePeriodYear'
+import { useReportingBundle } from '../../hooks/useReportingBundle'
+import type { MetricCatalogEntry } from '../../reporting/metrics/types'
+
+type Category = 'liquidez' | 'solvencia' | 'rentabilidad' | 'actividad' | 'flujo'
+
+const CATEGORIES: { id: Category; label: string; icon: React.ElementType }[] = [
+    { id: 'liquidez', label: 'Liquidez', icon: Droplets },
+    { id: 'solvencia', label: 'Solvencia', icon: Landmark },
+    { id: 'rentabilidad', label: 'Rentabilidad', icon: TrendingUp },
+    { id: 'actividad', label: 'Actividad', icon: Activity },
+    { id: 'flujo', label: 'Flujo de fondos', icon: Coins },
+]
+
+const money = (n: number) => n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0, maximumFractionDigits: 0 })
+
+function formatMetric(result: MetricCatalogEntry['result']): { value: string; nd: boolean } {
+    if (result.status !== 'CALCULATED') return { value: 'N/D', nd: true }
+    switch (result.unit) {
+        case 'percentage': return { value: `${result.value.toFixed(1)}%`, nd: false }
+        case 'currency': return { value: money(result.value), nd: false }
+        case 'days': return { value: `${Math.round(result.value)} días`, nd: false }
+        case 'times': return { value: `${result.value.toFixed(2)}×`, nd: false }
+        default: return { value: result.value.toFixed(2), nd: false }
+    }
 }
 
-// --- 2. SUB-COMPONENTS ---
+const STATUS_LABEL: Record<string, string> = {
+    NOT_CALCULABLE: 'No calculable',
+    NOT_APPLICABLE: 'No aplica',
+    INSUFFICIENT_INFORMATION: 'Sin datos suficientes',
+}
 
-// A. Micro Gauge SVG
-const MicroGauge = ({ value, max, sentiment }: { value: number, max: number, sentiment: Sentiment }) => {
-    // Normalizar
-    const limit = max * 1.5;
-    const safeVal = Math.max(0, Math.min(limit, value));
-    const percentage = (safeVal / limit) * 100;
-
-    const colorMap: Record<string, string> = {
-        success: '#10B981', // emerald-500
-        warning: '#F59E0B', // amber-500
-        error: '#EF4444',   // red-500
-        info: '#3B82F6',    // blue-500
-        neutral: '#CBD5E1'  // slate-300
-    };
-
-    const radius = 14;
-    const circumference = radius * Math.PI;
-    const offset = circumference - ((percentage / 100) * circumference);
-
+function MetricCard({ entry }: { entry: MetricCatalogEntry }) {
+    const r = entry.result
+    const { value, nd } = formatMetric(r)
+    const reason = r.status !== 'CALCULATED' ? r.reason : null
+    const warnings = r.status === 'CALCULATED' ? r.warnings : []
     return (
-        <div className={styles.microGaugeContainer}>
-            <svg className={styles.microGaugeSvg} viewBox="0 0 36 36">
-                <circle cx="18" cy="18" r="14" fill="none" stroke="#E2E8F0" strokeWidth="4"
-                    strokeDasharray={`${circumference} ${circumference}`} transform="rotate(180 18 18)" />
-                <circle cx="18" cy="18" r="14" fill="none" stroke={colorMap[sentiment] || colorMap.neutral} strokeWidth="4"
-                    strokeDasharray={`${circumference} ${circumference}`} strokeDashoffset={offset}
-                    strokeLinecap="round" transform="rotate(180 18 18)" className="transition-all duration-700 ease-out" />
-            </svg>
-        </div>
-    );
-};
-
-// B. Status Dot
-const StatusDot = ({ sentiment }: { sentiment: Sentiment }) => {
-    const dotClass = {
-        success: styles.dotSuccess,
-        warning: styles.dotWarning,
-        error: styles.dotError,
-        info: styles.dotInfo,
-        neutral: styles.dotNeutral
-    }[sentiment];
-
-    return <div className={`${styles.statusDot} ${dotClass}`} />;
-};
-
-// C. Indicator Card
-const IndicatorCard = ({ data }: { data: IndicatorResult }) => {
-    const isND = data.sentiment === 'neutral' && data.value === null;
-
-    const containerClasses = isND ? styles.cardND : '';
-
-    const textStatusColor = {
-        success: styles.pillSuccess,
-        warning: styles.pillWarning,
-        error: styles.pillError,
-        info: styles.pillInfo,
-        neutral: styles.pillNeutral
-    }[data.sentiment];
-
-    return (
-        <div className={`${styles.card} ${containerClasses}`}>
-
-            {/* 1. Header: Dot + Title + Info */}
-            <div className={styles.cardHeader}>
-                <div className={styles.cardTitleGroup}>
-                    <StatusDot sentiment={data.sentiment} />
-                    <div className={styles.cardTitle}>
-                        {data.title}
-                    </div>
-                </div>
-
-                {/* Tooltip Wrapper */}
-                <div className={`${styles.tooltipWrapper} group/tooltip`}>
-                    <Info
-                        size={18}
-                        className={styles.infoIcon}
-                    />
-                    {/* Tooltip Content */}
-                    <div className={styles.tooltipContent}>
-                        <div className="font-mono text-blue-300 mb-1.5 border-b border-slate-700 pb-1.5">{data.formula}</div>
-                        <p className="mb-2 text-slate-300 leading-relaxed font-sans">{data.explanation}</p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                            <CheckCircle2 className="text-emerald-400 shrink-0" size={12} />
-                            <span className="text-emerald-100 italic">{data.interpretation}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* 2. Value + MicroChart */}
-            <div className={styles.cardFooter}>
-                <div className={styles.valueGroup}>
-                    <span className={`${styles.value} ${isND ? styles.valueND : ''}`}>
-                        {data.formattedValue}
+        <div className={`ind-card${nd ? ' is-nd' : ''}`}>
+            <div className="ind-card-head">
+                <span className="ind-card-title">{entry.label}</span>
+                <span className="ind-tooltip">
+                    <Info size={15} aria-hidden />
+                    <span className="ind-tooltip-body">
+                        <span className="ind-formula">{r.formula}</span>
+                        {r.status === 'CALCULATED' && <span className="ind-sub">{r.substitution}</span>}
+                        <span className="ind-interp">{r.status === 'CALCULATED' ? r.interpretation : reason}</span>
                     </span>
-
-                    {/* Status Label Pill */}
-                    <span className={`${styles.pill} ${textStatusColor}`}>
-                        {data.statusLabel}
-                    </span>
-                </div>
-
-                {/* Chart (Solo si no es N/D y es tipo gauge) */}
-                {!isND && data.chartType === 'gauge' && data.value !== null && (
-                    <div className="mb-1">
-                        <MicroGauge value={data.value} max={data.thresholdMax || 2} sentiment={data.sentiment} />
-                    </div>
-                )}
+                </span>
             </div>
+            <div className="ind-card-value-row">
+                <span className={`ind-value${nd ? ' nd' : ''}`}>{value}</span>
+                {nd && <span className="ind-pill nd">{STATUS_LABEL[r.status] ?? 'N/D'}</span>}
+            </div>
+            {r.status === 'CALCULATED' && r.interpretation && (
+                <p className="ind-interp-line">{r.interpretation}</p>
+            )}
+            {reason && <p className="ind-reason">{reason}</p>}
+            {warnings.length > 0 && <p className="ind-warn">⚠ {warnings.join(' · ')}</p>}
         </div>
-    );
-};
-
-// D. Integral Score Card (Restored Design)
-const IntegralScoreCard = ({ scores }: { scores: { fin: number | null, pat: number | null, eco: number | null, avg: number } }) => {
-
-    const getBadgeStyle = (s: number) => {
-        if (s >= 8) return { label: 'Excelente', className: styles.badgeExcellent };
-        if (s >= 7) return { label: 'Muy Buena', className: styles.badgeVeryGood };
-        if (s >= 6) return { label: 'Buena', className: styles.badgeGood };
-        if (s >= 4) return { label: 'Regular', className: styles.badgeRegular };
-        return { label: 'Mala', className: styles.badgeBad };
-    };
-
-    const badge = getBadgeStyle(scores.avg);
-
-    // Circle Math
-    const r = 58;
-    const c = 2 * Math.PI * r;
-    const offset = c - ((scores.avg / 10) * c);
-
-    return (
-        <div className={styles.integralCard}>
-
-            {/* Left: Gauge */}
-            <div className={styles.integralLeft}>
-                <h3 className={styles.integralTitle}>Salud Financiera</h3>
-
-                <div className={styles.gaugeContainer}>
-                    {/* Track */}
-                    <svg className="w-full h-full transform -rotate-90">
-                        <circle cx="80" cy="80" r={r} stroke="#E2E8F0" strokeWidth="10" fill="transparent" />
-                        <circle cx="80" cy="80" r={r} stroke={scores.avg >= 6 ? '#10B981' : '#F59E0B'} strokeWidth="10"
-                            fill="transparent" strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
-                            className="transition-all duration-1000 ease-out" />
-                    </svg>
-                    <div className={styles.integralScore}>
-                        <span className={styles.scoreValue}>{scores.avg.toFixed(1)}</span>
-                        <span className={styles.scoreLabel}>GLOBAL</span>
-                    </div>
-                </div>
-
-                <div className={`${styles.badge} ${badge.className}`}>
-                    {badge.label}
-                </div>
-            </div>
-
-            {/* Right: Progress Bars */}
-            <div className={styles.integralRight}>
-                <h3 className={styles.breakdownTitle}>Desglose por Capacidad</h3>
-
-                <div className={styles.barsContainer}>
-                    {[
-                        { label: 'Capacidad Financiera', val: scores.fin, barClass: styles.barBlue },
-                        { label: 'Capacidad Patrimonial', val: scores.pat, barClass: styles.barEmerald },
-                        { label: 'Capacidad Económica', val: scores.eco, barClass: styles.barIndigo }
-                    ].map((item, idx) => (
-                        <div key={idx}>
-                            <div className={styles.barHeader}>
-                                <span className={styles.barLabel}>{item.label}</span>
-                                <span className={styles.barValue}>
-                                    {item.val !== null ? item.val.toFixed(1) : 'N/D'} <span className="text-slate-400 font-normal">/ 10</span>
-                                </span>
-                            </div>
-                            <div className={styles.barTrack}>
-                                <div
-                                    className={`${styles.barFill} ${item.val === null ? 'bg-slate-300' : item.barClass}`}
-                                    style={{ width: item.val === null ? '0%' : `${(item.val / 10) * 100}%` }}
-                                ></div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                {scores.eco === null && (
-                    <div className={styles.warningBox}>
-                        <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-                        <p>El puntaje global no incluye la capacidad económica por falta de datos en el Estado de Resultados.</p>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-
-// --- 4. MAIN DASHBOARD ---
-
-// Fase 2B (ANA-002): score universal desactivado por defecto (opt-in).
-const SHOW_UNIVERSAL_HEALTH_SCORE = false
+    )
+}
 
 export default function IndicatorsDashboard() {
-    const [activeTab, setActiveTab] = useState<GroupId>('financiero');
+    const { year } = usePeriodYear()
+    const { bundle, loading, error } = useReportingBundle(year, { withComparative: true })
+    const [tab, setTab] = useState<Category>('liquidez')
 
-    // --- REAL DATA CONNECTION ---
-    const data: FinancialData | null = useIndicatorsMetrics();
+    const byCategory = useMemo(() => {
+        const map = new Map<Category, MetricCatalogEntry[]>()
+        for (const c of CATEGORIES) map.set(c.id, [])
+        for (const m of bundle?.metrics ?? []) map.get(m.category as Category)?.push(m)
+        return map
+    }, [bundle])
 
-    // --- CALCULATION ENGINE ---
-    const indicators: IndicatorResult[] = useMemo(() => {
-        if (!data) return [];
-
-        const list: IndicatorResult[] = [];
-
-        // --- HELPERS FOR COMPONENT SPECIFIC LOGIC ---
-        // We override getStatus defaults to handle specific "Reasons" for N/D
-        const resolveStatus = (
-            val: number | null,
-            min: number,
-            max: number,
-            labels: { good: string, mid: string, bad: string },
-            inverted = false,
-            missingReason: string = 'N/D'
-        ) => {
-            const base = getStatus(val, min, max, labels, inverted);
-            if (base.statusLabel === 'N/D') {
-                return { ...base, statusLabel: missingReason };
-            }
-            return base;
-        };
-
-        // --- A. FINANCIEROS ---
-        const ct = safeDiv(data.activoCorriente - data.pasivoCorriente, 1); // safe math
-        const lc = safeDiv(data.activoCorriente, data.pasivoCorriente);
-
-        // Pa & Cash require VALID mappings. If data is null, ratio is null.
-        const pa = (data.inventarios === null) ? null : safeDiv(data.activoCorriente - data.inventarios, data.pasivoCorriente);
-        const cash = (data.disponibilidades === null) ? null : safeDiv(data.disponibilidades, data.pasivoCorriente);
-
-        // Placeholders
-        const pprac = null;
-        const ppepc = null;
-        const lcn = null;
-        const cob = null;
-        const ccc = null;
-
-        list.push(
-            {
-                id: 'ct', group: 'financiero', title: 'Capital de Trabajo', value: ct, formattedValue: formatCurrency(ct),
-                ...resolveStatus(ct, 0, Infinity, { good: 'Positivo', mid: 'Ajustado', bad: 'Déficit' }),
-                formula: 'AC - PC', explanation: 'Fondo de maniobra operativo.', interpretation: 'Debe ser > 0.', chartType: 'none'
-            },
-
-            {
-                id: 'lc', group: 'financiero', title: 'Liquidez Corriente', value: lc, formattedValue: formatNumber(lc),
-                ...resolveStatus(lc, 1.5, 2.0, { good: 'Sólido', mid: 'Aceptable', bad: 'Riesgo' }),
-                chartType: 'gauge', thresholdMin: 1, thresholdMax: 2.5,
-                formula: 'AC / PC', explanation: 'Capacidad de pago CP.', interpretation: 'Ideal 1.5 - 2.0.'
-            },
-
-            {
-                id: 'pa', group: 'financiero', title: 'Prueba Ácida', value: pa, formattedValue: formatNumber(pa),
-                ...resolveStatus(pa, 1.0, 1.5, { good: 'Excelente', mid: 'Bueno', bad: 'Bajo' }, false, 'Requiere Mapeo'),
-                chartType: 'gauge', thresholdMin: 0.8, thresholdMax: 1.5,
-                formula: '(AC - Inv) / PC', explanation: 'Liquidez ácida.', interpretation: 'Ideal > 1.0.'
-            },
-
-            {
-                id: 'cash', group: 'financiero', title: 'Liquidez Caja', value: cash, formattedValue: formatNumber(cash),
-                ...resolveStatus(cash, 0.1, 0.3, { good: 'Óptimo', mid: 'Bajo', bad: 'Crítico' }, false, 'Requiere Mapeo'),
-                chartType: 'bar',
-                formula: 'Disp / PC', explanation: 'Efectivo inmediato.', interpretation: '0.1 - 0.3 recomendado.'
-            },
-
-            {
-                id: 'pprac', group: 'financiero', title: 'Plazo Cobro (Est)', value: pprac, formattedValue: 'N/D',
-                sentiment: 'neutral', statusLabel: 'N/D',
-                chartType: 'none', formula: 'Prom. Pond. AC', explanation: 'Conversión de activos.', interpretation: 'Menor es mejor.'
-            },
-
-            {
-                id: 'ppepc', group: 'financiero', title: 'Plazo Pago (Est)', value: ppepc, formattedValue: 'N/D',
-                sentiment: 'neutral', statusLabel: 'N/D',
-                chartType: 'none', formula: 'Prom. Pond. PC', explanation: 'Exigibilidad deudas.', interpretation: '> Cobro es ideal.'
-            },
-
-            {
-                id: 'lcn', group: 'financiero', title: 'Liquidez Nec.', value: lcn, formattedValue: 'N/D',
-                sentiment: 'neutral', statusLabel: 'Ref. Técnica', chartType: 'none',
-                formula: 'PPRAC / PPEPC', explanation: 'Liquidez técnica mínima.', interpretation: 'Base de cálculo.'
-            },
-
-            {
-                id: 'cob', group: 'financiero', title: 'Cobertura LCN', value: cob, formattedValue: 'N/D',
-                sentiment: 'neutral', statusLabel: 'N/D',
-                chartType: 'gauge', thresholdMin: 0.9, thresholdMax: 1.5,
-                formula: 'LC / LCN', explanation: 'Cobertura real vs técnica.', interpretation: '> 1.0 es sano.'
-            },
-
-            {
-                id: 'ccc', group: 'financiero', title: 'Ciclo Caja', value: ccc, formattedValue: 'N/D',
-                sentiment: 'neutral', statusLabel: 'N/D', chartType: 'none',
-                formula: 'Ciclo Operativo', explanation: 'Días de dinero en calle.', interpretation: 'Requiere Ventas.'
-            },
-        );
-
-        // --- B. PATRIMONIALES ---
-        // For ratios where we divide by Total Assets/Liabilities/Equity, we need to be safe if they are 0.
-        // safeDiv handles 0 denominator.
-        const end = safeDiv(data.pasivoTotal, data.activoTotal);
-        const solv = safeDiv(data.activoTotal, data.pasivoTotal);
-        const aut = safeDiv(data.patrimonioNeto, data.activoTotal);
-        const lev = safeDiv(data.pasivoTotal, data.patrimonioNeto);
-        const quality = safeDiv(data.pasivoCorriente, data.pasivoTotal);
-        const inmov = safeDiv(data.activoNoCorriente, data.activoTotal);
-
-        list.push(
-            {
-                id: 'end', group: 'patrimonial', title: 'Endeudamiento', value: end, formattedValue: formatPercent(end),
-                ...resolveStatus(end, 0.4, 0.6, { good: 'Equilibrado', mid: 'Alto', bad: 'Excesivo' }, true),
-                chartType: 'gauge', thresholdMin: 0, thresholdMax: 1,
-                formula: 'PT / AT', explanation: 'Dependencia de terceros.', interpretation: '< 60% recomendado.'
-            },
-
-            {
-                id: 'solv', group: 'patrimonial', title: 'Solvencia Total', value: solv, formattedValue: formatNumber(solv),
-                ...resolveStatus(solv, 1.5, 2.0, { good: 'Sólido', mid: 'Suficiente', bad: 'Débil' }),
-                chartType: 'gauge', thresholdMin: 1, thresholdMax: 3,
-                formula: 'AT / PT', explanation: 'Garantía total.', interpretation: '> 1.5 ideal.'
-            },
-
-            {
-                id: 'aut', group: 'patrimonial', title: 'Autonomía', value: aut, formattedValue: formatPercent(aut),
-                ...resolveStatus(aut, 0.4, 0.8, { good: 'Alto', mid: 'Medio', bad: 'Bajo' }),
-                chartType: 'gauge', thresholdMin: 0, thresholdMax: 1,
-                formula: 'PN / AT', explanation: 'Independencia financiera.', interpretation: 'Mayor es mejor.'
-            },
-
-            {
-                id: 'lev', group: 'patrimonial', title: 'Apalancamiento', value: lev, formattedValue: formatNumber(lev),
-                ...resolveStatus(lev, 0.5, 1.5, { good: 'Moderado', mid: 'Alto', bad: 'Arriesgado' }, true),
-                chartType: 'none', formula: 'PT / PN', explanation: 'Deuda sobre capital.', interpretation: '< 1.0 conservador.'
-            },
-
-            {
-                id: 'qual', group: 'patrimonial', title: '% Deuda CP', value: quality, formattedValue: formatPercent(quality),
-                sentiment: 'info', statusLabel: 'Estructura', chartType: 'bar',
-                formula: 'PC / PT', explanation: 'Perfil de vencimientos.', interpretation: 'Informativo.'
-            },
-
-            {
-                id: 'inm', group: 'patrimonial', title: 'Inmovilidad', value: inmov, formattedValue: formatPercent(inmov),
-                sentiment: 'neutral', statusLabel: 'Estructural', chartType: 'gauge', thresholdMin: 0, thresholdMax: 1,
-                formula: 'ANC / AT', explanation: 'Rigidez activo.', interpretation: 'Varía por sector.'
-            },
-        );
-
-        // --- C. ECONOMICOS ---
-        const sales = data.ventas;
-        const cogs = data.costoVentas; // absolute value usually
-        const netIncome = data.resultadoNeto;
-
-        // REASON: If sales/cogs/income are null, it means no ER data -> "Requiere ER"
-        const erReason = 'Requiere ER';
-
-        let marginGross: number | null = null;
-        let marginNet: number | null = null;
-        let roe: number | null = null;
-
-        if (sales !== null && sales !== 0) {
-            if (cogs !== null) {
-                marginGross = (sales - Math.abs(cogs)) / sales;
-            }
-            if (netIncome !== null) {
-                marginNet = netIncome / sales;
-            }
-        }
-
-        if (netIncome !== null && data.patrimonioNeto !== 0) {
-            roe = netIncome / data.patrimonioNeto;
-        }
-
-        list.push(
-            {
-                id: 'mgbr', group: 'economico', title: 'Margen Bruto', value: marginGross, formattedValue: marginGross !== null ? formatPercent(marginGross) : 'N/D',
-                ...resolveStatus(marginGross, 0.2, 0.4, { good: 'Alto', mid: 'Medio', bad: 'Bajo' }, false, erReason),
-                chartType: 'none',
-                formula: '(Vtas-Cost)/Vtas', explanation: 'Rentabilidad producto.', interpretation: 'Alto es mejor.'
-            },
-            {
-                id: 'mgnt', group: 'economico', title: 'Margen Neto', value: marginNet, formattedValue: marginNet !== null ? formatPercent(marginNet) : 'N/D',
-                ...resolveStatus(marginNet, 0.05, 0.15, { good: 'Excelente', mid: 'Bueno', bad: 'Bajo' }, false, erReason),
-                chartType: 'none',
-                formula: 'R.Neto / Vtas', explanation: 'Ganancia final.', interpretation: 'Positivo es ganancia.'
-            },
-            {
-                id: 'roe', group: 'economico', title: 'ROE', value: roe, formattedValue: roe !== null ? formatPercent(roe) : 'N/D',
-                ...resolveStatus(roe, 0.15, 0.25, { good: 'Excelente', mid: 'Bueno', bad: 'Bajo' }, false, erReason),
-                chartType: 'none',
-                formula: 'R.Neto / PN', explanation: 'Retorno inversión.', interpretation: 'Clave accionistas.'
-            }
-        );
-
-        return list;
-    }, [data]);
-
-    // SCORING ENGINE
-    const scores = useMemo(() => {
-        if (!indicators.length) return { fin: 0, pat: 0, eco: 0, avg: 0 };
-
-        const computeScore = (group: GroupId) => {
-            const groupIndicators = indicators.filter(i => i.group === group);
-            if (!groupIndicators.length) return null;
-
-            let totalPoints = 0;
-            let count = 0;
-
-            groupIndicators.forEach(ind => {
-                if (ind.value === null) return; // Skip N/D
-                count++;
-                // Simple scoring model:
-                // Success: 10, Info: 8, Warning: 5, Error: 2
-                switch (ind.sentiment) {
-                    case 'success': totalPoints += 10; break;
-                    case 'info': totalPoints += 8; break; // Info is usually reliable/good context
-                    case 'neutral': totalPoints += 5; break; // Neutral is ... neutral
-                    case 'warning': totalPoints += 5; break;
-                    case 'error': totalPoints += 2; break;
-                }
-            });
-
-            if (count === 0) return null; // No available data for this group
-            return (totalPoints / count);
-        };
-
-        const fin = computeScore('financiero');
-        const pat = computeScore('patrimonial');
-        const eco = computeScore('economico');
-
-        // Global Average
-        const validScores = [fin, pat, eco].filter(s => s !== null) as number[];
-        const avg = validScores.length ? validScores.reduce((a, b) => a + b, 0) / validScores.length : 0;
-
-        return { fin, pat, eco, avg };
-    }, [indicators]);
-
-    const activeIndicators = indicators.filter(i => i.group === activeTab);
-    const counts = {
-        financiero: indicators.filter(i => i.group === 'financiero').length,
-        patrimonial: indicators.filter(i => i.group === 'patrimonial').length,
-        economico: indicators.filter(i => i.group === 'economico').length,
-    };
-
-    if (!data) return null; // Or a loading skeleton could go here
+    const active = byCategory.get(tab) ?? []
+    const hasAnyCalculated = (bundle?.metrics ?? []).some(m => m.result.status === 'CALCULATED')
 
     return (
-        <div data-styling="css-modules" className={styles.root}>
+        <div className="ind-root">
+            <header className="ind-header">
+                <h1 className="ind-title"><span className="ind-gradient">INDICADORES</span></h1>
+                <p className="ind-subtitle">Ratios de liquidez, solvencia, rentabilidad, actividad y flujo, derivados del motor canónico.</p>
+            </header>
 
-            {/* 1. Header Clean */}
-            <div className={styles.header}>
-                <h1 className={styles.title}>
-                    <span className={styles.gradientText}>
-                        INDICADORES
-                    </span>
-                </h1>
-                <p className={styles.subtitle}>
-                    Análisis de salud financiera, económica y patrimonial de la empresa.
-                </p>
-            </div>
+            {loading && <div className="ind-empty">Calculando indicadores…</div>}
+            {!loading && error && <div className="ind-empty ind-error">No se pudieron calcular los indicadores: {error}</div>}
 
-            {/* 2. Empty State (Visible only if totals are 0 and no data) */}
-            {data && data.activoTotal === 0 && data.pasivoTotal === 0 && data.entriesCount !== 0 ? (
-                // Logic subtlety: If we have entries but they are closing, or just no effect? 
-                // The hook returns 0s for empty set.
-                // Let's assume if ALL totals are 0, it's empty.
-                // But wait, hook might return 0 if there are entries but they cancel out? unlikely.
-                // Let's just use the totals = 0 check for now.
-                <div className="w-full py-12 flex flex-col items-center justify-center text-center opacity-70">
-                    <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
-                        <Info className="text-blue-400" size={32} />
-                    </div>
-                    <h3 className="text-lg font-medium text-slate-700 mb-1">Sin datos suficientes</h3>
-                    <p className="text-slate-500 max-w-sm">
-                        Cargá tu primer asiento contable para activar el tablero de indicadores.
-                    </p>
+            {!loading && !error && bundle && !hasAnyCalculated && (
+                <div className="ind-empty">
+                    <Info size={30} className="ind-empty-icon" />
+                    <h3>Sin datos suficientes</h3>
+                    <p>Cargá asientos del ejercicio para activar el tablero de indicadores.</p>
                 </div>
-            ) : (
+            )}
+
+            {!loading && !error && bundle && hasAnyCalculated && (
                 <>
-                    {/* 3. Tabs */}
-                    <div className={styles.tabsContainer}>
-                        <div className={styles.tabsList}>
-                            {[
-                                { id: 'financiero', label: 'Financieros', icon: Coins },
-                                { id: 'patrimonial', label: 'Patrimoniales', icon: Landmark },
-                                { id: 'economico', label: 'Económicos', icon: TrendingUp }
-                            ].map(tab => {
-                                const isActive = activeTab === tab.id;
-                                const Icon = tab.icon;
-                                return (
-                                    <button
-                                        key={tab.id}
-                                        onClick={() => setActiveTab(tab.id as GroupId)}
-                                        className={`${styles.tabBtn} ${isActive ? styles.tabActive : styles.tabInactive}`}
-                                    >
-                                        <Icon size={18} />
-                                        {tab.label}
-                                        <span className={`${styles.tabBadge} ${isActive ? styles.badgeActive : styles.badgeInactive}`}>
-                                            {counts[tab.id as GroupId]}
-                                        </span>
-                                        {isActive && <div className={styles.activeLine}></div>}
-                                    </button>
-                                )
-                            })}
-                        </div>
+                    <div className="ind-tabs" role="tablist" aria-label="Categorías de indicadores">
+                        {CATEGORIES.map(c => {
+                            const Icon = c.icon
+                            const count = byCategory.get(c.id)?.length ?? 0
+                            return (
+                                <button
+                                    key={c.id}
+                                    role="tab"
+                                    aria-selected={tab === c.id}
+                                    className={`ind-tab${tab === c.id ? ' active' : ''}`}
+                                    onClick={() => setTab(c.id)}
+                                    disabled={count === 0}
+                                >
+                                    <Icon size={16} />
+                                    {c.label}
+                                    <span className="ind-tab-badge">{count}</span>
+                                </button>
+                            )
+                        })}
                     </div>
 
-                    {/* 3. Grid Content */}
-                    <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-                        <div className={styles.grid}>
-                            {activeIndicators.map(ind => (
-                                <div key={ind.id} className={styles.cardWrapper}>
-                                    <IndicatorCard data={ind} />
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* 4. Evaluación integral — Fase 2B (ANA-002): el score
-                            universal está DESACTIVADO por defecto. Un promedio
-                            10/8/5/2 con umbrales genéricos sin sector, tamaño ni
-                            ciclo produce falsa autoridad diagnóstica. Se puede
-                            reactivar explícitamente (opt-in) asumiendo esa
-                            limitación. */}
-                        {SHOW_UNIVERSAL_HEALTH_SCORE && <IntegralScoreCard scores={scores} />}
-                        {!SHOW_UNIVERSAL_HEALTH_SCORE && (
-                            <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 16, lineHeight: 1.6 }}>
-                                La calificación global de “salud financiera” está desactivada: un puntaje
-                                universal sin contexto de sector y ciclo económico puede inducir a error.
-                                Interpretá cada indicador con su fórmula, su período y sus limitaciones.
-                            </p>
-                        )}
+                    <div className="ind-grid">
+                        {active.map(entry => <MetricCard key={entry.id} entry={entry} />)}
                     </div>
+
+                    <p className="ind-disclaimer">
+                        La calificación global de “salud financiera” está desactivada: un puntaje universal sin
+                        contexto de sector y ciclo económico induce a error. Interpretá cada indicador con su
+                        fórmula, su período y sus limitaciones.
+                    </p>
                 </>
             )}
 
+            <style>{styles}</style>
         </div>
-    );
+    )
 }
+
+const styles = `
+.ind-root { padding: 8px 0; }
+.ind-header { margin-bottom: 18px; }
+.ind-title { font-size: 1.6rem; font-weight: 800; margin: 0; letter-spacing: 0.02em; }
+.ind-gradient { background: linear-gradient(135deg, #2563EB 0%, #10B981 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.ind-subtitle { font-size: 0.88rem; color: #64748b; margin: 4px 0 0; }
+
+.ind-empty { text-align: center; padding: 48px 24px; color: #64748b; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.ind-empty-icon { color: #93c5fd; }
+.ind-empty h3 { font-size: 1.05rem; font-weight: 600; color: #334155; margin: 0; }
+.ind-error { color: #b91c1c; }
+
+.ind-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: rgba(241,245,249,0.8); border: 1px solid #e2e8f0; border-radius: 12px; width: fit-content; max-width: 100%; margin-bottom: 16px; }
+.ind-tab { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; font-size: 0.85rem; font-weight: 600; color: #64748b; background: transparent; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; transition: all 0.15s ease; }
+.ind-tab:hover:not(.active):not(:disabled) { background: rgba(226,232,240,0.6); color: #334155; }
+.ind-tab.active { background: white; color: #3B82F6; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.ind-tab:disabled { opacity: 0.45; cursor: not-allowed; }
+.ind-tab-badge { font-size: 0.68rem; font-weight: 700; background: rgba(148,163,184,0.2); color: #475569; padding: 1px 7px; border-radius: 9999px; }
+.ind-tab.active .ind-tab-badge { background: rgba(59,130,246,0.15); color: #2563eb; }
+
+.ind-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+
+.ind-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.ind-card.is-nd { background: #f8fafc; border-style: dashed; }
+.ind-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.ind-card-title { font-size: 0.85rem; font-weight: 600; color: #334155; }
+
+.ind-tooltip { position: relative; color: #94a3b8; cursor: help; flex-shrink: 0; display: inline-flex; }
+.ind-tooltip-body { position: absolute; right: 0; top: 22px; z-index: 20; width: 230px; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 10px; font-size: 0.74rem; line-height: 1.5; opacity: 0; pointer-events: none; transition: opacity 0.15s ease; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 10px 25px rgba(0,0,0,0.25); }
+.ind-tooltip:hover .ind-tooltip-body, .ind-tooltip:focus-within .ind-tooltip-body { opacity: 1; }
+.ind-formula { font-family: var(--font-mono, monospace); color: #93c5fd; border-bottom: 1px solid #1e293b; padding-bottom: 4px; }
+.ind-sub { font-family: var(--font-mono, monospace); color: #cbd5e1; font-size: 0.7rem; }
+.ind-interp { color: #cbd5e1; }
+
+.ind-card-value-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ind-value { font-family: var(--font-mono, monospace); font-size: 1.4rem; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; }
+.ind-value.nd { font-size: 1.05rem; color: #94a3b8; }
+.ind-pill { font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 9999px; }
+.ind-pill.nd { background: rgba(148,163,184,0.18); color: #64748b; }
+
+.ind-interp-line { font-size: 0.76rem; color: #64748b; margin: 0; line-height: 1.4; }
+.ind-reason { font-size: 0.76rem; color: #94a3b8; margin: 0; line-height: 1.4; }
+.ind-warn { font-size: 0.74rem; color: #a16207; margin: 0; line-height: 1.4; }
+
+.ind-disclaimer { font-size: 0.76rem; color: #64748b; margin: 18px 0 0; line-height: 1.6; }
+`

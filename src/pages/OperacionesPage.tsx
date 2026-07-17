@@ -24,7 +24,8 @@ import { calculateAllValuations } from '../core/inventario/costing'
 import { getFixedAssetsMetrics } from '../storage/fixedAssets'
 import { getInvestmentMetrics } from '../storage/inversiones'
 import { getPayrollMetrics, ensurePayrollSeeded } from '../storage/payroll'
-import { useIndicatorsMetrics } from '../hooks/useIndicatorsMetrics'
+import { useReportingBundle } from '../hooks/useReportingBundle'
+import { cashAndEquivalents, hasCashAccounts } from '../reporting/selectors'
 import { usePeriodYear } from '../hooks/usePeriodYear'
 import { useTaxClosure } from '../hooks/useTaxClosure'
 import { useUpcomingTaxNotifications } from '../hooks/useTaxNotifications'
@@ -52,7 +53,7 @@ export default function OperacionesPage() {
     const settings = useLiveQuery(() => db.bienesSettings.get('bienes-settings'), [])
     const entries = useLiveQuery(() => db.entries.toArray(), [])
     const accounts = useLiveQuery(() => db.accounts.toArray(), [])
-    const indicators = useIndicatorsMetrics()
+    const { bundle: reportingBundle } = useReportingBundle(periodYear)
 
     // Fixed Assets metrics
     const fixedAssetsMetrics = useLiveQuery(
@@ -261,8 +262,9 @@ export default function OperacionesPage() {
         ? currentSales / inventoryMetrics.stockValue
         : null
 
-    const cashAvailable = indicators?.disponibilidades
-    const hasCashData = indicators && indicators.entriesCount > 0 && cashAvailable !== null
+    // Disponibilidades desde el motor canónico (misma regla que los estados)
+    const cashAvailable = reportingBundle && accounts ? cashAndEquivalents(reportingBundle, accounts) : null
+    const hasCashData = !!reportingBundle && !!accounts && hasCashAccounts(accounts)
 
     const formatCurrency = (value?: number | null) => {
         if (value === null || value === undefined || Number.isNaN(value)) {
