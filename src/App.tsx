@@ -11,9 +11,8 @@ import Mayor from './pages/Mayor'
 import Balance from './pages/Balance'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
 import PlanillasHome from './pages/Planillas/PlanillasHome'
-import AcercaDe from './pages/AcercaDe'
 
-const MapeosPage = lazy(() => import('./pages/MapeosPage'))
+const ConfiguracionPage = lazy(() => import('./pages/ConfiguracionPage'))
 const PracticaPage = lazy(() => import('./pages/PracticaPage'))
 
 // Fase 2B (PER-001): las pantallas pesadas (estados, operaciones grandes,
@@ -72,8 +71,10 @@ function App() {
                 <Route path="/mayor" element={<Mayor />} />
                 <Route path="/balance" element={<Balance />} />
                 <Route path="/estados" element={<Estados />} />
-                <Route path="/mapeos" element={<MapeosPage />} />
-                <Route path="/acerca" element={<AcercaDe />} />
+                <Route path="/configuracion" element={<ConfiguracionPage />} />
+                {/* Rutas consolidadas en Configuración (Fase 2D) */}
+                <Route path="/mapeos" element={<Navigate to="/configuracion?seccion=plan-cuentas" replace />} />
+                <Route path="/acerca" element={<Navigate to="/configuracion?seccion=acerca" replace />} />
                 <Route path="/practica" element={<PracticaPage />} />
                 <Route path="/planillas" element={<PlanillasLayout />}>
                     <Route index element={<PlanillasHome />} />
