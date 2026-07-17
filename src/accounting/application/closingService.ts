@@ -532,6 +532,11 @@ export async function reopenClosedExercise(
         reversed.push(r.id)
     }
 
+    // Fase 2C (§16.3): los snapshots publicados del ejercicio se invalidan
+    // (no se borran) porque el Diario que los respaldaba cambió.
+    const { invalidateSnapshotsForExercise } = await import('../../reporting/snapshots/snapshotService')
+    const invalidated = await invalidateSnapshotsForExercise(exerciseId, `Reapertura del ejercicio: ${reason}`)
+
     await appendAuditEvent({
         eventType: 'EXERCISE_REOPENED',
         entityType: 'exercise',
@@ -540,7 +545,7 @@ export async function reopenClosedExercise(
         exerciseId,
         actorId,
         reason,
-        metadata: { reversedEntryIds: reversed, invalidatesPublishedStatements: true },
+        metadata: { reversedEntryIds: reversed, invalidatesPublishedStatements: true, invalidatedSnapshots: invalidated },
     })
 
     return { reversedEntryIds: reversed }

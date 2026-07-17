@@ -178,7 +178,7 @@ describe('GATE 2A+2B — flujo integrado', () => {
 
     it('2A+2B: backup/restore conserva schema v18+ y todos los registros', async () => {
         const backup = await exportBackup()
-        expect(backup.schemaVersion).toBeGreaterThanOrEqual(18)
+        expect(backup.schemaVersion).toBeGreaterThanOrEqual(19)
         const before = (await db.entries.toArray()).sort((a, b) => a.id.localeCompare(b.id))
 
         await db.delete()

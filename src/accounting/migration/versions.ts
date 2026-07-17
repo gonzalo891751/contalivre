@@ -5,7 +5,7 @@
  * nuevos se estampan con este valor.
  */
 
-export const CURRENT_SCHEMA_VERSION = 18
+export const CURRENT_SCHEMA_VERSION = 19
 
 export const APP_VERSION: string =
     (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env?.VITE_APP_VERSION) || '0.3.0'

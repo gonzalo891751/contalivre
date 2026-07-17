@@ -24,6 +24,7 @@ import { ReportMetadataBar } from '../components/Estados/canonical/ReportMetadat
 import { exportReportBundlePdf } from '../pdf/reportBundlePdf'
 import { exportReportBundleWorkbook } from '../lib/exportReportBundle'
 import { loadReportingBundle, type ReportingBundle } from '../reporting/loadReportingBundle'
+import { createSnapshot, listSnapshots } from '../reporting/snapshots/snapshotService'
 
 export default function Estados() {
     const [activeTab, setActiveTab] = useState<EstadosTab>('ESP')
@@ -39,6 +40,26 @@ export default function Estados() {
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
     const [isExporting, setIsExporting] = useState(false)
+    const [snapshotInfo, setSnapshotInfo] = useState<string | null>(null)
+
+    useEffect(() => {
+        listSnapshots().then(list => {
+            const forYear = list.filter(s => s.exerciseId.includes(String(year)))
+            if (forYear.length > 0) {
+                const last = forYear[0]
+                setSnapshotInfo(`${forYear.length} snapshot(s) de este ejercicio · último: ${last.status} (${last.createdAt.slice(0, 10)}, v${last.reportVersion})`)
+            } else {
+                setSnapshotInfo(null)
+            }
+        })
+    }, [year, reloadKey])
+
+    const handlePublishSnapshot = useCallback(async () => {
+        if (!bundle) return
+        const snap = await createSnapshot(bundle, { status: 'PUBLISHED' })
+        setSnapshotInfo(`Snapshot ${snap.status} creado (v${snap.reportVersion}, ${snap.createdAt.slice(0, 10)}).`)
+        setReloadKey(k => k + 1)
+    }, [bundle])
 
     useEffect(() => {
         let cancelled = false
@@ -101,6 +122,8 @@ export default function Estados() {
                             onDownloadPdf={handleDownloadPdf}
                             onDownloadXlsx={handleDownloadXlsx}
                             onEditCompany={() => setShowCompanyProfileModal(true)}
+                            onPublishSnapshot={handlePublishSnapshot}
+                            snapshotInfo={snapshotInfo ?? undefined}
                             isExporting={isExporting}
                         />
 

@@ -20,6 +20,8 @@ interface Props {
     onDownloadPdf: () => void
     onDownloadXlsx: () => void
     onEditCompany: () => void
+    onPublishSnapshot?: () => void
+    snapshotInfo?: string
     isExporting: boolean
 }
 
@@ -28,7 +30,7 @@ const fmtDate = (iso: string) => {
     return d && m && y ? `${d}/${m}/${y}` : iso
 }
 
-export function ReportMetadataBar({ metadata, showComparative, onToggleComparative, onDownloadPdf, onDownloadXlsx, onEditCompany, isExporting }: Props) {
+export function ReportMetadataBar({ metadata, showComparative, onToggleComparative, onDownloadPdf, onDownloadXlsx, onEditCompany, onPublishSnapshot, snapshotInfo, isExporting }: Props) {
     const chip = STATUS_CHIP[metadata.status] ?? STATUS_CHIP.LOADING
     return (
         <div className="card" style={{ padding: '12px 16px', marginBottom: 16 }}>
@@ -60,8 +62,21 @@ export function ReportMetadataBar({ metadata, showComparative, onToggleComparati
                     <button className="btn btn-secondary btn-sm" onClick={onDownloadXlsx} disabled={isExporting}>
                         {isExporting ? '…' : 'Planilla'}
                     </button>
+                    {onPublishSnapshot && (
+                        <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={onPublishSnapshot}
+                            disabled={metadata.status === 'BLOCKED'}
+                            title={metadata.status === 'BLOCKED' ? 'No se puede publicar un reporte con validaciones en rojo' : 'Congelar una versión del reporte'}
+                        >
+                            Publicar snapshot
+                        </button>
+                    )}
                 </div>
             </div>
+            {snapshotInfo && (
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 6 }}>{snapshotInfo}</div>
+            )}
         </div>
     )
 }

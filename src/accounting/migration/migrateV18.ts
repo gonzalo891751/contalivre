@@ -17,10 +17,12 @@ import type { EntryLine, JournalEntry } from '../../core/models'
 import type { MigrationException, SystemMeta } from '../domain/types'
 import { MIGRATION_ACTOR } from '../domain/types'
 import { isCentExact, MAX_AMOUNT, roundMoney } from '../domain/money'
-import { CURRENT_SCHEMA_VERSION, APP_VERSION } from './versions'
+import { APP_VERSION } from './versions'
 import { SYSTEM_META_ID } from './migrateV17'
 
 export const MIGRATION_V18_ID = 'v18-modelo-monetario'
+/** Esta migración lleva la base a la versión 18 (no a la vigente). */
+const SCHEMA_VERSION_V18 = 18
 
 interface LegacyAmountRecord {
     lineIndex: number
@@ -101,7 +103,7 @@ export async function migrateToV18(tx: Transaction): Promise<void> {
 
         const result = normalizeEntryAmounts(entry.lines ?? [])
         const updates: Partial<JournalEntry> = {
-            schemaVersion: CURRENT_SCHEMA_VERSION,
+            schemaVersion: SCHEMA_VERSION_V18,
             metadata: { ...meta, moneyModelV18: true },
         }
 
@@ -137,7 +139,7 @@ export async function migrateToV18(tx: Transaction): Promise<void> {
     if (existing) {
         await metaTable.update(SYSTEM_META_ID, {
             appVersion: APP_VERSION,
-            schemaVersion: CURRENT_SCHEMA_VERSION,
+            schemaVersion: SCHEMA_VERSION_V18,
             lastMigrationAt: timestamp,
             lastMigrationId: MIGRATION_V18_ID,
             migrationExceptions: [...(existing.migrationExceptions ?? []), ...exceptions],
