@@ -42,7 +42,8 @@ import { calculateRecpamIndirecto, type RecpamIndirectoResult } from '../../core
 import type { MonetaryClass } from '../../core/cierre-valuacion/monetary-classification';
 import { getInitialMonetaryClass, applyOverrides, isExcluded, getAccountType } from '../../core/cierre-valuacion/monetary-classification';
 import { computeBalances } from '../../core/ledger/computeBalances';
-import { createEntry, updateEntry } from '../../storage/entries';
+import { updateEntry } from '../../storage/entries';
+import { createDraftEntry } from '../../accounting/application/journalService';
 import { computeVoucherHash, findEntryByVoucherKey } from '../../core/cierre-valuacion/sync';
 import { loadBienesSettings } from '../../storage/bienes';
 
@@ -416,6 +417,21 @@ export default function CierreValuacionPage() {
     const handleSendToLedger = async () => {
         if (!state || !asientosDraft || asientosDraft.length === 0) return;
 
+        // ── Bloqueo por índices faltantes (Fase 2A, NOR-004) ──────────
+        // Un índice ausente NUNCA se sustituye por coeficiente 1: la
+        // contabilización queda bloqueada informando qué períodos faltan.
+        const missingPeriods = Array.from(new Set(
+            computedRT6.flatMap(p => p.missingPeriods ?? [])
+        )).sort();
+        if (missingPeriods.length > 0) {
+            showToast(`No se puede enviar al Diario: faltan índices para ${missingPeriods.join(', ')}. Cargalos en la pestaña Índices.`);
+            return;
+        }
+        if (computedRT6.some(p => p.status === 'error')) {
+            showToast('No se puede enviar al Diario: hay partidas RT6 con errores. Revisá la pestaña AxI.');
+            return;
+        }
+
         try {
             const unsynced = voucherSyncData.filter(s => s.status !== 'ENVIADO');
             if (unsynced.length === 0) {
@@ -436,27 +452,36 @@ export default function CierreValuacionPage() {
                         credit: l.haber,
                         description: voucher.descripcion
                     })),
+                    sourceModule: 'cierre-valuacion',
+                    sourceType: 'rt6-adjustment',
+                    sourceId: `${state.id || 'cierre-valuacion-state'}::${sync.voucherKey}`,
                     metadata: {
                         source: 'cierre',
                         cierreId: state.id || 'cierre-valuacion-state',
                         voucherKey: sync.voucherKey,
                         voucherHash: sync.currentHash,
                         step: voucher.tipo,
-                        side: sync.voucherKey.split('_')[1].toLowerCase()
+                        side: sync.voucherKey.split('_')[1].toLowerCase(),
+                        // Fase 2A: el motor RT6 actual está en revisión normativa
+                        // (ACC-010). Sus asientos quedan como BORRADOR hasta la
+                        // validación de la Fase 2B y no impactan los libros.
+                        rt6EngineLegacy: true,
+                        normativeReviewPending: true
                     }
                 };
 
                 if (sync.status === 'DESACTUALIZADO' && sync.existingEntryId) {
                     await updateEntry(sync.existingEntryId, entryData);
                 } else {
-                    await createEntry(entryData);
+                    // Borrador, NO contabilizado: no impacta Mayor/Balance/Estados
+                    await createDraftEntry(entryData);
                 }
             }
 
-            showToast(`¡Éxito! Se sincronizaron ${unsynced.length} asientos.`);
-        } catch (err: any) {
+            showToast(`Se enviaron ${unsynced.length} asientos como BORRADOR. Módulo en revisión normativa: no utilizar para emitir estados formales.`);
+        } catch (err) {
             console.error('Error sending to ledger:', err);
-            showToast('Error al enviar: ' + err.message);
+            showToast('Error al enviar: ' + (err instanceof Error ? err.message : String(err)));
         }
     };
 
@@ -735,7 +760,7 @@ export default function CierreValuacionPage() {
     const handleExcludeAccount = useCallback((accountId: string) => {
         const confirmed = window.confirm(
             '¿Excluir esta cuenta del cálculo RT6?\n\n' +
-            'La cuenta no aparecerá en Monetarias ni en \"Sin clasificar\".'
+            'La cuenta no aparecerá en Monetarias ni en "Sin clasificar".'
         );
         if (!confirmed) return;
 
@@ -785,6 +810,24 @@ export default function CierreValuacionPage() {
 
     return (
         <div className="cierre-page">
+            {/* Advertencia normativa (Fase 2A: ACC-010 / NOR-004) */}
+            <div
+                role="alert"
+                style={{
+                    margin: '12px 16px 0',
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    background: 'rgba(234, 179, 8, 0.12)',
+                    border: '1px solid rgba(234, 179, 8, 0.45)',
+                    color: '#854d0e',
+                    fontSize: '0.85rem',
+                    fontWeight: 500,
+                }}
+            >
+                ⚠ Módulo en revisión normativa. No utilizar para emitir estados formales.
+                Los asientos generados se envían al Diario como <strong>borrador</strong> y
+                los índices precargados son datos de ejemplo, no la serie oficial FACPCE.
+            </div>
             {/* HEADER */}
             <header className="cierre-header">
                 <div className="cierre-header-left">

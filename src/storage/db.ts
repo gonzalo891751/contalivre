@@ -1,6 +1,16 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { Account, JournalEntry } from '../core/models'
 import type {
+    AccountingExercise,
+    AccountingPeriod,
+    AuditEvent,
+    Company,
+    SystemMeta,
+} from '../accounting/domain/types'
+import type { InflationIndexSet } from '../accounting/inflation/types'
+import { migrateToV17 } from '../accounting/migration/migrateV17'
+import { migrateToV18 } from '../accounting/migration/migrateV18'
+import type {
     InventoryProduct,
     InventoryMovement,
     InventoryClosing,
@@ -103,6 +113,14 @@ class ContableDatabase extends Dexie {
     payrollLines!: EntityTable<PayrollLine, 'id'>
     payrollPayments!: EntityTable<PayrollPayment, 'id'>
     payrollConcepts!: EntityTable<PayrollConcept, 'id'>
+    // ── Fase 2A: núcleo contable ─────────────────────────────
+    companies!: EntityTable<Company, 'id'>
+    exercises!: EntityTable<AccountingExercise, 'id'>
+    periods!: EntityTable<AccountingPeriod, 'id'>
+    auditLog!: EntityTable<AuditEvent, 'id'>
+    systemMeta!: EntityTable<SystemMeta, 'id'>
+    // ── Fase 2B: índices de inflación versionados ────────────
+    inflationIndexSets!: EntityTable<InflationIndexSet, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -487,6 +505,60 @@ class ContableDatabase extends Dexie {
             payrollPayments: 'id, payrollRunId, type, date',
             payrollConcepts: 'id, kind, isActive, sortOrder',
         })
+
+        // Version 17 (Fase 2A): empresa, ejercicio, período, ciclo de vida de
+        // asientos, idempotencia, audit log y metadata de sistema.
+        // Índices nuevos en entries para consultas por contexto contable.
+        this.version(17).stores({
+            accounts: 'id, &code, name, kind, parentId, level, statementGroup, companyId',
+            entries: 'id, date, memo, sourceModule, sourceId, status, companyId, exerciseId, periodId, idempotencyKey, entryNumber, [companyId+exerciseId], [exerciseId+status]',
+            settings: 'id',
+            amortizationState: 'id',
+            inventoryProducts: 'id, sku',
+            inventoryMovements: 'id, date, productId, type',
+            inventoryClosings: 'id, periodEnd, status',
+            inventoryConfig: 'id',
+            cierreValuacionState: 'id',
+            bienesProducts: 'id, sku, category',
+            bienesMovements: 'id, date, productId, type',
+            bienesSettings: 'id',
+            fxAccounts: 'id, type, currency, periodId',
+            fxMovements: 'id, date, accountId, type, periodId',
+            fxDebts: 'id, currency, creditor, createdAt, status, periodId, accountId',
+            fxLiabilities: 'id, accountId, periodId',
+            fxSettings: 'id',
+            fxRatesCache: 'id',
+            taxClosures: 'id, month, regime, status',
+            taxDueNotifications: 'id, obligation, month, dueDate, seen',
+            taxObligations: 'id, &uniqueKey, taxType, taxPeriod, jurisdiction, status, dueDate',
+            taxPayments: 'id, obligationId, journalEntryId, paidAt',
+            fixedAssets: 'id, periodId, category, status, accountId, contraAccountId',
+            fixedAssetEvents: 'id, periodId, assetId, date, type',
+            invInstruments: 'id, periodId, rubro, ticker, accountId',
+            invMovements: 'id, periodId, date, rubro, type, instrumentId',
+            invSettings: 'id',
+            invNotifications: 'id, type, instrumentId, dueDate, seen',
+            companyProfile: 'id',
+            payrollEmployees: 'id, status',
+            payrollSettings: 'id',
+            payrollRuns: 'id, period, status',
+            payrollLines: 'id, payrollRunId, employeeId',
+            payrollPayments: 'id, payrollRunId, type, date',
+            payrollConcepts: 'id, kind, isActive, sortOrder',
+            // Fase 2A
+            companies: 'id, active',
+            exercises: 'id, companyId, startDate, endDate, status',
+            periods: 'id, exerciseId, companyId, startDate, endDate, status',
+            auditLog: 'id, eventType, entityType, entityId, companyId, exerciseId, timestamp',
+            systemMeta: 'id',
+        }).upgrade(migrateToV17)
+
+        // Version 18 (Fase 2B): modelo monetario definitivo (integridad de
+        // centavos) + registro versionado de índices de inflación.
+        // Mismos stores que v17 + inflationIndexSets.
+        this.version(18).stores({
+            inflationIndexSets: 'id, status, createdAt',
+        }).upgrade(migrateToV18)
     }
 }
 

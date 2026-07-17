@@ -29,7 +29,7 @@ export async function deleteJournalEntryWithSync(entryId: string): Promise<Journ
             await deleteEntry(entry.id)
             return {
                 mode: 'payroll_payment_unlinked',
-                message: 'Pago de sueldos desvinculado y eliminado del Diario.',
+                message: 'Pago de sueldos desvinculado y anulado por reversión en el Diario.',
             }
         }
     }
@@ -52,8 +52,8 @@ export async function deleteJournalEntryWithSync(entryId: string): Promise<Journ
             return {
                 mode: 'ops_voucher_cascade',
                 message: paymentsToDelete.length > 0
-                    ? `Comprobante y ${paymentsToDelete.length} pago(s) vinculado(s) eliminados.`
-                    : 'Comprobante de gasto eliminado.',
+                    ? `Comprobante y ${paymentsToDelete.length} pago(s) vinculado(s) anulados por reversión.`
+                    : 'Comprobante de gasto anulado por reversión.',
                 deletedPayments: paymentsToDelete.length,
             }
         }
@@ -62,7 +62,7 @@ export async function deleteJournalEntryWithSync(entryId: string): Promise<Journ
             await deleteEntry(entry.id)
             return {
                 mode: 'ops_payment_deleted',
-                message: 'Pago de gasto eliminado.',
+                message: 'Pago de gasto anulado por reversión.',
             }
         }
     }
@@ -70,6 +70,6 @@ export async function deleteJournalEntryWithSync(entryId: string): Promise<Journ
     await deleteEntry(entry.id)
     return {
         mode: 'deleted',
-        message: 'Asiento eliminado.',
+        message: entry.status === 'DRAFT' ? 'Borrador eliminado.' : 'Asiento anulado por reversión.',
     }
 }

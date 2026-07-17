@@ -440,7 +440,7 @@ export default function Dashboard() {
                             const currentRatioLow = kpis.currentRatio > 0 && kpis.currentRatio < 1
 
                             let alertType: 'danger' | 'warning' | 'success' = 'success'
-                            let alertMessages: string[] = []
+                            const alertMessages: string[] = []
 
                             if (debtShare > 0.60) {
                                 alertType = 'danger'

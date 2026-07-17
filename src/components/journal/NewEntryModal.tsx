@@ -488,6 +488,13 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
                                 </div>
                             </div>
 
+                            {/* Nota educativa (Fase 2A) */}
+                            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
+                                Guardar borrador no afecta los libros. Contabilizar (desde el Diario)
+                                incorpora el asiento al Diario y bloquea su modificación. Revertir crea
+                                un nuevo asiento inverso y conserva el original.
+                            </p>
+
                             {/* Actions */}
                             <div className="journal-modal-actions">
                                 <button onClick={onClose} className="journal-modal-btn-cancel">
@@ -498,7 +505,7 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
                                     disabled={!canSave || isSaving}
                                     className={`journal-modal-btn-save ${canSave ? 'enabled' : 'disabled'}`}
                                 >
-                                    <span>{isSaving ? 'Guardando...' : 'Guardar asiento'}</span>
+                                    <span>{isSaving ? 'Guardando...' : 'Guardar borrador'}</span>
                                     {!isSaving && <ArrowRight size={16} />}
                                 </button>
                             </div>

@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
 import ImportAsientosUX from '../components/ImportAsientosUX'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { createEntry, getTodayISO, createEmptyLine } from '../storage/entries'
+import { getTodayISO, createEmptyLine } from '../storage/entries'
+import { createDraftEntry } from '../accounting/application/journalService'
 import { getAllAccounts } from '../storage/accounts'
 import { validateEntry, sumDebits, sumCredits } from '../core/validation'
 import type { EntryLine, JournalEntry } from '../core/models'
@@ -84,7 +85,9 @@ export default function AsientosMobile() {
         }
 
         try {
-            await createEntry({
+            // Los asientos manuales nacen como borrador: no afectan los libros
+            // hasta contabilizarlos desde el Diario.
+            await createDraftEntry({
                 date,
                 memo,
                 lines: lines.filter((l) => l.accountId),

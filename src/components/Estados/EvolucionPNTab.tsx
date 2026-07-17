@@ -646,6 +646,27 @@ function EEPNTableRow({
     onDeleteCustomRow,
     onCustomCellSave,
 }: EEPNTableRowProps) {
+    // Hooks incondicionales (antes de cualquier early return)
+    // Compute subtotals for detail mode
+    const totalAportes = useMemo(() => {
+        return APORTES_COLUMNS.reduce((sum, col) => sum + getCellValue(row, col.id), 0)
+    }, [row])
+
+    const totalResultados = useMemo(() => {
+        return ALL_RESULTADOS_COLUMNS.reduce((sum, col) => sum + getCellValue(row, col.id), 0)
+    }, [row])
+
+    // Calculate grouped totals for non-detail mode
+    const groupedTotals = useMemo(() => {
+        if (showDetail) return null
+        const totals = { APORTES: 0, RESERVAS: 0, RESULTADOS: 0 }
+        for (const col of columns) {
+            const val = getCellValue(row, col.id)
+            totals[col.group] += val
+        }
+        return totals
+    }, [showDetail, columns, row])
+
     // Section header row
     if (row.isHeader) {
         // +2 for subtotal columns in detail mode
@@ -667,26 +688,6 @@ function EEPNTableRow({
         hidden ? 'eepn-row-zero-hidden' : '',
         isCustomRow ? 'eepn-row-custom' : '',
     ].filter(Boolean).join(' ')
-
-    // Compute subtotals for detail mode
-    const totalAportes = useMemo(() => {
-        return APORTES_COLUMNS.reduce((sum, col) => sum + getCellValue(row, col.id), 0)
-    }, [row])
-
-    const totalResultados = useMemo(() => {
-        return ALL_RESULTADOS_COLUMNS.reduce((sum, col) => sum + getCellValue(row, col.id), 0)
-    }, [row])
-
-    // Calculate grouped totals for non-detail mode
-    const groupedTotals = useMemo(() => {
-        if (showDetail) return null
-        const totals = { APORTES: 0, RESERVAS: 0, RESULTADOS: 0 }
-        for (const col of columns) {
-            const val = getCellValue(row, col.id)
-            totals[col.group] += val
-        }
-        return totals
-    }, [showDetail, columns, row])
 
     /** Format a zero value for display */
     const formatZero = (canEdit: boolean) => {

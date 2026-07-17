@@ -22,32 +22,31 @@ export interface KPIConfig {
 }
 
 // Helpers
+// Fase 2B (ANA-001): un denominador cero NUNCA produce Infinity ni ∞ en
+// pantalla; el resultado es null y se muestra "No calculable".
 export const safeDiv = (n: number, d: number): number | null => {
-    if (d === 0) return n === 0 ? null : Infinity;
+    if (d === 0) return null;
+    if (!Number.isFinite(n) || !Number.isFinite(d)) return null;
     return n / d;
 };
 
 export const formatCurrency = (val: number | null) => {
-    if (val === null) return 'N/D';
-    if (!isFinite(val)) return '∞';
+    if (val === null || !isFinite(val)) return 'No calculable';
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(val);
 };
 
 export const formatNumber = (val: number | null) => {
-    if (val === null) return 'N/D';
-    if (!isFinite(val)) return '∞';
+    if (val === null || !isFinite(val)) return 'No calculable';
     return new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
 };
 
 export const formatPercent = (val: number | null) => {
-    if (val === null) return 'N/D';
-    if (!isFinite(val)) return '∞';
+    if (val === null || !isFinite(val)) return 'No calculable';
     return new Intl.NumberFormat('es-AR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(val);
 };
 
 export const formatDays = (val: number | null) => {
-    if (val === null) return 'N/D';
-    if (!isFinite(val)) return '∞';
+    if (val === null || !isFinite(val)) return 'No calculable';
     return `${Math.round(val)}d`;
 };
 

@@ -51,7 +51,7 @@ const PLANILLAS: PlanillaCard[] = [
         badge: 'CIERRE',
         badgeClass: 'bg-violet-50 text-violet-700 border border-violet-200/60',
         description: 'Ajuste por inflación contable y valuación de activos al cierre del ejercicio.',
-        features: ['Índices FACPCE actualizados', 'RECPAM automático', 'Papeles de trabajo PDF'],
+        features: ['Carga manual de índices (serie oficial no incluida)', 'RECPAM en revisión normativa', 'Papeles de trabajo PDF'],
         lastUsed: '30/12/2025',
         href: '/planillas/cierre-valuacion',
         icon: Calculator,

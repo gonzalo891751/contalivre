@@ -154,7 +154,7 @@ export function autoGeneratePartidasRT6(
         stats.nonMonetaryAccounts++;
 
         // Get balance
-        let balance = ledgerBalances.get(account.id);
+        const balance = ledgerBalances.get(account.id);
 
         // Determine account grupo for special handling
         const accountGrupo = getAccountType(account);
@@ -613,28 +613,30 @@ function resolveProfileType(
 }
 
 /**
- * Derive rubro label from code and group
+ * Derive rubro label from code and group.
+ *
+ * Fase 2A (ACC-007): la fuente del rubro es la metadata estructurada de la
+ * cuenta (account.group, resuelto por el llamador). Los prefijos de código
+ * NO se usan para el activo: en el plan seed 1.2.01 es Bienes de Uso,
+ * 1.2.02 Intangibles y 1.2.03 Inversiones, mientras que esta tabla los
+ * rotulaba como Mercaderías/Bienes de Uso/Intangibles (contradicción
+ * detectada en la auditoría). Se conservan solo los prefijos de PN y
+ * resultados, que son estables en ambos esquemas.
  */
 function deriveRubroLabel(code: string, grupo: string): string {
-    // Try to infer from code prefix
-    if (code.startsWith('1.1.01')) return 'Caja y Bancos';
-    if (code.startsWith('1.1.02')) return 'Créditos';
-    if (code.startsWith('1.2.01')) return 'Mercaderías';
-    if (code.startsWith('1.2.02')) return 'Bienes de Uso';
-    if (code.startsWith('1.2.03')) return 'Intangibles';
-    if (code.startsWith('2.1')) return 'Deudas Corrientes';
-    if (code.startsWith('2.2')) return 'Deudas No Corrientes';
+    // Preferir siempre la metadata estructurada
+    if (grupo && grupo.trim() !== '') return grupo;
+
+    // Respaldo por prefijo SOLO donde no hay ambigüedad entre planes
     if (code.startsWith('3.1.01')) return 'Capital Social';
     if (code.startsWith('3.1.02')) return 'Ajuste de Capital';
     if (code.startsWith('3.1')) return 'Capital';
     if (code.startsWith('3.2')) return 'Resultados Acumulados';
-    if (code.startsWith('4.1')) return 'Ventas';
-    if (code.startsWith('4.2')) return 'Costo de Ventas';
-    if (code.startsWith('4.3')) return 'Gastos Administrativos';
-    if (code.startsWith('4.4')) return 'Gastos Comerciales';
+    if (code.startsWith('2.1')) return 'Deudas Corrientes';
+    if (code.startsWith('2.2')) return 'Deudas No Corrientes';
 
-    // Fallback to grupo
-    return grupo;
+    // Sin metadata suficiente: rubro genérico que exige revisión del usuario
+    return 'Sin rubro (requiere clasificación)';
 }
 
 /**

@@ -25,6 +25,11 @@ import {
     DEFAULT_FX_ACCOUNT_CODES,
 } from '../core/monedaExtranjera/types'
 import { createEntry, getLocalDateISO } from './entries'
+import {
+    JOURNAL_TX_TABLES,
+    updateEntrySourceLink,
+    voidOperationEntries,
+} from '../accounting/application/journalService'
 
 // ========================================
 // Account Resolution Helpers
@@ -102,6 +107,7 @@ const isValidDate = (value: string) => {
     const time = Date.parse(value)
     return !Number.isNaN(time)
 }
+const round2 = (value: number) => Math.round(value * 100) / 100
 
 const parseISODateLocal = (value: string): Date | null => {
     const [y, m, d] = value.split('-').map(Number)
@@ -119,6 +125,17 @@ const addMonths = (dateISO: string, months: number): string => {
     const day = base.getDate()
     const next = new Date(year, month + months, day)
     return getLocalDateISO(next)
+}
+
+async function calculateDebtInterestPendingARS(debtId: string): Promise<number> {
+    const movements = await db.fxMovements.where('debtId').equals(debtId).toArray()
+    const accrued = movements
+        .filter(m => m.type === 'DEVENGO_INTERES')
+        .reduce((sum, m) => sum + (m.arsAmount || 0), 0)
+    const paid = movements
+        .filter(m => m.type === 'PAGO_DEUDA')
+        .reduce((sum, m) => sum + (m.interestAppliedARS ?? m.interestARS ?? 0), 0)
+    return round2(Math.max(0, accrued - paid))
 }
 
 function generateFxDebtSchedule(params: {
@@ -425,9 +442,6 @@ async function buildJournalEntriesForFxMovement(
     // 4. Diferencia de cambio account
     const difCambioId = resolveMappedAccountId(accounts, settings, 'diferenciaCambio')
 
-    // 5. Intereses account
-    const interesesId = resolveMappedAccountId(accounts, settings, 'interesesPerdidos')
-
     // 6. Debt disbursement accounts (liability + asset target)
     let debtLiabilityAccountId: string | null = null
     let debtAssetAccountId: string | null = null
@@ -593,13 +607,17 @@ async function buildJournalEntriesForFxMovement(
     // === PAGO_DEUDA: Debit Pasivo + Intereses, Credit Contrapartida ===
     if (movement.type === 'PAGO_DEUDA' && fxAccount.type === 'LIABILITY') {
         const capitalME = movement.capitalAmount || movement.amount
-        const interestARS = movement.interestARS || 0
-        const capitalARS = capitalME * movement.rate
+        const interestARS = movement.interestAppliedARS ?? movement.interestARS ?? 0
+        const capitalARS = movement.capitalAppliedARS ?? (capitalME * movement.rate)
         const totalARS = capitalARS + interestARS + comisionARS
+        const interesesDevengarId = resolveAccountId(accounts, {
+            code: '2.1.05.90',
+            names: ['Intereses a devengar', 'Intereses devengados'],
+        })
 
         addLine(meAccountId!, capitalARS, 0, `Pago capital ${capitalME} ${movement.currency}`)
-        if (interestARS > 0 && interesesId) {
-            addLine(interesesId, interestARS, 0, 'Intereses')
+        if (interestARS > 0 && interesesDevengarId) {
+            addLine(interesesDevengarId, interestARS, 0, 'Cancelación intereses devengados')
         }
         if (comisionARS > 0 && comisionId) {
             addLine(comisionId, comisionARS, 0, 'Comisión')
@@ -892,7 +910,7 @@ export async function createFxMovement(
     }
 
     const createdEntries: JournalEntry[] = []
-    await db.transaction('rw', db.fxMovements, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const entryData of entries) {
             const created = await createEntry(entryData)
             createdEntries.push(created)
@@ -977,7 +995,7 @@ export async function updateFxMovementWithJournal(
         }
     }
 
-    let createdEntries: JournalEntry[] = []
+    const createdEntries: JournalEntry[] = []
 
     if (shouldRegenerate) {
         const { entries, error } = await buildJournalEntriesForFxMovement(baseMovement, fxAccount)
@@ -985,15 +1003,22 @@ export async function updateFxMovementWithJournal(
             throw new Error(error)
         }
 
-        await db.transaction('rw', db.fxMovements, db.entries, async () => {
+        await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
             if (autoEntries.length > 0) {
-                await db.entries.bulkDelete(autoEntries.map(e => e.id))
+                await voidOperationEntries(autoEntries.map(e => e.id), {
+                    reason: 'Regeneración de asientos del movimiento de moneda extranjera',
+                })
             }
 
             if (hasManualEntries) {
                 for (const entry of manualEntries) {
                     const cleaned = stripFxLinkFromEntry(entry, id)
-                    await db.entries.put(cleaned)
+                    await updateEntrySourceLink(entry.id, {
+                        sourceModule: cleaned.sourceModule,
+                        sourceId: cleaned.sourceId,
+                        sourceType: cleaned.sourceType,
+                        metadata: cleaned.metadata,
+                    }, { reason: 'Desvinculación de movimiento de moneda extranjera' })
                 }
             }
 
@@ -1059,7 +1084,7 @@ export async function generateJournalForFxMovement(
     }
 
     const createdEntries: JournalEntry[] = []
-    await db.transaction('rw', db.fxMovements, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const entryData of entries) {
             const created = await createEntry(entryData)
             createdEntries.push(created)
@@ -1101,14 +1126,13 @@ export async function linkFxMovementToEntries(
 
     const uniqueIds = Array.from(new Set([...(movement.linkedJournalEntryIds || []), ...entryIds]))
 
-    await db.transaction('rw', db.fxMovements, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const entryId of entryIds) {
             const entry = await db.entries.get(entryId)
             if (!entry) {
                 throw new Error('Asiento no encontrado')
             }
-            const updated: JournalEntry = {
-                ...entry,
+            await updateEntrySourceLink(entryId, {
                 sourceModule: entry.sourceModule || 'fx',
                 sourceId: entry.sourceId || movement.id,
                 sourceType: entry.sourceType || movement.type.toLowerCase(),
@@ -1119,8 +1143,7 @@ export async function linkFxMovementToEntries(
                     sourceType: movement.type.toLowerCase(),
                     linkedBy: 'fx',
                 },
-            }
-            await db.entries.put(updated)
+            }, { reason: 'Vinculación manual de asiento a movimiento de moneda extranjera' })
         }
 
         await db.fxMovements.update(movementId, {
@@ -1194,14 +1217,21 @@ export async function deleteFxMovementWithJournal(
         }
     }
 
-    await db.transaction('rw', db.fxMovements, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, ...JOURNAL_TX_TABLES], async () => {
         if (autoEntries.length > 0) {
-            await db.entries.bulkDelete(autoEntries.map(e => e.id))
+            await voidOperationEntries(autoEntries.map(e => e.id), {
+                reason: 'Baja de movimiento de moneda extranjera',
+            })
         }
         if (manualEntries.length > 0 && options?.keepManualEntries) {
             for (const entry of manualEntries) {
                 const cleaned = stripFxLinkFromEntry(entry, id)
-                await db.entries.put(cleaned)
+                await updateEntrySourceLink(entry.id, {
+                    sourceModule: cleaned.sourceModule,
+                    sourceId: cleaned.sourceId,
+                    sourceType: cleaned.sourceType,
+                    metadata: cleaned.metadata,
+                }, { reason: 'Desvinculación por baja de movimiento de moneda extranjera' })
             }
         }
         await db.fxMovements.delete(id)
@@ -1544,7 +1574,7 @@ export async function createFxDebt(
     }
 
     const fxAccount = await getFxAccountById(movement.accountId)
-    let createdEntries: JournalEntry[] = []
+    const createdEntries: JournalEntry[] = []
 
     // Include all stores that may be accessed during journal generation:
     // - fxDebts: main debt record
@@ -1552,7 +1582,7 @@ export async function createFxDebt(
     // - fxAccounts: lookup for target account
     // - accounts: ledger accounts for journal building
     // - entries: journal entries
-    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries], async () => {
+    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, ...JOURNAL_TX_TABLES], async () => {
         await db.fxDebts.add(newDebt)
 
         if (!autoJournal) {
@@ -1687,7 +1717,7 @@ export async function addFxDebtDisbursement(params: {
     const createdEntries: JournalEntry[] = []
 
     // Include all stores for journal generation (accounts lookup + entries)
-    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries], async () => {
+    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, ...JOURNAL_TX_TABLES], async () => {
         await db.fxDebts.update(debt.id, {
             principalME: nextPrincipalME,
             saldoME: nextSaldoME,
@@ -1740,8 +1770,7 @@ export async function addFxDebtDisbursement(params: {
 
 export async function addFxDebtPayment(params: {
     debtId: string
-    capitalME: number
-    interestARS?: number
+    totalARS: number
     rate: number
     date: string
     contrapartidaAccountId?: string
@@ -1753,17 +1782,25 @@ export async function addFxDebtPayment(params: {
     if (!debt) {
         throw new Error('Deuda no encontrada')
     }
-    if (params.capitalME <= 0) {
-        throw new Error('El capital a pagar debe ser mayor a 0.')
-    }
-    if (params.capitalME > debt.saldoME) {
-        throw new Error('El pago excede el saldo de la deuda.')
+    if (params.totalARS <= 0) {
+        throw new Error('El pago debe ser mayor a 0.')
     }
     if (params.rate <= 0) {
         throw new Error('El tipo de cambio debe ser mayor a 0.')
     }
     if (!isValidDate(params.date)) {
         throw new Error('Fecha de pago inválida.')
+    }
+
+    const interestPendingARS = await calculateDebtInterestPendingARS(debt.id)
+    const interestPaidARS = round2(Math.min(params.totalARS, interestPendingARS))
+    const capitalPaidARS = round2(params.totalARS - interestPaidARS)
+    const capitalME = debt.currency === 'ARS'
+        ? round2(capitalPaidARS)
+        : round2(capitalPaidARS / params.rate)
+
+    if (capitalME > debt.saldoME + 0.01) {
+        throw new Error('El pago excede el saldo pendiente de capital + intereses devengados.')
     }
 
     const autoJournal = params.autoJournal ?? debt.autoJournal
@@ -1775,19 +1812,21 @@ export async function addFxDebtPayment(params: {
         type: 'PAGO_DEUDA',
         accountId: debt.accountId,
         periodId: debt.periodId,
-        amount: params.capitalME,
+        amount: capitalME,
         currency: debt.currency,
         rate: params.rate,
         rateType: debt.rateType,
         rateSide: debt.rateSide,
         rateSource: 'Manual',
-        arsAmount: params.capitalME * params.rate,
+        arsAmount: capitalPaidARS,
         autoJournal,
         linkedJournalEntryIds: [],
         journalStatus: autoJournal ? 'generated' : 'none',
         debtId: debt.id,
-        capitalAmount: params.capitalME,
-        interestARS: params.interestARS || 0,
+        capitalAmount: capitalME,
+        interestARS: interestPaidARS,
+        capitalAppliedARS: capitalPaidARS,
+        interestAppliedARS: interestPaidARS,
         contrapartidaAccountId: params.contrapartidaAccountId,
         comisionARS: params.comisionARS,
         comisionAccountId: params.comisionAccountId,
@@ -1796,11 +1835,11 @@ export async function addFxDebtPayment(params: {
         updatedAt: now,
     }
 
-    const nextSaldoME = Math.max(0, debt.saldoME - params.capitalME)
+    const nextSaldoME = Math.max(0, round2(debt.saldoME - capitalME))
     let nextPaidInstallments = debt.paidInstallments || 0
     let nextSchedule = debt.schedule || []
     const unpaidIndex = nextSchedule.findIndex(item => !item.paid)
-    if (unpaidIndex >= 0 && params.capitalME >= (nextSchedule[unpaidIndex].capitalME || 0)) {
+    if (unpaidIndex >= 0 && capitalME >= (nextSchedule[unpaidIndex].capitalME || 0)) {
         nextSchedule = nextSchedule.map((item, index) => {
             if (index !== unpaidIndex) return item
             return {
@@ -1814,13 +1853,14 @@ export async function addFxDebtPayment(params: {
         nextPaidInstallments = Math.max(nextPaidInstallments, unpaidIndex + 1)
     }
 
-    const nextStatus: FxDebt['status'] = nextSaldoME <= 0 ? 'PAID' : 'ACTIVE'
+    const remainingInterestPendingARS = round2(Math.max(0, interestPendingARS - interestPaidARS))
+    const nextStatus: FxDebt['status'] = nextSaldoME <= 0 && remainingInterestPendingARS <= 0 ? 'PAID' : 'ACTIVE'
 
     const fxAccount = await getFxAccountById(movement.accountId)
     const createdEntries: JournalEntry[] = []
 
     // Include all stores for journal generation (accounts lookup + entries)
-    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, db.accounts, db.entries], async () => {
+    await db.transaction('rw', [db.fxDebts, db.fxMovements, db.fxAccounts, ...JOURNAL_TX_TABLES], async () => {
         await db.fxDebts.update(debt.id, {
             saldoME: nextSaldoME,
             paidInstallments: nextPaidInstallments,
@@ -2028,21 +2068,33 @@ export async function clearFxPeriodData(
     const autoEntries = linkedEntries.filter(e => isAutoGeneratedEntryForMovement(e, e.sourceId || ''))
     const manualEntries = linkedEntries.filter(e => !isAutoGeneratedEntryForMovement(e, e.sourceId || ''))
 
-    await db.transaction('rw', db.fxMovements, db.fxDebts, db.fxLiabilities, db.entries, async () => {
+    await db.transaction('rw', [db.fxMovements, db.fxDebts, db.fxLiabilities, ...JOURNAL_TX_TABLES], async () => {
         if (options.deleteGeneratedEntries) {
             if (autoEntries.length > 0) {
-                await db.entries.bulkDelete(autoEntries.map(e => e.id))
+                await voidOperationEntries(autoEntries.map(e => e.id), {
+                    reason: 'Limpieza de datos de moneda extranjera del período',
+                })
             }
             if (manualEntries.length > 0) {
                 for (const entry of manualEntries) {
                     const cleaned = stripFxLinkFromEntry(entry, entry.sourceId || '')
-                    await db.entries.put(cleaned)
+                    await updateEntrySourceLink(entry.id, {
+                        sourceModule: cleaned.sourceModule,
+                        sourceId: cleaned.sourceId,
+                        sourceType: cleaned.sourceType,
+                        metadata: cleaned.metadata,
+                    }, { reason: 'Desvinculación por limpieza de período de moneda extranjera' })
                 }
             }
         } else {
             for (const entry of linkedEntries) {
                 const cleaned = stripFxLinkFromEntry(entry, entry.sourceId || '')
-                await db.entries.put(cleaned)
+                await updateEntrySourceLink(entry.id, {
+                    sourceModule: cleaned.sourceModule,
+                    sourceId: cleaned.sourceId,
+                    sourceType: cleaned.sourceType,
+                    metadata: cleaned.metadata,
+                }, { reason: 'Desvinculación por limpieza de período de moneda extranjera' })
             }
         }
 

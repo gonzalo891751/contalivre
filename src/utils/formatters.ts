@@ -50,7 +50,7 @@ export function normalizeText(text: string): string {
  * - "-1.234,56" (Negative with sign)
  * - "1234.56" (US standard)
  */
-export function parseAmount(value: any): number {
+export function parseAmount(value: unknown): number {
     if (typeof value === 'number') return value
     if (!value) return 0
 

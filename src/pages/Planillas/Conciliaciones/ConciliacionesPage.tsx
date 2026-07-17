@@ -149,8 +149,8 @@ export default function ConciliacionesPage() {
                 margin: { left: margin, right: margin }
             })
 
-            // @ts-ignore
-            finalY = doc.lastAutoTable.finalY + 8
+            // lastAutoTable lo inyecta jspdf-autotable en runtime (sin tipos)
+            finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
 
             // --- TABLE 2: EXTERNO (EXTRACTO) ---
             doc.setFontSize(10)
@@ -188,8 +188,8 @@ export default function ConciliacionesPage() {
                 margin: { left: margin, right: margin }
             })
 
-            // @ts-ignore
-            finalY = doc.lastAutoTable.finalY + 10
+            // lastAutoTable lo inyecta jspdf-autotable en runtime (sin tipos)
+            finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10
 
             // Check if we need a new page for summary
             if (finalY > 200) {
@@ -345,7 +345,7 @@ export default function ConciliacionesPage() {
         { id: 103, fecha: '2026-01-08', concepto: 'REC-110 Transferencia A. Pérez', debe: 15500, haber: 0 },
     ])
 
-    const handleImportData = (rows: any[], mode: 'replace' | 'append') => {
+    const handleImportData = (rows: Array<{ fecha: string; concepto: string; debe: number; haber: number }>, mode: 'replace' | 'append') => {
         const newRows = rows.map((r, i) => ({
             id: Date.now() + i,
             fecha: r.fecha,
@@ -395,7 +395,7 @@ export default function ConciliacionesPage() {
         setExternoRows(externoRows.filter(r => r.id !== id))
     }
 
-    const handleExternoChange = (id: number, field: string, value: any) => {
+    const handleExternoChange = (id: number, field: string, value: string | number) => {
         setExternoRows(externoRows.map(r => {
             if (r.id === id) {
                 return { ...r, [field]: value }
@@ -407,7 +407,7 @@ export default function ConciliacionesPage() {
     const [editingDateId, setEditingDateId] = useState<string | number | null>(null)
 
     // --- Filtering & Totals ---
-    const matchFilter = (row: any) => {
+    const matchFilter = (row: { concepto: string; debe: number; haber: number }) => {
         if (!searchText) return true
         const s = searchText.toLowerCase()
         const txtMatch = row.concepto.toLowerCase().includes(s)
@@ -418,7 +418,7 @@ export default function ConciliacionesPage() {
     const filteredLibros = useMemo(() => librosRows.filter(matchFilter), [librosRows, searchText])
     const filteredExterno = useMemo(() => externoRows.filter(matchFilter), [externoRows, searchText])
 
-    const calculateTotals = (rows: any[]) => {
+    const calculateTotals = (rows: Array<{ debe: number; haber: number }>) => {
         const tDebe = rows.reduce((acc, r) => acc + (Number(r.debe) || 0), 0)
         const tHaber = rows.reduce((acc, r) => acc + (Number(r.haber) || 0), 0)
         return { tDebe, tHaber, saldo: tDebe - tHaber }
@@ -452,7 +452,7 @@ export default function ConciliacionesPage() {
         return new Set([...refsLibros].filter(x => refsExterno.has(x)))
     }, [showRefs, filteredLibros, filteredExterno])
 
-    const getRowClass = (row: any, side: 'libros' | 'externo') => {
+    const getRowClass = (row: { id: string | number; concepto: string }, side: 'libros' | 'externo') => {
         // Construct stable key logic
         // For Libros, row.id is usually unique enough (entry_idx). 
         // For Externo, row.id is unique (timestamp).

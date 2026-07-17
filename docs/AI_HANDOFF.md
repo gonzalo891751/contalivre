@@ -1,6 +1,186 @@
 # ContaLivre - AI Handoff Protocol
 
 ---
+## CHECKPOINT #PRESTAMOS-FASE2-ETAPA-B-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** IMPLEMENTADO + VALIDADO (PAGO INTERES/CAPITAL + UX MINIMO)
+
+### Objetivo
+Implementar Etapa B solicitada para prestamos:
+1. Pago con asignacion contable: primero interes devengado pendiente (2.1.05.90), luego capital.
+2. Asiento unico por pago.
+3. UX minima: defaults de cuenta CP/LP por maturity, unificacion Nombre/Acreedor, fecha por ejercicio, filtro de terceros en Pago (Proveedor).
+
+### Cambios aplicados
+| Archivo | Cambio |
+|---|---|
+| `src/storage/fx.ts` | `addFxDebtPayment` ahora recibe `totalARS`, calcula `interestPending` por `debtId` (DEVENGO_INTERES - PAGO_DEUDA.interestARS), asigna interes->capital, actualiza saldo/estado; `PAGO_DEUDA` debita 2.1.05.90 para interes aplicado y pasivo del prestamo para capital |
+| `src/pages/Operaciones/PrestamosPage.tsx` | Alta: campo unico "Acreedor/Entidad"; default fechas por ejercicio (`YYYY-12-31`); default cuenta madre CP/LP por maturity; creacion/uso obligatorio de subcuenta hija bajo madre seleccionada; Pago: monto total ARS + modo cuota/libre/total + preview split estimado interes/capital |
+| `src/pages/Planillas/components/MovementModalV3.tsx` | Filtro de terceros en tab pagos por contexto: COBRO->clientes, PAGO->proveedores (evita mezcla) |
+
+### Reglas contables implementadas
+- Pago (asiento unico):
+  - Debe `2.1.05.90` por interes aplicado
+  - Debe cuenta pasivo del prestamo (subcuenta) por capital
+  - Haber Caja/Banco por total
+- Devengo Fase 1 se mantiene sin cambios de criterio.
+
+### Validacion
+- `npm test` -> OK (16 archivos, 82 tests).
+- `npm run build` -> OK (warnings de chunks preexistentes).
+
+---
+## CHECKPOINT #PRESTAMOS-FASE1-ETAPA-A-MVP-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** IMPLEMENTADO + VALIDADO (MVP DEVENGO ACOTADO + BASE 365 + IDEMPOTENCIA GLOBAL)
+
+### Objetivo
+Implementar Etapa A (MVP) del modulo Prestamos segun contrato funcional/contable:
+1. Devengar hasta ultimo mes cerrado, acotado por maturity.
+2. Calculo de interes por base diaria 365 con prorrateo por mes.
+3. Idempotencia fuerte por `debtId + DEVENGO_INTERES + periodKey (YYYY-MM)` sin depender del `periodId`.
+
+### Cambios implementados
+| Archivo | Cambio |
+|---|---|
+| `src/pages/Operaciones/PrestamosPage.tsx` | Reemplazo de algoritmo de devengo: slices mensuales prorrateados, limite `min(ultimoMesCerrado, maturity)`, calculo diario 365, idempotencia global por movimientos `DEVENGO_INTERES` de todos los ejercicios, metadata `devengoKey` en asiento y `notes` en movimiento |
+
+### Detalle tecnico
+1. **Nuevo calculo de periodos acotados**:
+   - Se elimina el barrido historico fijo por `while cursor <= lastMonth` desde `originDate`.
+   - Se calcula `accrualEnd = min(lastClosedMonthEnd, maturityDate)`.
+   - Si `accrualEnd < originDate` => no devenga.
+   - Se generan slices por mes con `periodStart`, `periodEnd`, `days` (inclusive).
+2. **MaturityDate real**:
+   - Preferencia: ultima `dueDate` de `schedule`.
+   - Fallback: `firstDueDate + (installments-1) * mesesPorFrecuencia`.
+   - Respeta `installments=1` o `frequency=UNICO` (maturity = primer vencimiento).
+3. **Interes diario base 365**:
+   - `interesME = saldoME * TNA * (days / 365)`
+   - `interesARS = interesME * rate`
+4. **Idempotencia global (independiente de ejercicio)**:
+   - Ya existentes se consultan desde `db.fxMovements.toArray()` (sin filtro `periodId`).
+   - Clave estable: `devengoKey = debtId|DEVENGO_INTERES|YYYY-MM`.
+   - Se persiste `devengoKey` en metadata del asiento y en `notes` del movimiento.
+   - Un periodo ya devengado (`reference=YYYY-MM`) no se vuelve a postear aunque cambie de ejercicio.
+
+### Reglas contables mantenidas
+- Devengo no afecta capital ni recalcula schedule.
+- Asiento de devengo conserva:
+  - Debe `4.6.02`
+  - Haber `2.1.05.90` (preferente, con fallback preexistente)
+
+### Validacion
+- `npm test` -> OK (16 files, 82 tests).
+- `npm run build` -> OK (build productivo; warnings de chunks grandes preexistentes).
+
+### Riesgo residual
+- El MVP mantiene `saldoME` constante para devengo (segun alcance Etapa A). La imputacion pago "primero intereses devengados y luego capital" queda para la siguiente etapa de ajustes en flujo de pago.
+
+---
+## CHECKPOINT #PRESTAMOS-FASE0-AUDIT-2026-02-16
+**Fecha:** 2026-02-16
+**Estado:** FASE 0 COMPLETADA (AUDITORIA SIN CAMBIOS PRODUCTIVOS)
+
+### Objetivo
+Auditar modulo `Operaciones > Prestamos` para diagnosticar:
+1. Por que "Devengar intereses" genera multiples meses aun con `cuotas=1`.
+2. Como se crean hoy prestamos, calendario, pagos y asientos.
+3. Que falta para separar correctamente capital/interes y flujo completo (Alta -> Devengo -> Pago -> Cancelacion).
+
+### Comandos de inspeccion ejecutados
+- `git status --short` -> sin cambios reportados al iniciar.
+- `git diff --stat` -> sin cambios reportados al iniciar.
+- `rg -n "Prestam|Loan|Deveng|amort|frances|TNA|cuota|interest" .`
+- `rg -n "operaciones/prestamos|/prestamos" .`
+- `rg -n "Intereses a devengar|2\.1\.05\.90|intereses.*devengar" .`
+- `rg -n "build.*Devengo|devengarInteres|accru" .`
+
+### Archivos relevantes auditados
+| Archivo | Rol en flujo |
+|---|---|
+| `src/pages/Operaciones/PrestamosPage.tsx` | UI, alta prestamo, devengo manual/auto, revaluacion |
+| `src/storage/fx.ts` | Persistencia de deudas/schedule/pagos y asientos auto para movimientos FX |
+| `src/core/monedaExtranjera/types.ts` | Modelo `FxDebt`, `FxDebtInstallment`, tipos de movimiento |
+| `src/storage/seed.ts` | Plan de cuentas seed (2.1.05.02, 2.1.05.90, 2.2.01.01, 4.6.02) |
+| `src/App.tsx` | Ruta `/operaciones/prestamos` |
+| `src/pages/OperacionesPage.tsx` | Navegacion a prestamos |
+
+### Diagnostico (root cause confirmado)
+1. `getPeriodsToAccrue()` en `src/pages/Operaciones/PrestamosPage.tsx` (lineas ~1658-1677):
+   - Arranca en mes de `originDate`.
+   - Itera mes a mes hasta ultimo mes cerrado (`lastMonth = ultimo dia mes anterior a hoy`).
+   - Solo evita duplicados por `reference` (`YYYY-MM`) en movimientos previos.
+   - No usa `installments`, `firstDueDate`, `frequency`, `system` ni `schedule`.
+2. Resultado: si no habia devengos historicos, al presionar "Devengar intereses" (o al auto-devengo inicial) crea todos los meses faltantes desde origen hasta hoy, incluso cuando `cuotas=1`.
+3. Calculo actual de interes:
+   - `monthlyRate = interestRateAnnual / 12`
+   - `interestME = debt.saldoME * monthlyRate`
+   - No usa base diaria 365.
+   - No prorratea por dias ni por frecuencia real.
+4. Auto-devengo:
+   - `useEffect` en `PrestamosPage` ejecuta `runAutoDevengo()` una vez por carga (flag `autoDevengoRan`), por cada deuda activa.
+   - Esto puede generar lote masivo inmediatamente al abrir pagina.
+
+### Relevamiento funcional (estado actual)
+- Alta:
+  - Se guardan: `principalME`, `originDate`, `installments`, `frequency`, `interestRateAnnual`, `system`, `firstDueDate`, `currency`, `accountId`, `creditor`, `schedule`, `saldoME`, etc.
+  - `schedule` se genera en `createFxDebt()` via `generateFxDebtSchedule()` si viene vacio.
+- Asiento de alta:
+  - ARS: en `PrestamosPage` se crea manualmente `createEntry()` (Debe banco/caja destino, Haber pasivo elegido), `sourceType: 'toma_deuda'`.
+  - ME: `createFxDebt(...options.disbursement...)` crea movimiento `TOMA_DEUDA` y asientos via `buildJournalEntriesForFxMovement()`.
+- Pago:
+  - `addFxDebtPayment()` baja `saldoME` por capital y marca cuota pagada solo si `capitalME >= capital de proxima cuota`.
+  - Interes en pago es input (`interestARS`) y asiento debita resultado financiero (cuenta mapeada a intereses) + debita pasivo por capital + acredita contrapartida de pago.
+- Devengo:
+  - Crea asiento manual en `runDevengoForDebt()`:
+    - Debe `4.6.02` (Intereses perdidos)
+    - Haber `2.1.05.90` preferente (fallback nombre, ultimo fallback cuenta pasivo)
+  - Crea movimiento `DEVENGO_INTERES` con `reference=YYYY-MM` para idempotencia por periodo mensual.
+
+### Auditoria contable contra reglas objetivo
+- Devengo NO baja capital: CUMPLE (no toca `saldoME` ni `schedule`).
+- Pago baja capital + interes: PARCIAL
+  - Baja capital siempre.
+  - Interes depende de carga manual o cuota tomada de `schedule`; no hay conciliacion obligatoria contra intereses ya devengados.
+- Uso cuenta 2.1.05.90: CUMPLE en preferencia (con fallback permisivo al pasivo si falta).
+- CP vs LP:
+  - NO hay determinacion automatica por plazo remanente.
+  - Depende de cuenta pasivo elegida por usuario/sugerencia.
+
+### Gap clave para "capital vs interes real"
+1. Devengo no consume cronograma ni frecuencia.
+2. No existe relacion entre devengo mensual y componentes de cada cuota.
+3. `schedule` existe, pero devengo calcula interes plano sobre `saldoME` (no saldo por periodo del cuadro).
+4. Base 365 no implementada.
+
+### Plan minimo propuesto (sin implementar)
+- Etapa A (MVP):
+  - Acotar devengo por fecha objetivo/maturity real.
+  - Calculo por periodo usando base 365 y limites por deuda.
+  - Idempotencia robusta por deuda+periodo+tipo (sin re-generar lote historico no deseado).
+  - Respetar `cuotas=1` y `frequency=UNICO`.
+- Etapa B:
+  - Motor de amortizacion unico (FRANCES/ALEMAN/AMERICANO/BULLET) como source of truth.
+  - Devengo derivado del schedule (interes esperado por periodo).
+  - Pago cuota/parcial/anticipo con imputacion interes vs capital y cancelacion de intereses devengados.
+  - Regla CP/LP por vencimiento remanente (reclasificacion cuando corresponda).
+
+### Riesgos detectados
+1. Sobre-devengamiento historico al abrir pantalla por auto-devengo.
+2. Inconsistencia interes devengado vs interes pagado (input manual).
+3. Falta trazabilidad fuerte entre entry de devengo y cuota objetiva del schedule.
+
+### Validacion Fase 0
+- `npm test` -> OK (16 archivos, 82 tests passed).
+- `npm run dev` / `npx vite ...` -> no se pudo confirmar "ready" en consola por timeout de ejecucion en entorno CLI (sin errores impresos).
+
+### Supuestos y plan B
+- Supuesto: el plan de cuentas vigente es el definido en `src/storage/seed.ts` para este entorno local.
+- Supuesto: fuentes externas `/mnt/data/Contalivre.html` y `/mnt/data/Plan de cuentas feb 2026.pdf` no estan accesibles desde esta sesion.
+- Plan B: usar seed + codigos indicados por usuario como fuente contable hasta que se compartan capturas/PDF en el repo o ruta accesible.
+
+---
 ## CHECKPOINT #BIENES-USO-EXPR-RET-FINAL
 **Fecha:** 2026-02-16
 **Estado:** IMPLEMENTADO + QA — AmountInput + Bonificación + Descuento Financiero + Retenciones + Percepciones
@@ -7942,3 +8122,71 @@ Reemplazado `await onSave({type: 'VALUE_ADJUSTMENT'...})` (que pasaba por handle
 ### Validacion
 - `npx tsc --noEmit` -> OK
 - `npx vite build` -> OK
+
+## CHECKPOINT #PRESTAMOS-FASE3-HARDENING-2026-02-16
+
+### Estado
+Completado (hardening tecnico + UX de Prestamos, sin dependencias nuevas).
+
+### Objetivo
+Cerrar FASE 3 garantizando:
+- independencia entre Prestamos y MovementModalV3,
+- pago de prestamo con split interes/capital robusto,
+- idempotencia/devengo eficiente,
+- defaults de fechas por ejercicio,
+- cambios minimos y sin refactor masivo.
+
+### Cambios aplicados
+- `src/pages/Operaciones/prestamos/LoanPaymentModal.tsx`
+  - Nuevo modal propio de Prestamos (independiente de `MovementModalV3`).
+  - Input unico de pago: `Monto total pagado (ARS)`.
+  - Split automatico: interes pendiente -> capital.
+  - Campo TC editable y obligatorio cuando moneda del prestamo != ARS.
+  - Preview en vivo del asiento unico (Debe 2.1.05.90 + Debe pasivo prestamo + Haber banco/caja).
+
+- `src/pages/Operaciones/PrestamosPage.tsx`
+  - Se elimino `PaymentSubModal` inline y se reemplazo por `LoanPaymentModal`.
+  - Defaults de fecha migrados a fecha de fin del ejercicio (`usePeriodYear().end`).
+  - Alta: se removio duplicacion visible `Nombre`/`Acreedor` en modal y se dejo `Acreedor / Entidad`.
+  - Alta: default CP/LP por maturity en dias y subcuenta bajo madre con identificador (`Prestamo YYYY-MM`).
+  - Devengo: optimizacion de consultas por `debtId` (sin barrido global `toArray()` para todo el universo).
+
+- `src/storage/fx.ts`
+  - `calculateDebtInterestPendingARS` ahora usa `interestAppliedARS` (fallback `interestARS`).
+  - En `addFxDebtPayment` se persisten campos explicitos:
+    - `interestAppliedARS`
+    - `capitalAppliedARS`
+  - Asiento de `PAGO_DEUDA` toma esos campos explicitos para Debe interes/capital.
+  - Se mantiene cuenta `2.1.05.90` para cancelacion de interes devengado.
+
+- `src/core/monedaExtranjera/types.ts`
+  - `FxMovement` ampliado con:
+    - `interestAppliedARS?: number`
+    - `capitalAppliedARS?: number`
+
+- `src/pages/Planillas/components/MovementModalV3.tsx`
+  - Ajuste minimo de filtro de terceros en pagos/cobros:
+    - COBRO -> clientes,
+    - PAGO -> proveedores.
+  - Fallback seguro sin comprobante vinculado: toggle `Ver todos` (default OFF).
+  - Sin cambios de layout global ni logica de Prestamos dentro de este modal.
+
+### Validacion tecnica
+- `npm test`: OK (16 files, 82 tests)
+- `npm run build`: OK
+
+### Smoke manual sugerido (FASE 3)
+1. Crear prestamo 1 cuota (`UNICO`) con maturity < 365 dias.
+2. Verificar default cuenta pasivo CP/LP y creacion/uso de subcuenta debajo de madre.
+3. Devengar intereses y confirmar que no excede `min(ultimo mes cerrado, maturity)`.
+4. Registrar pago parcial menor a interes pendiente y validar asiento:
+   - Debe 2.1.05.90,
+   - Haber banco/caja,
+   - sin baja de capital.
+5. Registrar pago que cubra interes + capital y validar asiento unico con ambas lineas al Debe.
+6. Verificar en Diario imputacion de subcuenta del prestamo bajo su cuenta madre.
+7. En `MovementModalV3` (pagos/cobros), comprobar que no mezcla terceros por default y que `Ver todos` solo aparece en no vinculado.
+
+### Riesgos / notas
+- Se mantuvo compatibilidad hacia atras usando fallback `interestARS` cuando falte `interestAppliedARS` en movimientos historicos.
+- No se introdujeron migraciones ni nuevas dependencias.

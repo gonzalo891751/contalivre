@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import MainLayout from './ui/Layout/MainLayout'
 import CleanLayout from './layouts/CleanLayout'
@@ -8,27 +9,33 @@ import Cuentas from './pages/Cuentas'
 import Asientos from './pages/Asientos'
 import Mayor from './pages/Mayor'
 import Balance from './pages/Balance'
-import Estados from './pages/Estados'
-import AmortizacionesPage from './pages/Planillas/AmortizacionesPage'
-import InventarioBienesPage from './pages/Planillas/InventarioBienesPage'
-import MonedaExtranjeraPage from './pages/Operaciones/MonedaExtranjeraPage'
-import PrestamosPage from './pages/Operaciones/PrestamosPage'
-import ImpuestosPage from './pages/Operaciones/ImpuestosPage'
-import BienesUsoPage from './pages/Operaciones/BienesUsoPage'
-import InversionesPage from './pages/Operaciones/InversionesPage'
-import ProveedoresAcreedoresPage from './pages/Operaciones/ProveedoresAcreedoresPage'
-import ClientesDeudoresPage from './pages/Operaciones/ClientesDeudoresPage'
-import DeudasSocialesPage from './pages/Operaciones/DeudasSocialesPage'
-import GastosServiciosPage from './pages/Operaciones/GastosServiciosPage'
-import ConciliacionesPage from './pages/Planillas/Conciliaciones/ConciliacionesPage'
-import CierreValuacionPage from './pages/Planillas/CierreValuacionPage'
 import PlanillasLayout from './pages/Planillas/PlanillasLayout'
 import PlanillasHome from './pages/Planillas/PlanillasHome'
+import AcercaDe from './pages/AcercaDe'
+
+// Fase 2B (PER-001): las pantallas pesadas (estados, operaciones grandes,
+// planillas con PDF/XLSX) se cargan bajo demanda para bajar el bundle inicial.
+const Estados = lazy(() => import('./pages/Estados'))
+const AmortizacionesPage = lazy(() => import('./pages/Planillas/AmortizacionesPage'))
+const InventarioBienesPage = lazy(() => import('./pages/Planillas/InventarioBienesPage'))
+const MonedaExtranjeraPage = lazy(() => import('./pages/Operaciones/MonedaExtranjeraPage'))
+const PrestamosPage = lazy(() => import('./pages/Operaciones/PrestamosPage'))
+const ImpuestosPage = lazy(() => import('./pages/Operaciones/ImpuestosPage'))
+const BienesUsoPage = lazy(() => import('./pages/Operaciones/BienesUsoPage'))
+const InversionesPage = lazy(() => import('./pages/Operaciones/InversionesPage'))
+const ProveedoresAcreedoresPage = lazy(() => import('./pages/Operaciones/ProveedoresAcreedoresPage'))
+const ClientesDeudoresPage = lazy(() => import('./pages/Operaciones/ClientesDeudoresPage'))
+const DeudasSocialesPage = lazy(() => import('./pages/Operaciones/DeudasSocialesPage'))
+const GastosServiciosPage = lazy(() => import('./pages/Operaciones/GastosServiciosPage'))
+const ConciliacionesPage = lazy(() => import('./pages/Planillas/Conciliaciones/ConciliacionesPage'))
+const CierreValuacionPage = lazy(() => import('./pages/Planillas/CierreValuacionPage'))
 
 function MainLayoutRoute() {
     return (
         <MainLayout>
-            <Outlet />
+            <Suspense fallback={<div className="empty-state" style={{ padding: 48 }}>Cargando módulo…</div>}>
+                <Outlet />
+            </Suspense>
         </MainLayout>
     )
 }
@@ -62,6 +69,7 @@ function App() {
                 <Route path="/mayor" element={<Mayor />} />
                 <Route path="/balance" element={<Balance />} />
                 <Route path="/estados" element={<Estados />} />
+                <Route path="/acerca" element={<AcercaDe />} />
                 <Route path="/practica" element={<Navigate to="/" replace />} />
                 <Route path="/planillas" element={<PlanillasLayout />}>
                     <Route index element={<PlanillasHome />} />

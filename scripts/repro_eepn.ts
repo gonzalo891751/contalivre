@@ -1,6 +1,6 @@
 
-import { computeEEPN, EEPNInput } from '../src/core/eepn/compute';
-import { EEPN_COLUMNS } from '../src/core/eepn/columns';
+import { computeEEPN } from '../src/core/eepn/compute';
+import type { EEPNInput } from '../src/core/eepn/types';
 import { Account, JournalEntry } from '../src/core/models';
 
 // Mocks
@@ -54,7 +54,7 @@ try {
         periodEnd,
         netIncomeFromER,
         pnFromBalance
-    } as any);
+    } as unknown as EEPNInput);
 
     console.log("PN Cierre Calculated:", result.pnCierre);
     console.log("PN Balance Expected:", pnFromBalance);

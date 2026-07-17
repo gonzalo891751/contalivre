@@ -401,7 +401,7 @@ export default function InventarioBienesPage() {
             const prefill: Partial<BienesMovement> = {}
             if (locationState.prefillTab === 'pagos') {
                 prefill.type = 'PAYMENT'
-                prefill.paymentDirection = (locationState.prefillPaymentDirection as any) || 'PAGO'
+                prefill.paymentDirection = (locationState.prefillPaymentDirection as 'PAGO' | 'COBRO' | undefined) || 'PAGO'
             }
             if (locationState.prefillCounterparty) {
                 prefill.counterparty = locationState.prefillCounterparty

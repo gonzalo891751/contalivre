@@ -48,7 +48,7 @@ import {
     type LedgerAccountSuggestion,
 } from '../../storage/fxMapping'
 import { getExchangeRates, getQuote, getRateValue } from '../../services/exchangeRates'
-import type { Account } from '../../core/models'
+import type { Account, JournalEntry } from '../../core/models'
 import OperationsPageHeader from '../../components/OperationsPageHeader'
 import type {
     CurrencyCode,
@@ -1702,7 +1702,7 @@ export default function MonedaExtranjeraPage() {
     const [linkModalOpen, setLinkModalOpen] = useState(false)
     const [linkTargetMovement, setLinkTargetMovement] = useState<FxMovement | null>(null)
 
-    const [reconciliation, setReconciliation] = useState<{ movementsWithoutEntry: FxMovement[]; orphanEntries: any[] }>({
+    const [reconciliation, setReconciliation] = useState<{ movementsWithoutEntry: FxMovement[]; orphanEntries: JournalEntry[] }>({
         movementsWithoutEntry: [],
         orphanEntries: [],
     })
@@ -2295,11 +2295,11 @@ export default function MonedaExtranjeraPage() {
                 open={linkModalOpen}
                 onClose={() => setLinkModalOpen(false)}
                 movement={linkTargetMovement}
-                entries={reconciliation.orphanEntries.map((entry: any) => ({
+                entries={reconciliation.orphanEntries.map((entry) => ({
                     id: entry.id,
                     memo: entry.memo,
                     date: entry.date,
-                    total: entry.lines?.reduce((sum: number, line: any) => sum + line.debit + line.credit, 0) / 2,
+                    total: entry.lines?.reduce((sum: number, line) => sum + line.debit + line.credit, 0) / 2,
                 }))}
                 onLink={entryId => linkTargetMovement && handleLinkEntry(linkTargetMovement, entryId)}
             />

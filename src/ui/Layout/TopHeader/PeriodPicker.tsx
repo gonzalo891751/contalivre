@@ -1,8 +1,16 @@
 import { useRef, useCallback, useState, useEffect } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { CalendarBlank, CaretDown, Warning } from '@phosphor-icons/react'
 import { usePeriodYear } from '../../../hooks/usePeriodYear'
+import { db } from '../../../storage/db'
 import { type DropdownId } from '../../../hooks/useDropdownManager'
 import DropdownMenu from './DropdownMenu'
+
+const EXERCISE_STATUS_LABELS: Record<string, string> = {
+    OPEN: 'Abierto',
+    CLOSING: 'En cierre',
+    CLOSED: 'Cerrado',
+}
 
 interface PeriodPickerProps {
   isOpen: boolean
@@ -17,7 +25,8 @@ export default function PeriodPicker({
   onClose,
   registerRef,
 }: PeriodPickerProps) {
-  const { year, start, end, setYear, setPeriod, availableYears } = usePeriodYear()
+  const { year, start, end, setYear, setPeriod, availableYears, currentExercise, exercises } = usePeriodYear()
+  const company = useLiveQuery(() => db.companies.toCollection().first())
   const wrapperRef = useRef<HTMLDivElement>(null)
 
   // Local state for custom range
@@ -76,7 +85,12 @@ export default function PeriodPicker({
           <CalendarBlank size={18} />
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: '1.2' }}>
             <span className="period-picker-label">
-              Ejercicio <span className="period-picker-year">{year}</span>
+              {company?.legalName ? `${company.legalName} · ` : ''}Ejercicio <span className="period-picker-year">{year}</span>
+              {currentExercise && (
+                <span style={{ fontSize: '0.75em', opacity: 0.75, fontWeight: 500, marginLeft: 6 }}>
+                  ({EXERCISE_STATUS_LABELS[currentExercise.status] ?? currentExercise.status})
+                </span>
+              )}
             </span>
             <span style={{ fontSize: '0.75em', opacity: 0.7, fontWeight: 400 }}>
               {formatDate(start)} - {formatDate(end)}
@@ -94,19 +108,27 @@ export default function PeriodPicker({
         className="period-dropdown w-[320px] sm:w-[360px]"
       >
         <div className="period-dropdown-header">
-          <span>Seleccionar Año</span>
+          <span>Seleccionar Ejercicio</span>
         </div>
         <div className="period-dropdown-list max-h-[240px] overflow-y-auto">
-          {availableYears.map((y) => (
-            <button
-              key={y}
-              type="button"
-              className={`period-year-btn ${y === year ? 'selected' : ''}`}
-              onClick={() => handleSelectYear(y)}
-            >
-              {y}
-            </button>
-          ))}
+          {availableYears.map((y) => {
+            const exercise = exercises.find(ex => Number(ex.startDate.slice(0, 4)) === y)
+            return (
+              <button
+                key={y}
+                type="button"
+                className={`period-year-btn ${y === year ? 'selected' : ''}`}
+                onClick={() => handleSelectYear(y)}
+              >
+                {y}
+                {exercise && (
+                  <span style={{ fontSize: '0.75em', opacity: 0.65, marginLeft: 8 }}>
+                    {EXERCISE_STATUS_LABELS[exercise.status] ?? exercise.status}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
         {/* Custom Range Section */}

@@ -38,7 +38,7 @@ interface ImportComparativeModalProps {
 }
 
 interface ParsedRow {
-    [key: string]: any
+    [key: string]: unknown
 }
 
 type Step = 'upload' | 'preview' | 'review'
@@ -121,7 +121,7 @@ export function ImportComparativeModal({
                     complete: (results) => {
                         handleSuccess(results.data as ParsedRow[], results.meta.fields || Object.keys(results.data[0] || {}))
                     },
-                    error: (err: any) => handleError(`Error CSV: ${err.message}`)
+                    error: (err: Error) => handleError(`Error CSV: ${err.message}`)
                 })
             }
             reader.readAsText(file)
@@ -141,7 +141,7 @@ export function ImportComparativeModal({
                     } else {
                         handleError('La hoja de cálculo está vacía.')
                     }
-                } catch (err: any) {
+                } catch {
                     handleError('Error al procesar Excel.')
                 }
             }
@@ -399,9 +399,9 @@ export function ImportComparativeModal({
                                     <tbody>
                                         {fileData.slice(0, 5).map((r, i) => (
                                             <tr key={i}>
-                                                <td>{mapping.code ? r[mapping.code] : '-'}</td>
-                                                <td>{mapping.name ? r[mapping.name] : '-'}</td>
-                                                <td>{mapping.amount ? r[mapping.amount] : '-'}</td>
+                                                <td>{mapping.code ? String(r[mapping.code] ?? '') : '-'}</td>
+                                                <td>{mapping.name ? String(r[mapping.name] ?? '') : '-'}</td>
+                                                <td>{mapping.amount ? String(r[mapping.amount] ?? '') : '-'}</td>
                                             </tr>
                                         ))}
                                     </tbody>

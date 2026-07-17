@@ -6,10 +6,10 @@
  * the parent is shown as a visual header row with the subcuenta indented below.
  * The header row does NOT participate in totals.
  */
-import { useMemo } from 'react'
-import { Edit2, Trash2 } from 'lucide-react'
+import { useMemo, type CSSProperties } from 'react'
+import { ArrowCounterClockwise, CheckCircle, PencilSimple, Trash } from '@phosphor-icons/react'
 import { motion } from 'framer-motion'
-import type { JournalEntry, Account } from '../../core/models'
+import type { JournalEntry, Account, EntryStatus } from '../../core/models'
 import { resolveAccountDisplay } from '../../core/displayAccount'
 
 interface EntryCardProps {
@@ -18,8 +18,29 @@ interface EntryCardProps {
     accounts: Account[]
     onEdit: (entry: JournalEntry) => void
     onDelete: (id: string) => void
+    /** Contabilizar un borrador */
+    onPost?: (id: string) => void
+    /** Revertir un asiento contabilizado */
+    onReverse?: (id: string) => void
     disabled?: boolean
     formalView?: boolean
+}
+
+/** Los asientos previos a la Fase 2A no tienen status: se tratan como contabilizados */
+function effectiveStatus(entry: JournalEntry): EntryStatus {
+    return entry.status ?? 'POSTED'
+}
+
+const STATUS_LABELS: Record<EntryStatus, string> = {
+    DRAFT: 'Borrador',
+    POSTED: 'Contabilizado',
+    REVERSED: 'Revertido',
+}
+
+const STATUS_STYLES: Record<EntryStatus, CSSProperties> = {
+    DRAFT: { background: 'rgba(234, 179, 8, 0.12)', color: '#a16207', border: '1px solid rgba(234, 179, 8, 0.35)' },
+    POSTED: { background: 'rgba(34, 197, 94, 0.12)', color: '#15803d', border: '1px solid rgba(34, 197, 94, 0.35)' },
+    REVERSED: { background: 'rgba(148, 163, 184, 0.15)', color: '#64748b', border: '1px solid rgba(148, 163, 184, 0.4)' },
 }
 
 const formatAmount = (n: number): string => {
@@ -102,7 +123,7 @@ function buildDisplayRows(lines: JournalEntry['lines'], accounts: Account[], for
     return rows
 }
 
-export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disabled, formalView = true }: EntryCardProps) {
+export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, onPost, onReverse, disabled, formalView = true }: EntryCardProps) {
     const totalDebit = entry.lines.reduce((sum, line) => sum + (line.debit || 0), 0)
     const totalCredit = entry.lines.reduce((sum, line) => sum + (line.credit || 0), 0)
 
@@ -111,8 +132,15 @@ export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disa
         [entry.lines, accounts, formalView]
     )
 
-    // Format entry number with leading zeros
-    const formattedNumber = String(entryNumber).padStart(4, '0')
+    const status = effectiveStatus(entry)
+    const isDraft = status === 'DRAFT'
+    const isPosted = status === 'POSTED'
+    const isReversed = status === 'REVERSED'
+
+    // Número oficial asignado al contabilizar; los borradores no tienen número
+    const formattedNumber = isDraft
+        ? '—'
+        : String(entry.entryNumber ?? entryNumber).padStart(4, '0')
 
     return (
         <motion.div
@@ -130,7 +158,28 @@ export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disa
                         <div className="journal-entry-card-meta-row">
                             <span className="journal-entry-card-date">{formatDate(entry.date)}</span>
                             <span className="journal-entry-card-separator">•</span>
-                            <span className="journal-entry-card-status">Registrado</span>
+                            <span
+                                className="journal-entry-card-status"
+                                style={{ ...STATUS_STYLES[status], padding: '1px 8px', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 600 }}
+                            >
+                                {STATUS_LABELS[status]}
+                            </span>
+                            {entry.sourceModule && (
+                                <>
+                                    <span className="journal-entry-card-separator">•</span>
+                                    <span className="journal-entry-card-status" title="Módulo de origen">
+                                        Origen: {entry.sourceModule}
+                                    </span>
+                                </>
+                            )}
+                            {isReversed && entry.reversalEntryId && (
+                                <>
+                                    <span className="journal-entry-card-separator">•</span>
+                                    <span className="journal-entry-card-status" title={`Revertido por el asiento ${entry.reversalEntryId}`}>
+                                        Reversión vinculada
+                                    </span>
+                                </>
+                            )}
                         </div>
                         {entry.memo && (
                             <h3 className="journal-entry-card-concept">"{entry.memo}"</h3>
@@ -139,22 +188,56 @@ export function EntryCard({ entry, entryNumber, accounts, onEdit, onDelete, disa
                 </div>
 
                 <div className="journal-entry-card-actions">
-                    <button
-                        className="journal-entry-card-action-btn"
-                        onClick={() => onEdit(entry)}
-                        disabled={disabled}
-                        title="Editar"
-                    >
-                        <Edit2 size={16} />
-                    </button>
-                    <button
-                        className="journal-entry-card-action-btn journal-entry-card-action-btn-delete"
-                        onClick={() => onDelete(entry.id)}
-                        disabled={disabled}
-                        title="Eliminar"
-                    >
-                        <Trash2 size={16} />
-                    </button>
+                    {isDraft && onPost && (
+                        <button
+                            className="journal-entry-card-action-btn"
+                            onClick={() => onPost(entry.id)}
+                            disabled={disabled}
+                            title="Contabilizar: incorpora el asiento al Diario y bloquea su modificación"
+                        >
+                            <CheckCircle size={16} />
+                        </button>
+                    )}
+                    {isDraft && (
+                        <button
+                            className="journal-entry-card-action-btn"
+                            onClick={() => onEdit(entry)}
+                            disabled={disabled}
+                            title="Editar borrador (no afecta los libros)"
+                        >
+                            <PencilSimple size={16} />
+                        </button>
+                    )}
+                    {isDraft && (
+                        <button
+                            className="journal-entry-card-action-btn journal-entry-card-action-btn-delete"
+                            onClick={() => onDelete(entry.id)}
+                            disabled={disabled}
+                            title="Eliminar borrador"
+                        >
+                            <Trash size={16} />
+                        </button>
+                    )}
+                    {isPosted && onReverse && (
+                        <button
+                            className="journal-entry-card-action-btn"
+                            onClick={() => onReverse(entry.id)}
+                            disabled={disabled}
+                            title="Revertir: crea un nuevo asiento inverso y conserva el original"
+                        >
+                            <ArrowCounterClockwise size={16} />
+                        </button>
+                    )}
+                    {isPosted && entry.sourceModule && (
+                        <button
+                            className="journal-entry-card-action-btn journal-entry-card-action-btn-delete"
+                            onClick={() => onDelete(entry.id)}
+                            disabled={disabled}
+                            title="Eliminar junto con la operación de origen (baja auditada)"
+                        >
+                            <Trash size={16} />
+                        </button>
+                    )}
                 </div>
             </div>
 

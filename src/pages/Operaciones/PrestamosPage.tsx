@@ -31,7 +31,6 @@ import { usePeriodYear } from '../../hooks/usePeriodYear'
 import { db } from '../../storage/db'
 import {
     addFxDebtDisbursement,
-    addFxDebtPayment,
     createEntry,
     createFxAccount,
     createFxDebt,
@@ -45,11 +44,7 @@ import {
     reconcileFxJournalLinks,
     updateFxDebt,
 } from '../../storage'
-import {
-    ensureLedgerAccountExists,
-    suggestLedgerAccountForFxDebt,
-    type LedgerAccountSuggestion,
-} from '../../storage/fxMapping'
+import { createAccount, generateNextCode } from '../../storage/accounts'
 import { getExchangeRates, getQuote, getRateValue } from '../../services/exchangeRates'
 import type { Account, JournalEntry } from '../../core/models'
 import type {
@@ -70,6 +65,7 @@ import {
     MOVEMENT_TYPE_LABELS,
     DEBT_STATUS_LABELS,
 } from '../../core/monedaExtranjera/types'
+import LoanPaymentModal from './prestamos/LoanPaymentModal'
 
 // ========================================
 // Shared UI Primitives (local copies)
@@ -173,6 +169,7 @@ const formatDateShort = (dateStr?: string | null) => {
     return `${d}/${m}/${y}`
 }
 const formatDateInput = () => new Date().toISOString().split('T')[0]
+const resolveDefaultDate = (periodEnd?: string) => /^\d{4}-\d{2}-\d{2}$/.test(periodEnd || '') ? periodEnd as string : formatDateInput()
 
 // ========================================
 // Helpers
@@ -227,8 +224,9 @@ function computeDebtSummary(debt: FxDebt, oficialRate: number): DebtSummary {
 // ========================================
 
 export default function PrestamosPage() {
-    const { year: periodYear } = usePeriodYear()
+    const { year: periodYear, end: periodEndDate } = usePeriodYear()
     const periodId = String(periodYear)
+    const defaultDate = resolveDefaultDate(periodEndDate)
 
     // State
     const [activeTab, setActiveTab] = useState<TabId>('prestamos')
@@ -290,10 +288,10 @@ export default function PrestamosPage() {
     useEffect(() => {
         if (autoDevengoRan.current || fxDebts.length === 0 || !oficialRate) return
         autoDevengoRan.current = true
-        runAutoDevengo(fxDebts, debtMovements, oficialRate, periodId, ledgerAccounts, settings).then(count => {
+        runAutoDevengo(fxDebts, oficialRate, periodId, ledgerAccounts, settings).then(count => {
             if (count > 0) showToast(`Devengamiento automático: ${count} período(s) asentados`)
         }).catch(err => console.warn('Auto-devengo error:', err))
-    }, [fxDebts, debtMovements, oficialRate, periodId, ledgerAccounts, settings])
+    }, [fxDebts, oficialRate, periodId, ledgerAccounts, settings])
 
     const showToast = useCallback((msg: string) => {
         setToast(msg)
@@ -375,7 +373,6 @@ export default function PrestamosPage() {
                                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                                     <tr>
                                         <th className="px-4 py-3 text-left">Acreedor</th>
-                                        <th className="px-4 py-3 text-left">Nombre</th>
                                         <th className="px-4 py-3 text-left">Moneda</th>
                                         <th className="px-4 py-3 text-right">Saldo Original</th>
                                         <th className="px-4 py-3 text-right">Pagado Acum.</th>
@@ -393,7 +390,6 @@ export default function PrestamosPage() {
                                         return (
                                             <tr key={item.debt.id} className="border-t border-slate-200 hover:bg-slate-50">
                                                 <td className="px-4 py-3 font-medium">{item.debt.creditor || '—'}</td>
-                                                <td className="px-4 py-3 text-slate-600">{item.debt.name}</td>
                                                 <td className="px-4 py-3"><LoanBadge tone={isARS ? 'neutral' : 'info'}>{item.debt.currency}</LoanBadge></td>
                                                 <td className="px-4 py-3 text-right font-mono">{formatRate(item.debt.principalME)}</td>
                                                 <td className="px-4 py-3 text-right font-mono text-emerald-600">{formatRate(item.paidAcumME)}</td>
@@ -416,7 +412,7 @@ export default function PrestamosPage() {
                                     })}
                                     {debtSummaries.length === 0 && (
                                         <tr>
-                                            <td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-500">
+                                            <td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-500">
                                                 No hay préstamos registrados. Creá uno con "Nuevo Préstamo".
                                             </td>
                                         </tr>
@@ -453,7 +449,7 @@ export default function PrestamosPage() {
                                             <tr key={m.id} className="border-t border-slate-200">
                                                 <td className="px-4 py-3">{formatDateShort(m.date)}</td>
                                                 <td className="px-4 py-3"><LoanBadge tone={m.type === 'PAGO_DEUDA' ? 'success' : m.type === 'DEVENGO_INTERES' ? 'warning' : 'neutral'}>{MOVEMENT_TYPE_LABELS[m.type] || m.type}</LoanBadge></td>
-                                                <td className="px-4 py-3 text-slate-600">{debt?.name || m.counterparty || '—'}</td>
+                                                <td className="px-4 py-3 text-slate-600">{debt?.creditor || debt?.name || m.counterparty || '—'}</td>
                                                 <td className="px-4 py-3 text-right font-mono">{formatRate(m.amount)} {m.currency}</td>
                                                 <td className="px-4 py-3 text-right font-mono">{formatRate(m.rate)}</td>
                                                 <td className="px-4 py-3 text-right font-mono">{formatCurrencyARS(m.arsAmount)}</td>
@@ -495,6 +491,7 @@ export default function PrestamosPage() {
                 open={newLoanModalOpen}
                 onClose={() => setNewLoanModalOpen(false)}
                 periodId={periodId}
+                defaultDate={defaultDate}
                 ledgerAccounts={ledgerAccounts}
                 oficialRate={oficialRate}
                 onSuccess={showToast}
@@ -510,6 +507,7 @@ export default function PrestamosPage() {
                 allEntries={allEntries}
                 oficialRate={oficialRate}
                 periodId={periodId}
+                defaultDate={defaultDate}
                 settings={settings}
                 onSuccess={showToast}
             />
@@ -525,6 +523,7 @@ function NewLoanModal({
     open,
     onClose,
     periodId,
+    defaultDate,
     ledgerAccounts,
     oficialRate,
     onSuccess,
@@ -532,6 +531,7 @@ function NewLoanModal({
     open: boolean
     onClose: () => void
     periodId: string
+    defaultDate: string
     ledgerAccounts: Account[]
     oficialRate: number
     onSuccess: (msg: string) => void
@@ -539,13 +539,12 @@ function NewLoanModal({
     const fxAccounts = useLiveQuery(() => getAllFxAccounts(periodId), [periodId]) || []
     // Form state
     const [currency, setCurrency] = useState<CurrencyCode>('ARS')
-    const [name, setName] = useState('')
     const [creditor, setCreditor] = useState('')
     const [subtype, setSubtype] = useState<FxLiabilitySubtype>('PRESTAMO')
     const [principal, setPrincipal] = useState(0)
     const [rate, setRate] = useState(1)
-    const [originDate, setOriginDate] = useState(formatDateInput())
-    const [firstDueDate, setFirstDueDate] = useState(formatDateInput())
+    const [originDate, setOriginDate] = useState(defaultDate)
+    const [firstDueDate, setFirstDueDate] = useState(defaultDate)
     const [installments, setInstallments] = useState(1)
     const [frequency, setFrequency] = useState<PaymentFrequency>('MENSUAL')
     const [system, setSystem] = useState<LoanSystem>('FRANCES')
@@ -554,7 +553,6 @@ function NewLoanModal({
     const [ledgerAccountId, setLedgerAccountId] = useState('')
     const [targetAccountId, setTargetAccountId] = useState('')
     const [saving, setSaving] = useState(false)
-    const [suggestion, setSuggestion] = useState<LedgerAccountSuggestion | null>(null)
 
     const isARS = currency === 'ARS'
 
@@ -562,13 +560,12 @@ function NewLoanModal({
     useEffect(() => {
         if (!open) return
         setCurrency('ARS')
-        setName('')
         setCreditor('')
         setSubtype('PRESTAMO')
         setPrincipal(0)
         setRate(1)
-        setOriginDate(formatDateInput())
-        setFirstDueDate(formatDateInput())
+        setOriginDate(defaultDate)
+        setFirstDueDate(defaultDate)
         setInstallments(1)
         setFrequency('MENSUAL')
         setSystem('FRANCES')
@@ -577,7 +574,7 @@ function NewLoanModal({
         setLedgerAccountId('')
         setTargetAccountId('')
         setSaving(false)
-    }, [open])
+    }, [open, periodId, defaultDate])
 
     // When currency changes, update rate
     useEffect(() => {
@@ -588,19 +585,39 @@ function NewLoanModal({
         }
     }, [currency, oficialRate])
 
-    // Suggest ledger account
+    const cpMother = useMemo(
+        () => ledgerAccounts.find(a => a.code === '2.1.05.02' && !a.isHeader) || null,
+        [ledgerAccounts]
+    )
+    const lpMother = useMemo(
+        () => ledgerAccounts.find(a => a.code === '2.2.01.01' && !a.isHeader) || null,
+        [ledgerAccounts]
+    )
+
+    const preferredMother = useMemo(() => {
+        const origin = parseISODateUTC(originDate)
+        const firstDue = parseISODateUTC(firstDueDate)
+        if (!origin || !firstDue || !cpMother || !lpMother) return cpMother || lpMother
+        const monthsPerPeriod = frequencyMonths[frequency] ?? 1
+        const maturity = installments <= 1 || monthsPerPeriod === 0
+            ? firstDue
+            : addMonthsUTC(firstDue, monthsPerPeriod * (installments - 1))
+        const totalDays = Math.floor((maturity.getTime() - origin.getTime()) / DAY_MS) + 1
+        return totalDays <= 365 ? cpMother : lpMother
+    }, [originDate, firstDueDate, installments, frequency, cpMother, lpMother])
+
     useEffect(() => {
         if (!open) return
-        suggestLedgerAccountForFxDebt({ name: name || 'Préstamo', creditor, subtype, currency, accounts: ledgerAccounts })
-            .then(s => {
-                setSuggestion(s)
-                if (s.account && !ledgerAccountId) setLedgerAccountId(s.account.id)
-            })
-    }, [open, name, creditor, subtype, currency, ledgerAccounts, ledgerAccountId])
+        if (preferredMother && ledgerAccountId !== preferredMother.id) {
+            setLedgerAccountId(preferredMother.id)
+        }
+    }, [open, preferredMother, ledgerAccountId])
 
     const accountOptions = useMemo(
-        () => ledgerAccounts.filter(a => !a.isHeader).map(a => ({ value: a.id, label: `${a.code} - ${a.name}` })),
-        [ledgerAccounts]
+        () => [cpMother, lpMother]
+            .filter((a): a is Account => !!a)
+            .map(a => ({ value: a.id, label: `${a.code} - ${a.name}` })),
+        [cpMother, lpMother]
     )
 
     // For ARS: target is a postable account (Caja/Banco); for ME: target is an FX asset account
@@ -616,41 +633,57 @@ function NewLoanModal({
     }, [isARS, ledgerAccounts, fxAccounts, currency])
 
     const previewAmount = principal > 0 ? principal * (rate || 0) : 0
-
-    const handleCreateAccount = async () => {
-        if (!suggestion) return
-        const created = await ensureLedgerAccountExists({
-            name: name || 'Préstamo',
-            kind: 'LIABILITY',
-            accounts: ledgerAccounts,
-            parentId: suggestion.parentHint?.id || null,
-            group: suggestion.parentHint?.group || 'Prestamos y deudas financieras',
-            section: suggestion.parentHint?.section || 'CURRENT',
-            statementGroup: suggestion.parentHint?.statementGroup || 'LOANS',
-        })
-        setLedgerAccountId(created.id)
-        onSuccess('Cuenta contable creada')
-    }
+    const normalizeName = (value: string) => value.trim().toLowerCase()
 
     const handleSubmit = async () => {
-        if (!name.trim()) { onSuccess('El nombre es obligatorio'); return }
-        if (!ledgerAccountId) { onSuccess('Selecciona la cuenta contable del pasivo'); return }
+        const entityName = creditor.trim()
+        if (!entityName) { onSuccess('El acreedor/entidad es obligatorio'); return }
+        if (!ledgerAccountId) { onSuccess('Selecciona la cuenta madre del pasivo'); return }
         if (!principal || principal <= 0) { onSuccess('Ingresa el monto principal'); return }
         if (!isARS && (!rate || rate <= 0)) { onSuccess('Ingresa el tipo de cambio'); return }
         if (!targetAccountId) { onSuccess('Selecciona el destino de fondos'); return }
 
         setSaving(true)
         try {
+            const motherAccount = ledgerAccounts.find(a => a.id === ledgerAccountId && !a.isHeader)
+            if (!motherAccount) throw new Error('No se encontro la cuenta madre del prestamo')
+
+            const subAccountBaseName = `${entityName} - Prestamo ${originDate.slice(0, 7)}`
+            const siblingSubaccounts = ledgerAccounts.filter(a => !a.isHeader && a.parentId === motherAccount.id)
+            const existingSub = siblingSubaccounts.find(a =>
+                normalizeName(a.name) === normalizeName(subAccountBaseName)
+            )
+
+            const liabilitySubAccount = existingSub || await (async () => {
+                const existingWithBase = siblingSubaccounts.filter(a => normalizeName(a.name).startsWith(normalizeName(subAccountBaseName)))
+                const subAccountName = existingWithBase.length === 0
+                    ? subAccountBaseName
+                    : `${subAccountBaseName} #${existingWithBase.length + 1}`
+                const code = await generateNextCode(motherAccount.id)
+                return createAccount({
+                    code,
+                    name: subAccountName,
+                    kind: motherAccount.kind,
+                    section: motherAccount.section,
+                    group: motherAccount.group,
+                    statementGroup: motherAccount.statementGroup,
+                    parentId: motherAccount.id,
+                    normalSide: motherAccount.normalSide,
+                    isContra: false,
+                    isHeader: false,
+                })
+            })()
+
             if (isARS) {
                 // ARS loan: create FxAccount (LIABILITY) + FxDebt with rate=1
                 const liabilityAccount = await createFxAccount({
-                    name,
+                    name: entityName,
                     type: 'LIABILITY',
                     subtype,
                     currency: 'ARS',
                     periodId,
-                    accountId: ledgerAccountId,
-                    creditor,
+                    accountId: liabilitySubAccount.id,
+                    creditor: entityName,
                     openingBalance: 0,
                     openingRate: 1,
                     openingDate: originDate,
@@ -660,7 +693,7 @@ function NewLoanModal({
                 // We create a TOMA_DEUDA movement manually with the journal entry
                 const newDebt = await createFxDebt(
                     {
-                        name,
+                        name: entityName,
                         accountId: liabilityAccount.id,
                         periodId,
                         principalME: principal,
@@ -679,7 +712,7 @@ function NewLoanModal({
                         saldoME: principal,
                         paidInstallments: 0,
                         status: 'ACTIVE',
-                        creditor,
+                        creditor: entityName,
                         autoJournal,
                     }
                 )
@@ -688,10 +721,10 @@ function NewLoanModal({
                 if (autoJournal) {
                     const entry = await createEntry({
                         date: originDate,
-                        memo: `Alta préstamo ARS - ${name}`,
+                        memo: `Alta prestamo ARS - ${entityName}`,
                         lines: [
-                            { accountId: targetAccountId, debit: principal, credit: 0, description: `Desembolso préstamo ${name}` },
-                            { accountId: ledgerAccountId, debit: 0, credit: principal, description: `Préstamo ${creditor || name}` },
+                            { accountId: targetAccountId, debit: principal, credit: 0, description: `Desembolso prestamo ${entityName}` },
+                            { accountId: liabilitySubAccount.id, debit: 0, credit: principal, description: `Prestamo ${entityName}` },
                         ],
                         sourceModule: 'fx',
                         sourceId: newDebt.id,
@@ -707,13 +740,13 @@ function NewLoanModal({
             } else {
                 // ME loan: use existing createFxDebt flow with disbursement
                 const liabilityAccount = await createFxAccount({
-                    name,
+                    name: entityName,
                     type: 'LIABILITY',
                     subtype,
                     currency,
                     periodId,
-                    accountId: ledgerAccountId,
-                    creditor,
+                    accountId: liabilitySubAccount.id,
+                    creditor: entityName,
                     openingBalance: 0,
                     openingRate: rate,
                     openingDate: originDate,
@@ -721,7 +754,7 @@ function NewLoanModal({
 
                 await createFxDebt(
                     {
-                        name,
+                        name: entityName,
                         accountId: liabilityAccount.id,
                         periodId,
                         principalME: principal,
@@ -740,7 +773,7 @@ function NewLoanModal({
                         saldoME: principal,
                         paidInstallments: 0,
                         status: 'ACTIVE',
-                        creditor,
+                        creditor: entityName,
                         autoJournal,
                     },
                     {
@@ -789,8 +822,8 @@ function NewLoanModal({
                     <div className="mb-3 border-b border-slate-200 pb-2 text-sm font-semibold text-slate-700">A. Identidad y Contabilidad</div>
                     <div className="grid gap-4 sm:grid-cols-2">
                         <div>
-                            <label className="text-xs font-semibold text-slate-500">Nombre / Alias</label>
-                            <LoanInput value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Préstamo Banco Galicia" />
+                            <label className="text-xs font-semibold text-slate-500">Acreedor / Entidad</label>
+                            <LoanInput value={creditor} onChange={e => setCreditor(e.target.value)} placeholder="Ej: Banco Galicia" />
                         </div>
                         <div>
                             <label className="text-xs font-semibold text-slate-500">Moneda</label>
@@ -804,10 +837,6 @@ function NewLoanModal({
                                 {Object.entries(LIABILITY_SUBTYPE_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                             </LoanSelect>
                         </div>
-                        <div>
-                            <label className="text-xs font-semibold text-slate-500">Acreedor</label>
-                            <LoanInput value={creditor} onChange={e => setCreditor(e.target.value)} placeholder="Nombre persona o entidad" />
-                        </div>
                     </div>
 
                     {/* Cuenta contable */}
@@ -820,15 +849,10 @@ function NewLoanModal({
                                     <LoanSearchableSelect
                                         value={ledgerAccountId}
                                         options={accountOptions}
-                                        placeholder="Selecciona cuenta pasivo"
+                                        placeholder="Selecciona cuenta madre (CP/LP)"
                                         onChange={v => setLedgerAccountId(v)}
                                         className="flex-1"
                                     />
-                                    {!suggestion?.account && (
-                                        <LoanButton variant="secondary" size="sm" onClick={handleCreateAccount}>
-                                            <Plus size={14} /> Crear cuenta
-                                        </LoanButton>
-                                    )}
                                 </div>
                             </div>
                         </div>
@@ -940,6 +964,7 @@ function ViewLoanModal({
     allEntries,
     oficialRate,
     periodId,
+    defaultDate,
     settings,
     onSuccess,
 }: {
@@ -951,6 +976,7 @@ function ViewLoanModal({
     allEntries: JournalEntry[]
     oficialRate: number
     periodId: string
+    defaultDate: string
     settings: FxSettings | null
     onSuccess: (msg: string) => void
 }) {
@@ -980,7 +1006,7 @@ function ViewLoanModal({
     const handleDevengoManual = async () => {
         setDevengoLoading(true)
         try {
-            const count = await runDevengoForDebt(debt, debtMovements, oficialRate, periodId, ledgerAccounts, settings)
+            const count = await runDevengoForDebt(debt, oficialRate, periodId, ledgerAccounts, settings)
             if (count > 0) {
                 onSuccess(`Devengo registrado: ${count} período(s)`)
             } else {
@@ -1007,7 +1033,8 @@ function ViewLoanModal({
     }
 
     const handleDeleteDebt = async () => {
-        if (!confirm(`¿Eliminar préstamo "${debt.name}"? Los movimientos y asientos asociados serán eliminados.`)) return
+        const debtLabel = debt.creditor || debt.name
+        if (!confirm(`¿Eliminar préstamo "${debtLabel}"? Los movimientos y asientos asociados serán eliminados.`)) return
         try {
             // Delete all movements with their journal entries
             for (const m of debtMovements) {
@@ -1025,7 +1052,7 @@ function ViewLoanModal({
         <LoanModal
             open={open}
             onClose={onClose}
-            title={debt.name}
+            title={debt.creditor || debt.name}
             size="xl"
             footer={
                 <div className="flex w-full justify-between">
@@ -1206,13 +1233,14 @@ function ViewLoanModal({
             </div>
 
             {/* Sub-modal: Pago */}
-            <PaymentSubModal
+            <LoanPaymentModal
                 open={payModalOpen}
                 onClose={() => setPayModalOpen(false)}
                 debt={debt}
                 ledgerAccounts={ledgerAccounts}
                 oficialRate={oficialRate}
                 periodId={periodId}
+                defaultDate={defaultDate}
                 onSuccess={(msg) => { onSuccess(msg); setPayModalOpen(false) }}
             />
             {/* Sub-modal: Refinanciación */}
@@ -1222,232 +1250,9 @@ function ViewLoanModal({
                 debt={debt}
                 oficialRate={oficialRate}
                 periodId={periodId}
+                defaultDate={defaultDate}
                 onSuccess={(msg) => { onSuccess(msg); setRefiModalOpen(false) }}
             />
-        </LoanModal>
-    )
-}
-
-// ========================================
-// Sub-modal: Registrar Pago (parcial / cuota / cancelación total / extraordinario)
-// ========================================
-
-function PaymentSubModal({
-    open,
-    onClose,
-    debt,
-    ledgerAccounts,
-    oficialRate,
-    periodId,
-    onSuccess,
-}: {
-    open: boolean
-    onClose: () => void
-    debt: FxDebt
-    ledgerAccounts: Account[]
-    oficialRate: number
-    periodId: string
-    onSuccess: (msg: string) => void
-}) {
-    const isARS = debt.currency === 'ARS'
-    const fxAccounts = useLiveQuery(() => getAllFxAccounts(periodId), [periodId]) || []
-
-    const [mode, setMode] = useState<'cuota' | 'parcial' | 'total' | 'extraordinario'>('cuota')
-    const [capitalME, setCapitalME] = useState(0)
-    const [interestARS, setInterestARS] = useState(0)
-    const [comisionARS, setComisionARS] = useState(0)
-    const [comisionAccountId, setComisionAccountId] = useState('')
-    const [rate, setRate] = useState(isARS ? 1 : oficialRate)
-    const [date, setDate] = useState(formatDateInput())
-    const [source, setSource] = useState<'ARS' | 'ME'>('ARS')
-    const [contrapartidaId, setContrapartidaId] = useState('')
-    const [sourceFxAccountId, setSourceFxAccountId] = useState('')
-    const [saving, setSaving] = useState(false)
-
-    useEffect(() => {
-        if (!open) return
-        setMode('cuota')
-        setRate(isARS ? 1 : oficialRate)
-        setDate(formatDateInput())
-        setContrapartidaId('')
-        setSourceFxAccountId('')
-        setComisionARS(0)
-        setComisionAccountId('')
-        setSource('ARS')
-
-        const nextInstallment = debt.schedule?.find(i => !i.paid)
-        setCapitalME(nextInstallment?.capitalME || 0)
-        setInterestARS(isARS ? (nextInstallment?.interestME || 0) : ((nextInstallment?.interestME || 0) * (oficialRate || 1)))
-    }, [open, debt, isARS, oficialRate])
-
-    // When mode changes, recalculate capital
-    useEffect(() => {
-        if (mode === 'total') {
-            setCapitalME(debt.saldoME)
-        } else if (mode === 'cuota') {
-            const nextInstallment = debt.schedule?.find(i => !i.paid)
-            setCapitalME(nextInstallment?.capitalME || 0)
-            setInterestARS(isARS ? (nextInstallment?.interestME || 0) : ((nextInstallment?.interestME || 0) * (oficialRate || 1)))
-        }
-    }, [mode, debt, isARS, oficialRate])
-
-    const arsOptions = useMemo(
-        () => ledgerAccounts.filter(a => !a.isHeader && (a.code.startsWith('1.1.01') || a.code.startsWith('1.1.02'))).map(a => ({ value: a.id, label: `${a.code} - ${a.name}` })),
-        [ledgerAccounts]
-    )
-
-    const meAssetOptions = useMemo(
-        () => fxAccounts.filter(a => a.type === 'ASSET' && a.currency === debt.currency).map(a => ({ value: a.id, label: a.name, meta: a.currency })),
-        [fxAccounts, debt.currency]
-    )
-
-    const comisionOptions = useMemo(
-        () => ledgerAccounts.filter(a => !a.isHeader && (a.code.startsWith('4.6.04') || a.code.startsWith('4.6'))).map(a => ({ value: a.id, label: `${a.code} - ${a.name}` })),
-        [ledgerAccounts]
-    )
-
-    const effectiveContra = source === 'ME' && sourceFxAccountId
-        ? fxAccounts.find(a => a.id === sourceFxAccountId)?.accountId || contrapartidaId
-        : contrapartidaId
-
-    const handlePay = async () => {
-        if (capitalME <= 0) { onSuccess('Capital debe ser mayor a 0'); return }
-        if (!effectiveContra && source === 'ARS') { onSuccess('Selecciona cuenta de origen del pago'); return }
-        if (source === 'ME' && !sourceFxAccountId) { onSuccess('Selecciona cartera ME de origen'); return }
-        setSaving(true)
-        try {
-            await addFxDebtPayment({
-                debtId: debt.id,
-                capitalME,
-                interestARS,
-                rate,
-                date,
-                contrapartidaAccountId: effectiveContra,
-                comisionARS: comisionARS > 0 ? comisionARS : undefined,
-                comisionAccountId: comisionARS > 0 ? comisionAccountId : undefined,
-                autoJournal: true,
-            })
-
-            // If paying from ME cartera → create EGRESO movement to reduce tenencia ME
-            if (source === 'ME' && sourceFxAccountId && !isARS) {
-                await createFxMovement({
-                    date,
-                    type: 'EGRESO',
-                    accountId: sourceFxAccountId,
-                    periodId,
-                    amount: capitalME,
-                    currency: debt.currency,
-                    rate,
-                    rateType: 'Oficial',
-                    rateSide: 'venta',
-                    rateSource: 'BNA',
-                    arsAmount: capitalME * rate,
-                    autoJournal: false, // journal already created by addFxDebtPayment
-                })
-            }
-
-            onSuccess(mode === 'total' ? 'Cancelación total registrada' : 'Pago registrado correctamente')
-        } catch (err) {
-            onSuccess(err instanceof Error ? err.message : 'Error al registrar pago')
-        } finally {
-            setSaving(false)
-        }
-    }
-
-    return (
-        <LoanModal open={open} onClose={onClose} title={`Pago - ${debt.name}`} size="md" footer={
-            <>
-                <LoanButton variant="secondary" onClick={onClose}>Cancelar</LoanButton>
-                <LoanButton onClick={handlePay} disabled={saving}>
-                    {saving ? 'Procesando...' : mode === 'total' ? 'Cancelar total' : 'Registrar Pago'}
-                </LoanButton>
-            </>
-        }>
-            <div className="space-y-4">
-                {/* Mode selector */}
-                <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
-                    {([
-                        { id: 'cuota', label: 'Cuota' },
-                        { id: 'parcial', label: 'Parcial' },
-                        { id: 'extraordinario', label: 'Extraordinario' },
-                        { id: 'total', label: 'Cancelar total' },
-                    ] as const).map(m => (
-                        <button key={m.id} type="button" onClick={() => setMode(m.id)}
-                            className={cx('flex-1 rounded-md px-2 py-1.5 text-xs font-semibold transition', mode === m.id ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800')}>
-                            {m.label}
-                        </button>
-                    ))}
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                        <label className="text-xs font-semibold text-slate-500">Capital {isARS ? '(ARS)' : `(${debt.currency})`}</label>
-                        <LoanInput type="number" step="0.01" value={capitalME || ''} onChange={e => setCapitalME(Number(e.target.value) || 0)} disabled={mode === 'total'} />
-                        {mode === 'total' && <p className="text-xs text-amber-600 mt-1">Saldo total pendiente</p>}
-                    </div>
-                    <div>
-                        <label className="text-xs font-semibold text-slate-500">Intereses (ARS)</label>
-                        <LoanInput type="number" step="0.01" value={interestARS || ''} onChange={e => setInterestARS(Number(e.target.value) || 0)} />
-                    </div>
-                    {!isARS && (
-                        <div>
-                            <label className="text-xs font-semibold text-slate-500">TC Oficial (BNA)</label>
-                            <LoanInput type="number" step="0.01" value={rate || ''} readOnly className="bg-slate-50" />
-                        </div>
-                    )}
-                    <div>
-                        <label className="text-xs font-semibold text-slate-500">Fecha</label>
-                        <LoanInput type="date" value={date} onChange={e => setDate(e.target.value)} />
-                    </div>
-                </div>
-
-                {/* Payment source */}
-                {!isARS && (
-                    <div>
-                        <label className="text-xs font-semibold text-slate-500">Origen del pago</label>
-                        <LoanSelect value={source} onChange={e => setSource(e.target.value as 'ARS' | 'ME')}>
-                            <option value="ARS">Cuenta ARS (Caja/Banco)</option>
-                            <option value="ME">Cartera ME ({debt.currency})</option>
-                        </LoanSelect>
-                    </div>
-                )}
-
-                {source === 'ME' && !isARS ? (
-                    <div>
-                        <label className="text-xs font-semibold text-slate-500">Cartera ME origen</label>
-                        <LoanSearchableSelect value={sourceFxAccountId} options={meAssetOptions} placeholder="Selecciona cartera" onChange={setSourceFxAccountId} />
-                    </div>
-                ) : (
-                    <div>
-                        <label className="text-xs font-semibold text-slate-500">Cuenta ARS origen</label>
-                        <LoanSearchableSelect value={contrapartidaId} options={arsOptions} placeholder="Selecciona cuenta" onChange={setContrapartidaId} />
-                    </div>
-                )}
-
-                {/* Commissions (collapsible) */}
-                <details className="group">
-                    <summary className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-slate-600">Comisiones y gastos (opcional)</summary>
-                    <div className="grid gap-4 sm:grid-cols-2 mt-3">
-                        <div>
-                            <label className="text-xs font-semibold text-slate-500">Comisiones ARS</label>
-                            <LoanInput type="number" step="0.01" value={comisionARS || ''} onChange={e => setComisionARS(Number(e.target.value) || 0)} />
-                        </div>
-                        <div>
-                            <label className="text-xs font-semibold text-slate-500">Cuenta gasto</label>
-                            <LoanSearchableSelect value={comisionAccountId} options={comisionOptions} placeholder="4.6.04 Comisiones..." onChange={setComisionAccountId} />
-                        </div>
-                    </div>
-                </details>
-
-                {/* Preview */}
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                    <div className="flex justify-between"><span>Capital ARS:</span><span className="font-mono">{formatCurrencyARS(capitalME * rate)}</span></div>
-                    <div className="flex justify-between"><span>Intereses ARS:</span><span className="font-mono">{formatCurrencyARS(interestARS)}</span></div>
-                    {comisionARS > 0 && <div className="flex justify-between"><span>Comisiones ARS:</span><span className="font-mono">{formatCurrencyARS(comisionARS)}</span></div>}
-                    <div className="flex justify-between border-t border-slate-200 pt-2 mt-2 font-semibold"><span>Total egreso:</span><span className="font-mono">{formatCurrencyARS(capitalME * rate + interestARS + comisionARS)}</span></div>
-                    {source === 'ME' && !isARS && <div className="mt-1 text-xs text-amber-600">Reduce tenencia {debt.currency} en cartera ME</div>}
-                </div>
-            </div>
         </LoanModal>
     )
 }
@@ -1462,6 +1267,7 @@ function RefinanciacionSubModal({
     debt,
     oficialRate,
     periodId,
+    defaultDate,
     onSuccess,
 }: {
     open: boolean
@@ -1469,6 +1275,7 @@ function RefinanciacionSubModal({
     debt: FxDebt
     oficialRate: number
     periodId: string
+    defaultDate: string
     onSuccess: (msg: string) => void
 }) {
     const isARS = debt.currency === 'ARS'
@@ -1480,7 +1287,7 @@ function RefinanciacionSubModal({
     const [newSystem, setNewSystem] = useState<LoanSystem>(debt.system)
     const [newTNA, setNewTNA] = useState(debt.interestRateAnnual * 100)
     const [rate, setRate] = useState(isARS ? 1 : oficialRate)
-    const [date, setDate] = useState(formatDateInput())
+    const [date, setDate] = useState(defaultDate)
     const [targetAccountId, setTargetAccountId] = useState('')
     const [saving, setSaving] = useState(false)
 
@@ -1492,9 +1299,9 @@ function RefinanciacionSubModal({
         setNewSystem(debt.system)
         setNewTNA(debt.interestRateAnnual * 100)
         setRate(isARS ? 1 : oficialRate)
-        setDate(formatDateInput())
+        setDate(defaultDate)
         setTargetAccountId('')
-    }, [open, debt, isARS, oficialRate])
+    }, [open, debt, isARS, oficialRate, periodId, defaultDate])
 
     const meAssetOptions = useMemo(
         () => fxAccounts.filter(a => a.type === 'ASSET' && a.currency === debt.currency).map(a => ({ value: a.id, label: a.name, meta: a.currency })),
@@ -1576,7 +1383,7 @@ function RefinanciacionSubModal({
     }
 
     return (
-        <LoanModal open={open} onClose={onClose} title={`Refinanciar - ${debt.name}`} size="md" footer={
+        <LoanModal open={open} onClose={onClose} title={`Refinanciar - ${debt.creditor || debt.name}`} size="md" footer={
             <>
                 <LoanButton variant="secondary" onClick={onClose}>Cancelar</LoanButton>
                 <LoanButton onClick={handleRefinanciar} disabled={saving}>{saving ? 'Procesando...' : 'Refinanciar'}</LoanButton>
@@ -1645,53 +1452,160 @@ function RefinanciacionSubModal({
 // Devengamiento de intereses
 // ========================================
 
+const DAY_MS = 24 * 60 * 60 * 1000
+const frequencyMonths: Record<PaymentFrequency, number> = {
+    MENSUAL: 1,
+    BIMESTRAL: 2,
+    TRIMESTRAL: 3,
+    SEMESTRAL: 6,
+    ANUAL: 12,
+    UNICO: 0,
+}
+
+type AccrualSlice = {
+    periodKey: string
+    periodStart: Date
+    periodEnd: Date
+    days: number
+}
+
+function parseISODateUTC(value?: string | null): Date | null {
+    if (!value) return null
+    const [y, m, d] = value.split('-').map(Number)
+    if (!y || !m || !d) return null
+    return new Date(Date.UTC(y, m - 1, d))
+}
+
+function formatISODateUTC(date: Date): string {
+    const y = date.getUTCFullYear()
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+    const d = String(date.getUTCDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+}
+
+function getMonthKeyUTC(date: Date): string {
+    const y = date.getUTCFullYear()
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+    return `${y}-${m}`
+}
+
+function startOfMonthUTC(date: Date): Date {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1))
+}
+
+function endOfMonthUTC(date: Date): Date {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0))
+}
+
+function addMonthsUTC(date: Date, months: number): Date {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, date.getUTCDate()))
+}
+
+function minDateUTC(a: Date, b: Date): Date {
+    return a.getTime() <= b.getTime() ? a : b
+}
+
+function maxDateUTC(a: Date, b: Date): Date {
+    return a.getTime() >= b.getTime() ? a : b
+}
+
+function diffDaysInclusiveUTC(start: Date, end: Date): number {
+    return Math.floor((end.getTime() - start.getTime()) / DAY_MS) + 1
+}
+
+function round(value: number, decimals = 2): number {
+    const factor = 10 ** decimals
+    return Math.round(value * factor) / factor
+}
+
+function getLastClosedMonthEndUTC(now = new Date()): Date {
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0))
+}
+
+function buildDevengoKey(debtId: string, periodKey: string): string {
+    return `${debtId}|DEVENGO_INTERES|${periodKey}`
+}
+
+function getMaturityDateUTC(debt: FxDebt): Date | null {
+    const validScheduleDates = (debt.schedule || [])
+        .map(item => parseISODateUTC(item.dueDate))
+        .filter((d): d is Date => !!d)
+        .sort((a, b) => a.getTime() - b.getTime())
+    if (validScheduleDates.length > 0) {
+        return validScheduleDates[validScheduleDates.length - 1]
+    }
+
+    const firstDueDate = parseISODateUTC(debt.firstDueDate)
+    if (!firstDueDate) return null
+
+    const installments = Math.max(1, debt.installments || 1)
+    const monthsPerPeriod = frequencyMonths[debt.frequency] ?? 1
+    if (installments <= 1 || monthsPerPeriod === 0) {
+        return firstDueDate
+    }
+
+    return addMonthsUTC(firstDueDate, monthsPerPeriod * (installments - 1))
+}
+
 function getAccruedPeriods(movements: FxMovement[], debtId: string): Set<string> {
     const periods = new Set<string>()
     movements.forEach(m => {
-        if (m.debtId === debtId && m.type === 'DEVENGO_INTERES' && m.reference) {
-            periods.add(m.reference) // reference stores the period YYYY-MM
+        if (m.debtId !== debtId || m.type !== 'DEVENGO_INTERES') return
+        if (m.reference && /^\d{4}-\d{2}$/.test(m.reference)) {
+            periods.add(m.reference)
         }
     })
     return periods
 }
 
-function getPeriodsToAccrue(debt: FxDebt, existingPeriods: Set<string>): string[] {
-    if (debt.status !== 'ACTIVE' || debt.interestRateAnnual <= 0) return []
+function getAccrualSlicesToPost(debt: FxDebt, existingPeriods: Set<string>): AccrualSlice[] {
+    if (debt.status !== 'ACTIVE' || debt.interestRateAnnual <= 0 || debt.saldoME <= 0) return []
 
-    const originDate = new Date(debt.originDate)
-    const now = new Date()
-    const periods: string[] = []
+    const originDate = parseISODateUTC(debt.originDate)
+    const maturityDate = getMaturityDateUTC(debt)
+    if (!originDate || !maturityDate) return []
 
-    // Start from origination month, go up to last completed month
-    let cursor = new Date(originDate.getFullYear(), originDate.getMonth(), 1)
-    const lastMonth = new Date(now.getFullYear(), now.getMonth(), 0) // last day of previous month
+    const lastClosedEnd = getLastClosedMonthEndUTC(new Date())
+    const accrualEnd = minDateUTC(lastClosedEnd, maturityDate)
+    if (accrualEnd.getTime() < originDate.getTime()) return []
 
-    while (cursor <= lastMonth) {
-        const periodKey = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
+    const slices: AccrualSlice[] = []
+    let cursor = startOfMonthUTC(originDate)
+
+    while (cursor.getTime() <= accrualEnd.getTime()) {
+        const periodKey = getMonthKeyUTC(cursor)
         if (!existingPeriods.has(periodKey)) {
-            periods.push(periodKey)
+            const monthStart = cursor
+            const monthEnd = endOfMonthUTC(cursor)
+            const periodStart = maxDateUTC(monthStart, originDate)
+            const periodEnd = minDateUTC(monthEnd, accrualEnd)
+            const days = diffDaysInclusiveUTC(periodStart, periodEnd)
+
+            if (days > 0) {
+                slices.push({ periodKey, periodStart, periodEnd, days })
+            }
         }
-        cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)
+
+        cursor = startOfMonthUTC(addMonthsUTC(cursor, 1))
     }
 
-    return periods
+    return slices
 }
 
 async function runDevengoForDebt(
     debt: FxDebt,
-    movements: FxMovement[],
     oficialRate: number,
     periodId: string,
     ledgerAccounts: Account[],
     _settings: FxSettings | null,
 ): Promise<number> {
-    const existingPeriods = getAccruedPeriods(movements, debt.id)
-    const periodsToAccrue = getPeriodsToAccrue(debt, existingPeriods)
+    const debtMovements = await db.fxMovements.where('debtId').equals(debt.id).toArray()
+    const existingPeriods = getAccruedPeriods(debtMovements, debt.id)
+    const slicesToAccrue = getAccrualSlicesToPost(debt, existingPeriods)
 
-    if (periodsToAccrue.length === 0) return 0
+    if (slicesToAccrue.length === 0) return 0
 
     const isARS = debt.currency === 'ARS'
-    const monthlyRate = debt.interestRateAnnual / 12
 
     // Resolve accounts
     const interesesPerdidosAcc = ledgerAccounts.find(a => a.code === '4.6.02' && !a.isHeader)
@@ -1717,21 +1631,21 @@ async function runDevengoForDebt(
     if (!interesesDevengadosAcc) throw new Error('No se encontró cuenta de pasivo para intereses devengados')
 
     let count = 0
-    for (const period of periodsToAccrue) {
-        const interestME = debt.saldoME * monthlyRate
+    for (const slice of slicesToAccrue) {
+        const period = slice.periodKey
+        const devengoKey = buildDevengoKey(debt.id, period)
+        const interestME = round(debt.saldoME * debt.interestRateAnnual * (slice.days / 365), 8)
         const rate = isARS ? 1 : oficialRate
-        const interestARS = interestME * rate
+        const interestARS = round(interestME * rate, 2)
 
         if (interestARS <= 0) continue
 
-        const [y, m] = period.split('-')
-        const lastDay = new Date(Number(y), Number(m), 0).getDate()
-        const entryDate = `${period}-${String(lastDay).padStart(2, '0')}`
+        const entryDate = formatISODateUTC(slice.periodEnd)
 
         // Create journal entry
         await createEntry({
             date: entryDate,
-            memo: `Devengo intereses ${debt.name} - ${period}`,
+            memo: `Devengo intereses ${debt.creditor || debt.name} - ${period}`,
             lines: [
                 { accountId: interesesPerdidosAcc.id, debit: interestARS, credit: 0, description: `Intereses devengados ${period}` },
                 { accountId: interesesDevengadosAcc.id, debit: 0, credit: interestARS, description: `Intereses devengados a pagar ${period}` },
@@ -1740,7 +1654,16 @@ async function runDevengoForDebt(
             sourceId: debt.id,
             sourceType: 'devengo_interes',
             createdAt: new Date().toISOString(),
-            metadata: { sourceModule: 'fx', sourceId: debt.id, journalRole: 'FX_ACCRUAL', period },
+            metadata: {
+                sourceModule: 'fx',
+                sourceId: debt.id,
+                journalRole: 'FX_ACCRUAL',
+                period,
+                days: slice.days,
+                periodStart: formatISODateUTC(slice.periodStart),
+                periodEnd: formatISODateUTC(slice.periodEnd),
+                devengoKey,
+            },
         })
 
         // Create movement
@@ -1758,8 +1681,9 @@ async function runDevengoForDebt(
             arsAmount: interestARS,
             autoJournal: false, // we already created the entry
             debtId: debt.id,
-            counterparty: debt.creditor,
+            counterparty: debt.creditor || debt.name,
             reference: period,
+            notes: `devengoKey=${devengoKey}; days=${slice.days}; base=365`,
         })
 
         count++
@@ -1770,7 +1694,6 @@ async function runDevengoForDebt(
 
 async function runAutoDevengo(
     debts: FxDebt[],
-    movements: FxMovement[],
     oficialRate: number,
     periodId: string,
     ledgerAccounts: Account[],
@@ -1780,7 +1703,7 @@ async function runAutoDevengo(
     for (const debt of debts) {
         if (debt.status !== 'ACTIVE') continue
         try {
-            const count = await runDevengoForDebt(debt, movements, oficialRate, periodId, ledgerAccounts, settings)
+            const count = await runDevengoForDebt(debt, oficialRate, periodId, ledgerAccounts, settings)
             total += count
         } catch (err) {
             console.warn(`Auto-devengo failed for debt ${debt.id}:`, err)
@@ -1862,7 +1785,7 @@ async function runRevaluacionDebt(
         arsAmount: Math.abs(diferencia),
         autoJournal: false,
         debtId: debt.id,
-        counterparty: debt.creditor,
+        counterparty: debt.creditor || debt.name,
         reference: `Reval ${entryDate}`,
     })
 
@@ -1871,3 +1794,7 @@ async function runRevaluacionDebt(
         rateInicial: oficialRate, // update to current rate so next reval compares from here
     })
 }
+
+
+
+

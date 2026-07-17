@@ -19,6 +19,7 @@ import { usePeriodYear } from '../hooks/usePeriodYear'
 
 // New components for redesigned header/toolbar
 import { EstadosHeader, type EstadosTab } from '../components/Estados/EstadosHeader'
+import FlujoEfectivoTab from '../components/Estados/FlujoEfectivoTab'
 import { DocumentToolbar } from '../components/Estados/DocumentToolbar'
 import { ESPImportComparativeModal } from '../components/Estados/ESPImportComparativeModal'
 import {
@@ -156,7 +157,7 @@ function adaptBalanceSheetToGemini(bs: BalanceSheet, comparativeData?: Map<strin
 export default function Estados() {
     // Tab control (extended to support all 5 states)
     const [activeTab, setActiveTab] = useState<EstadosTab>('ESP')
-    const viewMode = activeTab === 'ESP' ? 'ESP' : activeTab === 'ER' ? 'ER' : activeTab === 'EPN' ? 'EPN' : activeTab === 'NA' ? 'NA' : 'ESP'
+    const viewMode = activeTab
 
     const [isExporting, setIsExporting] = useState(false)
 
@@ -301,7 +302,25 @@ export default function Estados() {
     // Data Loading
     // ============================================
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
-    const entries = useLiveQuery(() => db.entries.toArray())
+    // Aislamiento por contexto: el ESP es un stock a la fecha de corte.
+    // - Sin apertura formal: incluye la historia acumulada hasta globalEnd
+    //   (mecanismo explícito de la Fase 2A).
+    // - Con asiento de apertura formal contabilizado (cierre Fase 2B): los
+    //   saldos iniciales ya están DENTRO del ejercicio; incluir la historia
+    //   previa duplicaría, así que se limita al rango del ejercicio.
+    // Nunca incluye asientos posteriores al corte ni borradores.
+    const entries = useLiveQuery(
+        async () => {
+            const list = (await db.entries
+                .where('date')
+                .belowOrEqual(globalEnd)
+                .toArray()).filter(e => e.status !== 'DRAFT')
+            const hasOpening = list.some(e =>
+                e.date >= globalStart && e.sourceModule === 'closing' && e.sourceType === 'apertura')
+            return hasOpening ? list.filter(e => e.date >= globalStart) : list
+        },
+        [globalStart, globalEnd]
+    )
 
     // Compute ledger and trial balance for statements
     const statementsData = useMemo(() => {
@@ -530,6 +549,13 @@ export default function Estados() {
                 )}
 
                 {/* ER View (existing, with minimal changes) */}
+                {/* EFE View (Fase 2B: motor único de reporting) */}
+                {viewMode === 'EFE' && (
+                    <div className="animate-slide-up">
+                        <FlujoEfectivoTab />
+                    </div>
+                )}
+
                 {viewMode === 'ER' && estadoResultadosData && (
                     <div className="animate-slide-up">
                         <EstadoResultadosDocument

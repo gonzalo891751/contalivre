@@ -3,9 +3,12 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { FileText } from 'lucide-react'
 
 import { db } from '../storage/db'
-import { createEntry, getTodayISO, createEmptyLine } from '../storage/entries'
+import { getTodayISO, createEmptyLine } from '../storage/entries'
 import { getAllAccounts } from '../storage/accounts'
 import { deleteJournalEntryWithSync } from '../storage/journalSync'
+import { createDraftEntry, postDraft, reverseEntry, updateDraftEntry } from '../accounting/application/journalService'
+import { PostingError } from '../accounting/domain/types'
+import { usePeriodYear } from '../hooks/usePeriodYear'
 import { sumDebits, sumCredits } from '../core/validation'
 import type { JournalEntry, EntryLine } from '../core/models'
 
@@ -42,7 +45,16 @@ export default function AsientosDesktop() {
         () => (allAccounts || []).filter(a => !a.isHeader),
         [allAccounts]
     )
-    const entries = useLiveQuery(() => db.entries.orderBy('date').reverse().toArray())
+    // Diario aislado por ejercicio seleccionado (incluye borradores del ejercicio)
+    const { start: periodStart, end: periodEnd } = usePeriodYear()
+    const entries = useLiveQuery(
+        () => db.entries
+            .where('date')
+            .between(periodStart, periodEnd, true, true)
+            .reverse()
+            .toArray(),
+        [periodStart, periodEnd]
+    )
 
     // Modal state
     const [isModalOpen, setIsModalOpen] = useState(false)
@@ -74,15 +86,56 @@ export default function AsientosDesktop() {
         setIsImportOpen(true)
     }
 
+    const showServiceError = (error: unknown, fallback: string) => {
+        if (error instanceof PostingError) {
+            alert(error.errors.join('\n'))
+        } else {
+            alert(error instanceof Error ? error.message : fallback)
+        }
+    }
+
+    // Los asientos manuales nacen como BORRADOR: no afectan los libros hasta
+    // que se contabilizan ("Guardar borrador no afecta los libros").
     const handleSaveNewEntry = async (data: { date: string; memo: string; lines: EntryLine[] }) => {
-        await createEntry({
+        await createDraftEntry({
             date: data.date,
             memo: data.memo,
             lines: data.lines,
+            sourceModule: undefined,
         })
     }
 
+    const handlePost = async (id: string) => {
+        try {
+            await postDraft(id)
+        } catch (error) {
+            console.error('Failed to post entry', error)
+            showServiceError(error, 'No se pudo contabilizar el asiento')
+        }
+    }
+
+    const handleReverse = async (id: string) => {
+        const reason = window.prompt(
+            'Revertir crea un nuevo asiento inverso y conserva el original.\nMotivo de la reversión:'
+        )
+        if (reason === null) return
+        if (!reason.trim()) {
+            alert('La reversión requiere un motivo.')
+            return
+        }
+        try {
+            await reverseEntry(id, { reason: reason.trim() })
+        } catch (error) {
+            console.error('Failed to reverse entry', error)
+            showServiceError(error, 'No se pudo revertir el asiento')
+        }
+    }
+
     const handleEdit = (entry: JournalEntry) => {
+        if (entry.status && entry.status !== 'DRAFT') {
+            alert(`El asiento N° ${entry.entryNumber ?? ''} está contabilizado y no puede editarse. Usá "Revertir" para corregirlo.`)
+            return
+        }
         setEditingEntryId(entry.id)
         setEditingEntryData(JSON.parse(JSON.stringify(entry))) // Deep clone
     }
@@ -103,7 +156,7 @@ export default function AsientosDesktop() {
         if (!isBalanced) return
 
         try {
-            await db.entries.update(editingEntryId, {
+            await updateDraftEntry(editingEntryId, {
                 date: editingEntryData.date,
                 memo: editingEntryData.memo,
                 lines: editingEntryData.lines,
@@ -112,7 +165,7 @@ export default function AsientosDesktop() {
             setEditingEntryData(null)
         } catch (error) {
             console.error('Failed to update entry', error)
-            alert('Error al guardar los cambios: ' + error)
+            showServiceError(error, 'Error al guardar los cambios')
         }
     }
 
@@ -468,6 +521,8 @@ export default function AsientosDesktop() {
                                     accounts={allAccounts || []}
                                     onEdit={handleEdit}
                                     onDelete={(id) => setDeleteConfirmId(id)}
+                                    onPost={handlePost}
+                                    onReverse={handleReverse}
                                     disabled={editingEntryId !== null}
                                     formalView={formalView}
                                 />

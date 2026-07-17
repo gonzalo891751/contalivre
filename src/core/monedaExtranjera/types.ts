@@ -145,6 +145,8 @@ export interface FxMovement {
     capitalAmount?: number // FC capital portion
     interestAmount?: number // FC interest portion
     interestARS?: number // Interest in ARS
+    capitalAppliedARS?: number // Capital applied in ARS (for debt payments)
+    interestAppliedARS?: number // Interest applied in ARS (for debt payments)
     debtId?: string // Link to FxDebt
     // Counterparty info
     counterparty?: string

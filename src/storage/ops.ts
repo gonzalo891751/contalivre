@@ -12,6 +12,7 @@
 
 import { db } from './db'
 import { createEntry, deleteEntry } from './entries'
+import { replaceOperationEntry } from '../accounting/application/journalService'
 import { findOrCreateChildAccountByName } from './accounts'
 import { ACCOUNT_FALLBACKS, resolveAccountId } from './bienes'
 import type { JournalEntry, EntryLine, Account } from '../core/models'
@@ -341,25 +342,26 @@ export async function createExpensePayment(data: ExpensePaymentData): Promise<Jo
 
 // ─── Queries ─────────────────────────────────────────────────
 
-/** Get all expense vouchers (sourceModule='ops', sourceType='vendor_invoice') */
+/** Get all expense vouchers (sourceModule='ops', sourceType='vendor_invoice').
+ *  Excluye anulados (REVERSED) por la reversión uniforme de la Fase 2B. */
 export async function getExpenseVouchers(): Promise<JournalEntry[]> {
     const all = await db.entries
         .where('sourceModule')
         .equals(OPS_MODULE)
         .toArray()
     return all
-        .filter(e => e.sourceType === 'vendor_invoice')
+        .filter(e => e.sourceType === 'vendor_invoice' && e.status !== 'REVERSED')
         .sort((a, b) => b.date.localeCompare(a.date))
 }
 
-/** Get all expense payments */
+/** Get all expense payments (excluye anulados por reversión) */
 export async function getExpensePayments(): Promise<JournalEntry[]> {
     const all = await db.entries
         .where('sourceModule')
         .equals(OPS_MODULE)
         .toArray()
     return all
-        .filter(e => e.sourceType === 'payment')
+        .filter(e => e.sourceType === 'payment' && e.status !== 'REVERSED')
         .sort((a, b) => b.date.localeCompare(a.date))
 }
 
@@ -452,5 +454,7 @@ export async function updateVoucherMemo(
         }
     }
 
-    await db.entries.update(voucherId, patch)
+    await replaceOperationEntry(voucherId, patch, {
+        reason: 'Actualización de memo/número de comprobante del gasto',
+    })
 }

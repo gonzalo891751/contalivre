@@ -25,6 +25,12 @@ import {
     canChangeCostingMethod,
 } from '../core/inventario/costing'
 import { createEntry, updateEntry } from './entries'
+import {
+    JOURNAL_TX_TABLES,
+    replaceOperationEntry,
+    updateEntrySourceLink,
+    voidOperationEntries,
+} from '../accounting/application/journalService'
 import { resolveOpeningEquityAccountId } from './openingEquity'
 import { findOrCreateChildAccountByName } from './accounts'
 
@@ -799,7 +805,7 @@ const buildJournalEntriesForMovement = async (
     const createdAt = new Date().toISOString()
     const metadata = buildEntryMetadata(movement, product)
 
-    const pushEntry = (memo: string, lines: EntryLine[], extraMeta?: Record<string, any>) => {
+    const pushEntry = (memo: string, lines: EntryLine[], extraMeta?: Record<string, unknown>) => {
         entries.push({
             date: movement.date,
             memo,
@@ -1359,7 +1365,7 @@ export async function repairHeaderPostedCounterpartyLinesDev(): Promise<{
     let repairedLines = 0
     let updatedEntries = 0
 
-    await db.transaction('rw', db.entries, async () => {
+    await db.transaction('rw', JOURNAL_TX_TABLES, async () => {
         for (const entry of entries) {
             const lines = [...entry.lines]
             let changed = false
@@ -1402,8 +1408,14 @@ export async function repairHeaderPostedCounterpartyLinesDev(): Promise<{
             }
 
             if (changed) {
-                await db.entries.put({ ...entry, lines })
-                updatedEntries++
+                if (entry.sourceModule) {
+                    await replaceOperationEntry(entry.id, { lines }, {
+                        reason: 'Reparación de líneas imputadas a cuentas agrupadoras',
+                    })
+                    updatedEntries++
+                }
+                // Asientos manuales contabilizados: inmutables; se omiten y
+                // corresponde corregirlos por reversión desde la UI.
             }
         }
     })
@@ -1435,7 +1447,7 @@ export async function repairInitialStockMovements(
     const entryMap = new Map(entries.map(entry => [entry.id, entry]))
 
     let entriesUpdated = 0
-    await db.transaction('rw', db.bienesMovements, db.entries, async () => {
+    await db.transaction('rw', [db.bienesMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const movement of toFix) {
             const qty = Math.abs(movement.quantity || 0)
             const unitCost = movement.unitCost !== undefined ? Math.abs(movement.unitCost) : movement.unitCost
@@ -1681,7 +1693,7 @@ export async function createBienesProduct(
         openingUnitCost: 0,
     }
 
-    await db.transaction('rw', db.bienesProducts, db.bienesMovements, db.entries, async () => {
+    await db.transaction('rw', [db.bienesProducts, db.bienesMovements, ...JOURNAL_TX_TABLES], async () => {
         const createdEntry = await createEntry(journalEntry)
         initialMovement.linkedJournalEntryIds = [createdEntry.id]
         await db.bienesProducts.add(productToSave)
@@ -1832,7 +1844,7 @@ export async function createBienesMovement(
             }
             if (entries.length > 0) {
                 const createdEntries: JournalEntry[] = []
-                await db.transaction('rw', db.bienesMovements, db.entries, async () => {
+                await db.transaction('rw', [db.bienesMovements, ...JOURNAL_TX_TABLES], async () => {
                     for (const entryData of entries) {
                         const created = await createEntry(entryData)
                         createdEntries.push(created)
@@ -1952,7 +1964,7 @@ export async function createBienesMovement(
     }
 
     const createdEntries: JournalEntry[] = []
-    await db.transaction('rw', db.bienesMovements, db.entries, async () => {
+    await db.transaction('rw', [db.bienesMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const entryData of entries) {
             const created = await createEntry(entryData)
             createdEntries.push(created)
@@ -2189,7 +2201,7 @@ export async function updateBienesMovementWithJournal(
         }
     }
 
-    let createdEntries: JournalEntry[] = []
+    const createdEntries: JournalEntry[] = []
 
     if (shouldRegenerate && baseMovement.type !== 'COUNT') {
         const { entries, error } = await buildJournalEntriesForMovement(baseMovement, product)
@@ -2206,15 +2218,22 @@ export async function updateBienesMovementWithJournal(
             throw new Error(balanceError)
         }
 
-        await db.transaction('rw', db.bienesMovements, db.entries, async () => {
+        await db.transaction('rw', [db.bienesMovements, ...JOURNAL_TX_TABLES], async () => {
             if (autoEntries.length > 0) {
-                await db.entries.bulkDelete(autoEntries.map(entry => entry.id))
+                await voidOperationEntries(autoEntries.map(entry => entry.id), {
+                    reason: 'Regeneración de asientos del movimiento de inventario',
+                })
             }
 
             if (hasManualEntries) {
                 for (const entry of manualEntries) {
                     const cleaned = stripInventoryLinkFromEntry(entry, id)
-                    await db.entries.put(cleaned)
+                    await updateEntrySourceLink(entry.id, {
+                        sourceModule: cleaned.sourceModule,
+                        sourceId: cleaned.sourceId,
+                        sourceType: cleaned.sourceType,
+                        metadata: cleaned.metadata,
+                    }, { reason: 'Desvinculación de movimiento de inventario' })
                 }
             }
 
@@ -2305,7 +2324,7 @@ export async function generateJournalForMovement(
     }
 
     const createdEntries: JournalEntry[] = []
-    await db.transaction('rw', db.bienesMovements, db.entries, async () => {
+    await db.transaction('rw', [db.bienesMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const entryData of entries) {
             const created = await createEntry(entryData)
             createdEntries.push(created)
@@ -2348,14 +2367,13 @@ export async function linkMovementToEntries(
     const uniqueIds = Array.from(new Set([...(movement.linkedJournalEntryIds || []), ...entryIds]))
     const sourceType = movement.type.toLowerCase()
 
-    await db.transaction('rw', db.bienesMovements, db.entries, async () => {
+    await db.transaction('rw', [db.bienesMovements, ...JOURNAL_TX_TABLES], async () => {
         for (const entryId of entryIds) {
             const entry = await db.entries.get(entryId)
             if (!entry) {
                 throw new Error('Asiento no encontrado')
             }
-            const updated: JournalEntry = {
-                ...entry,
+            await updateEntrySourceLink(entryId, {
                 sourceModule: entry.sourceModule || 'inventory',
                 sourceId: entry.sourceId || movement.id,
                 sourceType: entry.sourceType || sourceType,
@@ -2366,8 +2384,7 @@ export async function linkMovementToEntries(
                     sourceType,
                     linkedBy: 'inventory',
                 },
-            }
-            await db.entries.put(updated)
+            }, { reason: 'Vinculación manual de asiento a movimiento de inventario' })
         }
 
         await db.bienesMovements.update(movementId, {
@@ -2446,14 +2463,21 @@ export async function deleteBienesMovementWithJournal(
         }
     }
 
-    await db.transaction('rw', db.bienesMovements, db.entries, async () => {
+    await db.transaction('rw', [db.bienesMovements, ...JOURNAL_TX_TABLES], async () => {
         if (autoEntries.length > 0) {
-            await db.entries.bulkDelete(autoEntries.map(entry => entry.id))
+            await voidOperationEntries(autoEntries.map(entry => entry.id), {
+                reason: 'Baja de movimiento de inventario',
+            })
         }
         if (manualEntries.length > 0 && options?.keepManualEntries) {
             for (const entry of manualEntries) {
                 const cleaned = stripInventoryLinkFromEntry(entry, id)
-                await db.entries.put(cleaned)
+                await updateEntrySourceLink(entry.id, {
+                    sourceModule: cleaned.sourceModule,
+                    sourceId: cleaned.sourceId,
+                    sourceType: cleaned.sourceType,
+                    metadata: cleaned.metadata,
+                }, { reason: 'Desvinculación por baja de movimiento de inventario' })
             }
         }
         await db.bienesMovements.delete(id)
@@ -2500,14 +2524,21 @@ export async function deleteBienesProductWithMovements(
         })
     })
 
-    await db.transaction('rw', db.bienesProducts, db.bienesMovements, db.entries, async () => {
+    await db.transaction('rw', [db.bienesProducts, db.bienesMovements, ...JOURNAL_TX_TABLES], async () => {
         if (autoEntryIds.size > 0) {
-            await db.entries.bulkDelete(Array.from(autoEntryIds))
+            await voidOperationEntries(Array.from(autoEntryIds), {
+                reason: 'Baja de producto de inventario con sus movimientos',
+            })
         }
         if (manualEntries.size > 0) {
             for (const { entry, movementId } of manualEntries.values()) {
                 const cleaned = stripInventoryLinkFromEntry(entry, movementId)
-                await db.entries.put(cleaned)
+                await updateEntrySourceLink(entry.id, {
+                    sourceModule: cleaned.sourceModule,
+                    sourceId: cleaned.sourceId,
+                    sourceType: cleaned.sourceType,
+                    metadata: cleaned.metadata,
+                }, { reason: 'Desvinculación por baja de producto de inventario' })
             }
         }
         if (movements.length > 0) {
@@ -2558,21 +2589,33 @@ export async function clearBienesPeriodData(
     const autoEntries = linkedEntries.filter(entry => isAutoGeneratedEntryForMovement(entry, entry.sourceId || ''))
     const manualEntries = linkedEntries.filter(entry => !isAutoGeneratedEntryForMovement(entry, entry.sourceId || ''))
 
-    await db.transaction('rw', db.bienesProducts, db.bienesMovements, db.entries, db.bienesSettings, async () => {
+    await db.transaction('rw', [db.bienesProducts, db.bienesMovements, db.bienesSettings, ...JOURNAL_TX_TABLES], async () => {
         if (options.deleteGeneratedEntries) {
             if (autoEntries.length > 0) {
-                await db.entries.bulkDelete(autoEntries.map(entry => entry.id))
+                await voidOperationEntries(autoEntries.map(entry => entry.id), {
+                    reason: 'Limpieza de datos de inventario del período',
+                })
             }
             if (manualEntries.length > 0) {
                 for (const entry of manualEntries) {
                     const cleaned = stripInventoryLinkFromEntry(entry, entry.sourceId || '')
-                    await db.entries.put(cleaned)
+                    await updateEntrySourceLink(entry.id, {
+                        sourceModule: cleaned.sourceModule,
+                        sourceId: cleaned.sourceId,
+                        sourceType: cleaned.sourceType,
+                        metadata: cleaned.metadata,
+                    }, { reason: 'Desvinculación por limpieza de período de inventario' })
                 }
             }
         } else {
             for (const entry of linkedEntries) {
                 const cleaned = stripInventoryLinkFromEntry(entry, entry.sourceId || '')
-                await db.entries.put(cleaned)
+                await updateEntrySourceLink(entry.id, {
+                    sourceModule: cleaned.sourceModule,
+                    sourceId: cleaned.sourceId,
+                    sourceType: cleaned.sourceType,
+                    metadata: cleaned.metadata,
+                }, { reason: 'Desvinculación por limpieza de período de inventario' })
             }
         }
 
@@ -2785,7 +2828,7 @@ export async function generatePeriodicClosingJournalEntries(
     const now = new Date().toISOString()
     const entryIds: string[] = []
 
-    await db.transaction('rw', db.entries, async () => {
+    await db.transaction('rw', JOURNAL_TX_TABLES, async () => {
         for (const closingEntry of closingEntries) {
             const created = await createEntry({
                 date: data.closingDate,

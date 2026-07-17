@@ -1,8 +1,15 @@
 /**
  * RECPAM - Método Indirecto
  *
- * Calculates RECPAM (Resultado por Exposición a la Inflación) using the
- * indirect method based on monthly monetary position.
+ * @deprecated OBSOLETO (Fase 2B): este algoritmo suma posiciones monetarias
+ * completas de fin de cada mes reexpresadas, lo que DUPLICA exposiciones
+ * persistentes (hallazgo ACC-010 de la auditoría). El cálculo correcto vive
+ * en src/accounting/inflation/engine.ts (RECPAM indirecto como partida de
+ * conciliación + método directo de control, conciliados y con golden tests).
+ * Este módulo se conserva únicamente para la pantalla legacy de
+ * Cierre/Valuación, que está contenida (solo borradores + advertencia
+ * "módulo en revisión normativa") y NO debe usarse para cierres reales.
+ * No agregar nuevos consumidores.
  */
 
 import type { Account, JournalEntry } from '../models';
@@ -116,7 +123,11 @@ export function calculateRecpamIndirecto(
         if (!monthIndex || !closingIndex) {
             missingIndices.push(month);
         }
-        const coef = calculateCoef(closingIndex, monthIndex);
+        // Fase 2A (NOR-004): índice faltante NO se sustituye por coeficiente 1.
+        // El mes queda con coef 1 y RECPAM 0 SOLO para visualización, y el
+        // resultado se marca con missingIndices: el llamador debe bloquear
+        // cualquier contabilización mientras missingIndices no esté vacío.
+        const coef = calculateCoef(closingIndex, monthIndex) ?? 1;
 
         // Calculate RECPAM for month
         // RECPAM = PMN * (Coef - 1) * -1
@@ -230,7 +241,7 @@ function generateMonthRange(startDate: string, endDate: string): string[] {
     const start = new Date(startDate + '-01');
     const end = new Date(endDate);
 
-    let current = new Date(start);
+    const current = new Date(start);
     while (current <= end) {
         const year = current.getFullYear();
         const month = String(current.getMonth() + 1).padStart(2, '0');
