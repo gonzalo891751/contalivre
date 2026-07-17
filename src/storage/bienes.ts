@@ -805,7 +805,7 @@ const buildJournalEntriesForMovement = async (
     const createdAt = new Date().toISOString()
     const metadata = buildEntryMetadata(movement, product)
 
-    const pushEntry = (memo: string, lines: EntryLine[], extraMeta?: Record<string, any>) => {
+    const pushEntry = (memo: string, lines: EntryLine[], extraMeta?: Record<string, unknown>) => {
         entries.push({
             date: movement.date,
             memo,

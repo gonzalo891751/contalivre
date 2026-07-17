@@ -29,7 +29,17 @@ import { db } from '../../storage/db'
 import { computeBalances } from '../../core/ledger/computeBalances'
 import { createBienesMovement } from '../../storage/bienes'
 import type { Account } from '../../core/models'
-import type { CostingMethod } from '../../core/inventario/types'
+import type { CostingMethod, BienesMovement } from '../../core/inventario/types'
+
+/** Campos de condiciones/instrumentos que algunos movimientos llevan como
+ *  metadata extendida (no forman parte del tipo base). */
+type MovementWithTerms = BienesMovement & {
+    dueDate?: string
+    paymentCondition?: string
+    instrumentType?: string
+    instrumentNumber?: string
+    instrumentBank?: string
+}
 import PerfeccionarModal from './PerfeccionarModal'
 import type { PerfeccionarSaveData } from './PerfeccionarModal'
 import OperationsPageHeader from '../../components/OperationsPageHeader'
@@ -173,8 +183,8 @@ export default function ClientesDeudoresPage() {
                     normalizeForCompare(m.counterparty) === normalizeForCompare(acc.name)
                 )
                 const dueDates = accMovements
-                    .filter(m => m.type === 'SALE' && (m as any).dueDate)
-                    .map(m => (m as any).dueDate as string)
+                    .filter(m => m.type === 'SALE' && (m as MovementWithTerms).dueDate)
+                    .map(m => (m as MovementWithTerms).dueDate as string)
                     .sort()
 
                 if (dueDates.length > 0) {
@@ -264,10 +274,10 @@ export default function ClientesDeudoresPage() {
                 reference: sale.reference || sale.id.slice(0, 8),
                 total: sale.total,
                 saldoPendiente,
-                dueDate: (sale as any).dueDate || null,
-                paymentCondition: (sale as any).paymentCondition,
-                instrumentType: (sale as any).instrumentType,
-                instrumentNumber: (sale as any).instrumentNumber,
+                dueDate: (sale as MovementWithTerms).dueDate || null,
+                paymentCondition: (sale as MovementWithTerms).paymentCondition,
+                instrumentType: (sale as MovementWithTerms).instrumentType,
+                instrumentNumber: (sale as MovementWithTerms).instrumentNumber,
                 accountId: childAccountByName.get(norm) || null,
             })
         }
@@ -293,10 +303,10 @@ export default function ClientesDeudoresPage() {
                 counterparty: m.counterparty!,
                 amount: m.total,
                 date: m.date,
-                dueDate: (m as any).dueDate || null,
-                instrumentType: (m as any).instrumentType,
-                instrumentNumber: (m as any).instrumentNumber,
-                instrumentBank: (m as any).instrumentBank,
+                dueDate: (m as MovementWithTerms).dueDate || null,
+                instrumentType: (m as MovementWithTerms).instrumentType,
+                instrumentNumber: (m as MovementWithTerms).instrumentNumber,
+                instrumentBank: (m as MovementWithTerms).instrumentBank,
             }))
     }, [movements])
 
@@ -762,7 +772,7 @@ function ListadoTab({
                 <div className="flex gap-2">
                     <select
                         value={statusFilter}
-                        onChange={(e) => onStatusFilterChange(e.target.value as any)}
+                        onChange={(e) => onStatusFilterChange(e.target.value as 'all' | 'ok' | 'pending' | 'overdue')}
                         className="bg-white border border-slate-300 text-slate-700 text-sm rounded-lg focus:border-emerald-500 block p-2 px-3 shadow-sm cursor-pointer"
                     >
                         <option value="all">Todos los estados</option>

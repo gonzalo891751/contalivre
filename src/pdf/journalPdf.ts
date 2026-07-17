@@ -181,9 +181,8 @@ export const downloadJournalPdf = async (
 
         doc.text(entryTitle, 16, startY + 5.5)
 
-        // Prepare Table Body
-        // Use 'any' type to bypass strict autoTable RowInput check for objects
-        const tableBody: any[] = entry.lines.map(line => {
+        // Prepare Table Body (RowInput de autoTable admite objetos por columna)
+        const tableBody: import('jspdf-autotable').RowInput[] = entry.lines.map(line => {
             const display = resolveAccountDisplay(line.accountId, accounts)
             const primaryName = display.name
             const detail = display.terceroDetail
@@ -240,8 +239,8 @@ export const downloadJournalPdf = async (
             },
         })
 
-        // Update startY for next loop
-        startY = (doc as any).lastAutoTable.finalY + 10
+        // Update startY for next loop (lastAutoTable lo inyecta jspdf-autotable)
+        startY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10
     }
 
     // Add page numbers to all pages

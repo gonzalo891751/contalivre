@@ -1695,7 +1695,7 @@ interface AsientosTabProps {
 }
 
 function AsientosTab({ entries, accounts, onGoToLiquidacion }: AsientosTabProps) {
-    const copyToClipboard = (entry: any) => {
+    const copyToClipboard = (entry: unknown) => {
         navigator.clipboard.writeText(JSON.stringify(entry, null, 2))
     }
 

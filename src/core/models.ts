@@ -173,6 +173,10 @@ export interface JournalEntry {
     sourceId?: string
     sourceType?: string
     createdAt?: string
+    // Metadata libre de módulos legacy: los consumidores acceden a rutas
+    // anidadas (p. ej. metadata.applyTo.entryId); tiparla como unknown
+    // rompería decenas de lecturas sin ganancia de seguridad real acá.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     metadata?: Record<string, any>
 
     // ── Ciclo de vida y contexto contable (Fase 2A) ─────────

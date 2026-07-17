@@ -19,6 +19,28 @@ type ImportAsientosUXProps = {
 
 const canUseDOM = () => typeof window !== 'undefined' && typeof document !== 'undefined'
 
+type RawRow = Record<string, unknown>
+
+interface ImportMapping {
+    fecha: string
+    cuenta_codigo: string
+    cuenta_nombre: string
+    debe: string
+    haber: string
+    concepto: string
+    nro_asiento: string
+    detalle: string
+}
+
+interface ProcessedEntry {
+    nro: string
+    fecha: string
+    memo: string
+    lines: Array<{ accountId: string; debit: number; credit: number; description?: string }>
+    debe: number
+    haber: number
+}
+
 export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar asientos', onSuccess, autoOpen, onClose }: ImportAsientosUXProps) {
     const [open, setOpen] = useState(autoOpen ?? false)
     const [helpOpen, setHelpOpen] = useState(false)
@@ -28,12 +50,12 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
     const [toast, setToast] = useState<string | null>(null)
 
     // Logic State
-    const [rawRows, setRawRows] = useState<any[]>([])
+    const [rawRows, setRawRows] = useState<RawRow[]>([])
     const [rawHeaders, setRawHeaders] = useState<string[]>([])
-    const [mapping, setMapping] = useState<any>({ fecha: '', cuenta_codigo: '', cuenta_nombre: '', debe: '', haber: '', concepto: '', nro_asiento: '', detalle: '' })
+    const [mapping, setMapping] = useState<ImportMapping>({ fecha: '', cuenta_codigo: '', cuenta_nombre: '', debe: '', haber: '', concepto: '', nro_asiento: '', detalle: '' })
     const [availableAccounts, setAvailableAccounts] = useState<Account[]>([])
     const [accountResolution, setAccountResolution] = useState<Map<string, string>>(new Map())
-    const [processedEntries, setProcessedEntries] = useState<any[]>([])
+    const [processedEntries, setProcessedEntries] = useState<ProcessedEntry[]>([])
     const [validationStats, setValidationStats] = useState({ totalSeats: 0, totalLines: 0, warnings: 0 })
     const [importLoading, setImportLoading] = useState(false)
     const [isConfirming, setIsConfirming] = useState(false)
@@ -432,7 +454,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
     const normalizeHeader = (h: string) => h.trim().toLowerCase().replace(/\s+|-/g, '_').normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     const normalizeText = (t: string) => t.trim().toLowerCase().replace(/\s+/g, ' ')
 
-    const parseARNumber = (val: any): number => {
+    const parseARNumber = (val: unknown): number => {
         if (typeof val === 'number') return val
         if (!val) return 0
         const str = String(val).trim().replace('$', '').trim()
@@ -444,7 +466,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
         return isNaN(num) ? 0 : num
     }
 
-    const parseDateStrict = (val: any): string | null => {
+    const parseDateStrict = (val: unknown): string | null => {
         if (!val) return null
         if (typeof val === 'number') {
             const date = new Date(Math.round((val - 25569) * 86400 * 1000))
@@ -467,8 +489,8 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
 
     // Detect Mapping
     const detectMapping = (headers: string[]) => {
-        const map: any = { fecha: '', cuenta_codigo: '', cuenta_nombre: '', debe: '', haber: '', concepto: '', nro_asiento: '', detalle: '' }
-        const synonyms: any = {
+        const map: ImportMapping = { fecha: '', cuenta_codigo: '', cuenta_nombre: '', debe: '', haber: '', concepto: '', nro_asiento: '', detalle: '' }
+        const synonyms: Record<keyof ImportMapping, string[]> = {
             nro_asiento: ['nro', 'asiento', 'id'],
             fecha: ['fecha', 'date', 'fec'],
             cuenta_codigo: ['cuenta_codigo', 'codigo_cuenta', 'cod', 'id_cuenta'],
@@ -480,7 +502,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
         }
         headers.forEach(h => {
             const norm = normalizeHeader(h)
-            for (const field of Object.keys(synonyms)) {
+            for (const field of Object.keys(synonyms) as Array<keyof ImportMapping>) {
                 if (!map[field] && synonyms[field].some((s: string) => norm === s || norm.includes(s))) {
                     map[field] = h
                 }
@@ -503,7 +525,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
         setFile(f)
         const ext = f.name.split('.').pop()?.toLowerCase()
 
-        const finish = (data: any[], headers: string[]) => {
+        const finish = (data: RawRow[], headers: string[]) => {
             // Límites de filas/columnas después de parsear
             const shapeError = validateImportShape(data.length, headers.length)
             if (shapeError) {
@@ -519,14 +541,14 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
         if (ext === 'csv') {
             Papa.parse(f, {
                 header: true, skipEmptyLines: true,
-                complete: (results) => finish(results.data as any[], results.meta.fields || [])
+                complete: (results) => finish(results.data as RawRow[], results.meta.fields || [])
             })
         } else if (ext === 'xlsx' || ext === 'xls') {
             const data = await f.arrayBuffer()
             const wb = XLSX.read(data, { type: 'array' })
             const ws = wb.Sheets[wb.SheetNames[0]]
-            const json = XLSX.utils.sheet_to_json(ws, { defval: "" })
-            if (json.length > 0) finish(json, Object.keys(json[0] as any))
+            const json = XLSX.utils.sheet_to_json<RawRow>(ws, { defval: "" })
+            if (json.length > 0) finish(json, Object.keys(json[0]))
         }
     }
 
@@ -638,7 +660,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
     useEffect(() => {
         if (step !== 4) return
 
-        const entries = new Map<string, any>()
+        const entries = new Map<string, ProcessedEntry>()
         let lastNro: string | null = null
         let lastFecha: string | null = null
         let lastConcepto: string | null = null
@@ -671,7 +693,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
                     debe: 0, haber: 0
                 })
             }
-            const entry = entries.get(entryId)
+            const entry = entries.get(entryId)!
             if (!entry.memo && concepto) entry.memo = concepto // Update memo if found later
 
             const code = String(row[mapping.cuenta_codigo] || '').trim()
@@ -817,7 +839,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
                         <div className={labelClass(4)}>Confirmar</div>
                     </div>
                 </div>
-                <div className="climpLine" style={{ ['--pct' as any]: progressPct }}>
+                <div className="climpLine" style={{ '--pct': progressPct } as React.CSSProperties}>
                     <div className="climpLineFill" />
                 </div>
             </div>

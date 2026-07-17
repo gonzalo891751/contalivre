@@ -31,7 +31,17 @@ import { db } from '../../storage/db'
 import { computeBalances } from '../../core/ledger/computeBalances'
 import { createBienesMovement } from '../../storage/bienes'
 import type { Account } from '../../core/models'
-import type { CostingMethod } from '../../core/inventario/types'
+import type { CostingMethod, BienesMovement } from '../../core/inventario/types'
+
+/** Campos de condiciones/instrumentos que algunos movimientos llevan como
+ *  metadata extendida (no forman parte del tipo base). */
+type MovementWithTerms = BienesMovement & {
+    dueDate?: string
+    paymentCondition?: string
+    instrumentType?: string
+    instrumentNumber?: string
+    instrumentBank?: string
+}
 import PerfeccionarModal from './PerfeccionarModal'
 import type { PerfeccionarSaveData } from './PerfeccionarModal'
 import PagoGastoModal from './components/PagoGastoModal'
@@ -123,7 +133,7 @@ export default function ProveedoresAcreedoresPage() {
     const location = useLocation()
 
     // Read initial mode from location state if navigated with prefill
-    const initialMode = (location.state as any)?.mode === 'acreedores' ? 'acreedores' : 'proveedores'
+    const initialMode = (location.state as { mode?: string } | null)?.mode === 'acreedores' ? 'acreedores' : 'proveedores'
     const [mode, setMode] = useState<ModuleMode>(initialMode)
     const [activeTab, setActiveTab] = useState<TabName>('dashboard')
     const [searchQuery, setSearchQuery] = useState('')
@@ -229,8 +239,8 @@ export default function ProveedoresAcreedoresPage() {
                 )
                 // Find closest dueDate from PURCHASE movements
                 const dueDates = accMovements
-                    .filter(m => m.type === 'PURCHASE' && (m as any).dueDate)
-                    .map(m => (m as any).dueDate as string)
+                    .filter(m => m.type === 'PURCHASE' && (m as MovementWithTerms).dueDate)
+                    .map(m => (m as MovementWithTerms).dueDate as string)
                     .sort()
 
                 if (dueDates.length > 0) {
@@ -312,10 +322,10 @@ export default function ProveedoresAcreedoresPage() {
                 reference: purchase.reference || purchase.id.slice(0, 8),
                 total: purchase.total,
                 saldoPendiente,
-                dueDate: (purchase as any).dueDate || null,
-                paymentCondition: (purchase as any).paymentCondition,
-                instrumentType: (purchase as any).instrumentType,
-                instrumentNumber: (purchase as any).instrumentNumber,
+                dueDate: (purchase as MovementWithTerms).dueDate || null,
+                paymentCondition: (purchase as MovementWithTerms).paymentCondition,
+                instrumentType: (purchase as MovementWithTerms).instrumentType,
+                instrumentNumber: (purchase as MovementWithTerms).instrumentNumber,
                 accountId: childAccountByName.get(norm) || null,
             })
         }
@@ -341,10 +351,10 @@ export default function ProveedoresAcreedoresPage() {
                 counterparty: m.counterparty!,
                 amount: m.total,
                 date: m.date,
-                dueDate: (m as any).dueDate || null,
-                instrumentType: (m as any).instrumentType,
-                instrumentNumber: (m as any).instrumentNumber,
-                instrumentBank: (m as any).instrumentBank,
+                dueDate: (m as MovementWithTerms).dueDate || null,
+                instrumentType: (m as MovementWithTerms).instrumentType,
+                instrumentNumber: (m as MovementWithTerms).instrumentNumber,
+                instrumentBank: (m as MovementWithTerms).instrumentBank,
             }))
     }, [movements])
 
@@ -867,7 +877,7 @@ function ListadoTab({
                 <div className="flex gap-2">
                     <select
                         value={statusFilter}
-                        onChange={(e) => onStatusFilterChange(e.target.value as any)}
+                        onChange={(e) => onStatusFilterChange(e.target.value as 'all' | 'ok' | 'pending' | 'overdue')}
                         className="bg-white border border-slate-300 text-slate-700 text-sm rounded-lg focus:border-blue-500 block p-2 px-3 shadow-sm cursor-pointer"
                     >
                         <option value="all">Todos los estados</option>

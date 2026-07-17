@@ -282,7 +282,7 @@ export function evaluateMoneyExpression(expr: string): EvaluationResult {
 
         return { value: rounded }
 
-    } catch (err: any) {
-        return { value: null, error: err.message || 'Error' }
+    } catch (err) {
+        return { value: null, error: err instanceof Error ? err.message : 'Error' }
     }
 }

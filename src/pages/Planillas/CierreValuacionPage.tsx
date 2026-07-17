@@ -479,9 +479,9 @@ export default function CierreValuacionPage() {
             }
 
             showToast(`Se enviaron ${unsynced.length} asientos como BORRADOR. Módulo en revisión normativa: no utilizar para emitir estados formales.`);
-        } catch (err: any) {
+        } catch (err) {
             console.error('Error sending to ledger:', err);
-            showToast('Error al enviar: ' + err.message);
+            showToast('Error al enviar: ' + (err instanceof Error ? err.message : String(err)));
         }
     };
 
@@ -760,7 +760,7 @@ export default function CierreValuacionPage() {
     const handleExcludeAccount = useCallback((accountId: string) => {
         const confirmed = window.confirm(
             '¿Excluir esta cuenta del cálculo RT6?\n\n' +
-            'La cuenta no aparecerá en Monetarias ni en \"Sin clasificar\".'
+            'La cuenta no aparecerá en Monetarias ni en "Sin clasificar".'
         );
         if (!confirmed) return;
 

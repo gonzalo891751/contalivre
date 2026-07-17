@@ -1926,12 +1926,12 @@ export default function MovementModalV3({
         try {
             // Calculate gastos totals for capitalizable vs expense
             let gastosCapitalizables = 0
-            let gastosNoCap = 0
+            let _gastosNoCap = 0
             gastos.forEach(g => {
                 if (g.capitalizar) {
                     gastosCapitalizables += g.monto
                 } else {
-                    gastosNoCap += g.monto
+                    _gastosNoCap += g.monto
                 }
             })
 

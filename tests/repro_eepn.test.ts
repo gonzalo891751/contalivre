@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { computeEEPN } from '../src/core/eepn/compute'
+import type { EEPNInput } from '../src/core/eepn/types'
 import type { Account, JournalEntry } from '../src/core/models'
 
 // Helper to create minimal Account
@@ -11,7 +12,7 @@ function mkAccount(id: string, code: string, name: string, kind: string): Accoun
         kind: kind as Account['kind'],
         section: 'CURRENT',
         group: '',
-        statementGroup: '' as any,
+        statementGroup: null,
         parentId: null,
         level: 3,
         normalSide: kind === 'EQUITY' ? 'CREDIT' : kind === 'ASSET' ? 'DEBIT' : 'CREDIT',
@@ -70,7 +71,7 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
             periodEnd,
             netIncomeFromER,
             pnFromBalance,
-        } as any)
+        } as unknown as EEPNInput)
 
         // Key assertion: pnCierre must equal pnFromBalance (no swallowed entry)
         expect(result.pnCierre).toBe(pnFromBalance)
@@ -119,7 +120,7 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
             periodEnd,
             netIncomeFromER,
             pnFromBalance,
-        } as any)
+        } as unknown as EEPNInput)
 
         // pnInicio = 10000 (from capital)
         expect(result.pnInicio).toBe(10000)
@@ -146,7 +147,7 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
             ] as unknown as JournalEntry[],
             periodStart: '2024-01-01',
             periodEnd: '2024-12-31',
-        } as any)
+        } as unknown as EEPNInput)
 
         const recpamRow = result.rows.find(r => r.type === 'RECPAM')
         expect(recpamRow).toBeDefined()
@@ -157,8 +158,8 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
     it('should classify refundición entry as RESULTADO_EJERCICIO', () => {
         const accounts2 = [
             ...accounts,
-            mkAccount('6', '4.1.01', 'Ventas', 'INCOME' as any),
-            mkAccount('7', '5.1.01', 'CMV', 'EXPENSE' as any),
+            mkAccount('6', '4.1.01', 'Ventas', 'INCOME'),
+            mkAccount('7', '5.1.01', 'CMV', 'EXPENSE'),
         ]
 
         const entries: JournalEntry[] = [
@@ -192,7 +193,7 @@ describe('EEPN Motor - Fix Swallowed Entry + Saldo Cierre', () => {
             entries,
             periodStart: '2024-01-01',
             periodEnd: '2024-12-31',
-        } as any)
+        } as unknown as EEPNInput)
 
         // The cierre entry should be classified as RESULTADO_EJERCICIO
         const resultadoRow = result.rows.find(r => r.type === 'RESULTADO_EJERCICIO')

@@ -3,10 +3,19 @@ import { createPortal } from 'react-dom'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 
+type RawRow = Record<string, unknown>
+
+export interface ImportedBankRow {
+    fecha: string
+    concepto: string
+    debe: number
+    haber: number
+}
+
 interface ImportModalProps {
     isOpen: boolean
     onClose: () => void
-    onImport: (rows: any[], mode: 'replace' | 'append') => void
+    onImport: (rows: ImportedBankRow[], mode: 'replace' | 'append') => void
 }
 
 type Step = 'upload' | 'settings'
@@ -21,7 +30,7 @@ interface ColumnMapping {
 
 export default function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
     const [step, setStep] = useState<Step>('upload')
-    const [rawRows, setRawRows] = useState<any[]>([])
+    const [rawRows, setRawRows] = useState<RawRow[]>([])
     const [headers, setHeaders] = useState<string[]>([])
     const [fileName, setFileName] = useState('')
     const [mapping, setMapping] = useState<ColumnMapping>({ fecha: '', concepto: '', debe: '', haber: '', ref: '' })
@@ -102,7 +111,7 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
                 if (results.errors.length > 0) {
                     console.warn("CSV Errors:", results.errors)
                 }
-                processParsedData(results.data, results.meta.fields || [])
+                processParsedData(results.data as RawRow[], results.meta.fields || [])
                 setIsLoading(false)
             },
             error: (err) => {
@@ -120,16 +129,16 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
                 const workbook = XLSX.read(data, { type: 'binary', cellDates: true })
                 const firstSheetName = workbook.SheetNames[0]
                 const worksheet = workbook.Sheets[firstSheetName]
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' })
+                const jsonData = XLSX.utils.sheet_to_json<RawRow>(worksheet, { defval: '' })
 
                 if (jsonData.length > 0 && typeof jsonData[0] === 'object') {
-                    const keys = Object.keys(jsonData[0] as object)
+                    const keys = Object.keys(jsonData[0])
                     processParsedData(jsonData, keys)
                 } else {
                     setError('El archivo parece estar vacío o no tiene formato de tabla.')
                 }
-            } catch (err: any) {
-                setError('Error al leer Excel: ' + err.message)
+            } catch (err) {
+                setError('Error al leer Excel: ' + (err instanceof Error ? err.message : String(err)))
             } finally {
                 setIsLoading(false)
             }
@@ -137,7 +146,7 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
         reader.readAsBinaryString(file)
     }
 
-    const processParsedData = (data: any[], detectedHeaders: string[]) => {
+    const processParsedData = (data: RawRow[], detectedHeaders: string[]) => {
         setRawRows(data)
         setHeaders(detectedHeaders)
         autoMapColumns(detectedHeaders)
@@ -170,13 +179,13 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
             return
         }
 
-        const processed: any[] = []
+        const processed: ImportedBankRow[] = []
         let errorsCount = 0
 
         rawRows.forEach((row) => {
             const fechaRaw = row[mapping.fecha]
-            const conceptoRaw = row[mapping.concepto] || ''
-            const refRaw = mapping.ref ? row[mapping.ref] : ''
+            const conceptoRaw = String(row[mapping.concepto] ?? '')
+            const refRaw = mapping.ref ? String(row[mapping.ref] ?? '') : ''
             const debeRaw = mapping.debe ? row[mapping.debe] : 0
             const haberRaw = mapping.haber ? row[mapping.haber] : 0
 
@@ -190,7 +199,7 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
                 } else if (typeof fechaRaw === 'string') {
                     finalDate = parseDateString(fechaRaw)
                 }
-            } catch (e) { }
+            } catch { /* fecha no interpretable: la fila se cuenta como error */ }
 
             // 2. Normalize Details
             const finalConcepto = refRaw ? `REF ${refRaw} - ${conceptoRaw}` : conceptoRaw
@@ -212,7 +221,7 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
         })
 
         if (processed.length === 0 && rawRows.length > 0) {
-            setError('No se pudieron procesar filas válidas. Revisa el mapeo de columnas.')
+            setError(`No se pudieron procesar filas válidas (${errorsCount} con fecha inválida). Revisa el mapeo de columnas.`)
             return
         }
 
@@ -235,7 +244,7 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
         return ''
     }
 
-    const parseAmount = (val: any): number => {
+    const parseAmount = (val: unknown): number => {
         if (typeof val === 'number') return val
         if (!val) return 0
         if (typeof val === 'string') {

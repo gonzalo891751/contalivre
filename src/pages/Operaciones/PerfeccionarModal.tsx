@@ -265,7 +265,7 @@ export default function PerfeccionarModal({
     }, [])
 
     // Update a split field
-    const updateSplit = useCallback((id: string, field: keyof SplitRow, value: any) => {
+    const updateSplit = useCallback((id: string, field: keyof SplitRow, value: string | number) => {
         setSplits(prev => prev.map(r => {
             if (r.id !== id) return r
             const updated = { ...r, [field]: value }
@@ -655,7 +655,7 @@ function SplitRowEditor({
     index: number
     accounts: Account[]
     canRemove: boolean
-    onUpdate: (field: keyof SplitRow, value: any) => void
+    onUpdate: (field: keyof SplitRow, value: string | number) => void
     onRemove: () => void
     showInstrument: boolean
     ringColor: string

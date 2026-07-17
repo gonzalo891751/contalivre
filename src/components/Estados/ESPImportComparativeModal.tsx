@@ -25,7 +25,7 @@ interface ESPImportComparativeModalProps {
 }
 
 interface ParsedRow {
-    [key: string]: any
+    [key: string]: unknown
 }
 
 interface CandidateRecord {
@@ -133,7 +133,7 @@ export function ESPImportComparativeModal({
                             results.meta.fields || Object.keys(results.data[0] || {})
                         )
                     },
-                    error: (err: any) => handleError(`Error CSV: ${err.message}`)
+                    error: (err: Error) => handleError(`Error CSV: ${err.message}`)
                 })
             }
             reader.readAsText(file)
@@ -447,9 +447,9 @@ export function ESPImportComparativeModal({
                                             <tbody>
                                                 {fileData.slice(0, 5).map((row, i) => (
                                                     <tr key={i}>
-                                                        <td>{mapping.code ? row[mapping.code] : '-'}</td>
-                                                        <td>{mapping.name ? row[mapping.name] : '-'}</td>
-                                                        <td>{mapping.amount ? row[mapping.amount] : '-'}</td>
+                                                        <td>{mapping.code ? String(row[mapping.code] ?? '') : '-'}</td>
+                                                        <td>{mapping.name ? String(row[mapping.name] ?? '') : '-'}</td>
+                                                        <td>{mapping.amount ? String(row[mapping.amount] ?? '') : '-'}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>

@@ -23,6 +23,16 @@ export default tseslint.config(
                 'warn',
                 { allowConstantExport: true },
             ],
+            // Convención estándar: el prefijo _ marca parámetros/variables
+            // intencionalmente sin uso (la regla sigue activa para el resto).
+            '@typescript-eslint/no-unused-vars': [
+                'error',
+                {
+                    argsIgnorePattern: '^_',
+                    varsIgnorePattern: '^_',
+                    caughtErrorsIgnorePattern: '^_',
+                },
+            ],
             // Fase 2A (ACC-001): la tabla de asientos solo se escribe desde
             // src/accounting/repositories/journalRepository.ts (ver override).
             'no-restricted-syntax': [
