@@ -23,7 +23,11 @@ function flattenLines(lines: ReportLine[], showComp: boolean): Cell[][] {
     return out
 }
 
-export async function exportReportBundleWorkbook(bundle: ReportingBundle): Promise<void> {
+/**
+ * Construye las hojas del workbook desde el bundle (pura y testeable).
+ * Garantiza que la exportación usa EXACTAMENTE las cifras del motor.
+ */
+export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
     const showComp = bundle.metadata.hasComparative
     const headerRow = (): Cell[] => showComp ? ['Concepto', 'Ejercicio actual', 'Ejercicio anterior'] : ['Concepto', 'Ejercicio actual']
 
@@ -126,6 +130,11 @@ export async function exportReportBundleWorkbook(bundle: ReportingBundle): Promi
     }
     sheets.push({ name: 'Análisis horizontal', rows: ahRows })
 
+    return sheets
+}
+
+export async function exportReportBundleWorkbook(bundle: ReportingBundle): Promise<void> {
+    const sheets = buildReportSheets(bundle)
     const dateStr = new Date().toISOString().slice(0, 10)
     await writeWorkbook(sheets, `contalivre-estados-${bundle.metadata.exerciseLabel.replace(/\s+/g, '_')}-${dateStr}.xlsx`)
 }
