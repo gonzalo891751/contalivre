@@ -13,7 +13,6 @@ import PlanillasLayout from './pages/Planillas/PlanillasLayout'
 import PlanillasHome from './pages/Planillas/PlanillasHome'
 
 const ConfiguracionPage = lazy(() => import('./pages/ConfiguracionPage'))
-const PracticaPage = lazy(() => import('./pages/PracticaPage'))
 
 // Fase 2B (PER-001): las pantallas pesadas (estados, operaciones grandes,
 // planillas con PDF/XLSX) se cargan bajo demanda para bajar el bundle inicial.
@@ -75,7 +74,8 @@ function App() {
                 {/* Rutas consolidadas en Configuración (Fase 2D) */}
                 <Route path="/mapeos" element={<Navigate to="/configuracion?seccion=plan-cuentas" replace />} />
                 <Route path="/acerca" element={<Navigate to="/configuracion?seccion=acerca" replace />} />
-                <Route path="/practica" element={<PracticaPage />} />
+                {/* Práctica guiada retirada (Fase 2D): los escenarios viven solo en tests */}
+                <Route path="/practica" element={<Navigate to="/" replace />} />
                 <Route path="/planillas" element={<PlanillasLayout />}>
                     <Route index element={<PlanillasHome />} />
                     <Route path="inventario" element={<Navigate to="/operaciones/inventario" replace />} />

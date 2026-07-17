@@ -78,7 +78,6 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
         {
             label: 'HERRAMIENTAS',
             items: [
-                { path: '/practica', label: 'Práctica guiada', icon: SquaresFour },
                 {
                     path: '/planillas',
                     label: 'Planillas',
