@@ -8,8 +8,10 @@ import type {
     SystemMeta,
 } from '../accounting/domain/types'
 import type { InflationIndexSet } from '../accounting/inflation/types'
+import type { ReportSnapshot } from '../reporting/snapshots/types'
 import { migrateToV17 } from '../accounting/migration/migrateV17'
 import { migrateToV18 } from '../accounting/migration/migrateV18'
+import { migrateToV19 } from '../accounting/migration/migrateV19'
 import type {
     InventoryProduct,
     InventoryMovement,
@@ -121,6 +123,8 @@ class ContableDatabase extends Dexie {
     systemMeta!: EntityTable<SystemMeta, 'id'>
     // ── Fase 2B: índices de inflación versionados ────────────
     inflationIndexSets!: EntityTable<InflationIndexSet, 'id'>
+    // ── Fase 2C: snapshots de reportes publicados ────────────
+    reportSnapshots!: EntityTable<ReportSnapshot, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -559,6 +563,11 @@ class ContableDatabase extends Dexie {
         this.version(18).stores({
             inflationIndexSets: 'id, status, createdAt',
         }).upgrade(migrateToV18)
+
+        // Version 19 (Fase 2C): snapshots de reportes publicados.
+        this.version(19).stores({
+            reportSnapshots: 'id, companyId, exerciseId, status, createdAt',
+        }).upgrade(migrateToV19)
     }
 }
 

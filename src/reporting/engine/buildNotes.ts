@@ -70,6 +70,54 @@ function groupNote(
     }
 }
 
+/**
+ * Anexo de evolución de bienes de uso (§15): saldo inicial, altas, bajas,
+ * depreciación y saldo final, DERIVADO del balance normalizado (opening +
+ * movimientos del período por cuenta). Reconcilia con el rubro PPE del ESP.
+ * Las cuentas regularizadoras (amortización acumulada) se exponen en negativo.
+ */
+function buildFixedAssetsEvolution(input: ReportingInput, bundle: StatementsBundle): StatementNote {
+    const byId = new Map(input.accounts.map(a => [a.id, a]))
+    const lines: NoteLine[] = []
+    let totalCents = 0
+
+    for (const row of bundle.trialBalance.rows) {
+        const account = byId.get(row.accountId)
+        if (account?.statementGroup !== 'PPE') continue
+        const openingCents = toCents(row.opening)
+        const debitCents = toCents(row.periodDebit)
+        const creditCents = toCents(row.periodCredit)
+        const closingCents = toCents(row.closing)
+        if (openingCents === 0 && debitCents === 0 && creditCents === 0 && closingCents === 0) continue
+
+        const isContra = account?.isContra
+        // El neto D−C ya lleva el signo correcto: una regularizadora con saldo
+        // acreedor queda negativa y reduce el rubro. No se vuelve a invertir.
+        // Para cuentas de origen: altas = débitos, bajas = créditos.
+        // Para amortización acumulada (contra): depreciación = créditos.
+        const detail = isContra
+            ? `Depreciación acumulada ${fromCents(creditCents)} · desafectaciones ${fromCents(debitCents)}`
+            : `Altas ${fromCents(debitCents)} · bajas ${fromCents(creditCents)}`
+        lines.push({
+            label: `${account?.code} ${account?.name} — inicial ${fromCents(openingCents)} · ${detail} · final ${fromCents(closingCents)}`,
+            amount: fromCents(closingCents),
+            origin: 'DERIVED',
+            accountIds: [row.accountId],
+        })
+        totalCents += closingCents
+    }
+
+    return {
+        id: 'anexo-bienes-uso',
+        title: 'Anexo de evolución de bienes de uso',
+        text: 'Saldo inicial, altas, bajas y depreciación del ejercicio por cuenta, derivados del Diario. El total reconcilia con el rubro Bienes de uso del ESP.',
+        lines: lines.length > 0 ? lines : [{ label: 'Sin bienes de uso en el ejercicio', amount: null, origin: 'NOT_APPLICABLE', accountIds: [] }],
+        total: fromCents(totalCents),
+        reconcilesWith: 'esp:anc',
+        reconciled: null,
+    }
+}
+
 export function buildNotes(input: ReportingInput, bundle: StatementsBundle): StatementNote[] {
     const byId = new Map(input.accounts.map(a => [a.id, a]))
     const notes: StatementNote[] = []
@@ -115,8 +163,7 @@ export function buildNotes(input: ReportingInput, bundle: StatementsBundle): Sta
         ['TRADE_RECEIVABLES', 'OTHER_RECEIVABLES', 'TAX_CREDITS'], input, bundle))
     notes.push(groupNote('nota-bienes-cambio', 'Bienes de cambio',
         ['INVENTORIES'], input, bundle))
-    notes.push(groupNote('nota-bienes-uso', 'Bienes de uso (anexo)',
-        ['PPE'], input, bundle))
+    notes.push(buildFixedAssetsEvolution(input, bundle))
     notes.push(groupNote('nota-intangibles', 'Activos intangibles',
         ['INTANGIBLES'], input, bundle))
     notes.push(groupNote('nota-deudas', 'Deudas',

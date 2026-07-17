@@ -43,8 +43,15 @@ export async function getEntryRecord(id: string): Promise<JournalEntry | undefin
     return db.entries.get(id)
 }
 
+/**
+ * Busca un asiento ACTIVO por su clave de idempotencia. Fase 2C: los asientos
+ * REVERSED (anulados) se ignoran, de modo que tras revertir/anular una
+ * operación se puede volver a contabilizar el mismo hecho (nueva versión) sin
+ * quedar atrapado por la clave del asiento anulado.
+ */
 export async function findEntryByIdempotencyKey(key: string): Promise<JournalEntry | undefined> {
-    return db.entries.where('idempotencyKey').equals(key).first()
+    const matches = await db.entries.where('idempotencyKey').equals(key).toArray()
+    return matches.find(e => e.status !== 'REVERSED') ?? undefined
 }
 
 /** Máximo entryNumber asignado en un ejercicio (para numeración secuencial) */

@@ -1,8 +1,19 @@
-# Excepción de seguridad aceptada — dependencia `xlsx` (SheetJS)
+# Excepción de seguridad — dependencia `xlsx` (SheetJS) — **CERRADA en Fase 2C**
+
+> **ESTADO FINAL (17-07-2026): CERRADA.** `xlsx` fue eliminado del proyecto
+> (package.json, lockfile e imports) y reemplazado por `exceljs` + `papaparse`
+> según `docs/ADR_EXPORTACION_IMPORTACION_PLANILLAS.md`. `npm audit --omit=dev`
+> ya **no reporta** las advisories high de SheetJS. Quedan 3 vulnerabilidades
+> **moderate** de bajo riesgo real (uuid dentro de exceljs — bounds check con
+> `buf` que la app no controla; brace-expansion transitiva), documentadas en
+> el informe de Fase 2C; ninguna es high/critical. La sección siguiente se
+> conserva como registro histórico de la excepción original.
+
+---
 
 | Dato | Valor |
 |---|---|
-| Estado | **Excepción temporal aceptada y documentada** (Fase 2B, §15.5) |
+| Estado | ~~Excepción temporal aceptada~~ → **CERRADA (Fase 2C)** |
 | Fecha de aceptación | 16-07-2026 |
 | Dependencia | `xlsx@^0.18.5` (SheetJS Community Edition) |
 | Advisories | GHSA-4r6h-8v6p-xvw6 (Prototype Pollution, high) · GHSA-5pgg-2g8v-p4x9 (ReDoS, high) |

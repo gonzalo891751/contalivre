@@ -3,8 +3,7 @@
  * Parsing, validation, and normalization utilities for Plan de Cuentas import
  */
 
-import Papa from 'papaparse'
-import * as XLSX from 'xlsx'
+import { readSpreadsheetMatrix } from './spreadsheet'
 import type { Account, AccountKind, AccountSection } from '../core/models'
 import { getDefaultNormalSide } from '../core/models'
 
@@ -60,68 +59,14 @@ export interface ImportSummary {
 // ============================================================================
 
 /**
- * Parse a CSV file and return raw rows
+ * Parse CSV/XLSX as raw matrix (Fase 2C: via readSpreadsheetMatrix / exceljs).
  */
 export function parseCSV(file: File): Promise<string[][]> {
-    return new Promise((resolve, reject) => {
-        Papa.parse(file, {
-            complete: (results) => {
-                // Filter out completely empty rows
-                const rows = (results.data as string[][]).filter(row =>
-                    row.some(cell => cell && cell.trim() !== '')
-                )
-                resolve(rows)
-            },
-            error: (error) => {
-                reject(new Error(`CSV parsing error: ${error.message}`))
-            },
-            skipEmptyLines: true,
-        })
-    })
+    return readSpreadsheetMatrix(file)
 }
 
-/**
- * Parse an XLSX file and return raw rows from the first sheet
- */
 export function parseXLSX(file: File): Promise<string[][]> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-
-        reader.onload = (e) => {
-            try {
-                const data = new Uint8Array(e.target?.result as ArrayBuffer)
-                const workbook = XLSX.read(data, { type: 'array' })
-
-                // Get first sheet
-                const firstSheetName = workbook.SheetNames[0]
-                if (!firstSheetName) {
-                    reject(new Error('El archivo Excel está vacío'))
-                    return
-                }
-
-                const worksheet = workbook.Sheets[firstSheetName]
-                const jsonData = XLSX.utils.sheet_to_json<string[]>(worksheet, {
-                    header: 1,
-                    defval: ''
-                })
-
-                // Filter out empty rows
-                const rows = jsonData.filter(row =>
-                    row.some(cell => cell && String(cell).trim() !== '')
-                ).map(row => row.map(cell => String(cell ?? '')))
-
-                resolve(rows)
-            } catch (err) {
-                reject(new Error(`Error al leer archivo Excel: ${err instanceof Error ? err.message : 'Error desconocido'}`))
-            }
-        }
-
-        reader.onerror = () => {
-            reject(new Error('Error al leer el archivo'))
-        }
-
-        reader.readAsArrayBuffer(file)
-    })
+    return readSpreadsheetMatrix(file)
 }
 
 /**

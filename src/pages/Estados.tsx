@@ -1,636 +1,141 @@
-import { useMemo, useState, useRef, useCallback, useEffect } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../storage/db'
-import { computeLedger } from '../core/ledger'
-import { computeTrialBalance, computeRollupTrialBalance } from '../core/balance'
-import { computeStatements } from '../core/statements'
-import { excludeClosingEntries } from '../utils/resultsStatement'
-import { exportElementToPdf } from '../utils/exportPdf'
-import type { StatementSection, BalanceSheet } from '../core/models'
-import {
-    EstadoSituacionPatrimonialGemini,
-    type SectionData,
-    type AccountLine
-} from '../components/Estados/EstadoSituacionPatrimonialGemini'
-import { EstadoResultadosDocument } from '../components/Estados/EstadoResultados'
-import { buildEstadoResultados, getFiscalYearDates } from '../domain/reports/estadoResultados'
-import { ImportComparativeModal, type ImportedRecord } from '../components/Estados/EstadoResultados/ImportComparativeModal'
-import { usePeriodYear } from '../hooks/usePeriodYear'
+/**
+ * Estados contables — Fase 2C (§5): consumen EXCLUSIVAMENTE el motor canónico.
+ *
+ * Toda cifra sale de un único loadReportingBundle(year). No hay presentadores
+ * legacy, ni cálculos en componentes, ni localStorage como fuente contable,
+ * ni heurísticas por nombre. ESP/ER/EEPN/EFE/Notas + indicadores + análisis +
+ * validación + metadatos vienen del mismo bundle y del mismo ReportingContext.
+ */
 
-// New components for redesigned header/toolbar
-import { EstadosHeader, type EstadosTab } from '../components/Estados/EstadosHeader'
-import FlujoEfectivoTab from '../components/Estados/FlujoEfectivoTab'
-import { DocumentToolbar } from '../components/Estados/DocumentToolbar'
-import { ESPImportComparativeModal } from '../components/Estados/ESPImportComparativeModal'
-import {
-    loadESPComparative,
-    clearESPComparative,
-    createComparativeLookup
-} from '../storage/espComparativeStore'
-import { EvolucionPNTab } from '../components/Estados/EvolucionPNTab'
-import { NotasAnexosTab } from '../components/Estados/NotasAnexosTab'
+import { useEffect, useState, useCallback } from 'react'
+import { usePeriodYear } from '../hooks/usePeriodYear'
 import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { CompanyProfileModal } from '../components/CompanyProfile'
 import '../components/CompanyProfile/CompanyProfile.css'
+import { EstadosHeader, type EstadosTab } from '../components/Estados/EstadosHeader'
+import {
+    ESPCanonicalTab,
+    ERCanonicalTab,
+    EEPNCanonicalTab,
+    NotasCanonicalTab,
+} from '../components/Estados/canonical/CanonicalTabs'
+import FlujoEfectivoCanonicalTab from '../components/Estados/canonical/FlujoEfectivoCanonicalTab'
+import { ReportMetadataBar } from '../components/Estados/canonical/ReportMetadataBar'
+import { exportReportBundlePdf } from '../pdf/reportBundlePdf'
+import { exportReportBundleWorkbook } from '../lib/exportReportBundle'
+import { loadReportingBundle, type ReportingBundle } from '../reporting/loadReportingBundle'
+import { createSnapshot, listSnapshots } from '../reporting/snapshots/snapshotService'
 
-// ESP V2 Components
-import { EstadoSituacionPatrimonialV2 } from './estados/components/EstadoSituacionPatrimonialV2'
-import { adaptBalanceSheetToViewModel } from './estados/adapters/balanceSheetViewModel'
-
-// Feature flag for ESP V2 (set to true to use new UI)
-const USE_ESP_V2 = true
-
-// ============================================
-// Data Adapter: BalanceSheet → Gemini Format
-// ============================================
-function adaptSectionToGemini(section: StatementSection, comparativeData?: Map<string, number>): SectionData {
-    const items: AccountLine[] = section.accounts.map((item, idx) => ({
-        id: item.account.id || `item-${idx}`,
-        code: item.account.code,
-        label: item.account.name,
-        amount: item.balance,
-        level: 2 as const,
-        isContra: item.isContra,
-        comparativeAmount: comparativeData?.get(item.account.code)
-    }))
-
-    // Add total row
-    if (items.length > 0) {
-        // Calculate comparative total for section
-        const comparativeTotal = items.reduce((sum, item) => {
-            return sum + (item.comparativeAmount ?? 0)
-        }, 0)
-
-        items.push({
-            id: `${section.key}-total`,
-            label: `Total ${section.label}`,
-            amount: section.netTotal,
-            level: 2 as const,
-            isTotal: true,
-            comparativeAmount: comparativeData ? comparativeTotal : undefined
-        })
-    }
-
-    return {
-        title: section.label,
-        items
-    }
-}
-
-function adaptBalanceSheetToGemini(bs: BalanceSheet, comparativeData?: Map<string, number>) {
-    const TOLERANCE = 0.05
-    const diff = bs.totalAssets - (bs.totalLiabilities + bs.totalEquity)
-    const isBalanced = Math.abs(diff) < TOLERANCE
-
-    const activoSections = [
-        adaptSectionToGemini(bs.currentAssets, comparativeData),
-        adaptSectionToGemini(bs.nonCurrentAssets, comparativeData)
-    ].filter(s => s.items.length > 0)
-
-    const pasivoSections = [
-        adaptSectionToGemini(bs.currentLiabilities, comparativeData),
-        adaptSectionToGemini(bs.nonCurrentLiabilities, comparativeData)
-    ].filter(s => s.items.length > 0)
-
-    // Calculate comparative totals
-    const comparativeTotalActivo = comparativeData
-        ? activoSections.reduce((sum, s) => {
-            const totalItem = s.items.find(i => i.isTotal)
-            return sum + (totalItem?.comparativeAmount ?? 0)
-        }, 0)
-        : undefined
-
-    const comparativeTotalPasivo = comparativeData
-        ? pasivoSections.reduce((sum, s) => {
-            const totalItem = s.items.find(i => i.isTotal)
-            return sum + (totalItem?.comparativeAmount ?? 0)
-        }, 0)
-        : undefined
-
-    // PN comparative
-    const pnItems: AccountLine[] = bs.equity.accounts.map((item, idx) => ({
-        id: item.account.id || `pn-${idx}`,
-        code: item.account.code,
-        label: item.account.name,
-        amount: item.balance,
-        level: 2,
-        isContra: item.isContra,
-        comparativeAmount: comparativeData?.get(item.account.code)
-    }))
-
-    const comparativeTotalPN = pnItems.reduce((sum, item) => {
-        return sum + (item.comparativeAmount ?? 0)
-    }, 0)
-
-    if (bs.equity.accounts.length > 0) {
-        pnItems.push({
-            id: 'pn-total',
-            label: 'Total Patrimonio Neto',
-            amount: bs.totalEquity,
-            level: 2 as const,
-            isTotal: true,
-            comparativeAmount: comparativeData ? comparativeTotalPN : undefined
-        })
-    }
-
-    return {
-        activoSections,
-        pasivoSections,
-        patrimonioNetoSection: {
-            title: 'Patrimonio Neto',
-            items: pnItems
-        },
-        totalActivo: bs.totalAssets,
-        totalPasivo: bs.totalLiabilities,
-        totalPN: bs.totalEquity,
-        isBalanced,
-        diff,
-        comparativeTotalActivo,
-        comparativeTotalPasivo,
-        comparativeTotalPN: comparativeData ? comparativeTotalPN : undefined
-    }
-}
-
-// ============================================
-// Main Component
-// ============================================
 export default function Estados() {
-    // Tab control (extended to support all 5 states)
     const [activeTab, setActiveTab] = useState<EstadosTab>('ESP')
-    const viewMode = activeTab
+    const { year } = usePeriodYear()
 
-    const [isExporting, setIsExporting] = useState(false)
-
-    // Current year for periods (Global Store)
-    const { year: globalYear, start: globalStart, end: globalEnd } = usePeriodYear()
-    const currentYear = globalYear
-
-    // ============================================
-    // Estado de Resultados (ER) Controls
-    // ============================================
-    const [erSelectedYear, setErSelectedYear] = useState(currentYear)
-
-    // Sync with global year change
-    useEffect(() => {
-        setErSelectedYear(globalYear)
-    }, [globalYear])
-    const [erShowComparative, setErShowComparative] = useState(false)
-    const [erShowDetails, setErShowDetails] = useState(true)
-    const erFiscalYears = useMemo(() => [currentYear, currentYear - 1, currentYear - 2], [currentYear])
-    const [erImportModalOpen, setErImportModalOpen] = useState(false)
-    const [erComparativeOverrides, setErComparativeOverrides] = useState<Map<string, number>>(new Map())
-
-    // ============================================
-    // Estado de Situación Patrimonial (ESP) Controls - NEW
-    // ============================================
-    const [espShowComparative, setEspShowComparative] = useState(false)
-    const [espComparativeYear, setEspComparativeYear] = useState(currentYear - 1)
-    const [espImportModalOpen, setEspImportModalOpen] = useState(false)
-    const [espComparativeData, setEspComparativeData] = useState<Map<string, number> | null>(null)
-    const espAvailableYears = useMemo(() => [currentYear - 1, currentYear - 2, currentYear - 3], [currentYear])
-
-    // Empresa ID (hardcoded for now, could be from context/store)
-    const empresaId = 'default'
-    // Company Profile: dynamic company name from Dexie
     const { profile: companyProfile, save: saveCompanyProfile, isSaving: isSavingCompanyProfile } = useCompanyProfile()
     const [showCompanyProfileModal, setShowCompanyProfileModal] = useState(false)
-    // FALLBACK: Use profile.legalName or default placeholder
-    const empresaName = companyProfile?.legalName || 'Mi Empresa S.A.' // Fallback if not configured
+    const empresaName = companyProfile?.legalName || 'Empresa ContaLivre'
 
-    // Load ESP comparative from storage on mount/year change
+    const [showComparative, setShowComparative] = useState(false)
+    const [bundle, setBundle] = useState<ReportingBundle | null>(null)
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState<string | null>(null)
+    const [reloadKey, setReloadKey] = useState(0)
+    const [isExporting, setIsExporting] = useState(false)
+    const [snapshotInfo, setSnapshotInfo] = useState<string | null>(null)
+
     useEffect(() => {
-        const records = loadESPComparative(empresaId, espComparativeYear)
-        if (records) {
-            setEspComparativeData(createComparativeLookup(records))
-        } else {
-            setEspComparativeData(null)
-        }
-    }, [espComparativeYear, espImportModalOpen]) // Re-check after modal closes
-
-    const hasEspComparativeData = espComparativeData !== null && espComparativeData.size > 0
-
-    // ============================================
-    // ER Comparative handlers (existing)
-    // ============================================
-    useEffect(() => {
-        const comparativeYear = erSelectedYear - 1
-        const key = `estadoResultados:comparativo:${comparativeYear}`
-        const stored = localStorage.getItem(key)
-        if (stored) {
-            try {
-                const parsed = JSON.parse(stored)
-                if (Array.isArray(parsed)) {
-                    setErComparativeOverrides(new Map(parsed))
-                }
-            } catch (e) {
-                console.error('Error loading comparative overrides', e)
+        listSnapshots().then(list => {
+            const forYear = list.filter(s => s.exerciseId.includes(String(year)))
+            if (forYear.length > 0) {
+                const last = forYear[0]
+                setSnapshotInfo(`${forYear.length} snapshot(s) de este ejercicio · último: ${last.status} (${last.createdAt.slice(0, 10)}, v${last.reportVersion})`)
+            } else {
+                setSnapshotInfo(null)
             }
-        } else {
-            setErComparativeOverrides(new Map())
-        }
-    }, [erSelectedYear])
+        })
+    }, [year, reloadKey])
 
-    const handleErImportComparative = useCallback((records: ImportedRecord[]) => {
-        const comparativeYear = erSelectedYear - 1
-        const map = new Map<string, number>()
-        records.forEach(r => map.set(r.code, r.amount))
+    const handlePublishSnapshot = useCallback(async () => {
+        if (!bundle) return
+        const snap = await createSnapshot(bundle, { status: 'PUBLISHED' })
+        setSnapshotInfo(`Snapshot ${snap.status} creado (v${snap.reportVersion}, ${snap.createdAt.slice(0, 10)}).`)
+        setReloadKey(k => k + 1)
+    }, [bundle])
 
-        setErComparativeOverrides(map)
-        setErImportModalOpen(false)
+    useEffect(() => {
+        let cancelled = false
+        setLoading(true)
+        setError(null)
+        loadReportingBundle(year, { withComparative: showComparative })
+            .then(b => { if (!cancelled) { setBundle(b); setLoading(false) } })
+            .catch(e => { if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); setLoading(false) } })
+        return () => { cancelled = true }
+    }, [year, showComparative, reloadKey])
 
-        const key = `estadoResultados:comparativo:${comparativeYear}`
-        localStorage.setItem(key, JSON.stringify(Array.from(map.entries())))
-    }, [erSelectedYear])
-
-    const handleErDeleteComparative = useCallback(() => {
-        if (!confirm('¿Estás seguro de que querés borrar los datos importados?')) return
-
-        const comparativeYear = erSelectedYear - 1
-        setErComparativeOverrides(new Map())
-        localStorage.removeItem(`estadoResultados:comparativo:${comparativeYear}`)
-    }, [erSelectedYear])
-
-    // ============================================
-    // ESP Comparative handlers - NEW
-    // ============================================
-    const handleEspToggleComparative = useCallback((value: boolean) => {
-        setEspShowComparative(value)
-        // If turning on without data, the toolbar will trigger import modal via onImportClick
-    }, [])
-
-    const handleEspImportSuccess = useCallback(() => {
-        // Reload data from storage
-        const records = loadESPComparative(empresaId, espComparativeYear)
-        if (records) {
-            setEspComparativeData(createComparativeLookup(records))
-            setEspShowComparative(true)
-        }
-    }, [espComparativeYear, empresaId])
-
-    const handleEspClearComparative = useCallback(() => {
-        if (!confirm(`¿Estás seguro de que querés borrar los datos comparativos de ${espComparativeYear}?`)) return
-
-        clearESPComparative(empresaId, espComparativeYear)
-        setEspComparativeData(null)
-        setEspShowComparative(false)
-    }, [espComparativeYear, empresaId])
-
-    // Refs for PDF capture
-    const espRef = useRef<HTMLDivElement>(null)
-    const erRef = useRef<HTMLDivElement>(null)
-
-    const handleDownload = async () => {
+    const handleDownloadPdf = useCallback(async () => {
+        if (!bundle) return
         setIsExporting(true)
-        const dateStr = new Date().toISOString().split('T')[0]
-
         try {
-            if (viewMode === 'ESP' && espRef.current) {
-                await exportElementToPdf(espRef.current, `situacion_patrimonial_${dateStr}`)
-            } else if (viewMode === 'ER' && erRef.current) {
-                await exportElementToPdf(erRef.current, `estado_resultados_${dateStr}`)
-            }
+            await exportReportBundlePdf(bundle, activeTab)
         } finally {
             setIsExporting(false)
         }
-    }
+    }, [bundle, activeTab])
 
-    const handlePrint = useCallback(() => {
-        window.print()
-    }, [])
-
-    // ============================================
-    // Data Loading
-    // ============================================
-    const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
-    // Aislamiento por contexto: el ESP es un stock a la fecha de corte.
-    // - Sin apertura formal: incluye la historia acumulada hasta globalEnd
-    //   (mecanismo explícito de la Fase 2A).
-    // - Con asiento de apertura formal contabilizado (cierre Fase 2B): los
-    //   saldos iniciales ya están DENTRO del ejercicio; incluir la historia
-    //   previa duplicaría, así que se limita al rango del ejercicio.
-    // Nunca incluye asientos posteriores al corte ni borradores.
-    const entries = useLiveQuery(
-        async () => {
-            const list = (await db.entries
-                .where('date')
-                .belowOrEqual(globalEnd)
-                .toArray()).filter(e => e.status !== 'DRAFT')
-            const hasOpening = list.some(e =>
-                e.date >= globalStart && e.sourceModule === 'closing' && e.sourceType === 'apertura')
-            return hasOpening ? list.filter(e => e.date >= globalStart) : list
-        },
-        [globalStart, globalEnd]
-    )
-
-    // Compute ledger and trial balance for statements
-    const statementsData = useMemo(() => {
-        if (!accounts || !entries || entries.length === 0) return null
-
-        const entriesWithoutClosing = excludeClosingEntries(entries, accounts)
-        const ledger = computeLedger(entriesWithoutClosing, accounts)
-        const trialBalanceRollup = computeRollupTrialBalance(ledger, accounts)
-        // Also compute raw trial balance for unmapped account detection
-        const trialBalanceRaw = computeTrialBalance(ledger, accounts)
-        const statements = computeStatements(trialBalanceRollup, accounts)
-
-        return {
-            statements,
-            trialBalanceRaw,
-            ledger
+    const handleDownloadXlsx = useCallback(async () => {
+        if (!bundle) return
+        setIsExporting(true)
+        try {
+            await exportReportBundleWorkbook(bundle)
+        } finally {
+            setIsExporting(false)
         }
-    }, [accounts, entries])
+    }, [bundle])
 
-    const statements = statementsData?.statements ?? null
-
-    // ESP V2 ViewModel
-    const espViewModel = useMemo(() => {
-        if (!statements || !accounts || !statementsData) return null
-
-        const comparativeMap = espShowComparative && espComparativeData
-            ? espComparativeData
-            : undefined
-
-        return adaptBalanceSheetToViewModel(statements.balanceSheet, {
-            empresa: empresaName,
-            ejercicioActual: currentYear,
-            fechaCorte: new Date(globalEnd).toLocaleDateString('es-AR', {
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric'
-            }),
-            comparativeData: comparativeMap,
-            trialBalance: statementsData.trialBalanceRaw,
-            accounts
-        })
-    }, [statements, accounts, statementsData, espShowComparative, espComparativeData, empresaName, currentYear, globalEnd])
-
-    const estadoResultadosData = useMemo(() => {
-        if (!accounts || !entries) return null
-
-        let fromDate, toDate
-        if (erSelectedYear === globalYear) {
-            fromDate = globalStart
-            toDate = globalEnd
-        } else {
-            // Fallback for past years (using calendar year)
-            // TODO: In the future, we might want to store historical fiscal year dates
-            ({ fromDate, toDate } = getFiscalYearDates(erSelectedYear))
-        }
-
-        const { fromDate: compFromDate, toDate: compToDate } = getFiscalYearDates(erSelectedYear - 1)
-
-        return buildEstadoResultados({
-            accounts,
-            entries,
-            fromDate,
-            toDate,
-            fiscalYear: erSelectedYear,
-            comparativeFromDate: compFromDate,
-            comparativeToDate: compToDate,
-            comparativeOverrides: erComparativeOverrides
-        })
-    }, [accounts, entries, erSelectedYear, erComparativeOverrides, globalYear, globalStart, globalEnd])
-
-    // ============================================
-    // ESP Info Items (for toolbar accordion)
-    // ============================================
-    const espInfoItems = [
-        'Muestra lo que tenés (Activo) y lo que debés (Pasivo/PN).',
-        'La ecuación fundamental debe dar cero: Activo = Pasivo + PN.',
-        'Usá el modo comparativo para ver la evolución interanual.'
-    ]
-
-    /* Unused
-    const erInfoItems = [
-        'Muestra ingresos y gastos del período.',
-        'El resultado neto indica si hay ganancia o pérdida.',
-        'Comparalo con el año anterior para ver la evolución.'
-    ]
-    */
-
-    // ============================================
-    // Empty/Loading States (with new header)
-    // ============================================
-    if (!entries?.length) {
-        return (
-            <div className="estados-page">
-                <EstadosHeader
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                    empresaName={empresaName}
-                />
-                <main className="estados-main">
-                    <div className="card">
-                        <div className="empty-state">
-                            <div className="empty-state-icon">📈</div>
-                            <p>No hay asientos registrados. Cargá algunos para ver los estados contables.</p>
-                        </div>
-                    </div>
-                </main>
-                <style>{pageStyles}</style>
-            </div>
-        )
-    }
-
-    if (!statements) {
-        return (
-            <div className="estados-page">
-                <EstadosHeader
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                    empresaName={empresaName}
-                />
-                <main className="estados-main">
-                    <div className="empty-state">
-                        <div className="empty-state-icon">⏳</div>
-                        <p>Cargando información...</p>
-                    </div>
-                </main>
-                <style>{pageStyles}</style>
-            </div>
-        )
-    }
-
-    const { balanceSheet } = statements
-
-    // ============================================
-    // Render
-    // ============================================
     return (
         <div className="estados-page">
-            {/* New Header with tabs */}
-            <EstadosHeader
-                activeTab={activeTab}
-                onTabChange={setActiveTab}
-                empresaName={empresaName}
-            />
+            <EstadosHeader activeTab={activeTab} onTabChange={setActiveTab} empresaName={empresaName} />
 
             <main className="estados-main">
-                {/* ESP View */}
-                {viewMode === 'ESP' && (
-                    <div className="animate-slide-up">
-                        {USE_ESP_V2 && espViewModel ? (
-                            /* ESP V2 - New pixel-perfect UI */
-                            <EstadoSituacionPatrimonialV2
-                                viewModel={espViewModel}
-                                showComparative={espShowComparative}
-                                onToggleComparative={handleEspToggleComparative}
-                                hasComparativeData={hasEspComparativeData}
-                                onImportClick={() => setEspImportModalOpen(true)}
-                            />
-                        ) : (
-                            /* ESP V1 - Original Gemini UI (fallback) */
-                            <>
-                                <DocumentToolbar
-                                    showComparative={espShowComparative}
-                                    onToggleComparative={handleEspToggleComparative}
-                                    comparativeYear={espComparativeYear}
-                                    availableYears={espAvailableYears}
-                                    onYearChange={setEspComparativeYear}
-                                    hasComparativeData={hasEspComparativeData}
-                                    onImportClick={() => setEspImportModalOpen(true)}
-                                    onClearClick={handleEspClearComparative}
-                                    infoTitle="Sobre este estado"
-                                    infoItems={espInfoItems}
-                                    onDownloadPdf={handleDownload}
-                                    isExporting={isExporting}
-                                />
-
-                                {(() => {
-                                    const comparativeMap = espShowComparative && hasEspComparativeData
-                                        ? espComparativeData
-                                        : undefined
-                                    const geminiData = adaptBalanceSheetToGemini(balanceSheet, comparativeMap ?? undefined)
-
-                                    return (
-                                        <EstadoSituacionPatrimonialGemini
-                                            loading={false}
-                                            entidad={empresaName}
-                                            fechaCorte={new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
-                                            activoSections={geminiData.activoSections}
-                                            pasivoSections={geminiData.pasivoSections}
-                                            patrimonioNetoSection={geminiData.patrimonioNetoSection}
-                                            totalActivo={geminiData.totalActivo}
-                                            totalPasivo={geminiData.totalPasivo}
-                                            totalPN={geminiData.totalPN}
-                                            isBalanced={geminiData.isBalanced}
-                                            diff={geminiData.diff}
-                                            onExportPdf={handleDownload}
-                                            isExporting={isExporting}
-                                            pdfRef={espRef}
-                                            showComparative={espShowComparative && hasEspComparativeData}
-                                            comparativeYear={espComparativeYear}
-                                            currentYear={currentYear}
-                                            comparativeTotalActivo={geminiData.comparativeTotalActivo}
-                                            comparativeTotalPasivo={geminiData.comparativeTotalPasivo}
-                                            comparativeTotalPN={geminiData.comparativeTotalPN}
-                                        />
-                                    )
-                                })()}
-
-                                {espShowComparative && !hasEspComparativeData && (
-                                    <div className="esp-overlay-cta">
-                                        <div className="esp-overlay-card">
-                                            <div className="esp-overlay-icon">📄</div>
-                                            <h3>Faltan datos de {espComparativeYear}</h3>
-                                            <p>Para ver la comparación, necesitás importar el balance del ejercicio anterior.</p>
-                                            <button
-                                                className="esp-overlay-btn"
-                                                onClick={() => setEspImportModalOpen(true)}
-                                            >
-                                                Importar Comparativo
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </>
-                        )}
+                {loading && (
+                    <div className="empty-state">
+                        <div className="empty-state-icon">⏳</div>
+                        <p>Calculando estados desde el motor canónico…</p>
                     </div>
                 )}
 
-                {/* ER View (existing, with minimal changes) */}
-                {/* EFE View (Fase 2B: motor único de reporting) */}
-                {viewMode === 'EFE' && (
-                    <div className="animate-slide-up">
-                        <FlujoEfectivoTab />
+                {!loading && error && (
+                    <div className="card" style={{ padding: 20, borderLeft: '4px solid #ef4444' }}>
+                        <strong>No se pudo generar el reporte.</strong>
+                        <p style={{ marginTop: 6, color: '#64748b' }}>{error}</p>
+                        <button className="btn btn-secondary" style={{ marginTop: 10 }} onClick={() => setReloadKey(k => k + 1)}>
+                            Reintentar
+                        </button>
                     </div>
                 )}
 
-                {viewMode === 'ER' && estadoResultadosData && (
+                {!loading && !error && bundle && (
                     <div className="animate-slide-up">
-                        <EstadoResultadosDocument
-                            data={estadoResultadosData}
-                            showComparative={erShowComparative}
-                            showDetails={erShowDetails}
-                            fiscalYear={erSelectedYear}
-                            fiscalYears={erFiscalYears}
-                            onToggleComparative={() => setErShowComparative(p => !p)}
-                            onToggleDetails={() => setErShowDetails(p => !p)}
-                            onYearChange={setErSelectedYear}
-                            onPrint={handlePrint}
-                            onImportComparative={() => setErImportModalOpen(true)}
-                            onDeleteComparative={handleErDeleteComparative}
-                            hasComparativeData={erComparativeOverrides.size > 0}
+                        <ReportMetadataBar
+                            metadata={bundle.metadata}
+                            showComparative={showComparative}
+                            onToggleComparative={() => setShowComparative(v => !v)}
+                            onDownloadPdf={handleDownloadPdf}
+                            onDownloadXlsx={handleDownloadXlsx}
+                            onEditCompany={() => setShowCompanyProfileModal(true)}
+                            onPublishSnapshot={handlePublishSnapshot}
+                            snapshotInfo={snapshotInfo ?? undefined}
+                            isExporting={isExporting}
                         />
-                    </div>
-                )}
 
-                {/* EPN View - Evolución del Patrimonio Neto */}
-                {viewMode === 'EPN' && accounts && entries && (
-                    <div className="animate-slide-up">
-                        <EvolucionPNTab
-                            accounts={accounts}
-                            entries={entries}
-                            fiscalYear={currentYear}
-                            empresaName={empresaName}
-                            netIncomeFromER={estadoResultadosData?.resultadoNeto}
-                            pnFromBalance={statements?.balanceSheet.totalEquity}
-                            periodStart={globalStart}
-                            periodEnd={globalEnd}
-                        />
-                    </div>
-                )}
-
-                {/* NA View - Notas y Anexos */}
-                {viewMode === 'NA' && statements && accounts && entries && (
-                    <div className="animate-slide-up">
-                        <NotasAnexosTab
-                            balanceSheet={statements.balanceSheet}
-                            incomeStatement={statements.incomeStatement}
-                            accounts={accounts}
-                            entries={entries}
-                            fiscalYear={currentYear}
-                            empresaName={empresaName}
-                            empresaId={empresaId}
-                            comparativeData={espShowComparative && hasEspComparativeData ? espComparativeData ?? undefined : undefined}
-                            periodEnd={globalEnd}
-                        />
+                        {activeTab === 'ESP' && <ESPCanonicalTab bundle={bundle} />}
+                        {activeTab === 'ER' && <ERCanonicalTab bundle={bundle} />}
+                        {activeTab === 'EPN' && <EEPNCanonicalTab bundle={bundle} />}
+                        {activeTab === 'EFE' && <FlujoEfectivoCanonicalTab bundle={bundle} />}
+                        {activeTab === 'NA' && <NotasCanonicalTab bundle={bundle} />}
                     </div>
                 )}
             </main>
 
-            {/* Modals */}
-            <ESPImportComparativeModal
-                isOpen={espImportModalOpen}
-                onClose={() => setEspImportModalOpen(false)}
-                onSuccess={handleEspImportSuccess}
-                targetYear={espComparativeYear}
-                currentYear={currentYear}
-                empresaId={empresaId}
-                accounts={accounts || []}
-            />
-
-            <ImportComparativeModal
-                isOpen={erImportModalOpen}
-                onClose={() => setErImportModalOpen(false)}
-                onImport={handleErImportComparative}
-                onClean={handleErDeleteComparative}
-                targetYear={erSelectedYear - 1}
-                accounts={accounts || []}
-                hasComparativeData={erComparativeOverrides.size > 0}
-            />
-
-            {/* Company Profile Modal - allows editing from Estados page */}
             <CompanyProfileModal
                 isOpen={showCompanyProfileModal}
                 onClose={() => setShowCompanyProfileModal(false)}
@@ -644,128 +149,14 @@ export default function Estados() {
     )
 }
 
-// ============================================
-// Page Styles
-// ============================================
 const pageStyles = `
-.estados-page {
-    min-height: 100vh;
-    background: #f8fafc;
-}
-
-.estados-main {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 24px 16px;
-    position: relative;
-}
-
-@media (min-width: 640px) {
-    .estados-main {
-        padding: 32px 24px;
-    }
-}
-
-@media (min-width: 1024px) {
-    .estados-main {
-        padding: 32px;
-    }
-}
-
-/* Animation */
-.animate-slide-up {
-    animation: slideUp 0.4s ease-out forwards;
-}
-
-@keyframes slideUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-/* Empty State */
-.empty-state {
-    text-align: center;
-    padding: 64px 32px;
-    color: #64748b;
-}
-
-.empty-state-icon {
-    font-size: 3rem;
-    margin-bottom: 16px;
-}
-
-/* Card */
-.card {
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-    border: 1px solid #f1f5f9;
-}
-
-/* ESP Overlay CTA */
-.esp-overlay-cta {
-    position: fixed;
-    inset: 0;
-    background: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(8px);
-    z-index: 50;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-.esp-overlay-card {
-    background: white;
-    padding: 32px 48px;
-    border-radius: 16px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
-    border: 1px solid #e2e8f0;
-    text-align: center;
-    max-width: 400px;
-}
-
-.esp-overlay-icon {
-    font-size: 3rem;
-    margin-bottom: 16px;
-}
-
-.esp-overlay-card h3 {
-    font-family: var(--font-display, 'Outfit', sans-serif);
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: #0f172a;
-    margin: 0 0 8px;
-}
-
-.esp-overlay-card p {
-    color: #64748b;
-    font-size: 0.9rem;
-    margin: 0 0 24px;
-}
-
-.esp-overlay-btn {
-    width: 100%;
-    padding: 12px 24px;
-    background: #3B82F6;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 0.95rem;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-    transition: all 0.2s ease;
-}
-
-.esp-overlay-btn:hover {
-    background: #2563eb;
-    transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
-}
+.estados-page { min-height: 100vh; background: #f8fafc; }
+.estados-main { max-width: 1280px; margin: 0 auto; padding: 24px 16px; position: relative; }
+@media (min-width: 640px) { .estados-main { padding: 32px 24px; } }
+@media (min-width: 1024px) { .estados-main { padding: 32px; } }
+.animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
+@keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.empty-state { text-align: center; padding: 64px 32px; color: #64748b; }
+.empty-state-icon { font-size: 3rem; margin-bottom: 16px; }
+.card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); border: 1px solid #f1f5f9; }
 `

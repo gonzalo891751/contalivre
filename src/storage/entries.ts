@@ -18,11 +18,13 @@ import type { JournalEntry, EntryLine } from '../core/models'
 import {
     deleteDraftEntry,
     postNewEntry,
+    postOperation,
     replaceOperationEntry,
     resetJournal,
     updateDraftEntry,
     voidOperationEntry,
 } from '../accounting/application/journalService'
+import { contentDiscriminator } from '../accounting/domain/idempotency'
 
 /**
  * Obtiene todos los asientos ordenados por fecha.
@@ -41,11 +43,39 @@ export async function getEntryById(id: string): Promise<JournalEntry | undefined
 
 /**
  * Crea y contabiliza un asiento a través del servicio único.
+ *
+ * Fase 2C (idempotencia explícita, ACC-011): si el asiento tiene origen
+ * completo (sourceModule + sourceType + sourceId) y no trae clave propia,
+ * se enruta por postOperation con una clave derivada
+ * `companyId|module|type|sourceId|accountingEventType`, donde
+ * accountingEventType distingue cada hecho contable de la operación (el
+ * accountingEventType explícito de metadata, o el hash del contenido de las
+ * líneas). Reintentar el mismo asiento NO duplica; los asientos distintos de
+ * la misma operación conservan claves distintas.
  * Lanza PostingError con mensajes concretos si la validación falla.
  */
 export async function createEntry(
     entry: Omit<JournalEntry, 'id'>
 ): Promise<JournalEntry> {
+    const hasSource = !!(entry.sourceModule && entry.sourceType && entry.sourceId)
+
+    if (hasSource && !entry.idempotencyKey) {
+        const accountingEventType =
+            (entry.metadata?.accountingEventType as string | undefined) ?? contentDiscriminator(entry.lines)
+        const { entry: posted } = await postOperation({
+            date: entry.date,
+            memo: entry.memo,
+            lines: entry.lines,
+            sourceModule: entry.sourceModule!,
+            sourceType: entry.sourceType!,
+            sourceId: entry.sourceId!,
+            accountingEventType,
+            metadata: entry.metadata,
+            createdAt: entry.createdAt,
+        })
+        return posted
+    }
+
     return postNewEntry({
         date: entry.date,
         memo: entry.memo,
