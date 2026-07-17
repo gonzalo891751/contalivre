@@ -237,6 +237,9 @@ const IntegralScoreCard = ({ scores }: { scores: { fin: number | null, pat: numb
 
 // --- 4. MAIN DASHBOARD ---
 
+// Fase 2B (ANA-002): score universal desactivado por defecto (opt-in).
+const SHOW_UNIVERSAL_HEALTH_SCORE = false
+
 export default function IndicatorsDashboard() {
     const [activeTab, setActiveTab] = useState<GroupId>('financiero');
 
@@ -561,8 +564,20 @@ export default function IndicatorsDashboard() {
                             ))}
                         </div>
 
-                        {/* 4. Integral Evaluation (Always Visible at bottom of tab) */}
-                        <IntegralScoreCard scores={scores} />
+                        {/* 4. Evaluación integral — Fase 2B (ANA-002): el score
+                            universal está DESACTIVADO por defecto. Un promedio
+                            10/8/5/2 con umbrales genéricos sin sector, tamaño ni
+                            ciclo produce falsa autoridad diagnóstica. Se puede
+                            reactivar explícitamente (opt-in) asumiendo esa
+                            limitación. */}
+                        {SHOW_UNIVERSAL_HEALTH_SCORE && <IntegralScoreCard scores={scores} />}
+                        {!SHOW_UNIVERSAL_HEALTH_SCORE && (
+                            <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 16, lineHeight: 1.6 }}>
+                                La calificación global de “salud financiera” está desactivada: un puntaje
+                                universal sin contexto de sector y ciclo económico puede inducir a error.
+                                Interpretá cada indicador con su fórmula, su período y sus limitaciones.
+                            </p>
+                        )}
                     </div>
                 </>
             )}
