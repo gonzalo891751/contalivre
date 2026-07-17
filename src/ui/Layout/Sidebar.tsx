@@ -72,11 +72,13 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 { path: '/mayor', label: 'Libro Mayor', icon: BookBookmark },
                 { path: '/balance', label: 'Balance de SyS', icon: Scales },
                 { path: '/estados', label: 'Estados contables', icon: ChartLineUp },
+                { path: '/mapeos', label: 'Mapeos de cuentas', icon: TreeStructure },
             ]
         },
         {
             label: 'HERRAMIENTAS',
             items: [
+                { path: '/practica', label: 'Práctica guiada', icon: SquaresFour },
                 {
                     path: '/planillas',
                     label: 'Planillas',

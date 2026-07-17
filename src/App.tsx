@@ -13,6 +13,9 @@ import PlanillasLayout from './pages/Planillas/PlanillasLayout'
 import PlanillasHome from './pages/Planillas/PlanillasHome'
 import AcercaDe from './pages/AcercaDe'
 
+const MapeosPage = lazy(() => import('./pages/MapeosPage'))
+const PracticaPage = lazy(() => import('./pages/PracticaPage'))
+
 // Fase 2B (PER-001): las pantallas pesadas (estados, operaciones grandes,
 // planillas con PDF/XLSX) se cargan bajo demanda para bajar el bundle inicial.
 const Estados = lazy(() => import('./pages/Estados'))
@@ -69,8 +72,9 @@ function App() {
                 <Route path="/mayor" element={<Mayor />} />
                 <Route path="/balance" element={<Balance />} />
                 <Route path="/estados" element={<Estados />} />
+                <Route path="/mapeos" element={<MapeosPage />} />
                 <Route path="/acerca" element={<AcercaDe />} />
-                <Route path="/practica" element={<Navigate to="/" replace />} />
+                <Route path="/practica" element={<PracticaPage />} />
                 <Route path="/planillas" element={<PlanillasLayout />}>
                     <Route index element={<PlanillasHome />} />
                     <Route path="inventario" element={<Navigate to="/operaciones/inventario" replace />} />
