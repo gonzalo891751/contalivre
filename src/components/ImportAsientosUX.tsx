@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import * as XLSX from 'xlsx'
-import Papa from 'papaparse'
 import { createEntry } from '../storage/entries'
 import { getPostableAccounts } from '../storage/accounts'
-import { validateImportFile, validateImportShape } from '../accounting/importLimits'
+import { readSpreadsheet } from '../lib/spreadsheet'
 import type { Account } from '../core/models'
 
 type Step = 1 | 2 | 3 | 4
@@ -511,44 +509,18 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
         return map
     }
 
-    // Step 1: File Parsing
+    // Step 1: File Parsing (Fase 2C: readSpreadsheet unificado, sin xlsx)
     const onPickFile = async (f: File | null) => {
         if (!f) return
-
-        // Límites de importación (Fase 2A, SEC-002): extensión y tamaño
-        const fileError = validateImportFile(f)
-        if (fileError) {
-            alert(fileError)
-            return
-        }
-
-        setFile(f)
-        const ext = f.name.split('.').pop()?.toLowerCase()
-
-        const finish = (data: RawRow[], headers: string[]) => {
-            // Límites de filas/columnas después de parsear
-            const shapeError = validateImportShape(data.length, headers.length)
-            if (shapeError) {
-                alert(shapeError)
-                setFile(null)
-                return
-            }
-            setRawRows(data)
+        try {
+            const { headers, rows } = await readSpreadsheet(f)
+            setFile(f)
+            setRawRows(rows)
             setRawHeaders(headers)
             setMapping(detectMapping(headers))
-        }
-
-        if (ext === 'csv') {
-            Papa.parse(f, {
-                header: true, skipEmptyLines: true,
-                complete: (results) => finish(results.data as RawRow[], results.meta.fields || [])
-            })
-        } else if (ext === 'xlsx' || ext === 'xls') {
-            const data = await f.arrayBuffer()
-            const wb = XLSX.read(data, { type: 'array' })
-            const ws = wb.Sheets[wb.SheetNames[0]]
-            const json = XLSX.utils.sheet_to_json<RawRow>(ws, { defval: "" })
-            if (json.length > 0) finish(json, Object.keys(json[0]))
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'No se pudo leer el archivo')
+            setFile(null)
         }
     }
 

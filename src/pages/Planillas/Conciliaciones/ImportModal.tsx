@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import Papa from 'papaparse'
-import * as XLSX from 'xlsx'
+import { readSpreadsheet } from '../../../lib/spreadsheet'
 
 type RawRow = Record<string, unknown>
 
@@ -82,8 +81,8 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
         }
     }
 
-    // --- Logic: File Parsing ---
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // --- Logic: File Parsing (Fase 2C: readSpreadsheet unificado, sin xlsx) ---
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (!file) return
 
@@ -91,59 +90,18 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
         setFileName(file.name)
         setError('')
 
-        setTimeout(() => {
-            if (file.name.endsWith('.csv')) {
-                parseCSV(file)
-            } else if (file.name.match(/\.(xlsx|xls)$/)) {
-                parseExcel(file)
+        try {
+            const { headers, rows } = await readSpreadsheet(file)
+            if (rows.length === 0) {
+                setError('El archivo parece estar vacío o no tiene formato de tabla.')
             } else {
-                setError('Formato no soportado. Use .csv o .xlsx')
-                setIsLoading(false)
+                processParsedData(rows, headers)
             }
-        }, 300)
-    }
-
-    const parseCSV = (file: File) => {
-        Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
-            complete: (results) => {
-                if (results.errors.length > 0) {
-                    console.warn("CSV Errors:", results.errors)
-                }
-                processParsedData(results.data as RawRow[], results.meta.fields || [])
-                setIsLoading(false)
-            },
-            error: (err) => {
-                setError('Error al leer CSV: ' + err.message)
-                setIsLoading(false)
-            }
-        })
-    }
-
-    const parseExcel = (file: File) => {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-            try {
-                const data = e.target?.result
-                const workbook = XLSX.read(data, { type: 'binary', cellDates: true })
-                const firstSheetName = workbook.SheetNames[0]
-                const worksheet = workbook.Sheets[firstSheetName]
-                const jsonData = XLSX.utils.sheet_to_json<RawRow>(worksheet, { defval: '' })
-
-                if (jsonData.length > 0 && typeof jsonData[0] === 'object') {
-                    const keys = Object.keys(jsonData[0])
-                    processParsedData(jsonData, keys)
-                } else {
-                    setError('El archivo parece estar vacío o no tiene formato de tabla.')
-                }
-            } catch (err) {
-                setError('Error al leer Excel: ' + (err instanceof Error ? err.message : String(err)))
-            } finally {
-                setIsLoading(false)
-            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'No se pudo leer el archivo')
+        } finally {
+            setIsLoading(false)
         }
-        reader.readAsBinaryString(file)
     }
 
     const processParsedData = (data: RawRow[], detectedHeaders: string[]) => {

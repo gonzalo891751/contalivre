@@ -4,7 +4,6 @@
  * Parsing and normalization functions for indices import.
  */
 
-import * as XLSX from 'xlsx';
 import type { IndexRow } from './types';
 import type { Account } from '../models';
 import type { RubroType } from './types';
@@ -39,17 +38,14 @@ const SPANISH_MONTHS: Record<string, string> = {
 export function normalizePeriod(input: string | number | null | undefined): string | null {
     if (input === null || input === undefined) return null;
 
-    // Handle Excel date serial numbers
+    // Handle Excel date serial numbers (epoch 1899-12-30; sin dependencia externa)
     if (typeof input === 'number') {
-        try {
-            const date = XLSX.SSF.parse_date_code(input);
-            if (date) {
-                const year = date.y;
-                const month = String(date.m).padStart(2, '0');
-                return `${year}-${month}`;
-            }
-        } catch {
-            return null;
+        const ms = Math.round((input - 25569) * 86400 * 1000);
+        const date = new Date(ms);
+        if (!isNaN(date.getTime())) {
+            const year = date.getUTCFullYear();
+            const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+            return `${year}-${month}`;
         }
         return null;
     }
@@ -173,41 +169,41 @@ export interface XlsxParseResult {
 }
 
 /**
- * Parse XLSX/XLS file to 2D array
+ * Parse XLSX/XLS file to 2D array (Fase 2C: exceljs cargado bajo demanda,
+ * reemplaza a xlsx). Preserva números y fechas para la normalización de
+ * períodos e índices.
  */
 export async function parseXlsxFile(file: File): Promise<XlsxParseResult> {
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await file.arrayBuffer());
 
-    const sheets: SheetInfo[] = workbook.SheetNames.map(name => {
-        const sheet = workbook.Sheets[name];
-        const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
-        return { name, rowCount: range.e.r - range.s.r + 1 };
-    });
+    const sheets: SheetInfo[] = workbook.worksheets.map(ws => ({
+        name: ws.name,
+        rowCount: ws.rowCount,
+    }));
 
-    // Default to first non-empty sheet
     const selectedSheet = sheets.find(s => s.rowCount > 0)?.name || sheets[0]?.name || '';
+    const ws = workbook.getWorksheet(selectedSheet);
 
-    const data = getSheetData(workbook, selectedSheet);
+    const data: (string | number | null)[][] = [];
+    if (ws) {
+        ws.eachRow({ includeEmpty: false }, (row) => {
+            const cells: (string | number | null)[] = [];
+            row.eachCell({ includeEmpty: true }, (cell, col) => {
+                const v = cell.value;
+                if (v == null) cells[col - 1] = null;
+                else if (typeof v === 'number') cells[col - 1] = v;
+                else if (v instanceof Date) cells[col - 1] = `${v.getUTCFullYear()}-${String(v.getUTCMonth() + 1).padStart(2, '0')}`;
+                else if (typeof v === 'object' && 'result' in v) cells[col - 1] = (v as { result: string | number | null }).result;
+                else if (typeof v === 'object' && 'text' in v) cells[col - 1] = String((v as { text: unknown }).text);
+                else cells[col - 1] = String(v);
+            });
+            data.push(cells);
+        });
+    }
 
     return { sheets, data, selectedSheet };
-}
-
-/**
- * Get data from a specific sheet
- */
-export function getSheetData(workbook: XLSX.WorkBook, sheetName: string): (string | number | null)[][] {
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) return [];
-
-    // Use raw values to preserve Excel date serials
-    const jsonData = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, {
-        header: 1,
-        raw: true,
-        defval: null,
-    });
-
-    return jsonData as (string | number | null)[][];
 }
 
 // ============================================
