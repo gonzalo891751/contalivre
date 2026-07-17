@@ -17,12 +17,10 @@ interface Props {
     metadata: ReportMetadata
     showComparative: boolean
     onToggleComparative: () => void
-    onDownloadPdf: () => void
-    onDownloadXlsx: () => void
+    onExport: () => void
     onEditCompany: () => void
     onPublishSnapshot?: () => void
     snapshotInfo?: string
-    isExporting: boolean
 }
 
 const fmtDate = (iso: string) => {
@@ -30,7 +28,7 @@ const fmtDate = (iso: string) => {
     return d && m && y ? `${d}/${m}/${y}` : iso
 }
 
-export function ReportMetadataBar({ metadata, showComparative, onToggleComparative, onDownloadPdf, onDownloadXlsx, onEditCompany, onPublishSnapshot, snapshotInfo, isExporting }: Props) {
+export function ReportMetadataBar({ metadata, showComparative, onToggleComparative, onExport, onEditCompany, onPublishSnapshot, snapshotInfo }: Props) {
     const chip = STATUS_CHIP[metadata.status] ?? STATUS_CHIP.LOADING
     return (
         <div className="card" style={{ padding: '12px 16px', marginBottom: 16 }}>
@@ -56,11 +54,8 @@ export function ReportMetadataBar({ metadata, showComparative, onToggleComparati
                         <input type="checkbox" checked={showComparative} onChange={onToggleComparative} />
                         Comparativo
                     </label>
-                    <button className="btn btn-secondary btn-sm" onClick={onDownloadPdf} disabled={isExporting}>
-                        {isExporting ? '…' : 'PDF'}
-                    </button>
-                    <button className="btn btn-secondary btn-sm" onClick={onDownloadXlsx} disabled={isExporting}>
-                        {isExporting ? '…' : 'Planilla'}
+                    <button className="btn btn-primary btn-sm" onClick={onExport}>
+                        Exportar estados
                     </button>
                     {onPublishSnapshot && (
                         <button

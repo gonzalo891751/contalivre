@@ -21,8 +21,7 @@ import {
 } from '../components/Estados/canonical/CanonicalTabs'
 import FlujoEfectivoCanonicalTab from '../components/Estados/canonical/FlujoEfectivoCanonicalTab'
 import { ReportMetadataBar } from '../components/Estados/canonical/ReportMetadataBar'
-import { exportReportBundlePdf } from '../pdf/reportBundlePdf'
-import { exportReportBundleWorkbook } from '../lib/exportReportBundle'
+import { ExportEstadosModal } from '../components/Estados/ExportEstadosModal'
 import { loadReportingBundle, type ReportingBundle } from '../reporting/loadReportingBundle'
 import { createSnapshot, listSnapshots } from '../reporting/snapshots/snapshotService'
 
@@ -39,7 +38,7 @@ export default function Estados() {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
-    const [isExporting, setIsExporting] = useState(false)
+    const [showExportModal, setShowExportModal] = useState(false)
     const [snapshotInfo, setSnapshotInfo] = useState<string | null>(null)
 
     useEffect(() => {
@@ -71,26 +70,6 @@ export default function Estados() {
         return () => { cancelled = true }
     }, [year, showComparative, reloadKey])
 
-    const handleDownloadPdf = useCallback(async () => {
-        if (!bundle) return
-        setIsExporting(true)
-        try {
-            await exportReportBundlePdf(bundle, activeTab)
-        } finally {
-            setIsExporting(false)
-        }
-    }, [bundle, activeTab])
-
-    const handleDownloadXlsx = useCallback(async () => {
-        if (!bundle) return
-        setIsExporting(true)
-        try {
-            await exportReportBundleWorkbook(bundle)
-        } finally {
-            setIsExporting(false)
-        }
-    }, [bundle])
-
     return (
         <div className="estados-page">
             <EstadosHeader activeTab={activeTab} onTabChange={setActiveTab} empresaName={empresaName} />
@@ -119,12 +98,10 @@ export default function Estados() {
                             metadata={bundle.metadata}
                             showComparative={showComparative}
                             onToggleComparative={() => setShowComparative(v => !v)}
-                            onDownloadPdf={handleDownloadPdf}
-                            onDownloadXlsx={handleDownloadXlsx}
+                            onExport={() => setShowExportModal(true)}
                             onEditCompany={() => setShowCompanyProfileModal(true)}
                             onPublishSnapshot={handlePublishSnapshot}
                             snapshotInfo={snapshotInfo ?? undefined}
-                            isExporting={isExporting}
                         />
 
                         {activeTab === 'ESP' && <ESPCanonicalTab bundle={bundle} />}
@@ -135,6 +112,10 @@ export default function Estados() {
                     </div>
                 )}
             </main>
+
+            {showExportModal && bundle && (
+                <ExportEstadosModal bundle={bundle} onClose={() => setShowExportModal(false)} />
+            )}
 
             <CompanyProfileModal
                 isOpen={showCompanyProfileModal}
