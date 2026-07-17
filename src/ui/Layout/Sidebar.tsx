@@ -18,6 +18,7 @@ import {
     ShoppingCart,
     Bank,
     Users,
+    Gear,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
 
@@ -72,7 +73,6 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 { path: '/mayor', label: 'Libro Mayor', icon: BookBookmark },
                 { path: '/balance', label: 'Balance de SyS', icon: Scales },
                 { path: '/estados', label: 'Estados contables', icon: ChartLineUp },
-                { path: '/mapeos', label: 'Mapeos de cuentas', icon: TreeStructure },
             ]
         },
         {
@@ -88,6 +88,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                         { path: '/planillas/cierre-valuacion', label: 'Cierre: AxI + Valuación' },
                     ]
                 },
+                { path: '/configuracion', label: 'Configuración', icon: Gear },
             ]
         }
     ]

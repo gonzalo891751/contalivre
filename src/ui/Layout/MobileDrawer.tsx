@@ -14,6 +14,7 @@ import {
     ShoppingCart,
     Bank,
     Robot,
+    Gear,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
 
@@ -52,6 +53,7 @@ const navItems: NavItem[] = [
             { path: '/planillas/cierre-valuacion', label: 'Cierre: AxI + Valuación' },
         ]
     },
+    { path: '/configuracion', label: 'Configuración', icon: Gear },
 ]
 
 interface MobileDrawerProps {
