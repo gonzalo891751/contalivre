@@ -16,7 +16,8 @@ import {
     restoreBackup,
     type BackupPreview,
 } from '../accounting/backup/backupService'
-import { APP_VERSION, CURRENT_SCHEMA_VERSION as SCHEMA_VERSION } from '../accounting/migration/versions'
+import { ACCOUNTING_ENGINE_VERSION, APP_VERSION, CURRENT_SCHEMA_VERSION as SCHEMA_VERSION, NORMATIVE_BASELINE } from '../accounting/migration/versions'
+import { CAPABILITIES } from '../accounting/capabilities'
 import type { SystemMeta } from '../accounting/domain/types'
 
 const COMMIT_SHA: string =
@@ -114,6 +115,8 @@ export default function AcercaDe() {
                         <tr><td style={{ paddingRight: 24, color: 'var(--text-muted)' }}>Aplicación</td><td>ContaLivre {APP_VERSION}</td></tr>
                         <tr><td style={{ paddingRight: 24, color: 'var(--text-muted)' }}>Modo</td><td>Laboratorio educativo local (los datos viven en este navegador)</td></tr>
                         <tr><td style={{ paddingRight: 24, color: 'var(--text-muted)' }}>Schema Dexie</td><td>v{SCHEMA_VERSION}</td></tr>
+                        <tr><td style={{ paddingRight: 24, color: 'var(--text-muted)' }}>Motor contable</td><td>{ACCOUNTING_ENGINE_VERSION}</td></tr>
+                        <tr><td style={{ paddingRight: 24, color: 'var(--text-muted)' }}>Marco normativo</td><td>{NORMATIVE_BASELINE}</td></tr>
                         <tr><td style={{ paddingRight: 24, color: 'var(--text-muted)' }}>Commit</td><td style={{ fontFamily: 'monospace' }}>{COMMIT_SHA}</td></tr>
                         <tr><td style={{ paddingRight: 24, color: 'var(--text-muted)' }}>Compilación</td><td>{BUILD_DATE}</td></tr>
                         <tr><td style={{ paddingRight: 24, color: 'var(--text-muted)' }}>Instalación</td><td style={{ fontFamily: 'monospace' }}>{meta?.installationId ?? '…'}</td></tr>
@@ -183,6 +186,41 @@ export default function AcercaDe() {
                         </div>
                     </div>
                 )}
+            </div>
+
+            <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+                <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 8 }}>Alcance real (capacidades)</h2>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+                    Qué soporta esta versión y qué no. Lo no soportado no se simula.
+                </p>
+                <table style={{ fontSize: '0.82rem', lineHeight: 1.7, width: '100%' }}>
+                    <tbody>
+                        {CAPABILITIES.map(cap => (
+                            <tr key={cap.id}>
+                                <td style={{ paddingRight: 12, whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                                    <span style={{
+                                        padding: '1px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 700,
+                                        background: cap.status === 'SUPPORTED' ? 'rgba(34,197,94,0.12)'
+                                            : cap.status === 'PARTIAL' ? 'rgba(234,179,8,0.12)'
+                                            : cap.status === 'EDUCATIONAL_ONLY' ? 'rgba(59,130,246,0.12)'
+                                            : 'rgba(148,163,184,0.18)',
+                                        color: cap.status === 'SUPPORTED' ? '#15803d'
+                                            : cap.status === 'PARTIAL' ? '#a16207'
+                                            : cap.status === 'EDUCATIONAL_ONLY' ? '#1d4ed8'
+                                            : '#64748b',
+                                    }}>
+                                        {cap.status === 'SUPPORTED' ? 'Soportado'
+                                            : cap.status === 'PARTIAL' ? 'Parcial'
+                                            : cap.status === 'EDUCATIONAL_ONLY' ? 'Solo educativo'
+                                            : 'No soportado'}
+                                    </span>
+                                </td>
+                                <td style={{ paddingRight: 12, fontWeight: 600, verticalAlign: 'top' }}>{cap.label}</td>
+                                <td style={{ color: 'var(--text-muted)', verticalAlign: 'top' }}>{cap.detail}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
 
             {message && (

@@ -3,8 +3,22 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
+import { execSync } from 'node:child_process'
+
+// Provenance del build (Fase 2B, DEP-001): commit y fecha visibles en /acerca
+function gitCommitSha(): string {
+    try {
+        return execSync('git rev-parse --short HEAD').toString().trim()
+    } catch {
+        return 'desconocido'
+    }
+}
 
 export default defineConfig({
+    define: {
+        'import.meta.env.VITE_COMMIT_SHA': JSON.stringify(gitCommitSha()),
+        'import.meta.env.VITE_BUILD_DATE': JSON.stringify(new Date().toISOString()),
+    },
     plugins: [
         react(),
         tailwindcss(),
