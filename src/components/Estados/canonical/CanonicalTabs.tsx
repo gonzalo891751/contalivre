@@ -1,13 +1,15 @@
 /**
- * Tabs canónicos ESP/ER/EEPN/Notas — Fase 2C (§5.1).
+ * Tabs canónicos ESP/ER/EEPN/Notas — Fase 2C (§5.1) / rediseño Fase 2D (§1).
  *
  * Renderizan EXCLUSIVAMENTE desde el ReportingBundle del motor. No importan
  * utils/resultsStatement, core/statements ni domain/reports. Los importes ya
- * vienen calculados; acá solo se presentan con drilldown y comparativo.
+ * vienen calculados; acá solo se presentan (diseño anterior recuperado) con
+ * detalle desplegable, comparativo y drilldown de trazabilidad.
  */
 
 import { useState } from 'react'
-import ReportLineTable from './ReportLineTable'
+import { StatementCard, StatementRows } from './StatementView'
+import { statementStyles } from './statementFormat'
 import ValidationBanner from './ValidationBanner'
 import LineageModal from './LineageModal'
 import type { ReportLine } from '../../../reporting/domain/types'
@@ -38,19 +40,29 @@ export function ESPCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
     return (
         <div>
             <ValidationBanner report={bundle.statements.validation} status={bundle.metadata.status} />
-            <ReportLineTable
-                title="Activo"
-                lines={[bs.currentAssets, bs.nonCurrentAssets, bs.totalAssets]}
-                showComparative={showComp}
-                onLineClick={open}
-            />
-            <ReportLineTable
-                title="Pasivo y Patrimonio Neto"
-                lines={[bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities, bs.equity, bs.totalLiabilitiesAndEquity]}
-                showComparative={showComp}
-                onLineClick={open}
-            />
+            <div className={`stmt-grid${showComp ? '' : ' two-col'}`}>
+                <StatementCard
+                    title="Activo"
+                    accent="green"
+                    total={bs.totalAssets.amount}
+                    comparativeTotal={bs.totalAssets.comparativeAmount}
+                    showComparative={showComp}
+                >
+                    <StatementRows lines={bs.totalAssets.children ?? [bs.currentAssets, bs.nonCurrentAssets]} showComparative={showComp} onLineClick={open} />
+                </StatementCard>
+
+                <StatementCard
+                    title="Pasivo y Patrimonio Neto"
+                    accent="blue"
+                    total={bs.totalLiabilitiesAndEquity.amount}
+                    comparativeTotal={bs.totalLiabilitiesAndEquity.comparativeAmount}
+                    showComparative={showComp}
+                >
+                    <StatementRows lines={[bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities, bs.equity]} showComparative={showComp} onLineClick={open} />
+                </StatementCard>
+            </div>
             {modal}
+            <style>{statementStyles}</style>
         </div>
     )
 }
@@ -63,13 +75,15 @@ export function ERCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
     return (
         <div>
             <ValidationBanner report={bundle.statements.validation} status={bundle.metadata.status} />
-            <ReportLineTable
-                title="Estado de Resultados"
-                lines={[er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses, er.operatingResult, er.financialResults, er.otherResults, er.netIncome]}
-                showComparative={showComp}
-                onLineClick={open}
-            />
+            <StatementCard title="Estado de Resultados" accent="red" showComparative={showComp}>
+                <StatementRows
+                    lines={[er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses, er.operatingResult, er.financialResults, er.otherResults, er.netIncome]}
+                    showComparative={showComp}
+                    onLineClick={open}
+                />
+            </StatementCard>
             {modal}
+            <style>{statementStyles}</style>
         </div>
     )
 }
@@ -82,13 +96,15 @@ export function EEPNCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
     return (
         <div>
             <ValidationBanner report={bundle.statements.validation} status={bundle.metadata.status} />
-            <ReportLineTable
-                title="Evolución del Patrimonio Neto"
-                lines={[eepn.openingBalance, eepn.contributions, eepn.distributions, eepn.reservesMovements, eepn.otherMovements, eepn.periodResult, eepn.closingBalance]}
-                showComparative={showComp}
-                onLineClick={open}
-            />
+            <StatementCard title="Evolución del Patrimonio Neto" accent="violet" showComparative={showComp}>
+                <StatementRows
+                    lines={[eepn.openingBalance, eepn.contributions, eepn.distributions, eepn.reservesMovements, eepn.otherMovements, eepn.periodResult, eepn.closingBalance]}
+                    showComparative={showComp}
+                    onLineClick={open}
+                />
+            </StatementCard>
             {modal}
+            <style>{statementStyles}</style>
         </div>
     )
 }
@@ -96,35 +112,37 @@ export function EEPNCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
 // ── Notas ────────────────────────────────────────────────────
 function NoteCard({ note }: { note: StatementNote }) {
     return (
-        <div className="card" style={{ padding: 16, marginBottom: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>{note.title}</h3>
-                {note.reconciled === true && <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>✓ Reconciliada</span>}
-                {note.reconciled === false && <span style={{ fontSize: '0.72rem', color: '#b91c1c', fontWeight: 600 }}>✗ No reconcilia</span>}
+        <div className="stmt-card" style={{ marginBottom: 14 }}>
+            <div className="stmt-card-header">
+                <h3 className="stmt-card-title" style={{ fontSize: '1rem' }}>{note.title}</h3>
+                {note.reconciled === true && <span style={{ fontSize: '0.72rem', color: '#059669', fontWeight: 700 }}>✓ Reconciliada</span>}
+                {note.reconciled === false && <span style={{ fontSize: '0.72rem', color: '#dc2626', fontWeight: 700 }}>✗ No reconcilia</span>}
             </div>
-            {note.text && <p style={{ fontSize: '0.82rem', color: '#475569', margin: '6px 0', lineHeight: 1.5 }}>{note.text}</p>}
-            {note.lines.length > 0 && (
-                <table style={{ width: '100%', fontSize: '0.82rem', borderCollapse: 'collapse', marginTop: 6 }}>
-                    <tbody>
-                        {note.lines.map((l, i) => (
-                            <tr key={i} style={{ borderTop: '1px solid #f1f5f9' }}>
-                                <td style={{ padding: '4px 6px' }}>
-                                    {l.label}
-                                    {l.origin === 'MANUAL' && <span style={{ color: '#a16207', fontSize: '0.7rem' }}> (manual)</span>}
-                                    {l.origin === 'NOT_AVAILABLE' && <span style={{ color: '#64748b', fontSize: '0.7rem' }}> (no disponible)</span>}
-                                </td>
-                                <td style={{ padding: '4px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(l.amount)}</td>
-                            </tr>
-                        ))}
-                        {note.total != null && (
-                            <tr style={{ borderTop: '2px solid #cbd5e1', fontWeight: 700 }}>
-                                <td style={{ padding: '4px 6px' }}>Total</td>
-                                <td style={{ padding: '4px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(note.total)}</td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            )}
+            <div className="stmt-card-body" style={{ padding: 16 }}>
+                {note.text && <p style={{ fontSize: '0.82rem', color: '#475569', margin: '0 0 8px', lineHeight: 1.5 }}>{note.text}</p>}
+                {note.lines.length > 0 && (
+                    <table style={{ width: '100%', fontSize: '0.84rem', borderCollapse: 'collapse' }}>
+                        <tbody>
+                            {note.lines.map((l, i) => (
+                                <tr key={i} style={{ borderTop: '1px solid #f1f5f9' }}>
+                                    <td style={{ padding: '5px 6px' }}>
+                                        {l.label}
+                                        {l.origin === 'MANUAL' && <span style={{ color: '#a16207', fontSize: '0.7rem' }}> (manual)</span>}
+                                        {l.origin === 'NOT_AVAILABLE' && <span style={{ color: '#64748b', fontSize: '0.7rem' }}> (no disponible)</span>}
+                                    </td>
+                                    <td style={{ padding: '5px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(l.amount)}</td>
+                                </tr>
+                            ))}
+                            {note.total != null && (
+                                <tr style={{ borderTop: '2px solid #cbd5e1', fontWeight: 700 }}>
+                                    <td style={{ padding: '5px 6px' }}>Total</td>
+                                    <td style={{ padding: '5px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(note.total)}</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                )}
+            </div>
         </div>
     )
 }
@@ -136,6 +154,7 @@ export function NotasCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
                 Notas derivadas del motor canónico (reconciliadas con los rubros) e información de carga manual identificada.
             </p>
             {bundle.notes.map(n => <NoteCard key={n.id} note={n} />)}
+            <style>{statementStyles}</style>
         </div>
     )
 }
