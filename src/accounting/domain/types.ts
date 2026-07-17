@@ -158,6 +158,8 @@ export interface OperationPostingInput extends EntryDraftInput {
     accountingEventType?: string
     /** Clave explícita; si falta se construye con buildIdempotencyKey */
     idempotencyKey?: string
+    /** Fecha de creación original (para preservar asientos migrados/legacy) */
+    createdAt?: string
 }
 
 export interface PostingResult {
