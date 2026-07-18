@@ -7,7 +7,7 @@
  * contra el mismo ReportingBundle (no recalcula).
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { X, FileText, Table, Download } from 'lucide-react'
 import type { ReportingBundle } from '../../reporting/loadReportingBundle'
 import {
@@ -42,6 +42,12 @@ export function ExportEstadosModal({ bundle, onClose }: Props) {
     const [error, setError] = useState<string | null>(null)
 
     const canExport = useMemo(() => hasAnyContent(opts.content), [opts.content])
+
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onClose() }
+        document.addEventListener('keydown', onKey)
+        return () => document.removeEventListener('keydown', onKey)
+    }, [busy, onClose])
 
     const setContent = (key: keyof ExportContentSelection, value: boolean) =>
         setOpts(o => ({ ...o, content: { ...o.content, [key]: value } }))

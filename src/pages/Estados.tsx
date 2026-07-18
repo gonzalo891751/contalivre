@@ -93,7 +93,7 @@ export default function Estados() {
                 )}
 
                 {!loading && !error && bundle && (
-                    <div className="animate-slide-up">
+                    <div className="animate-slide-up" role="tabpanel" aria-label={`Contenido: ${activeTab}`}>
                         <ReportMetadataBar
                             metadata={bundle.metadata}
                             showComparative={showComparative}
@@ -137,6 +137,9 @@ const pageStyles = `
 @media (min-width: 1024px) { .estados-main { padding: 32px; } }
 .animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
 @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+    .animate-slide-up { animation: none; }
+}
 .empty-state { text-align: center; padding: 64px 32px; color: #64748b; }
 .empty-state-icon { font-size: 3rem; margin-bottom: 16px; }
 .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); border: 1px solid #f1f5f9; }
