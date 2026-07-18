@@ -54,7 +54,7 @@ export function EstadosHeader({ activeTab, onTabChange, empresaName }: EstadosHe
                 </div>
 
                 {/* Navigation Tabs */}
-                <nav className="estados-tabs" aria-label="Estados Contables">
+                <nav className="estados-tabs" role="tablist" aria-label="Estados Contables">
                     {TABS.map((tab) => {
                         const Icon = tab.icon
                         const isActive = activeTab === tab.id
@@ -66,7 +66,8 @@ export function EstadosHeader({ activeTab, onTabChange, empresaName }: EstadosHe
                                     onClick={() => !isDisabled && onTabChange(tab.id)}
                                     disabled={isDisabled}
                                     className={`estados-tab ${isActive ? 'active' : ''} ${isDisabled ? 'disabled' : ''}`}
-                                    aria-current={isActive ? 'page' : undefined}
+                                    role="tab"
+                                    aria-selected={isActive}
                                     aria-label={tab.label}
                                 >
                                     <Icon size={16} strokeWidth={2} />
@@ -215,9 +216,18 @@ const styles = `
     background: rgba(241, 245, 249, 0.8);
     border-radius: 12px;
     width: fit-content;
+    max-width: 100%;
     border: 1px solid #e2e8f0;
     margin-top: 32px;
     margin-bottom: 8px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+}
+@media (max-width: 640px) {
+    .estados-tabs { margin-top: 16px; }
+    .estados-tab { padding: 8px 12px; }
+    .estados-tab span { font-size: 0.8rem; }
 }
 
 .estados-tab-wrapper {
@@ -258,6 +268,11 @@ const styles = `
     color: #94a3b8;
     cursor: not-allowed;
     opacity: 0.7;
+}
+
+.estados-tab:focus-visible {
+    outline: 2px solid #3B82F6;
+    outline-offset: 2px;
 }
 
 .estados-tab-lock {

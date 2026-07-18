@@ -8,7 +8,8 @@
 
 import { writeWorkbook, type WorkbookSheet } from './spreadsheet'
 import type { ReportingBundle } from '../reporting/loadReportingBundle'
-import type { ReportLine } from '../reporting/domain/types'
+import type { ReportLine, CashFlowStatement2B } from '../reporting/domain/types'
+import type { ExportEstadosOptions } from './exportOptions'
 
 type Cell = string | number | null
 
@@ -133,8 +134,102 @@ export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
     return sheets
 }
 
-export async function exportReportBundleWorkbook(bundle: ReportingBundle): Promise<void> {
-    const sheets = buildReportSheets(bundle)
+/**
+ * Hojas del workbook según las opciones de exportación (Fase 2D, §3): filtra
+ * por contenido elegido, honra método/moneda del EFE y comparativo. Sigue
+ * usando EXACTAMENTE las cifras del bundle.
+ */
+export function buildSelectedReportSheets(bundle: ReportingBundle, options: ExportEstadosOptions): WorkbookSheet[] {
+    const s = bundle.statements
+    const c = options.content
+    const showComp = bundle.metadata.hasComparative && options.comparative
+    const headerRow = (): Cell[] => showComp ? ['Concepto', 'Ejercicio actual', 'Ejercicio anterior'] : ['Concepto', 'Ejercicio actual']
+    const sheets: WorkbookSheet[] = []
+
+    // Metadatos siempre presentes (contexto + validaciones + borrador)
+    const m = bundle.metadata
+    const publishable = s.validation.canPublish
+    const isDraft = !publishable || options.markDraft
+    sheets.push({
+        name: 'Metadatos', rows: [
+            ['ContaLivre — Estados contables (exportación formal)'],
+            [],
+            ['Empresa', m.companyLegalName],
+            ['CUIT', m.companyTaxId ?? '—'],
+            ['Ejercicio', m.exerciseLabel],
+            ['Período', `${m.periodStart} a ${m.periodEnd}`],
+            ['Moneda', `${m.currency} (${m.unit})`],
+            ['Normativa', m.normative],
+            ['Comparativo', showComp ? 'Sí' : 'No'],
+            ['Método EFE', options.efeMethod === 'INDIRECT' ? 'Indirecto' : 'Directo'],
+            ['Expresión', options.currency === 'CLOSING' ? 'Moneda de cierre' : 'Moneda nominal'],
+            ['Motor contable', m.engineVersion],
+            ['Versión de reporte', m.reportVersion],
+            ['Estado', isDraft ? 'BORRADOR' : m.status],
+            [],
+            ['Validaciones'],
+            ...s.validation.checks.map((ch): Cell[] => [ch.passed ? 'OK' : 'FALLA', ch.label, ch.difference && ch.difference !== 0 ? ch.difference : '']),
+        ],
+    })
+
+    if (c.esp) {
+        const bs = s.balanceSheet
+        sheets.push({ name: 'ESP', rows: [headerRow(), ...flattenLines([bs.currentAssets, bs.nonCurrentAssets, bs.totalAssets, bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities, bs.equity, bs.totalLiabilitiesAndEquity], showComp)] })
+    }
+    if (c.er) {
+        const er = s.incomeStatement
+        sheets.push({ name: 'ER', rows: [headerRow(), ...flattenLines([er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses, er.operatingResult, er.financialResults, er.otherResults, er.netIncome], showComp)] })
+    }
+    if (c.eepn) {
+        const e = s.equityStatement
+        sheets.push({ name: 'EEPN', rows: [headerRow(), ...flattenLines([e.openingBalance, e.contributions, e.distributions, e.reservesMovements, e.otherMovements, e.periodResult, e.closingBalance], showComp)] })
+    }
+    if (c.efe) {
+        const restated = bundle.cashFlowRestated
+        const wantClosing = options.currency === 'CLOSING' && !!restated
+        const src = wantClosing && restated ? { direct: restated.direct, indirect: restated.indirect } : { direct: s.cashFlowDirect, indirect: s.cashFlowIndirect }
+        const cf: CashFlowStatement2B | null = options.efeMethod === 'INDIRECT' ? src.indirect : src.direct
+        if (cf) {
+            const name = `EFE ${options.efeMethod === 'INDIRECT' ? 'indirecto' : 'directo'}${wantClosing ? ' (cierre)' : ''}`
+            sheets.push({ name, rows: [['Concepto', 'Importe'], ...flattenLines([cf.openingCash, cf.operating, cf.investing, cf.financing, cf.unclassified, cf.netChange, cf.closingCash], false)] })
+        }
+    }
+    if (c.notas) {
+        const notasRows: Cell[][] = [['Nota', 'Concepto', 'Importe', 'Origen', 'Reconcilia']]
+        for (const note of bundle.notes) {
+            notasRows.push([note.title, note.text ?? '', note.total ?? '', '', note.reconciled == null ? '' : note.reconciled ? 'Sí' : 'No'])
+            for (const l of note.lines) notasRows.push(['', l.label, l.amount ?? '', l.origin, ''])
+        }
+        sheets.push({ name: 'Notas', rows: notasRows })
+    }
+    if (c.indicadores) {
+        const indRows: Cell[][] = [['Indicador', 'Categoría', 'Estado', 'Valor', 'Fórmula', 'Detalle']]
+        for (const e of bundle.metrics) {
+            const r = e.result
+            if (r.status === 'CALCULATED') indRows.push([e.label, e.category, 'Calculado', r.value, r.formula, r.substitution])
+            else indRows.push([e.label, e.category, r.status, '', r.formula, 'reason' in r ? r.reason : ''])
+        }
+        sheets.push({ name: 'Indicadores', rows: indRows })
+    }
+    if (c.analisis) {
+        const avRows: Cell[][] = [['Renglón', 'Importe', 'Base', 'Base importe', '%']]
+        for (const row of [...bundle.analysis.verticalBalanceSheet, ...bundle.analysis.verticalIncomeStatement]) {
+            avRows.push([row.label, row.amount, row.baseLabel, row.baseAmount, row.percentage ?? 'N/D'])
+        }
+        sheets.push({ name: 'Análisis vertical', rows: avRows })
+        const ahRows: Cell[][] = [['Renglón', 'Actual', 'Anterior', 'Var. absoluta', 'Var. %', 'Nota']]
+        for (const row of [...bundle.analysis.horizontalBalanceSheet, ...bundle.analysis.horizontalIncomeStatement]) {
+            ahRows.push([row.label, row.current, row.previous ?? 'N/D', row.absoluteChange ?? 'N/D', row.percentageChange ?? 'N/D', row.note ?? ''])
+        }
+        sheets.push({ name: 'Análisis horizontal', rows: ahRows })
+    }
+
+    return sheets
+}
+
+export async function exportReportBundleWorkbook(bundle: ReportingBundle, options?: ExportEstadosOptions): Promise<void> {
+    const sheets = options ? buildSelectedReportSheets(bundle, options) : buildReportSheets(bundle)
     const dateStr = new Date().toISOString().slice(0, 10)
-    await writeWorkbook(sheets, `contalivre-estados-${bundle.metadata.exerciseLabel.replace(/\s+/g, '_')}-${dateStr}.xlsx`)
+    const draft = options && (!bundle.statements.validation.canPublish || options.markDraft) ? '_BORRADOR' : ''
+    await writeWorkbook(sheets, `contalivre-estados-${bundle.metadata.exerciseLabel.replace(/\s+/g, '_')}-${dateStr}${draft}.xlsx`)
 }

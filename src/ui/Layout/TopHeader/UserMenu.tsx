@@ -1,4 +1,5 @@
 import { useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Gear, User, SignOut } from '@phosphor-icons/react'
 import { type DropdownId } from '../../../hooks/useDropdownManager'
 import DropdownMenu from './DropdownMenu'
@@ -29,6 +30,7 @@ export default function UserMenu({
   user = defaultUser,
 }: UserMenuProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
 
   const setRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -75,16 +77,16 @@ export default function UserMenu({
       >
         <ul>
           <li>
-            <a href="#">
+            <button type="button" onClick={() => { onClose(); navigate('/configuracion') }}>
               <Gear size={16} />
-              Preferencias
-            </a>
+              Configuración
+            </button>
           </li>
           <li>
-            <a href="#">
+            <button type="button" onClick={() => { onClose(); navigate('/configuracion?seccion=empresa') }}>
               <User size={16} />
-              Mi Perfil
-            </a>
+              Empresa
+            </button>
           </li>
           <li className="user-dropdown-divider" />
           <li className="logout">

@@ -85,6 +85,7 @@ export type AuditEventType =
     | 'BACKUP_CREATED'
     | 'RESTORE_EXECUTED'
     | 'JOURNAL_RESET'
+    | 'APP_RESET'          // restablecimiento total a instalación limpia
 
 export interface AuditEvent {
     id: string

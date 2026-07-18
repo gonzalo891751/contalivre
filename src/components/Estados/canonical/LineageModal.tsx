@@ -32,10 +32,17 @@ export default function LineageModal({ bundle, lineId, label, accountIds, onClos
         return () => { cancelled = true }
     }, [bundle, lineId, accountIds])
 
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+        document.addEventListener('keydown', onKey)
+        return () => document.removeEventListener('keydown', onKey)
+    }, [onClose])
+
     return (
         <div
             role="dialog"
             aria-modal="true"
+            aria-labelledby="lineage-modal-title"
             style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
             onClick={onClose}
         >
@@ -46,7 +53,7 @@ export default function LineageModal({ bundle, lineId, label, accountIds, onClos
                 <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, background: 'white' }}>
                     <div>
                         <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b', fontWeight: 700 }}>Trazabilidad del importe</div>
-                        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '2px 0 0' }}>{label}</h3>
+                        <h3 id="lineage-modal-title" style={{ fontSize: '1.05rem', fontWeight: 700, margin: '2px 0 0' }}>{label}</h3>
                     </div>
                     <button className="btn btn-icon btn-secondary" onClick={onClose} aria-label="Cerrar">✕</button>
                 </div>

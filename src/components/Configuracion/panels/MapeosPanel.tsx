@@ -1,12 +1,12 @@
 /**
- * Asistente de mapeos contables — Fase 2C (§11).
- * Accesible desde Plan de cuentas / Estados / Cierre / Inflación / EFE.
- * Lista cuentas por estado de metadata, muestra el impacto antes de guardar
- * y persiste con auditoría. Las heurísticas solo proponen.
+ * MapeosPanel — Fase 2D (§4): asistente de mapeos contables, ahora embebido en
+ * Configuración → Plan de cuentas y mapeos (antes página /mapeos).
+ * Lista cuentas por estado de metadata, muestra el impacto antes de guardar y
+ * persiste con auditoría. Las heurísticas solo proponen.
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import type { Account, MonetaryClassification, CurrentClassification, StatementGroup } from '../core/models'
+import type { Account, MonetaryClassification, CurrentClassification, StatementGroup } from '../../../core/models'
 import {
     buildMappingReport,
     describeImpact,
@@ -15,7 +15,7 @@ import {
     ISSUE_LABELS,
     type AccountMappingStatus,
     type MappingReport,
-} from '../accounting/taxonomy/mappingAssistant'
+} from '../../../accounting/taxonomy/mappingAssistant'
 
 const STATEMENT_GROUPS: StatementGroup[] = [
     'CASH_AND_BANKS', 'TRADE_RECEIVABLES', 'OTHER_RECEIVABLES', 'TAX_CREDITS', 'INVENTORIES',
@@ -105,7 +105,7 @@ function EditRow({ status, onSaved }: { status: AccountMappingStatus; onSaved: (
     )
 }
 
-export default function MapeosPage() {
+export function MapeosPanel() {
     const [report, setReport] = useState<MappingReport | null>(null)
     const [showComplete, setShowComplete] = useState(false)
 
@@ -115,14 +115,11 @@ export default function MapeosPage() {
     if (!report) return <div className="empty-state"><p>Analizando el plan de cuentas…</p></div>
 
     return (
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: 24 }}>
-            <header className="page-header">
-                <h1 className="page-title">Asistente de mapeos contables</h1>
-                <p className="page-subtitle">
-                    Revisá y completá la metadata de las cuentas. Las cuentas con saldo y mapping
-                    obligatorio faltante impiden marcar los estados como validados.
-                </p>
-            </header>
+        <div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+                Revisá y completá la metadata de las cuentas. Las cuentas con saldo y mapping
+                obligatorio faltante impiden marcar los estados como validados.
+            </p>
 
             <div className="card" style={{ padding: 16, marginBottom: 16, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
                 <div><strong>{report.total}</strong> cuentas · <strong>{report.complete.length}</strong> completas · <strong style={{ color: '#b45309' }}>{report.incomplete.length}</strong> a revisar</div>
