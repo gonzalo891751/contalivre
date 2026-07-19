@@ -12,6 +12,7 @@ import { StatementCard, StatementRows } from './StatementView'
 import { statementStyles } from './statementFormat'
 import ValidationBanner from './ValidationBanner'
 import LineageModal from './LineageModal'
+import { EquityMatrixView } from './EquityMatrixView'
 import type { ReportLine } from '../../../reporting/domain/types'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 import type { StatementNote } from '../../../reporting/engine/buildNotes'
@@ -126,18 +127,47 @@ export function ERCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
 // ── EEPN ─────────────────────────────────────────────────────
 export function EEPNCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
     const { open, modal } = useLineage(bundle)
+    const [view, setView] = useState<'MATRIX' | 'SUMMARY'>('MATRIX')
+    const [matrixTarget, setMatrixTarget] = useState<{ label: string; accountIds: string[] } | null>(null)
     const eepn = bundle.statements.equityStatement
     const showComp = bundle.metadata.hasComparative
     return (
         <div>
             <ValidationBanner report={bundle.statements.validation} status={bundle.metadata.status} />
-            <StatementCard title="Evolución del Patrimonio Neto" accent="violet" showComparative={showComp}>
-                <StatementRows
-                    lines={[eepn.openingBalance, eepn.contributions, eepn.distributions, eepn.reservesMovements, eepn.otherMovements, eepn.periodResult, eepn.closingBalance]}
-                    showComparative={showComp}
-                    onLineClick={open}
+
+            <div className="eqm-toolbar" role="group" aria-label="Vista del EEPN" style={{ marginRight: 12 }}>
+                <button type="button" className={`eqm-filter-btn${view === 'MATRIX' ? ' active' : ''}`} aria-pressed={view === 'MATRIX'} onClick={() => setView('MATRIX')}>
+                    Vista matricial
+                </button>
+                <button type="button" className={`eqm-filter-btn${view === 'SUMMARY' ? ' active' : ''}`} aria-pressed={view === 'SUMMARY'} onClick={() => setView('SUMMARY')}>
+                    Vista resumida
+                </button>
+            </div>
+
+            {view === 'MATRIX' ? (
+                <EquityMatrixView
+                    matrix={bundle.statements.equityMatrix}
+                    onCellClick={(label, accountIds) => setMatrixTarget({ label, accountIds })}
                 />
-            </StatementCard>
+            ) : (
+                <StatementCard title="Evolución del Patrimonio Neto" accent="violet" showComparative={showComp}>
+                    <StatementRows
+                        lines={[eepn.openingBalance, eepn.contributions, eepn.distributions, eepn.reservesMovements, eepn.otherMovements, eepn.periodResult, eepn.closingBalance]}
+                        showComparative={showComp}
+                        onLineClick={open}
+                    />
+                </StatementCard>
+            )}
+
+            {matrixTarget && (
+                <LineageModal
+                    bundle={bundle.statements}
+                    lineId="eepn:matrix"
+                    label={matrixTarget.label}
+                    accountIds={matrixTarget.accountIds}
+                    onClose={() => setMatrixTarget(null)}
+                />
+            )}
             {modal}
             <style>{statementStyles}</style>
         </div>

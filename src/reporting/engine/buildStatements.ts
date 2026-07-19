@@ -10,6 +10,7 @@
 import type { Account } from '../../core/models'
 import { toCents } from '../../accounting/domain/money'
 import { isStructuralClosingEntry } from '../../utils/resultsStatement'
+import { buildEquityMatrix } from './equityMatrix'
 import type {
     BalanceSheet2B,
     EquityStatement2B,
@@ -499,7 +500,29 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
     const incomeStatement = buildIncomeStatement(resultTb, input.accounts)
     const balanceSheet = buildBalanceSheet(trialBalance, input.accounts, pendingResultCents(trialBalance, input.accounts))
     const equityStatement = buildEquityStatement(input, trialBalance, incomeStatement)
+    const equityMatrix = buildEquityMatrix(input, trialBalance, incomeStatement)
     const validation = validateStatements(input, trialBalance, balanceSheet, incomeStatement, equityStatement)
+
+    // Puente EEPN matriz ↔ EEPN vertical ↔ ESP (Fase 2E, §6.8): el cierre de
+    // la matriz debe coincidir con el cierre del EEPN (que ya se compara con
+    // el PN del ESP); además se arrastran los invariantes internos de la matriz.
+    validation.checks.push({
+        id: 'eepn-matrix-closing',
+        label: 'EEPN matriz: saldo final = saldo final del EEPN',
+        passed: toCents(equityMatrix.closingRow.total) === toCents(equityStatement.closingBalance.amount),
+        expected: equityStatement.closingBalance.amount,
+        actual: equityMatrix.closingRow.total,
+        difference: equityMatrix.closingRow.total - equityStatement.closingBalance.amount,
+    })
+    const matrixFailed = equityMatrix.validations.filter(v => !v.passed)
+    validation.checks.push({
+        id: 'eepn-matrix-internal',
+        label: 'EEPN matriz: invariantes internos (filas, columnas, resultado)',
+        passed: matrixFailed.length === 0,
+        detail: matrixFailed.length > 0 ? matrixFailed.map(v => v.label).join(' · ') : undefined,
+    })
+    validation.allPassed = validation.checks.every(c => c.passed)
+    validation.canPublish = validation.allPassed
 
     // Comparativo: importes espejados línea a línea por id
     if (input.comparative) {
@@ -513,6 +536,7 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
         balanceSheet,
         incomeStatement,
         equityStatement,
+        equityMatrix,
         cashFlowDirect: null,   // se completa en buildCashFlow (EFE)
         cashFlowIndirect: null,
         validation,

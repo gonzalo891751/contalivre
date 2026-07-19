@@ -129,6 +129,58 @@ export interface EquityStatement2B {
     closingBalance: ReportLine
 }
 
+// ─────────────────────────────────────────────────────────────
+// EEPN matricial de doble entrada (Fase 2E, §6)
+// ─────────────────────────────────────────────────────────────
+
+import type { EquityComponent, EquityMovementType } from '../../core/models'
+
+export type EquityColumnGroupId = 'CONTRIBUTED' | 'RESERVES' | 'RETAINED' | 'DEFERRED' | 'OTHER'
+
+export interface EquityMatrixColumn {
+    component: EquityComponent
+    label: string
+    group: EquityColumnGroupId
+    /** cuentas que integran la columna (linaje) */
+    accountIds: string[]
+    opening: number
+    variations: number
+    closing: number
+}
+
+export interface EquityMatrixColumnGroup {
+    id: EquityColumnGroupId
+    label: string
+    components: EquityComponent[]
+}
+
+export interface EquityMatrixRow {
+    type: EquityMovementType | 'ADJUSTED_OPENING' | 'TOTAL_VARIATIONS' | 'CLOSING'
+    label: string
+    /** importe por componente (clave = EquityComponent); credit-positivo */
+    cells: Partial<Record<EquityComponent, number>>
+    total: number
+    accountIds: string[]
+    entryIds: string[]
+    /** filas conceptuales sin movimientos se ocultan en el modo compacto */
+    hasData: boolean
+    isSubtotal: boolean
+}
+
+export interface EquityMatrixViewModel {
+    columns: EquityMatrixColumn[]
+    columnGroups: EquityMatrixColumnGroup[]
+    openingRow: EquityMatrixRow
+    priorAdjustmentRow: EquityMatrixRow
+    adjustedOpeningRow: EquityMatrixRow
+    movementRows: EquityMatrixRow[]
+    totalVariationsRow: EquityMatrixRow
+    closingRow: EquityMatrixRow
+    /** totales del ejercicio comparativo (mismo motor sobre el ejercicio previo) */
+    comparative: { openingTotal: number; closingTotal: number; periodResult: number } | null
+    validations: ValidationCheck[]
+}
+
 export type CashFlowMethod = 'DIRECT' | 'INDIRECT'
 
 export interface CashFlowStatement2B {
@@ -173,6 +225,8 @@ export interface StatementsBundle {
     balanceSheet: BalanceSheet2B
     incomeStatement: IncomeStatement2B
     equityStatement: EquityStatement2B
+    /** EEPN matricial de doble entrada (Fase 2E, §6) */
+    equityMatrix: EquityMatrixViewModel
     cashFlowDirect: CashFlowStatement2B | null
     cashFlowIndirect: CashFlowStatement2B | null
     validation: StatementValidationReport

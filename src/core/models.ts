@@ -55,6 +55,39 @@ export type StatementGroup =
     | 'INCOME_TAX'
 
 /**
+ * Componente del patrimonio neto para el EEPN matricial (Fase 2E, §6.4).
+ * Mapping estructural por cuenta; con derivación de respaldo desde
+ * statementGroup (CAPITAL→CAPITAL, RESERVES→OTHER_RESERVE,
+ * RETAINED_EARNINGS→PRIOR_RETAINED_EARNINGS). Nunca se infiere por nombre.
+ */
+export type EquityComponent =
+    | 'CAPITAL'
+    | 'CAPITAL_ADJUSTMENT'
+    | 'SHARE_PREMIUM'
+    | 'IRREVOCABLE_CONTRIBUTION'
+    | 'LEGAL_RESERVE'
+    | 'STATUTORY_RESERVE'
+    | 'OTHER_RESERVE'
+    | 'PRIOR_RETAINED_EARNINGS'
+    | 'CURRENT_RESULT'
+    | 'DEFERRED_RESULT'
+    | 'OTHER_EQUITY'
+
+/** Tipo de movimiento patrimonial (clasificación estructural, Fase 2E §6.4) */
+export type EquityMovementType =
+    | 'OPENING_BALANCE'
+    | 'PRIOR_PERIOD_ADJUSTMENT'
+    | 'CONTRIBUTION'
+    | 'WITHDRAWAL'
+    | 'DISTRIBUTION'
+    | 'RESERVE_CREATION'
+    | 'RESERVE_RELEASE'
+    | 'CAPITALIZATION'
+    | 'LOSS_ABSORPTION'
+    | 'CURRENT_RESULT'
+    | 'OTHER'
+
+/**
  * Lado natural del saldo
  */
 export type NormalSide = 'DEBIT' | 'CREDIT'
@@ -121,6 +154,8 @@ export interface Account {
     cashFlowSubcategory?: string
     notesGroup?: string
     annexGroup?: string
+    /** componente del PN para el EEPN matricial (Fase 2E, §6.4) */
+    equityComponent?: EquityComponent
     currency?: string
     validFrom?: string               // ISO date
     validTo?: string                 // ISO date
