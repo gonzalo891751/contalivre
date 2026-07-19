@@ -129,8 +129,11 @@ export const statementStyles = `
 .stmt-rubro-row.has-detail:hover .stmt-rubro-name { color: #3B82F6; }
 .stmt-note-badge {
     font-size: 0.62rem; font-weight: 700; background: #f1f5f9; color: #64748b;
-    padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0; flex-shrink: 0;
+    padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0; flex-shrink: 0; margin-left: 6px;
 }
+.stmt-note-badge.is-link { cursor: pointer; color: #2563eb; background: rgba(59,130,246,0.08); border-color: rgba(59,130,246,0.25); }
+.stmt-note-badge.is-link:hover { background: rgba(59,130,246,0.16); }
+.stmt-note-badge.is-link:focus-visible { outline: 2px solid #3B82F6; outline-offset: 1px; }
 
 .stmt-amount {
     font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);

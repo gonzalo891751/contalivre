@@ -27,7 +27,13 @@ import { createSnapshot, listSnapshots } from '../reporting/snapshots/snapshotSe
 
 export default function Estados() {
     const [activeTab, setActiveTab] = useState<EstadosTab>('ESP')
+    const [noteFocus, setNoteFocus] = useState<string | null>(null)
     const { year } = usePeriodYear()
+
+    const openNote = useCallback((ref: string) => {
+        setNoteFocus(ref)
+        setActiveTab('NA')
+    }, [])
 
     const { profile: companyProfile, save: saveCompanyProfile, isSaving: isSavingCompanyProfile } = useCompanyProfile()
     const [showCompanyProfileModal, setShowCompanyProfileModal] = useState(false)
@@ -104,11 +110,11 @@ export default function Estados() {
                             snapshotInfo={snapshotInfo ?? undefined}
                         />
 
-                        {activeTab === 'ESP' && <ESPCanonicalTab bundle={bundle} />}
-                        {activeTab === 'ER' && <ERCanonicalTab bundle={bundle} />}
+                        {activeTab === 'ESP' && <ESPCanonicalTab bundle={bundle} onOpenNote={openNote} />}
+                        {activeTab === 'ER' && <ERCanonicalTab bundle={bundle} onOpenNote={openNote} />}
                         {activeTab === 'EPN' && <EEPNCanonicalTab bundle={bundle} />}
                         {activeTab === 'EFE' && <FlujoEfectivoCanonicalTab bundle={bundle} />}
-                        {activeTab === 'NA' && <NotasCanonicalTab bundle={bundle} />}
+                        {activeTab === 'NA' && <NotasCanonicalTab bundle={bundle} focusNote={noteFocus} />}
                     </div>
                 )}
             </main>

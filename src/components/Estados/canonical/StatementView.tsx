@@ -23,10 +23,25 @@ const ACCENT_ICON: Record<StatementAccent, React.ElementType> = {
 // ─────────────────────────────────────────────────────────────
 // Fila de cuenta (level 2): detalle desplegado bajo un rubro
 // ─────────────────────────────────────────────────────────────
-function AccountRow({ line, showComparative, onLineClick }: {
+function NoteBadge({ noteRef, onNoteClick }: { noteRef: string; onNoteClick?: (ref: string) => void }) {
+    if (!onNoteClick) return <span className="stmt-note-badge">Nota {noteRef}</span>
+    return (
+        <button
+            type="button"
+            className="stmt-note-badge is-link"
+            title={`Abrir la Nota ${noteRef} y ver su composición`}
+            onClick={e => { e.stopPropagation(); onNoteClick(noteRef) }}
+        >
+            Nota {noteRef}
+        </button>
+    )
+}
+
+function AccountRow({ line, showComparative, onLineClick, onNoteClick }: {
     line: ReportLine
     showComparative: boolean
     onLineClick?: (l: ReportLine) => void
+    onNoteClick?: (ref: string) => void
 }) {
     const clickable = !!onLineClick && line.accountIds.length > 0
     return (
@@ -38,7 +53,10 @@ function AccountRow({ line, showComparative, onLineClick }: {
             onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLineClick!(line) } } : undefined}
             title={clickable ? 'Ver trazabilidad hasta los asientos' : undefined}
         >
-            <span className="stmt-account-name">{line.label}</span>
+            <span className="stmt-account-name">
+                {line.label}
+                {line.noteRef && <NoteBadge noteRef={line.noteRef} onNoteClick={onNoteClick} />}
+            </span>
             {showComparative ? (
                 <span className="stmt-account-values">
                     <span className="stmt-amount">{money(line.amount)}</span>
@@ -55,10 +73,11 @@ function AccountRow({ line, showComparative, onLineClick }: {
 // ─────────────────────────────────────────────────────────────
 // Fila de rubro (level 1): desplegable si tiene cuentas
 // ─────────────────────────────────────────────────────────────
-function RubroRow({ line, showComparative, onLineClick }: {
+function RubroRow({ line, showComparative, onLineClick, onNoteClick }: {
     line: ReportLine
     showComparative: boolean
     onLineClick?: (l: ReportLine) => void
+    onNoteClick?: (ref: string) => void
 }) {
     const children = line.children ?? []
     const hasDetail = children.length > 0
@@ -90,7 +109,7 @@ function RubroRow({ line, showComparative, onLineClick }: {
                         ? <ChevronRight size={14} strokeWidth={2.5} className="stmt-caret" aria-hidden />
                         : lineageOnly ? <span className="stmt-trace" aria-hidden>↳</span> : <span className="stmt-caret-spacer" aria-hidden />}
                     <span className="stmt-rubro-name">{line.label}</span>
-                    {line.noteRef && <span className="stmt-note-badge">Nota {line.noteRef}</span>}
+                    {line.noteRef && <NoteBadge noteRef={line.noteRef} onNoteClick={onNoteClick} />}
                 </span>
 
                 {showComparative ? (
@@ -121,7 +140,7 @@ function RubroRow({ line, showComparative, onLineClick }: {
             {hasDetail && open && (
                 <div className="stmt-account-list">
                     {children.map(c => (
-                        <AccountRow key={c.id} line={c} showComparative={showComparative} onLineClick={onLineClick} />
+                        <AccountRow key={c.id} line={c} showComparative={showComparative} onLineClick={onLineClick} onNoteClick={onNoteClick} />
                     ))}
                 </div>
             )}
@@ -153,10 +172,11 @@ function TotalRow({ line, showComparative }: { line: ReportLine; showComparative
 }
 
 /** Renderiza una lista de ReportLine decidiendo el estilo por su `level`. */
-export function StatementRows({ lines, showComparative, onLineClick }: {
+export function StatementRows({ lines, showComparative, onLineClick, onNoteClick }: {
     lines: ReportLine[]
     showComparative: boolean
     onLineClick?: (l: ReportLine) => void
+    onNoteClick?: (ref: string) => void
 }) {
     return (
         <div className="stmt-rows">
@@ -171,7 +191,7 @@ export function StatementRows({ lines, showComparative, onLineClick }: {
             {lines.map(line =>
                 line.level === 0
                     ? <TotalRow key={line.id} line={line} showComparative={showComparative} />
-                    : <RubroRow key={line.id} line={line} showComparative={showComparative} onLineClick={onLineClick} />
+                    : <RubroRow key={line.id} line={line} showComparative={showComparative} onLineClick={onLineClick} onNoteClick={onNoteClick} />
             )}
         </div>
     )
