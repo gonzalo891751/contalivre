@@ -14,6 +14,7 @@ import type {
     BalanceSheet2B,
     EquityStatement2B,
     IncomeStatement2B,
+    IncomeTaxStatus,
     NormalizedTrialBalance,
     ReportLine,
     ReportingInput,
@@ -220,6 +221,7 @@ const ER_GROUPS = {
     selling: new Set(['SELLING_EXPENSES']),
     financial: new Set(['FINANCIAL_INCOME', 'FINANCIAL_EXPENSES']),
     other: new Set(['OTHER_OPERATING_INCOME', 'OTHER_INCOME', 'OTHER_EXPENSES']),
+    tax: new Set(['INCOME_TAX']),
 }
 
 export function buildIncomeStatement(resultTb: NormalizedTrialBalance, accounts: Account[]): IncomeStatement2B {
@@ -254,12 +256,38 @@ export function buildIncomeStatement(resultTb: NormalizedTrialBalance, accounts:
     const otherResults = buildGroupLine(resultTb, byId, {
         id: 'er:otros', label: 'Otros ingresos y egresos', sign: -1,
         filter: a => inGroup(a, ER_GROUPS.other) ||
-            (isResult(a) && (!a?.statementGroup || ![...ER_GROUPS.sales, ...ER_GROUPS.cogs, ...ER_GROUPS.admin, ...ER_GROUPS.selling, ...ER_GROUPS.financial, ...ER_GROUPS.other].includes(a.statementGroup as string))),
+            (isResult(a) && (!a?.statementGroup || ![...ER_GROUPS.sales, ...ER_GROUPS.cogs, ...ER_GROUPS.admin, ...ER_GROUPS.selling, ...ER_GROUPS.financial, ...ER_GROUPS.other, ...ER_GROUPS.tax].includes(a.statementGroup as string))),
     })
+    // Impuesto a las ganancias: SOLO mapping estructural (Fase 2E, §5.2).
+    // Signo 1: cargo por impuesto positivo (D−H); un recupero queda negativo.
+    const incomeTax = buildGroupLine(resultTb, byId, {
+        id: 'er:impuesto', label: 'Impuesto a las ganancias', sign: 1,
+        filter: a => inGroup(a, ER_GROUPS.tax),
+    })
+
+    const hasTaxMapping = accounts.some(a =>
+        (a.kind === 'INCOME' || a.kind === 'EXPENSE') && a.statementGroup === 'INCOME_TAX' && a.active !== false)
+    const hasResultActivity = resultTb.rows.some(r => {
+        const a = byId.get(r.accountId)
+        return isResult(a) && (toCents(r.periodDebit) !== 0 || toCents(r.periodCredit) !== 0)
+    })
+    const incomeTaxStatus: IncomeTaxStatus =
+        hasTaxMapping ? 'CALCULATED'
+            : hasResultActivity ? 'INSUFFICIENT_INFORMATION'
+                : 'NOT_APPLICABLE'
 
     const grossCents = cents(sales) - cents(costOfSales)
     const operatingCents = grossCents - cents(adminExpenses) - cents(sellingExpenses)
-    const netCents = operatingCents + cents(financialResults) + cents(otherResults)
+    const preTaxCents = operatingCents + cents(financialResults) + cents(otherResults)
+    // Sin mapping, el impuesto integra el neto en 0 pero se EXPONE como
+    // "información insuficiente" (nunca como $0 calculado).
+    const taxCents = cents(incomeTax)
+    const continuingCents = preTaxCents - taxCents
+    // Operaciones discontinuadas: capability NOT_SUPPORTED ⇒ neto = continuadas.
+    const netCents = continuingCents
+
+    const operativeIds = [...sales.accountIds, ...costOfSales.accountIds, ...adminExpenses.accountIds, ...sellingExpenses.accountIds]
+    const preTaxIds = [...operativeIds, ...financialResults.accountIds, ...otherResults.accountIds]
 
     return {
         sales,
@@ -267,12 +295,16 @@ export function buildIncomeStatement(resultTb: NormalizedTrialBalance, accounts:
         grossProfit: makeLine('er:bruto', 'Resultado bruto', 0, grossCents, [...sales.accountIds, ...costOfSales.accountIds]),
         adminExpenses,
         sellingExpenses,
-        operatingResult: makeLine('er:operativo', 'Resultado operativo', 0, operatingCents,
-            [...sales.accountIds, ...costOfSales.accountIds, ...adminExpenses.accountIds, ...sellingExpenses.accountIds]),
+        operatingResult: makeLine('er:operativo', 'Resultado operativo', 0, operatingCents, operativeIds),
         financialResults,
         otherResults,
+        preTaxResult: makeLine('er:antes-impuesto', 'Resultado antes del impuesto a las ganancias', 0, preTaxCents, preTaxIds),
+        incomeTax,
+        incomeTaxStatus,
+        continuingResult: makeLine('er:continuadas', 'Resultado de operaciones que continúan', 0, continuingCents,
+            [...preTaxIds, ...incomeTax.accountIds]),
         netIncome: makeLine('er:neto', 'Resultado del ejercicio', 0, netCents,
-            [...sales.accountIds, ...costOfSales.accountIds, ...adminExpenses.accountIds, ...sellingExpenses.accountIds, ...financialResults.accountIds, ...otherResults.accountIds]),
+            [...preTaxIds, ...incomeTax.accountIds]),
     }
 }
 
@@ -398,6 +430,10 @@ export function validateStatements(
     checks.push(check('er-eepn', 'Resultado del ER = resultado incorporado al EEPN',
         cents(er.netIncome), cents(eepn.periodResult)))
 
+    // Puente del impuesto (Fase 2E, §5.3): antes del impuesto − IG = neto
+    checks.push(check('er-pretax', 'ER: resultado antes del impuesto − IG = resultado del ejercicio',
+        cents(er.preTaxResult) - cents(er.incomeTax), cents(er.netIncome)))
+
     // PN del ESP = cierre del EEPN
     checks.push(check('eepn-esp', 'PN del ESP = saldo final del EEPN',
         cents(bs.equity), cents(eepn.closingBalance)))
@@ -506,8 +542,15 @@ function attachComparatives(bs: BalanceSheet2B, prev: BalanceSheet2B) {
     }
 }
 
+/** Solo las líneas del ER (excluye campos de estado como incomeTaxStatus) */
+function erLines(er: IncomeStatement2B): ReportLine[] {
+    return [er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses,
+        er.operatingResult, er.financialResults, er.otherResults,
+        er.preTaxResult, er.incomeTax, er.continuingResult, er.netIncome]
+}
+
 function attachComparativesER(er: IncomeStatement2B, prev: IncomeStatement2B) {
     const map = new Map<string, ReportLine>()
-    for (const line of Object.values(prev)) indexLines(line as ReportLine, map)
-    for (const line of Object.values(er)) applyComparative(line as ReportLine, map)
+    for (const line of erLines(prev)) indexLines(line, map)
+    for (const line of erLines(er)) applyComparative(line, map)
 }

@@ -45,7 +45,8 @@ export function verticalIncomeStatement(bundle: StatementsBundle): VerticalAnaly
     const lines = [
         er.sales, er.costOfSales, er.grossProfit,
         er.adminExpenses, er.sellingExpenses, er.operatingResult,
-        er.financialResults, er.otherResults, er.netIncome,
+        er.financialResults, er.otherResults, er.preTaxResult,
+        er.incomeTax, er.netIncome,
     ].flatMap(l => flatten(l))
     return verticalRows(lines, 'Ventas', er.sales.amount)
 }
@@ -101,7 +102,7 @@ export function horizontalIncomeStatement(bundle: StatementsBundle): HorizontalA
     const er = bundle.incomeStatement
     return [er.sales, er.costOfSales, er.grossProfit, er.adminExpenses,
         er.sellingExpenses, er.operatingResult, er.financialResults,
-        er.otherResults, er.netIncome]
+        er.otherResults, er.preTaxResult, er.incomeTax, er.netIncome]
         .flatMap(l => flatten(l))
         .map(horizontalRow)
 }

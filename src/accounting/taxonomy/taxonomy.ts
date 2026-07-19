@@ -66,6 +66,7 @@ const STATEMENT_GROUP_MONETARY: Record<StatementGroup, MonetaryClassification> =
     FINANCIAL_EXPENSES: 'NON_MONETARY',
     OTHER_INCOME: 'NON_MONETARY',
     OTHER_EXPENSES: 'NON_MONETARY',
+    INCOME_TAX: 'NON_MONETARY',
 }
 
 export function deriveAccountClass(account: Account): AccountClass {

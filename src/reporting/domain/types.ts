@@ -90,6 +90,16 @@ export interface BalanceSheet2B {
     equationDifference: number
 }
 
+/**
+ * Estado del renglón de impuesto a las ganancias (Fase 2E, §5.2).
+ * - CALCULATED: hay cuentas con mapping estructural INCOME_TAX (importe real,
+ *   incluso $0 si no se devengó impuesto).
+ * - NOT_APPLICABLE: el ejercicio no tiene actividad de resultados que gravar.
+ * - INSUFFICIENT_INFORMATION: hay resultados pero el plan no tiene ninguna
+ *   cuenta mapeada a INCOME_TAX; el importe NO se muestra como $0 calculado.
+ */
+export type IncomeTaxStatus = 'CALCULATED' | 'NOT_APPLICABLE' | 'INSUFFICIENT_INFORMATION'
+
 export interface IncomeStatement2B {
     sales: ReportLine
     costOfSales: ReportLine
@@ -99,6 +109,13 @@ export interface IncomeStatement2B {
     operatingResult: ReportLine
     financialResults: ReportLine
     otherResults: ReportLine
+    /** Resultado operativo + financieros y por tenencia + otros (Fase 2E, §5) */
+    preTaxResult: ReportLine
+    /** Solo cuentas con statementGroup INCOME_TAX; jamás inferido por nombre */
+    incomeTax: ReportLine
+    incomeTaxStatus: IncomeTaxStatus
+    /** Resultado de operaciones que continúan (= neto: discontinuadas sin soporte) */
+    continuingResult: ReportLine
     netIncome: ReportLine
 }
 

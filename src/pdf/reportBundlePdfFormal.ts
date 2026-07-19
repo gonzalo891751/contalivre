@@ -34,6 +34,23 @@ function flatten(lines: ReportLine[], showComp: boolean): Row[] {
 interface Section {
     title: string
     lines: ReportLine[]
+    /** filas ya resueltas (para renglones con estado, ej. impuesto sin mapping) */
+    extraRows?: Row[]
+}
+
+/** Filas del ER con la secuencia completa (Fase 2E, §5 / §13.1) */
+function incomeStatementRows(bundle: ReportingBundle, showComp: boolean): Row[] {
+    const er = bundle.statements.incomeStatement
+    const rows = flatten([er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses,
+        er.operatingResult, er.financialResults, er.otherResults, er.preTaxResult], showComp)
+    if (er.incomeTaxStatus === 'CALCULATED') {
+        rows.push(...flatten([er.incomeTax], showComp))
+    } else {
+        const label = er.incomeTaxStatus === 'NOT_APPLICABLE' ? 'No aplicable' : 'Información insuficiente (sin mapping)'
+        rows.push(showComp ? ['Impuesto a las ganancias', label, '—'] : ['Impuesto a las ganancias', label])
+    }
+    rows.push(...flatten([er.continuingResult, er.netIncome], showComp))
+    return rows
 }
 
 function efeStatement(bundle: ReportingBundle, options: ExportEstadosOptions): { cf: CashFlowStatement2B | null; closingUsed: boolean } {
@@ -59,10 +76,10 @@ function buildSections(bundle: ReportingBundle, options: ExportEstadosOptions): 
         })
     }
     if (c.er) {
-        const er = s.incomeStatement
         sections.push({
             title: 'Estado de Resultados',
-            lines: [er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses, er.operatingResult, er.financialResults, er.otherResults, er.netIncome],
+            lines: [],
+            extraRows: incomeStatementRows(bundle, options.comparative && bundle.metadata.hasComparative),
         })
     }
     if (c.eepn) {
@@ -135,7 +152,7 @@ export async function exportReportBundlePdfFormal(bundle: ReportingBundle, optio
         autoTable(doc, {
             startY: y + 6,
             head,
-            body: flatten(section.lines, showComp),
+            body: section.extraRows ?? flatten(section.lines, showComp),
             styles: { fontSize: 8.5, cellPadding: 3, textColor: [30, 41, 59] },
             headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
             alternateRowStyles: { fillColor: [248, 250, 252] },

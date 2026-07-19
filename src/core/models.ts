@@ -52,6 +52,7 @@ export type StatementGroup =
     | 'FINANCIAL_EXPENSES'
     | 'OTHER_INCOME'
     | 'OTHER_EXPENSES'
+    | 'INCOME_TAX'
 
 /**
  * Lado natural del saldo

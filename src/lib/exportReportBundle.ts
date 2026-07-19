@@ -24,6 +24,21 @@ function flattenLines(lines: ReportLine[], showComp: boolean): Cell[][] {
     return out
 }
 
+/** Filas del ER con la secuencia completa 2E (impuesto con estado, no $0 ficticio) */
+function incomeStatementSheetRows(bundle: ReportingBundle, showComp: boolean): Cell[][] {
+    const er = bundle.statements.incomeStatement
+    const rows = flattenLines([er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses,
+        er.operatingResult, er.financialResults, er.otherResults, er.preTaxResult], showComp)
+    if (er.incomeTaxStatus === 'CALCULATED') {
+        rows.push(...flattenLines([er.incomeTax], showComp))
+    } else {
+        const label = er.incomeTaxStatus === 'NOT_APPLICABLE' ? 'No aplicable' : 'Información insuficiente (sin mapping)'
+        rows.push(showComp ? ['Impuesto a las ganancias', label, null] : ['Impuesto a las ganancias', label])
+    }
+    rows.push(...flattenLines([er.continuingResult, er.netIncome], showComp))
+    return rows
+}
+
 /**
  * Construye las hojas del workbook desde el bundle (pura y testeable).
  * Garantiza que la exportación usa EXACTAMENTE las cifras del motor.
@@ -33,7 +48,6 @@ export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
     const headerRow = (): Cell[] => showComp ? ['Concepto', 'Ejercicio actual', 'Ejercicio anterior'] : ['Concepto', 'Ejercicio actual']
 
     const bs = bundle.statements.balanceSheet
-    const er = bundle.statements.incomeStatement
     const eepn = bundle.statements.equityStatement
     const efe = bundle.statements.cashFlowDirect
     const efeInd = bundle.statements.cashFlowIndirect
@@ -80,7 +94,7 @@ export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
     // ── ER ───────────────────────────────────────────────────
     sheets.push({
         name: 'ER',
-        rows: [headerRow(), ...flattenLines([er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses, er.operatingResult, er.financialResults, er.otherResults, er.netIncome], showComp)],
+        rows: [headerRow(), ...incomeStatementSheetRows(bundle, showComp)],
     })
 
     // ── EEPN ─────────────────────────────────────────────────
@@ -177,8 +191,7 @@ export function buildSelectedReportSheets(bundle: ReportingBundle, options: Expo
         sheets.push({ name: 'ESP', rows: [headerRow(), ...flattenLines([bs.currentAssets, bs.nonCurrentAssets, bs.totalAssets, bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities, bs.equity, bs.totalLiabilitiesAndEquity], showComp)] })
     }
     if (c.er) {
-        const er = s.incomeStatement
-        sheets.push({ name: 'ER', rows: [headerRow(), ...flattenLines([er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses, er.operatingResult, er.financialResults, er.otherResults, er.netIncome], showComp)] })
+        sheets.push({ name: 'ER', rows: [headerRow(), ...incomeStatementSheetRows(bundle, showComp)] })
     }
     if (c.eepn) {
         const e = s.equityStatement
