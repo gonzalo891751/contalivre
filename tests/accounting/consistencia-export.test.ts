@@ -44,9 +44,15 @@ describe('Fase 2C — consistencia motor/exportación', () => {
     })
 
     it('el EEPN exportado coincide con el bundle y con el PN del ESP', () => {
-        const cierre = cell(sheets, 'EEPN', 'Saldos al cierre')
+        // Fase 2E: la hoja EEPN es la matriz (total en la última columna);
+        // la hoja "EEPN resumen" conserva la forma vertical anterior.
+        const cierre = cell(sheets, 'EEPN resumen', 'Saldos al cierre')
         expect(cierre).toBe(bundle.statements.equityStatement.closingBalance.amount)
         expect(cierre).toBe(bundle.statements.balanceSheet.equity.amount)
+
+        const eepn = sheets.find(s => s.name === 'EEPN')!
+        const matrixClosing = eepn.rows.find(r => r[0] === 'Saldos al cierre')!
+        expect(matrixClosing[eepn.rows[1].length - 1]).toBe(bundle.statements.balanceSheet.equity.amount)
     })
 
     it('el EFE exportado coincide con el bundle', () => {

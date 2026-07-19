@@ -24,6 +24,113 @@ function flattenLines(lines: ReportLine[], showComp: boolean): Cell[][] {
     return out
 }
 
+/** EEPN matricial (Fase 2E §13.2): una fila por movimiento, una columna por componente */
+function equityMatrixSheetRows(bundle: ReportingBundle, showComp: boolean): Cell[][] {
+    const m = bundle.statements.equityMatrix
+    const header: Cell[] = ['Movimiento', ...m.columns.map(c => c.label), 'Total PN']
+    if (showComp) header.push('Total ej. anterior')
+    const groupHeader: Cell[] = ['', ...m.columns.map(c => {
+        const g = m.columnGroups.find(gr => gr.components.includes(c.component))
+        return g?.label ?? ''
+    }), '']
+    if (showComp) groupHeader.push('')
+
+    const rowCells = (row: typeof m.openingRow, compTotal?: number | null): Cell[] => {
+        const cells: Cell[] = [row.label, ...m.columns.map(c => row.cells[c.component] ?? null), row.total]
+        if (showComp) cells.push(compTotal ?? null)
+        return cells
+    }
+
+    const rows: Cell[][] = [groupHeader, header]
+    rows.push(rowCells(m.openingRow, showComp ? m.comparative?.openingTotal : undefined))
+    if (m.priorAdjustmentRow.hasData) rows.push(rowCells(m.priorAdjustmentRow))
+    if (m.priorAdjustmentRow.hasData) rows.push(rowCells(m.adjustedOpeningRow))
+    for (const r of m.movementRows) {
+        if (r.hasData) rows.push(rowCells(r))
+    }
+    rows.push(rowCells(m.totalVariationsRow))
+    rows.push(rowCells(m.closingRow, showComp ? m.comparative?.closingTotal : undefined))
+    return rows
+}
+
+/** Hojas de anexos 2E (§13.4): gastos por función, CMV, bienes de uso, moneda extranjera */
+function annexSheets(bundle: ReportingBundle, showComp: boolean): WorkbookSheet[] {
+    const sheets: WorkbookSheet[] = []
+    const s = bundle.statements
+
+    // Gastos por función
+    if (s.expensesByFunction.rows.length > 0 || s.expensesByFunction.unmappedExpenses.length > 0) {
+        const m = s.expensesByFunction
+        const header: Cell[] = ['Cuenta', 'Total', ...m.columns.map(c => c.label)]
+        if (showComp) header.push('Ej. anterior')
+        const rows: Cell[][] = [header]
+        for (const r of m.rows) {
+            const row: Cell[] = [`${r.code} ${r.name}`, r.total, ...m.columns.map(c => r.cells[c.function] ?? null)]
+            if (showComp) row.push(r.comparativeTotal ?? null)
+            rows.push(row)
+        }
+        for (const u of m.unmappedExpenses) {
+            rows.push([`${u.code} ${u.name} (SIN FUNCIÓN)`, u.total, ...m.columns.map((): Cell => null)])
+        }
+        const totalRow: Cell[] = ['Total', m.totals.total, ...m.columns.map(c => m.totals.byFunction[c.function] ?? null)]
+        if (showComp) totalRow.push(m.totals.comparativeTotal ?? null)
+        rows.push(totalRow)
+        sheets.push({ name: 'Gastos por función', rows })
+    }
+
+    // Determinación del costo de ventas
+    if (s.costOfSales.mode !== 'NOT_APPLICABLE') {
+        const b = s.costOfSales
+        const val = (v: { amount: number | null; status: string }): Cell =>
+            v.status === 'CALCULATED' ? v.amount : v.status === 'NOT_APPLICABLE' ? 'No aplicable' : 'Información insuficiente'
+        const rows: Cell[][] = [['Concepto', 'Importe', ...(showComp ? ['Ej. anterior'] : [])]]
+        const push = (label: string, v: { amount: number | null; status: string; comparativeAmount?: number | null }) => {
+            const row: Cell[] = [label, val(v)]
+            if (showComp) row.push(v.comparativeAmount ?? null)
+            rows.push(row)
+        }
+        push('Existencia inicial', b.openingInventory)
+        push('Compras y costos incorporables', b.purchases)
+        push('Bienes disponibles para la venta', b.goodsAvailableForSale)
+        push('Existencia final', b.closingInventory)
+        push('Costo de ventas (puente)', b.costOfSales)
+        rows.push(['Costo de ventas según ER', b.costOfSalesPerIncomeStatement])
+        for (const v of b.validations) rows.push([v.passed ? 'OK' : 'FALLA', v.label, v.difference && v.difference !== 0 ? v.difference : ''])
+        sheets.push({ name: 'Costo de ventas', rows })
+    }
+
+    // Bienes de uso
+    if (s.fixedAssetsAnnex.rows.length > 0) {
+        const header: Cell[] = ['Clase', 'VO inicio', 'Altas', 'Bajas', 'VO cierre',
+            'Dep. acum. inicio', 'Dep. ejercicio', 'Bajas dep.', 'Dep. acum. cierre', 'Valor residual']
+        if (showComp) header.push('Residual ej. anterior')
+        const rows: Cell[][] = [header]
+        for (const r of [...s.fixedAssetsAnnex.rows, s.fixedAssetsAnnex.totals]) {
+            const row: Cell[] = [r.assetClass, r.grossOpening, r.additions, r.disposals, r.grossClosing,
+                r.accumDepOpening, r.periodDepreciation, r.depDisposals, r.accumDepClosing, r.residual]
+            if (showComp) row.push(r.comparativeResidual ?? null)
+            rows.push(row)
+        }
+        sheets.push({ name: 'Bienes de uso', rows })
+    }
+
+    // Moneda extranjera
+    if (s.foreignCurrency.applicable) {
+        const rows: Cell[][] = [['Cuenta', 'Moneda', 'Tipo', 'Clasificación', 'Cantidad', 'Cotización', 'Medición', ...(showComp ? ['Comparativo'] : [])]]
+        for (const r of s.foreignCurrency.rows) {
+            const row: Cell[] = [`${r.code} ${r.name}`, r.currency,
+                r.side === 'ASSET' ? 'Activo' : r.side === 'LIABILITY' ? 'Pasivo' : 'Otro',
+                r.monetary, 'Información insuficiente', 'Información insuficiente', r.measurement]
+            if (showComp) row.push(r.comparativeMeasurement ?? null)
+            rows.push(row)
+        }
+        rows.push([s.foreignCurrency.note])
+        sheets.push({ name: 'Moneda extranjera', rows })
+    }
+
+    return sheets
+}
+
 /** Filas del ER con la secuencia completa 2E (impuesto con estado, no $0 ficticio) */
 function incomeStatementSheetRows(bundle: ReportingBundle, showComp: boolean): Cell[][] {
     const er = bundle.statements.incomeStatement
@@ -97,9 +204,10 @@ export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
         rows: [headerRow(), ...incomeStatementSheetRows(bundle, showComp)],
     })
 
-    // ── EEPN ─────────────────────────────────────────────────
+    // ── EEPN (matriz de doble entrada, Fase 2E) ──────────────
+    sheets.push({ name: 'EEPN', rows: equityMatrixSheetRows(bundle, showComp) })
     sheets.push({
-        name: 'EEPN',
+        name: 'EEPN resumen',
         rows: [headerRow(), ...flattenLines([eepn.openingBalance, eepn.contributions, eepn.distributions, eepn.reservesMovements, eepn.otherMovements, eepn.periodResult, eepn.closingBalance], showComp)],
     })
 
@@ -144,6 +252,9 @@ export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
         ahRows.push([row.label, row.current, row.previous ?? 'N/D', row.absoluteChange ?? 'N/D', row.percentageChange ?? 'N/D', row.note ?? ''])
     }
     sheets.push({ name: 'Análisis horizontal', rows: ahRows })
+
+    // ── Anexos 2E ────────────────────────────────────────────
+    sheets.push(...annexSheets(bundle, showComp))
 
     return sheets
 }
@@ -195,25 +306,40 @@ export function buildSelectedReportSheets(bundle: ReportingBundle, options: Expo
     }
     if (c.eepn) {
         const e = s.equityStatement
-        sheets.push({ name: 'EEPN', rows: [headerRow(), ...flattenLines([e.openingBalance, e.contributions, e.distributions, e.reservesMovements, e.otherMovements, e.periodResult, e.closingBalance], showComp)] })
+        sheets.push({ name: 'EEPN', rows: equityMatrixSheetRows(bundle, showComp) })
+        sheets.push({ name: 'EEPN resumen', rows: [headerRow(), ...flattenLines([e.openingBalance, e.contributions, e.distributions, e.reservesMovements, e.otherMovements, e.periodResult, e.closingBalance], showComp)] })
     }
     if (c.efe) {
         const restated = bundle.cashFlowRestated
         const wantClosing = options.currency === 'CLOSING' && !!restated
         const src = wantClosing && restated ? { direct: restated.direct, indirect: restated.indirect } : { direct: s.cashFlowDirect, indirect: s.cashFlowIndirect }
-        const cf: CashFlowStatement2B | null = options.efeMethod === 'INDIRECT' ? src.indirect : src.direct
-        if (cf) {
-            const name = `EFE ${options.efeMethod === 'INDIRECT' ? 'indirecto' : 'directo'}${wantClosing ? ' (cierre)' : ''}`
+        const methods: ('DIRECT' | 'INDIRECT')[] = options.efeMethod === 'BOTH' ? ['DIRECT', 'INDIRECT'] : [options.efeMethod]
+        for (const method of methods) {
+            const cf: CashFlowStatement2B | null = method === 'INDIRECT' ? src.indirect : src.direct
+            if (!cf) continue
+            const name = `EFE ${method === 'INDIRECT' ? 'indirecto' : 'directo'}${wantClosing ? ' (cierre)' : ''}`
             sheets.push({ name, rows: [['Concepto', 'Importe'], ...flattenLines([cf.openingCash, cf.operating, cf.investing, cf.financing, cf.unclassified, cf.netChange, cf.closingCash], false)] })
         }
     }
     if (c.notas) {
-        const notasRows: Cell[][] = [['Nota', 'Concepto', 'Importe', 'Origen', 'Reconcilia']]
+        const header: Cell[] = ['Nota', 'Concepto', 'Importe', ...(showComp ? ['Comparativo'] : []), 'Origen', 'Reconcilia']
+        const notasRows: Cell[][] = [header]
         for (const note of bundle.notes) {
-            notasRows.push([note.title, note.text ?? '', note.total ?? '', '', note.reconciled == null ? '' : note.reconciled ? 'Sí' : 'No'])
-            for (const l of note.lines) notasRows.push(['', l.label, l.amount ?? '', l.origin, ''])
+            const titleRow: Cell[] = [`Nota ${note.number} — ${note.title}`, note.text ?? '', note.total ?? '']
+            if (showComp) titleRow.push(note.comparativeTotal ?? '')
+            titleRow.push('', note.reconciled == null ? '' : note.reconciled ? 'Sí' : 'No')
+            notasRows.push(titleRow)
+            for (const l of note.lines) {
+                const lineRow: Cell[] = ['', l.label, l.amount ?? '']
+                if (showComp) lineRow.push(l.comparativeAmount ?? '')
+                lineRow.push(l.origin, '')
+                notasRows.push(lineRow)
+            }
         }
         sheets.push({ name: 'Notas', rows: notasRows })
+    }
+    if (c.anexos) {
+        sheets.push(...annexSheets(bundle, showComp))
     }
     if (c.indicadores) {
         const indRows: Cell[][] = [['Indicador', 'Categoría', 'Estado', 'Valor', 'Fórmula', 'Detalle']]
