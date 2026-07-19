@@ -19,10 +19,11 @@ import type { ReportingInput, StatementsBundle } from './domain/types'
 export async function loadReportingInput(year: number): Promise<ReportingInput> {
     const ctx = await resolveContextForYear(year)
     const exercise = await getExercise(exerciseIdForYear(year))
-    const [entries, openingBalances, accounts] = await Promise.all([
+    const [entries, openingBalances, accounts, allocationRules] = await Promise.all([
         getEntriesForContext(ctx),
         getOpeningBalances(ctx),
         db.accounts.toArray(),
+        db.expenseAllocationRules.toArray(),
     ])
     return {
         context: {
@@ -35,6 +36,7 @@ export async function loadReportingInput(year: number): Promise<ReportingInput> 
         entries,
         openingBalances,
         accounts,
+        allocationRules,
     }
 }
 

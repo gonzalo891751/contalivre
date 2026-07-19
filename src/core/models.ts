@@ -73,6 +73,42 @@ export type EquityComponent =
     | 'DEFERRED_RESULT'
     | 'OTHER_EQUITY'
 
+/**
+ * Función del gasto para el anexo de gastos (Fase 2E, §9).
+ * Mapping estructural por cuenta (`resultFunction`) o distribución por regla
+ * versionada; con derivación de respaldo desde statementGroup. COGS e
+ * INCOME_TAX quedan fuera del anexo (tienen exposición propia).
+ */
+export type ResultFunction =
+    | 'ADMINISTRATION'
+    | 'SELLING'
+    | 'PRODUCTION'
+    | 'FINANCIAL'
+    | 'OTHER'
+
+/**
+ * Regla versionada de distribución de un gasto entre funciones (Fase 2E §9.2).
+ * Es metadata de EXPOSICIÓN: no altera asientos históricos. La suma de
+ * percentages debe ser exactamente 100 (validado por el motor).
+ */
+export interface ExpenseAllocationRule {
+    id: string
+    accountId: string
+    /** ISO date desde la que rige */
+    validFrom: string
+    /** ISO date hasta la que rige (abierta si falta) */
+    validTo?: string
+    allocations: {
+        function: ResultFunction
+        /** porcentaje 0–100 con hasta 2 decimales */
+        percentage: number
+    }[]
+    reason: string
+    createdBy: string
+    createdAt: string
+    version: number
+}
+
 /** Tipo de movimiento patrimonial (clasificación estructural, Fase 2E §6.4) */
 export type EquityMovementType =
     | 'OPENING_BALANCE'
@@ -149,7 +185,7 @@ export interface Account {
     currentClassification?: CurrentClassification
     monetaryClassification?: MonetaryClassification
     statementSection?: string        // sección de exposición (ej: 'ACTIVO_CORRIENTE')
-    resultFunction?: string          // función del resultado (admin/comercial/financiera)
+    resultFunction?: ResultFunction | string  // función del gasto (anexo de gastos, Fase 2E §9)
     cashFlowCategory?: 'OPERATING' | 'INVESTING' | 'FINANCING' | 'CASH_EQUIVALENT' | 'NOT_APPLICABLE'
     cashFlowSubcategory?: string
     notesGroup?: string

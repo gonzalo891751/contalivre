@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import LineageModal from './LineageModal'
+import { ExpensesByFunctionView } from './ExpensesByFunctionView'
 import { statementStyles } from './statementFormat'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 import type { StatementNote, NoteLine } from '../../../reporting/engine/buildNotes'
@@ -151,14 +152,25 @@ export interface NotesAndAnnexesTabProps {
     bundle: ReportingBundle
     /** número de nota a enfocar (referencia cruzada desde ESP/ER) */
     focusNote?: string | null
-    /** contenido de los subtabs de anexos (se inyecta desde la página) */
-    annexContent?: Partial<Record<Exclude<NotesSubTab, 'NOTAS'>, React.ReactNode>>
+    /** subtabs de anexos aún no implementados o sin datos (se ocultan/deshabilitan) */
+    extraAnnexes?: Partial<Record<Exclude<NotesSubTab, 'NOTAS'>, React.ReactNode>>
 }
 
-export function NotesAndAnnexesTab({ bundle, focusNote, annexContent }: NotesAndAnnexesTabProps) {
+export function NotesAndAnnexesTab({ bundle, focusNote, extraAnnexes }: NotesAndAnnexesTabProps) {
     const [subtab, setSubtab] = useState<NotesSubTab>('NOTAS')
     const [target, setTarget] = useState<{ label: string; accountIds: string[] } | null>(null)
     const showComparative = bundle.metadata.hasComparative
+
+    const expenses = bundle.statements.expensesByFunction
+    const hasExpenses = expenses.rows.length > 0 || expenses.unmappedExpenses.length > 0
+
+    const available: Record<NotesSubTab, boolean> = {
+        NOTAS: true,
+        GASTOS: hasExpenses,
+        CMV: !!extraAnnexes?.CMV,
+        BIENES_USO: !!extraAnnexes?.BIENES_USO,
+        MONEDA_EXT: !!extraAnnexes?.MONEDA_EXT,
+    }
 
     useEffect(() => {
         if (focusNote) setSubtab('NOTAS')
@@ -167,23 +179,20 @@ export function NotesAndAnnexesTab({ bundle, focusNote, annexContent }: NotesAnd
     return (
         <div>
             <nav className="note-subtabs" role="tablist" aria-label="Notas y anexos">
-                {SUBTABS.map(t => {
-                    const content = t.id === 'NOTAS' ? true : annexContent?.[t.id]
-                    return (
-                        <button
-                            key={t.id}
-                            type="button"
-                            role="tab"
-                            aria-selected={subtab === t.id}
-                            className={`note-subtab${subtab === t.id ? ' active' : ''}`}
-                            disabled={!content}
-                            title={!content ? 'Sin datos aplicables en este ejercicio' : undefined}
-                            onClick={() => setSubtab(t.id)}
-                        >
-                            {t.label}
-                        </button>
-                    )
-                })}
+                {SUBTABS.map(t => (
+                    <button
+                        key={t.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={subtab === t.id}
+                        className={`note-subtab${subtab === t.id ? ' active' : ''}`}
+                        disabled={!available[t.id]}
+                        title={!available[t.id] ? 'Sin datos aplicables en este ejercicio' : undefined}
+                        onClick={() => setSubtab(t.id)}
+                    >
+                        {t.label}
+                    </button>
+                ))}
             </nav>
 
             {subtab === 'NOTAS' && (
@@ -204,7 +213,15 @@ export function NotesAndAnnexesTab({ bundle, focusNote, annexContent }: NotesAnd
                 </div>
             )}
 
-            {subtab !== 'NOTAS' && annexContent?.[subtab]}
+            {subtab === 'GASTOS' && (
+                <ExpensesByFunctionView
+                    matrix={expenses}
+                    showComparative={showComparative}
+                    onAccountClick={(label, accountIds) => setTarget({ label, accountIds })}
+                />
+            )}
+
+            {subtab !== 'NOTAS' && subtab !== 'GASTOS' && extraAnnexes?.[subtab]}
 
             {target && (
                 <LineageModal

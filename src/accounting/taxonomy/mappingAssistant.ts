@@ -181,6 +181,9 @@ export function describeImpact(account: Account, proposed: Partial<Account>): Ma
             case 'active':
                 descriptions.push(to === false ? `Inactivará "${account.name}" (no admitirá nuevas imputaciones).` : `Reactivará "${account.name}".`)
                 break
+            case 'resultFunction':
+                descriptions.push(`Incluirá "${account.name}" en la función ${to ?? '(sin función)'} del anexo de gastos por función.`)
+                break
             default:
                 descriptions.push(`Actualizará ${field} de "${account.name}".`)
         }

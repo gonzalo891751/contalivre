@@ -11,6 +11,7 @@ import type { Account } from '../../core/models'
 import { toCents } from '../../accounting/domain/money'
 import { isStructuralClosingEntry } from '../../utils/resultsStatement'
 import { buildEquityMatrix } from './equityMatrix'
+import { buildExpensesByFunction } from './expensesByFunction'
 import type {
     BalanceSheet2B,
     EquityStatement2B,
@@ -501,6 +502,7 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
     const balanceSheet = buildBalanceSheet(trialBalance, input.accounts, pendingResultCents(trialBalance, input.accounts))
     const equityStatement = buildEquityStatement(input, trialBalance, incomeStatement)
     const equityMatrix = buildEquityMatrix(input, trialBalance, incomeStatement)
+    const expensesByFunction = buildExpensesByFunction(input, resultTb, incomeStatement)
     const validation = validateStatements(input, trialBalance, balanceSheet, incomeStatement, equityStatement)
 
     // Puente EEPN matriz ↔ EEPN vertical ↔ ESP (Fase 2E, §6.8): el cierre de
@@ -521,6 +523,16 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
         passed: matrixFailed.length === 0,
         detail: matrixFailed.length > 0 ? matrixFailed.map(v => v.label).join(' · ') : undefined,
     })
+
+    // Anexo de gastos por función (§9.4): conciliación con el ER + funciones
+    const expensesFailed = expensesByFunction.validations.filter(v => !v.passed)
+    validation.checks.push({
+        id: 'gastos-funcion',
+        label: 'Anexo de gastos por función: concilia con el ER y no hay gastos sin función',
+        passed: expensesFailed.length === 0,
+        detail: expensesFailed.length > 0 ? expensesFailed.map(v => v.detail ?? v.label).join(' · ') : undefined,
+    })
+
     validation.allPassed = validation.checks.every(c => c.passed)
     validation.canPublish = validation.allPassed
 
@@ -537,6 +549,7 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
         incomeStatement,
         equityStatement,
         equityMatrix,
+        expensesByFunction,
         cashFlowDirect: null,   // se completa en buildCashFlow (EFE)
         cashFlowIndirect: null,
         validation,

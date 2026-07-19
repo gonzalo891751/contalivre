@@ -7,7 +7,7 @@
  * Cada línea lleva linaje (cuentas y asientos que la forman).
  */
 
-import type { Account, JournalEntry } from '../../core/models'
+import type { Account, ExpenseAllocationRule, JournalEntry, ResultFunction } from '../../core/models'
 
 export interface EngineContext {
     companyId: string
@@ -24,6 +24,8 @@ export interface ReportingInput {
     /** Saldos previos explícitos (vacío si existe apertura formal) */
     openingBalances: Map<string, { debit: number; credit: number }>
     accounts: Account[]
+    /** Reglas versionadas de distribución de gastos por función (Fase 2E §9.2) */
+    allocationRules?: ExpenseAllocationRule[]
     /** Bundle comparativo (ejercicio anterior, derivado con el mismo motor) */
     comparative?: StatementsBundle | null
 }
@@ -167,6 +169,37 @@ export interface EquityMatrixRow {
     isSubtotal: boolean
 }
 
+// ─────────────────────────────────────────────────────────────
+// Anexo de gastos por función (Fase 2E, §9)
+// ─────────────────────────────────────────────────────────────
+
+export interface ExpenseAccountRow {
+    accountId: string
+    code: string
+    name: string
+    /** gasto total de la cuenta en el período (positivo) */
+    total: number
+    comparativeTotal?: number | null
+    /** importe por función (suma exacta = total) */
+    cells: Partial<Record<ResultFunction, number>>
+    /** origen de la asignación: regla versionada, mapping explícito o derivación */
+    source: 'RULE' | 'MAPPING' | 'DERIVED'
+    ruleId?: string
+}
+
+export interface ExpensesByFunctionMatrix {
+    rows: ExpenseAccountRow[]
+    columns: { function: ResultFunction; label: string }[]
+    totals: {
+        byFunction: Partial<Record<ResultFunction, number>>
+        total: number
+        comparativeTotal?: number | null
+    }
+    /** gastos sin función: se exponen y bloquean la publicación formal */
+    unmappedExpenses: { accountId: string; code: string; name: string; total: number }[]
+    validations: ValidationCheck[]
+}
+
 export interface EquityMatrixViewModel {
     columns: EquityMatrixColumn[]
     columnGroups: EquityMatrixColumnGroup[]
@@ -227,6 +260,8 @@ export interface StatementsBundle {
     equityStatement: EquityStatement2B
     /** EEPN matricial de doble entrada (Fase 2E, §6) */
     equityMatrix: EquityMatrixViewModel
+    /** Anexo de gastos por función (Fase 2E, §9) */
+    expensesByFunction: ExpensesByFunctionMatrix
     cashFlowDirect: CashFlowStatement2B | null
     cashFlowIndirect: CashFlowStatement2B | null
     validation: StatementValidationReport
