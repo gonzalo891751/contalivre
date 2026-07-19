@@ -229,6 +229,62 @@ export interface CostOfSalesBridge {
     validations: ValidationCheck[]
 }
 
+// ─────────────────────────────────────────────────────────────
+// Anexo de bienes de uso (Fase 2E, §11)
+// ─────────────────────────────────────────────────────────────
+
+export interface FixedAssetsAnnexRow {
+    /** clase estructural (annexGroup); 'Sin clase asignada' si falta mapping */
+    assetClass: string
+    accountIds: string[]
+    /** valores de origen */
+    grossOpening: number
+    additions: number
+    disposals: number
+    grossClosing: number
+    /** depreciaciones acumuladas (positivas: regularizan restando) */
+    accumDepOpening: number
+    periodDepreciation: number
+    depDisposals: number
+    accumDepClosing: number
+    /** valor residual = VO final − dep. acumulada final */
+    residual: number
+    comparativeResidual?: number | null
+}
+
+export interface FixedAssetsAnnex {
+    rows: FixedAssetsAnnexRow[]
+    totals: FixedAssetsAnnexRow
+    /** true si alguna cuenta PPE no tiene clase asignada (annexGroup) */
+    hasUnclassified: boolean
+    validations: ValidationCheck[]
+}
+
+// ─────────────────────────────────────────────────────────────
+// Moneda extranjera (Fase 2E, §12)
+// ─────────────────────────────────────────────────────────────
+
+export interface ForeignCurrencyRow {
+    accountId: string
+    code: string
+    name: string
+    currency: string
+    side: 'ASSET' | 'LIABILITY' | 'OTHER'
+    monetary: string
+    /** medición contable en moneda de curso legal (saldo del libro) */
+    measurement: number
+    comparativeMeasurement?: number | null
+    /** cantidad y cotización: sin datos estructurados ⇒ INSUFFICIENT */
+    quantityStatus: 'CALCULATED' | 'INSUFFICIENT_INFORMATION'
+    statementLineId: string
+}
+
+export interface ForeignCurrencyDisclosure {
+    applicable: boolean
+    rows: ForeignCurrencyRow[]
+    note: string
+}
+
 export interface EquityMatrixViewModel {
     columns: EquityMatrixColumn[]
     columnGroups: EquityMatrixColumnGroup[]
@@ -293,6 +349,10 @@ export interface StatementsBundle {
     expensesByFunction: ExpensesByFunctionMatrix
     /** Determinación del costo de ventas (Fase 2E, §10) */
     costOfSales: CostOfSalesBridge
+    /** Anexo de bienes de uso por clase (Fase 2E, §11) */
+    fixedAssetsAnnex: FixedAssetsAnnex
+    /** Cuadro de moneda extranjera (Fase 2E, §12) */
+    foreignCurrency: ForeignCurrencyDisclosure
     cashFlowDirect: CashFlowStatement2B | null
     cashFlowIndirect: CashFlowStatement2B | null
     validation: StatementValidationReport

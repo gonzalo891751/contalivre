@@ -13,6 +13,8 @@ import { isStructuralClosingEntry } from '../../utils/resultsStatement'
 import { buildEquityMatrix } from './equityMatrix'
 import { buildExpensesByFunction } from './expensesByFunction'
 import { buildCostOfSales } from './costOfSales'
+import { buildFixedAssetsAnnex } from './fixedAssetsAnnex'
+import { buildForeignCurrency } from './foreignCurrency'
 import type {
     BalanceSheet2B,
     EquityStatement2B,
@@ -505,6 +507,8 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
     const equityMatrix = buildEquityMatrix(input, trialBalance, incomeStatement)
     const expensesByFunction = buildExpensesByFunction(input, resultTb, incomeStatement)
     const costOfSales = buildCostOfSales(input, trialBalance, incomeStatement)
+    const fixedAssetsAnnex = buildFixedAssetsAnnex(input, trialBalance)
+    const foreignCurrency = buildForeignCurrency(input, trialBalance)
     const validation = validateStatements(input, trialBalance, balanceSheet, incomeStatement, equityStatement)
 
     // Puente EEPN matriz ↔ EEPN vertical ↔ ESP (Fase 2E, §6.8): el cierre de
@@ -544,6 +548,15 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
         detail: cmvFailed.length > 0 ? cmvFailed.map(v => v.detail ?? v.label).join(' · ') : undefined,
     })
 
+    // Anexo de bienes de uso (§11): valor residual = PPE neto del ESP
+    const ppeFailed = fixedAssetsAnnex.validations.filter(v => !v.passed)
+    validation.checks.push({
+        id: 'ppe-anexo',
+        label: 'Anexo de bienes de uso: valor residual = Bienes de uso netos del ESP',
+        passed: ppeFailed.length === 0,
+        detail: ppeFailed.length > 0 ? ppeFailed.map(v => v.detail ?? v.label).join(' · ') : undefined,
+    })
+
     validation.allPassed = validation.checks.every(c => c.passed)
     validation.canPublish = validation.allPassed
 
@@ -562,6 +575,8 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
         equityMatrix,
         expensesByFunction,
         costOfSales,
+        fixedAssetsAnnex,
+        foreignCurrency,
         cashFlowDirect: null,   // se completa en buildCashFlow (EFE)
         cashFlowIndirect: null,
         validation,

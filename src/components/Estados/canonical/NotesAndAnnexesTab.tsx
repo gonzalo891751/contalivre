@@ -13,6 +13,8 @@ import { ChevronRight } from 'lucide-react'
 import LineageModal from './LineageModal'
 import { ExpensesByFunctionView } from './ExpensesByFunctionView'
 import { CostOfSalesBridgeView } from './CostOfSalesBridgeView'
+import { FixedAssetsAnnexView } from './FixedAssetsAnnexView'
+import { ForeignCurrencyView } from './ForeignCurrencyView'
 import { statementStyles } from './statementFormat'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 import type { StatementNote, NoteLine } from '../../../reporting/engine/buildNotes'
@@ -153,11 +155,9 @@ export interface NotesAndAnnexesTabProps {
     bundle: ReportingBundle
     /** número de nota a enfocar (referencia cruzada desde ESP/ER) */
     focusNote?: string | null
-    /** subtabs de anexos aún no implementados o sin datos (se ocultan/deshabilitan) */
-    extraAnnexes?: Partial<Record<Exclude<NotesSubTab, 'NOTAS'>, React.ReactNode>>
 }
 
-export function NotesAndAnnexesTab({ bundle, focusNote, extraAnnexes }: NotesAndAnnexesTabProps) {
+export function NotesAndAnnexesTab({ bundle, focusNote }: NotesAndAnnexesTabProps) {
     const [subtab, setSubtab] = useState<NotesSubTab>('NOTAS')
     const [target, setTarget] = useState<{ label: string; accountIds: string[] } | null>(null)
     const showComparative = bundle.metadata.hasComparative
@@ -165,13 +165,15 @@ export function NotesAndAnnexesTab({ bundle, focusNote, extraAnnexes }: NotesAnd
     const expenses = bundle.statements.expensesByFunction
     const hasExpenses = expenses.rows.length > 0 || expenses.unmappedExpenses.length > 0
     const costOfSales = bundle.statements.costOfSales
+    const fixedAssets = bundle.statements.fixedAssetsAnnex
+    const foreignCurrency = bundle.statements.foreignCurrency
 
     const available: Record<NotesSubTab, boolean> = {
         NOTAS: true,
         GASTOS: hasExpenses,
         CMV: costOfSales.mode !== 'NOT_APPLICABLE',
-        BIENES_USO: !!extraAnnexes?.BIENES_USO,
-        MONEDA_EXT: !!extraAnnexes?.MONEDA_EXT,
+        BIENES_USO: fixedAssets.rows.length > 0,
+        MONEDA_EXT: foreignCurrency.applicable,
     }
 
     useEffect(() => {
@@ -231,7 +233,21 @@ export function NotesAndAnnexesTab({ bundle, focusNote, extraAnnexes }: NotesAnd
                 />
             )}
 
-            {subtab !== 'NOTAS' && subtab !== 'GASTOS' && subtab !== 'CMV' && extraAnnexes?.[subtab]}
+            {subtab === 'BIENES_USO' && (
+                <FixedAssetsAnnexView
+                    annex={fixedAssets}
+                    showComparative={showComparative}
+                    onRowClick={(label, accountIds) => setTarget({ label, accountIds })}
+                />
+            )}
+
+            {subtab === 'MONEDA_EXT' && (
+                <ForeignCurrencyView
+                    disclosure={foreignCurrency}
+                    showComparative={showComparative}
+                    onRowClick={(label, accountIds) => setTarget({ label, accountIds })}
+                />
+            )}
 
             {target && (
                 <LineageModal
