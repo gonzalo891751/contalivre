@@ -52,7 +52,7 @@ export default function Estados() {
             const forYear = list.filter(s => s.exerciseId.includes(String(year)))
             if (forYear.length > 0) {
                 const last = forYear[0]
-                setSnapshotInfo(`${forYear.length} snapshot(s) de este ejercicio · último: ${last.status} (${last.createdAt.slice(0, 10)}, v${last.reportVersion})`)
+                setSnapshotInfo(`${forYear.length} versión(es) validada(s) de este ejercicio · última: ${last.status} (${last.createdAt.slice(0, 10)}, v${last.reportVersion})`)
             } else {
                 setSnapshotInfo(null)
             }
@@ -62,7 +62,7 @@ export default function Estados() {
     const handlePublishSnapshot = useCallback(async () => {
         if (!bundle) return
         const snap = await createSnapshot(bundle, { status: 'PUBLISHED' })
-        setSnapshotInfo(`Snapshot ${snap.status} creado (v${snap.reportVersion}, ${snap.createdAt.slice(0, 10)}).`)
+        setSnapshotInfo(`Versión validada guardada (${snap.status}, v${snap.reportVersion}, ${snap.createdAt.slice(0, 10)}).`)
         setReloadKey(k => k + 1)
     }, [bundle])
 

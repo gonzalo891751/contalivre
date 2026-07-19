@@ -179,7 +179,7 @@ const styles = `
 .ind-interp { color: #cbd5e1; }
 
 .ind-card-value-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.ind-value { font-family: var(--font-mono, monospace); font-size: 1.4rem; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; }
+.ind-value { font-size: 1.4rem; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; }
 .ind-value.nd { font-size: 1.05rem; color: #94a3b8; }
 .ind-pill { font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 9999px; }
 .ind-pill.nd { background: rgba(148,163,184,0.18); color: #64748b; }

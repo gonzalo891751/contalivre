@@ -72,7 +72,6 @@ export const statementStyles = `
 }
 .stmt-card-total-wrap { display: flex; flex-direction: column; align-items: flex-end; }
 .stmt-card-total {
-    font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
     font-weight: 700;
     font-size: 1.1rem;
     color: #0f172a;
@@ -136,7 +135,6 @@ export const statementStyles = `
 .stmt-note-badge.is-link:focus-visible { outline: 2px solid #3B82F6; outline-offset: 1px; }
 
 .stmt-amount {
-    font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
     font-variant-numeric: tabular-nums; color: #0f172a; font-weight: 600; white-space: nowrap;
 }
 .stmt-amount-prev { color: #94a3b8; font-weight: 500; }
