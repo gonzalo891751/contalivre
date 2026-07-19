@@ -21,7 +21,7 @@
 import { toCents } from '../../accounting/domain/money'
 import { isStructuralClosingEntry } from '../../utils/resultsStatement'
 import { getCoefficient } from '../../accounting/inflation/engine'
-import { flowBucket, isCashAccount } from './buildCashFlow'
+import { directOperatingSubcategory, flowBucket, isCashAccount } from './buildCashFlow'
 import type { CashFlowStatement2B, ReportLine, ReportingInput, StatementsBundle } from '../domain/types'
 
 const fromCents = (c: number) => c / 100
@@ -66,13 +66,10 @@ export function reexpressCashFlow(
     let resultCents = 0, wcAssetCents = 0, wcLiabCents = 0, nonCashInvFinCents = 0
     const resultIds = new Set<string>(), wcAIds = new Set<string>(), wcLIds = new Set<string>()
 
+    // Misma apertura estructural que el método directo nominal (Fase 2E §7.2)
     const subcat = (accountId: string): string => {
-        const g = byId.get(accountId)?.statementGroup
-        if (g === 'TRADE_RECEIVABLES' || g === 'SALES') return 'Cobros de clientes'
-        if (g === 'TRADE_PAYABLES' || g === 'INVENTORIES' || g === 'COGS') return 'Pagos a proveedores'
-        if (g === 'PAYROLL_LIABILITIES') return 'Pagos al personal'
-        if (g === 'TAX_LIABILITIES' || g === 'TAX_CREDITS') return 'Pagos/cobros de impuestos'
-        return 'Otros cobros y pagos operativos'
+        const account = byId.get(accountId)
+        return account ? directOperatingSubcategory(account) : 'Otros cobros y pagos operativos'
     }
 
     for (const entry of flowEntries) {
