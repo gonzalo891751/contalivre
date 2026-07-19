@@ -200,6 +200,35 @@ export interface ExpensesByFunctionMatrix {
     validations: ValidationCheck[]
 }
 
+// ─────────────────────────────────────────────────────────────
+// Determinación del costo de ventas (Fase 2E, §10)
+// ─────────────────────────────────────────────────────────────
+
+export type CostOfSalesMode = 'COMMERCIAL' | 'SERVICES' | 'NOT_APPLICABLE'
+
+export interface CostOfSalesValue {
+    /** null cuando el estado no es CALCULATED (nunca cero como sustituto) */
+    amount: number | null
+    status: 'CALCULATED' | 'NOT_APPLICABLE' | 'INSUFFICIENT_INFORMATION'
+    accountIds: string[]
+    comparativeAmount?: number | null
+    detail?: string
+}
+
+export interface CostOfSalesBridge {
+    mode: CostOfSalesMode
+    openingInventory: CostOfSalesValue
+    purchases: CostOfSalesValue
+    incorporableCosts: CostOfSalesValue
+    goodsAvailableForSale: CostOfSalesValue
+    closingInventory: CostOfSalesValue
+    /** CMV por el puente: disponibles − existencia final */
+    costOfSales: CostOfSalesValue
+    /** CMV según el ER (registro perpetuo); la igualdad se VERIFICA, no se fuerza */
+    costOfSalesPerIncomeStatement: number
+    validations: ValidationCheck[]
+}
+
 export interface EquityMatrixViewModel {
     columns: EquityMatrixColumn[]
     columnGroups: EquityMatrixColumnGroup[]
@@ -262,6 +291,8 @@ export interface StatementsBundle {
     equityMatrix: EquityMatrixViewModel
     /** Anexo de gastos por función (Fase 2E, §9) */
     expensesByFunction: ExpensesByFunctionMatrix
+    /** Determinación del costo de ventas (Fase 2E, §10) */
+    costOfSales: CostOfSalesBridge
     cashFlowDirect: CashFlowStatement2B | null
     cashFlowIndirect: CashFlowStatement2B | null
     validation: StatementValidationReport

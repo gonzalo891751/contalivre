@@ -12,6 +12,7 @@ import { toCents } from '../../accounting/domain/money'
 import { isStructuralClosingEntry } from '../../utils/resultsStatement'
 import { buildEquityMatrix } from './equityMatrix'
 import { buildExpensesByFunction } from './expensesByFunction'
+import { buildCostOfSales } from './costOfSales'
 import type {
     BalanceSheet2B,
     EquityStatement2B,
@@ -503,6 +504,7 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
     const equityStatement = buildEquityStatement(input, trialBalance, incomeStatement)
     const equityMatrix = buildEquityMatrix(input, trialBalance, incomeStatement)
     const expensesByFunction = buildExpensesByFunction(input, resultTb, incomeStatement)
+    const costOfSales = buildCostOfSales(input, trialBalance, incomeStatement)
     const validation = validateStatements(input, trialBalance, balanceSheet, incomeStatement, equityStatement)
 
     // Puente EEPN matriz ↔ EEPN vertical ↔ ESP (Fase 2E, §6.8): el cierre de
@@ -533,6 +535,15 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
         detail: expensesFailed.length > 0 ? expensesFailed.map(v => v.detail ?? v.label).join(' · ') : undefined,
     })
 
+    // Determinación del CMV (§10.5): el puente concilia con el ER y con el ESP
+    const cmvFailed = costOfSales.validations.filter(v => !v.passed)
+    validation.checks.push({
+        id: 'cmv-puente',
+        label: 'Costo de ventas: el puente EI + compras − EF concilia con el ER y el ESP',
+        passed: cmvFailed.length === 0,
+        detail: cmvFailed.length > 0 ? cmvFailed.map(v => v.detail ?? v.label).join(' · ') : undefined,
+    })
+
     validation.allPassed = validation.checks.every(c => c.passed)
     validation.canPublish = validation.allPassed
 
@@ -550,6 +561,7 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
         equityStatement,
         equityMatrix,
         expensesByFunction,
+        costOfSales,
         cashFlowDirect: null,   // se completa en buildCashFlow (EFE)
         cashFlowIndirect: null,
         validation,

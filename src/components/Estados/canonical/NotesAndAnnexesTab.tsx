@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import LineageModal from './LineageModal'
 import { ExpensesByFunctionView } from './ExpensesByFunctionView'
+import { CostOfSalesBridgeView } from './CostOfSalesBridgeView'
 import { statementStyles } from './statementFormat'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 import type { StatementNote, NoteLine } from '../../../reporting/engine/buildNotes'
@@ -163,11 +164,12 @@ export function NotesAndAnnexesTab({ bundle, focusNote, extraAnnexes }: NotesAnd
 
     const expenses = bundle.statements.expensesByFunction
     const hasExpenses = expenses.rows.length > 0 || expenses.unmappedExpenses.length > 0
+    const costOfSales = bundle.statements.costOfSales
 
     const available: Record<NotesSubTab, boolean> = {
         NOTAS: true,
         GASTOS: hasExpenses,
-        CMV: !!extraAnnexes?.CMV,
+        CMV: costOfSales.mode !== 'NOT_APPLICABLE',
         BIENES_USO: !!extraAnnexes?.BIENES_USO,
         MONEDA_EXT: !!extraAnnexes?.MONEDA_EXT,
     }
@@ -221,7 +223,15 @@ export function NotesAndAnnexesTab({ bundle, focusNote, extraAnnexes }: NotesAnd
                 />
             )}
 
-            {subtab !== 'NOTAS' && subtab !== 'GASTOS' && extraAnnexes?.[subtab]}
+            {subtab === 'CMV' && (
+                <CostOfSalesBridgeView
+                    bridge={costOfSales}
+                    showComparative={showComparative}
+                    onDrilldown={(label, accountIds) => setTarget({ label, accountIds })}
+                />
+            )}
+
+            {subtab !== 'NOTAS' && subtab !== 'GASTOS' && subtab !== 'CMV' && extraAnnexes?.[subtab]}
 
             {target && (
                 <LineageModal
