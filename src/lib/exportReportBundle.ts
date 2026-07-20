@@ -120,11 +120,17 @@ function annexSheets(bundle: ReportingBundle, showComp: boolean): WorkbookSheet[
 
     // Moneda extranjera
     if (s.foreignCurrency.applicable) {
-        const rows: Cell[][] = [['Cuenta', 'Moneda', 'Tipo', 'Clasificación', 'Cantidad', 'Cotización', 'Medición', ...(showComp ? ['Comparativo'] : [])]]
+        const rows: Cell[][] = [['Cuenta', 'Moneda', 'Tipo', 'Clasificación', 'Cantidad', 'Cotización', 'Fuente', 'Fecha', 'Tipo cotiz.', 'Medición (Diario)', 'Diferencia', ...(showComp ? ['Comparativo'] : [])]]
         for (const r of s.foreignCurrency.rows) {
+            const has = r.quantityStatus === 'CALCULATED'
             const row: Cell[] = [`${r.code} ${r.name}`, r.currency,
                 r.side === 'ASSET' ? 'Activo' : r.side === 'LIABILITY' ? 'Pasivo' : 'Otro',
-                r.monetary, 'Información insuficiente', 'Información insuficiente', r.measurement]
+                r.monetary,
+                has ? (r.quantity ?? null) : 'Información insuficiente',
+                has ? (r.rate ?? null) : 'Información insuficiente',
+                r.rateSource ?? '', r.rateDate ?? '', r.rateType ?? '',
+                r.measurement,
+                has ? (r.reconciliationDifference ?? 0) : '']
             if (showComp) row.push(r.comparativeMeasurement ?? null)
             rows.push(row)
         }

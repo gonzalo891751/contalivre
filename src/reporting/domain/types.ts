@@ -28,6 +28,8 @@ export interface ReportingInput {
     allocationRules?: ExpenseAllocationRule[]
     /** Notas manuales persistentes vigentes del ejercicio (Fase 2F §8) */
     manualDisclosures?: ManualDisclosure[]
+    /** Detalle operativo de posiciones en moneda extranjera (Fase 2F §11) */
+    foreignCurrencyDetails?: ForeignCurrencyDetail[]
     /** Bundle comparativo (ejercicio anterior, derivado con el mismo motor) */
     comparative?: StatementsBundle | null
 }
@@ -289,6 +291,21 @@ export interface ForeignCurrencyRow {
     comparativeMeasurement?: number | null
     /** cantidad y cotización: sin datos estructurados ⇒ INSUFFICIENT */
     quantityStatus: 'CALCULATED' | 'INSUFFICIENT_INFORMATION'
+    /** cantidad en moneda extranjera (módulo operativo), si está disponible */
+    quantity?: number | null
+    /** cotización efectivamente utilizada (ARS/ME) */
+    rate?: number | null
+    rateType?: string
+    rateSource?: string
+    rateDate?: string
+    /** medición implícita = cantidad × cotización (módulo operativo) */
+    impliedMeasurement?: number | null
+    /**
+     * diferencia entre la medición contable (Diario) y la implícita del
+     * módulo operativo. La fuente del saldo es SIEMPRE el Diario; cualquier
+     * diferencia se expone, no se oculta (Fase 2F §11).
+     */
+    reconciliationDifference?: number | null
     statementLineId: string
 }
 
@@ -296,6 +313,23 @@ export interface ForeignCurrencyDisclosure {
     applicable: boolean
     rows: ForeignCurrencyRow[]
     note: string
+    /** true si el detalle operativo reconcilia con el Diario en todas las cuentas */
+    reconciled: boolean
+}
+
+/**
+ * Detalle operativo de una posición en moneda extranjera (Fase 2F §11),
+ * normalizado desde el módulo de moneda extranjera. El motor lo usa para
+ * enriquecer la nota; la fuente del saldo sigue siendo el Diario.
+ */
+export interface ForeignCurrencyDetail {
+    ledgerAccountId: string
+    currency: string
+    quantity: number
+    rate: number
+    rateType?: string
+    rateSource?: string
+    rateDate?: string
 }
 
 export interface EquityMatrixViewModel {
