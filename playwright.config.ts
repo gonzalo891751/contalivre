@@ -26,11 +26,19 @@ export default defineConfig({
         {
             name: 'chromium-desktop',
             use: { ...devices['Desktop Chrome'], viewport: { width: 1920, height: 1080 } },
+            // mobile.spec corre en chromium-mobile (390×844), no acá
+            testIgnore: /mobile\.spec\.ts/,
         },
         {
             name: 'chromium-mobile',
             use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
             testMatch: /mobile\.spec\.ts/,
+        },
+        {
+            // Segundo motor (§19): el flujo integral también en Firefox
+            name: 'firefox-desktop',
+            use: { ...devices['Desktop Firefox'], viewport: { width: 1440, height: 900 } },
+            testMatch: /full-flow\.spec\.ts/,
         },
     ],
     webServer: {
