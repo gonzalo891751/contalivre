@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 import { execSync } from 'node:child_process'
+import pkg from './package.json'
 
 // Provenance del build (Fase 2B, DEP-001): commit y fecha visibles en /acerca
 function gitCommitSha(): string {
@@ -18,6 +19,8 @@ export default defineConfig({
     define: {
         'import.meta.env.VITE_COMMIT_SHA': JSON.stringify(gitCommitSha()),
         'import.meta.env.VITE_BUILD_DATE': JSON.stringify(new Date().toISOString()),
+        // Fuente ÚNICA de versión: package.json (Fase 2F, §4.1)
+        'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
     },
     plugins: [
         react(),

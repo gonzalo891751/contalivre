@@ -8,11 +8,15 @@
 
 | Ítem | Valor |
 |---|---|
-| Node | 20 LTS (probado con 25.9.0) |
-| npm | 10+ (probado con 11.12.1) |
+| Node | **22 LTS "Jod"** (pineado en `.nvmrc`/`.node-version` = 22.23.1; `engines: >=22 <23`). Node 20 quedó EOL en abril de 2026. |
+| npm | 10+ (`packageManager: npm@11.12.1`) |
 | Comando build | `npm ci && npm run build` |
 | Directorio de salida | `dist/` |
 | rollup | pineado a 4.44.0 (`overrides` en package.json) por compatibilidad con la generación del service worker de workbox |
+| Versión de app | fuente única `package.json` (`0.4.0-rc.1`); Vite la inyecta como `VITE_APP_VERSION` y el runtime la importa como fallback — no hay números duplicados |
+
+> En Cloudflare Pages fijar la variable de entorno `NODE_VERSION=22.23.1`
+> (o respetar `.node-version`, que Pages lee automáticamente).
 
 ## 2. Configuración de Cloudflare Pages
 
