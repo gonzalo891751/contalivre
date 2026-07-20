@@ -307,12 +307,16 @@ export async function exportReportBundlePdfFormal(bundle: ReportingBundle, optio
                     : v.status === 'NOT_APPLICABLE' ? 'No aplicable' : 'Información insuficiente'
             const body: Row[] = [
                 ['Existencia inicial', cell(b.openingInventory)],
-                ['Compras y costos incorporables', cell(b.purchases)],
-                ['Bienes disponibles para la venta', cell(b.goodsAvailableForSale)],
-                ['Existencia final', cell(b.closingInventory)],
-                ['Costo de ventas (puente)', cell(b.costOfSales)],
-                ['Costo de ventas según el ER', fmt(b.costOfSalesPerIncomeStatement)],
+                ['Compras', cell(b.purchases)],
             ]
+            if (b.purchaseReturns.status === 'CALCULATED') body.push(['(−) Devoluciones y bonificaciones', cell(b.purchaseReturns)])
+            if (b.acquisitionCosts.status === 'CALCULATED') body.push(['(+) Costos de adquisición (fletes)', cell(b.acquisitionCosts)])
+            if (b.incorporableCosts.status === 'CALCULATED') body.push(['(+) Otros costos incorporables', cell(b.incorporableCosts)])
+            body.push(['Bienes disponibles para la venta', cell(b.goodsAvailableForSale)])
+            body.push(['Existencia final', cell(b.closingInventory)])
+            if (b.abnormalLosses.status === 'CALCULATED') body.push(['(−) Bajas / pérdidas anormales', cell(b.abnormalLosses)])
+            body.push(['Costo de ventas (puente)', cell(b.costOfSales)])
+            body.push(['Costo de ventas según el ER', fmt(b.costOfSalesPerIncomeStatement)])
             annexTable('Anexo — Determinación del costo de ventas', [['Concepto', 'Importe']], body)
         }
 

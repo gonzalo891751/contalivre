@@ -118,6 +118,24 @@ export interface ExpenseAllocationRule {
 }
 
 /**
+ * Componente estructurado del costo de ventas (Fase 2F, §10).
+ * Mapping explícito por cuenta (`costComponent`); jamás inferido por nombre.
+ * Permite separar el puente comercial en sus partes (compras, devoluciones,
+ * costos de adquisición, otros incorporables) y aislar las pérdidas anormales
+ * del CMV. Sin mapping, el modelo perpetuo trata débitos a inventario como
+ * compras y créditos como CMV (comportamiento 2E preservado).
+ */
+export type CostOfSalesComponent =
+    | 'PURCHASES'
+    | 'PURCHASE_RETURNS'
+    | 'ACQUISITION_COST'
+    | 'OTHER_INCORPORABLE_COST'
+    | 'ABNORMAL_LOSS'
+    | 'OPENING_INVENTORY'
+    | 'CLOSING_INVENTORY'
+    | 'COST_OF_SALES'
+
+/**
  * Nota manual persistente (Fase 2F, §8): información complementaria de carga
  * manual, versionada. Cada guardado crea una fila nueva que reemplaza a la
  * anterior (supersedesId); el historial nunca se borra. El contenido es TEXTO
@@ -232,6 +250,8 @@ export interface Account {
     annexGroup?: string
     /** componente del PN para el EEPN matricial (Fase 2E, §6.4) */
     equityComponent?: EquityComponent
+    /** componente estructurado del costo de ventas (Fase 2F, §10) */
+    costComponent?: CostOfSalesComponent
     currency?: string
     validFrom?: string               // ISO date
     validTo?: string                 // ISO date

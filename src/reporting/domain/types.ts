@@ -221,10 +221,21 @@ export interface CostOfSalesBridge {
     mode: CostOfSalesMode
     openingInventory: CostOfSalesValue
     purchases: CostOfSalesValue
+    /** devoluciones y bonificaciones de compras (restan; Fase 2F §10) */
+    purchaseReturns: CostOfSalesValue
+    /** fletes y costos de adquisición (suman; Fase 2F §10) */
+    acquisitionCosts: CostOfSalesValue
+    /** otros costos incorporables (suman; Fase 2F §10) */
     incorporableCosts: CostOfSalesValue
     goodsAvailableForSale: CostOfSalesValue
     closingInventory: CostOfSalesValue
-    /** CMV por el puente: disponibles − existencia final */
+    /**
+     * Pérdidas/bajas anormales que salieron de inventario pero NO son CMV
+     * (siniestros, obsolescencia). Se exponen como diferencia real, jamás
+     * mezcladas con el costo (Fase 2F §10.1).
+     */
+    abnormalLosses: CostOfSalesValue
+    /** CMV por el puente: disponibles − existencia final − bajas anormales */
     costOfSales: CostOfSalesValue
     /** CMV según el ER (registro perpetuo); la igualdad se VERIFICA, no se fuerza */
     costOfSalesPerIncomeStatement: number
