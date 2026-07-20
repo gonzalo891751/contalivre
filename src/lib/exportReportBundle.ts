@@ -24,6 +24,18 @@ function flattenLines(lines: ReportLine[], showComp: boolean): Cell[][] {
     return out
 }
 
+/** Filas del ESP sin duplicar: los totales de activo/pasivo se muestran como
+ *  línea de total sin reexpandir sus componentes (Fase 2F §16). */
+function balanceSheetRows(bundle: ReportingBundle, showComp: boolean): Cell[][] {
+    const bs = bundle.statements.balanceSheet
+    const asTotal = (l: ReportLine): ReportLine => ({ ...l, children: undefined })
+    return flattenLines([
+        bs.currentAssets, bs.nonCurrentAssets, asTotal(bs.totalAssets),
+        bs.currentLiabilities, bs.nonCurrentLiabilities, asTotal(bs.totalLiabilities),
+        bs.equity, asTotal(bs.totalLiabilitiesAndEquity),
+    ], showComp)
+}
+
 /** EEPN matricial (Fase 2E §13.2): una fila por movimiento, una columna por componente */
 function equityMatrixSheetRows(bundle: ReportingBundle, showComp: boolean): Cell[][] {
     const m = bundle.statements.equityMatrix
@@ -164,7 +176,6 @@ export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
     const showComp = bundle.metadata.hasComparative
     const headerRow = (): Cell[] => showComp ? ['Concepto', 'Ejercicio actual', 'Ejercicio anterior'] : ['Concepto', 'Ejercicio actual']
 
-    const bs = bundle.statements.balanceSheet
     const eepn = bundle.statements.equityStatement
     const efe = bundle.statements.cashFlowDirect
     const efeInd = bundle.statements.cashFlowIndirect
@@ -205,7 +216,7 @@ export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
     // ── ESP ──────────────────────────────────────────────────
     sheets.push({
         name: 'ESP',
-        rows: [headerRow(), ...flattenLines([bs.currentAssets, bs.nonCurrentAssets, bs.totalAssets, bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities, bs.equity, bs.totalLiabilitiesAndEquity], showComp)],
+        rows: [headerRow(), ...balanceSheetRows(bundle, showComp)],
     })
 
     // ── ER ───────────────────────────────────────────────────
@@ -308,8 +319,7 @@ export function buildSelectedReportSheets(bundle: ReportingBundle, options: Expo
     })
 
     if (c.esp) {
-        const bs = s.balanceSheet
-        sheets.push({ name: 'ESP', rows: [headerRow(), ...flattenLines([bs.currentAssets, bs.nonCurrentAssets, bs.totalAssets, bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities, bs.equity, bs.totalLiabilitiesAndEquity], showComp)] })
+        sheets.push({ name: 'ESP', rows: [headerRow(), ...balanceSheetRows(bundle, showComp)] })
     }
     if (c.er) {
         sheets.push({ name: 'ER', rows: [headerRow(), ...incomeStatementSheetRows(bundle, showComp)] })

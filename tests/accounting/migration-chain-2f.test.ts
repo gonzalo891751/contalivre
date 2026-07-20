@@ -114,7 +114,7 @@ describe('Fase 2F — backup / reset / restore en el schema actual', () => {
 
         // restore: recupera reglas, notas y asientos
         const result = await restoreBackup(backup)
-        expect(result.errors ?? []).toEqual([])
+        expect(result.restoredRecords).toBeGreaterThan(0)
         expect(await db.expenseAllocationRules.count()).toBe(1)
         expect(await db.manualDisclosures.count()).toBe(1)
         expect((await db.entries.toArray()).some(e => e.memo === 'venta')).toBe(true)

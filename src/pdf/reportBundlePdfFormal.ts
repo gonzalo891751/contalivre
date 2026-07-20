@@ -75,9 +75,13 @@ function buildSections(bundle: ReportingBundle, options: ExportEstadosOptions): 
 
     if (c.esp) {
         const bs = s.balanceSheet
+        // totalAssets/totalLiabilities contienen a currentAssets/nonCurrentAssets
+        // como hijos: si se listan ambos, flatten los duplica. Se muestran como
+        // líneas de TOTAL sin reexpandir (los componentes ya van listados).
+        const asTotal = (l: ReportLine): ReportLine => ({ ...l, children: undefined })
         sections.push({
             title: 'Estado de Situación Patrimonial',
-            lines: [bs.currentAssets, bs.nonCurrentAssets, bs.totalAssets, bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities, bs.equity, bs.totalLiabilitiesAndEquity],
+            lines: [bs.currentAssets, bs.nonCurrentAssets, asTotal(bs.totalAssets), bs.currentLiabilities, bs.nonCurrentLiabilities, asTotal(bs.totalLiabilities), bs.equity, asTotal(bs.totalLiabilitiesAndEquity)],
         })
     }
     if (c.er) {
