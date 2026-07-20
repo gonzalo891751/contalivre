@@ -275,10 +275,11 @@ const matrixStyles = `
     text-transform: uppercase; letter-spacing: 0.05em; text-align: center;
     border-bottom: 1px solid #ede9fe; border-left: 1px solid #ede9fe;
 }
-.eqm-colhead {
+.eqm-table th.eqm-colhead {
     position: sticky; top: 33px; z-index: 3;
     background: #faf9ff; color: #475569; font-size: 0.72rem; font-weight: 600; text-align: right;
-    border-bottom: 2px solid #e2e8f0; border-left: 1px solid #f1f5f9; max-width: 160px; white-space: normal; min-width: 120px;
+    border-bottom: 2px solid #e2e8f0; border-left: 1px solid #f1f5f9;
+    white-space: normal; overflow-wrap: break-word; min-width: 130px; max-width: 180px; vertical-align: bottom;
 }
 .eqm-total-head { background: rgba(139,92,246,0.14); }
 .eqm-comp-head { background: rgba(148,163,184,0.14); color: #475569; }

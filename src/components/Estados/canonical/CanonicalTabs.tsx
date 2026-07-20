@@ -94,7 +94,7 @@ export function ERCanonicalTab({ bundle, onOpenNote }: { bundle: ReportingBundle
                     onNoteClick={onOpenNote}
                 />
                 {taxCalculated ? (
-                    <StatementRows lines={[er.incomeTax]} showComparative={showComp} onLineClick={open} />
+                    <StatementRows lines={[er.incomeTax]} showComparative={showComp} onLineClick={open} hideColumnHeaders />
                 ) : (
                     <div className="stmt-rubro-row" title={taxInfo?.hint}>
                         <span className="stmt-rubro-label">
@@ -114,6 +114,7 @@ export function ERCanonicalTab({ bundle, onOpenNote }: { bundle: ReportingBundle
                     lines={[er.continuingResult, er.netIncome]}
                     showComparative={showComp}
                     onLineClick={open}
+                    hideColumnHeaders
                 />
             </StatementCard>
             {modal}

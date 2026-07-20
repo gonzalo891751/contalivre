@@ -94,6 +94,8 @@ export default defineConfig({
     test: {
         globals: true,
         environment: 'jsdom',
-        setupFiles: './tests/setup.ts'
+        setupFiles: './tests/setup.ts',
+        // Los E2E de Playwright (Fase 2F) corren con `npm run e2e`, no con vitest
+        exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**']
     }
 })
