@@ -94,6 +94,7 @@ export async function createDraftEntry(input: EntryDraftInput): Promise<JournalE
         sourceModule: input.sourceModule,
         sourceType: input.sourceType,
         sourceId: input.sourceId,
+        equityMovementType: input.equityMovementType,
         metadata: input.metadata as Record<string, unknown>,
         status: 'DRAFT',
         companyId: DEFAULT_COMPANY_ID,
@@ -303,6 +304,7 @@ async function postNewEntryInternal(input: EntryDraftInput & {
         sourceModule: input.sourceModule,
         sourceType: input.sourceType,
         sourceId: input.sourceId,
+        equityMovementType: input.equityMovementType,
         metadata: input.metadata as Record<string, unknown>,
         idempotencyKey: input.idempotencyKey,
         status: 'POSTED',
@@ -428,6 +430,7 @@ export async function reverseEntry(id: string, options: ReverseEntryOptions): Pr
         sourceModule: original.sourceModule,
         sourceType: 'reversal',
         sourceId: original.id,
+        equityMovementType: original.equityMovementType,
         metadata: { reversalOf: original.id },
         status: 'POSTED',
         companyId: original.companyId ?? DEFAULT_COMPANY_ID,
@@ -525,7 +528,7 @@ function linesEconomicallyEqual(a: EntryLine[], b: EntryLine[]): boolean {
  */
 export async function replaceOperationEntry(
     entryId: string,
-    input: Partial<Pick<JournalEntry, 'date' | 'memo' | 'lines' | 'metadata' | 'sourceId' | 'sourceType'>>,
+    input: Partial<Pick<JournalEntry, 'date' | 'memo' | 'lines' | 'metadata' | 'sourceId' | 'sourceType' | 'equityMovementType'>>,
     options: OperationMutationOptions = {}
 ): Promise<JournalEntry> {
     const actorId = options.actorId ?? LOCAL_ACTOR
@@ -607,6 +610,7 @@ export async function replaceOperationEntry(
         sourceModule: existing.sourceModule,
         sourceType: input.sourceType ?? existing.sourceType,
         sourceId: input.sourceId ?? existing.sourceId,
+        equityMovementType: input.equityMovementType ?? existing.equityMovementType,
         metadata: {
             ...(input.metadata ?? existing.metadata ?? {}),
             replacesEntryId: existing.id,
@@ -688,6 +692,7 @@ function buildReversalCandidate(original: JournalEntry, actorId: string, reason:
         sourceModule: original.sourceModule,
         sourceType: 'reversal',
         sourceId: original.id,
+        equityMovementType: original.equityMovementType,
         metadata: { reversalOf: original.id },
         status: 'POSTED',
         companyId: original.companyId ?? DEFAULT_COMPANY_ID,

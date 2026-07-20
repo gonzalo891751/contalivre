@@ -309,6 +309,15 @@ export interface JournalEntry {
     reversedEntryId?: string      // en el reverso: id del asiento original
     reversalReason?: string
     schemaVersion?: number
+
+    /**
+     * Clasificación EXPLÍCITA del movimiento patrimonial (Fase 2F, §9).
+     * Se estampa al contabilizar (inmutable como el resto del asiento).
+     * Sin este campo, el EEPN clasifica estructuralmente (componente/sentido/
+     * contrapartida) y las modificaciones de ejercicios anteriores no pueden
+     * distinguirse: quedan en Distribuciones/Otros hasta ser confirmadas.
+     */
+    equityMovementType?: EquityMovementType
 }
 
 /**

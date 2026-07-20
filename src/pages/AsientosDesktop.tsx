@@ -96,7 +96,7 @@ export default function AsientosDesktop() {
 
     // Los asientos manuales nacen como BORRADOR: no afectan los libros hasta
     // que se contabilizan ("Guardar borrador no afecta los libros").
-    const handleSaveNewEntry = async (data: { date: string; memo: string; lines: EntryLine[] }) => {
+    const handleSaveNewEntry = async (data: { date: string; memo: string; lines: EntryLine[]; equityMovementType?: import('../core/models').EquityMovementType }) => {
         await createDraftEntry({
             date: data.date,
             memo: data.memo,

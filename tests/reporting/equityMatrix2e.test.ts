@@ -190,6 +190,47 @@ describe('Fase 2E — EEPN matricial', () => {
         expect(s.equityMatrix.comparative).toEqual({ openingTotal: 0, closingTotal: 550, periodResult: 150 })
     })
 
+    it('equityMovementType EXPLÍCITO manda sobre la clasificación estructural (Fase 2F §9)', () => {
+        const s = buildStatements(input([
+            // AREA: estructuralmente parecería una distribución; la metadata la
+            // manda a "Modificaciones de ejercicios anteriores"
+            entry('2025-01-05', [{ accountId: 'rna', debit: 70, credit: 0 }, { accountId: 'caja', debit: 0, credit: 70 }],
+                { equityMovementType: 'PRIOR_PERIOD_ADJUSTMENT' }),
+            // reexpresión del capital: estructuralmente caería en Aportes; la
+            // metadata la manda a Otros
+            entry('2025-02-01', [{ accountId: 'ventas', debit: 40, credit: 0 }, { accountId: 'capital', debit: 0, credit: 40 }],
+                { equityMovementType: 'OTHER' }),
+        ], [
+            ['capital', { debit: 0, credit: 500 }],
+            ['rna', { debit: 0, credit: 300 }],
+            ['caja', { debit: 800, credit: 0 }],
+        ]))
+        const m = s.equityMatrix
+
+        expect(m.priorAdjustmentRow.hasData).toBe(true)
+        expect(m.priorAdjustmentRow.cells.PRIOR_RETAINED_EARNINGS).toBe(-70)
+        expect(m.adjustedOpeningRow.total).toBe(730)
+        expect(findRow(m.movementRows, 'DISTRIBUTION').hasData).toBe(false)
+
+        expect(findRow(m.movementRows, 'OTHER').cells.CAPITAL).toBe(40)
+        expect(findRow(m.movementRows, 'CONTRIBUTION').hasData).toBe(false)
+
+        expect(m.validations.every(v => v.passed)).toBe(true)
+    })
+
+    it('sin metadata explícita, la clasificación estructural se mantiene (legacy sin invento)', () => {
+        const s = buildStatements(input([
+            entry('2025-01-05', [{ accountId: 'rna', debit: 70, credit: 0 }, { accountId: 'caja', debit: 0, credit: 70 }]),
+        ], [
+            ['rna', { debit: 0, credit: 300 }],
+            ['caja', { debit: 300, credit: 0 }],
+        ]))
+        // sin metadata: cae en Distribuciones (estructural); la AREA solo existe
+        // cuando el usuario la confirma explícitamente
+        expect(findRow(s.equityMatrix.movementRows, 'DISTRIBUTION').total).toBe(-70)
+        expect(s.equityMatrix.priorAdjustmentRow.hasData).toBe(false)
+    })
+
     it('sin datos de PN: matriz vacía sin columnas fantasma ni ceros inventados', () => {
         const s = buildStatements(input([]))
         expect(s.equityMatrix.columns.filter(c => c.component !== 'CURRENT_RESULT')).toEqual([])

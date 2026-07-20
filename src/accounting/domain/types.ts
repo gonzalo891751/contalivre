@@ -149,6 +149,8 @@ export interface EntryDraftInput {
     sourceId?: string
     metadata?: Record<string, unknown>
     actorId?: string
+    /** clasificación explícita del movimiento de PN (Fase 2F §9); opcional */
+    equityMovementType?: import('../../core/models').EquityMovementType
 }
 
 export interface OperationPostingInput extends EntryDraftInput {

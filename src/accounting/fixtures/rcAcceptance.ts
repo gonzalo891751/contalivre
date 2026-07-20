@@ -98,7 +98,7 @@ export const RC_ALLOCATION_RULE: ExpenseAllocationRule = {
 }
 
 interface FxLine { accountId: string; debit: number; credit: number }
-interface FxEntry { date: string; memo: string; type: string; lines: FxLine[] }
+interface FxEntry { date: string; memo: string; type: string; lines: FxLine[]; equityMovementType?: import('../../core/models').EquityMovementType }
 
 const d = (accountId: string, amount: number): FxLine => ({ accountId, debit: amount, credit: 0 })
 const h = (accountId: string, amount: number): FxLine => ({ accountId, credit: amount, debit: 0 })
@@ -115,7 +115,7 @@ export const RC_ENTRIES_PRIOR: FxEntry[] = [
 
 /** Asientos del ejercicio actual 2025 */
 export const RC_ENTRIES_CURRENT: FxEntry[] = [
-    { date: `${RC_CURRENT_YEAR}-01-08`, memo: 'RC AREA: gasto omitido en 2024 (modificación de ejercicios anteriores)', type: 'area', lines: [d('rc-rna', 20000), h('rc-proveedores', 20000)] },
+    { date: `${RC_CURRENT_YEAR}-01-08`, memo: 'RC AREA: gasto omitido en 2024 (modificación de ejercicios anteriores)', type: 'area', equityMovementType: 'PRIOR_PERIOD_ADJUSTMENT', lines: [d('rc-rna', 20000), h('rc-proveedores', 20000)] },
     { date: `${RC_CURRENT_YEAR}-01-15`, memo: 'RC Aporte de los propietarios', type: 'aporte', lines: [d('rc-caja', 300000), h('rc-capital', 300000)] },
     { date: `${RC_CURRENT_YEAR}-01-20`, memo: 'RC Capitalización parcial de resultados', type: 'capitalizacion', lines: [d('rc-rna', 50000), h('rc-ajuste-capital', 50000)] },
     { date: `${RC_CURRENT_YEAR}-02-01`, memo: 'RC Constitución de reserva legal (5%)', type: 'reserva', lines: [d('rc-rna', 13200), h('rc-reserva-legal', 13200)] },
@@ -137,7 +137,7 @@ export const RC_ENTRIES_CURRENT: FxEntry[] = [
     { date: `${RC_CURRENT_YEAR}-09-01`, memo: 'RC Intereses del préstamo pagados', type: 'intereses', lines: [d('rc-intereses', 24000), h('rc-caja', 24000)] },
     { date: `${RC_CURRENT_YEAR}-10-01`, memo: 'RC Constitución de previsión para incobrables', type: 'prevision', lines: [d('rc-quebrantos', 30000), h('rc-prevision', 30000)] },
     { date: `${RC_CURRENT_YEAR}-12-31`, memo: 'RC Depreciación del rodado', type: 'deprec', lines: [d('rc-deprec', 24000), h('rc-amort-rodados', 24000)] },
-    { date: `${RC_CURRENT_YEAR}-12-31`, memo: 'RC Reexpresión del capital (RECPAM)', type: 'recpam', lines: [d('rc-recpam', 40000), h('rc-ajuste-capital', 40000)] },
+    { date: `${RC_CURRENT_YEAR}-12-31`, memo: 'RC Reexpresión del capital (RECPAM)', type: 'recpam', equityMovementType: 'OTHER', lines: [d('rc-recpam', 40000), h('rc-ajuste-capital', 40000)] },
     { date: `${RC_CURRENT_YEAR}-12-31`, memo: 'RC Impuesto a las ganancias devengado', type: 'ig', lines: [d('rc-ig', 30000), h('rc-ig-pagar', 30000)] },
 ]
 
@@ -202,6 +202,7 @@ export async function loadRcAcceptanceDataset(): Promise<RcLoadResult> {
         const res = await postOperation({
             date: e.date, memo: e.memo, lines: e.lines,
             sourceModule: RC_FIXTURE_MODULE, sourceType: e.type, sourceId: `rc-${year}-${i}`,
+            equityMovementType: e.equityMovementType,
         })
         if (!res.idempotentHit) idempotent = false
     }

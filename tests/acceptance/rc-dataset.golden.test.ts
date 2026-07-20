@@ -61,10 +61,16 @@ describe('Fase 2F — dataset RC Acceptance (golden)', () => {
         const m = current.equityMatrix
         const row = (t: string) => m.movementRows.find(r => r.type === t)!
         expect(row('CONTRIBUTION').cells.CAPITAL).toBe(300000)
-        // −80.000 dividendos; la AREA (−20.000) cae acá por clasificación
-        // estructural hasta que exista equityMovementType persistido (2F §9):
-        // ese hito la mueve a "Modificaciones de ejercicios anteriores".
-        expect(row('DISTRIBUTION').total).toBe(-100000)
+        expect(row('CONTRIBUTION').total).toBe(300000) // la reexpresión ya no cae acá
+        expect(row('DISTRIBUTION').total).toBe(-80000) // solo dividendos
+
+        // AREA con equityMovementType persistido (2F §9): fila propia
+        expect(m.priorAdjustmentRow.total).toBe(-20000)
+        expect(m.priorAdjustmentRow.cells.PRIOR_RETAINED_EARNINGS).toBe(-20000)
+        expect(m.adjustedOpeningRow.total).toBe(1244000)
+
+        // La reexpresión del capital (explícita OTHER) va a Otros movimientos
+        expect(row('OTHER').cells.CAPITAL_ADJUSTMENT).toBe(40000)
         expect(row('RESERVE_CREATION').cells.LEGAL_RESERVE).toBe(13200)
         expect(row('RESERVE_CREATION').total).toBe(0)
         expect(row('RESERVE_RELEASE').cells.LEGAL_RESERVE).toBe(-3200)

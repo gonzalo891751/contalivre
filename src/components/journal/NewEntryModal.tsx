@@ -4,17 +4,30 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Plus, Trash2, CheckCircle, AlertCircle, ArrowRight } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { Account, EntryLine } from '../../core/models'
+import type { Account, EntryLine, EquityMovementType } from '../../core/models'
 import AccountSearchSelect, { AccountSearchSelectRef } from '../../ui/AccountSearchSelect'
 import { evaluateMoneyExpression } from '../../utils/moneyExpression'
 
 interface NewEntryModalProps {
     isOpen: boolean
     onClose: () => void
-    onSave: (data: { date: string; memo: string; lines: EntryLine[] }) => Promise<void>
+    onSave: (data: { date: string; memo: string; lines: EntryLine[]; equityMovementType?: EquityMovementType }) => Promise<void>
     accounts: Account[]
     initialDate: string
 }
+
+/** Clasificación explícita del movimiento de PN (Fase 2F §9) */
+const EQUITY_MOVEMENT_OPTIONS: { value: EquityMovementType; label: string }[] = [
+    { value: 'CONTRIBUTION', label: 'Aporte de los propietarios' },
+    { value: 'WITHDRAWAL', label: 'Retiro / reducción de capital' },
+    { value: 'DISTRIBUTION', label: 'Distribución de resultados' },
+    { value: 'RESERVE_CREATION', label: 'Constitución de reservas' },
+    { value: 'RESERVE_RELEASE', label: 'Desafectación de reservas' },
+    { value: 'CAPITALIZATION', label: 'Capitalización' },
+    { value: 'LOSS_ABSORPTION', label: 'Absorción de pérdidas' },
+    { value: 'PRIOR_PERIOD_ADJUSTMENT', label: 'Modificación de ejercicios anteriores (AREA)' },
+    { value: 'OTHER', label: 'Otro movimiento del PN' },
+]
 
 const formatMoney = (amount: number) => {
     return new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)
@@ -45,6 +58,13 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
     const [isSaving, setIsSaving] = useState(false)
     const [inputOverrides, setInputOverrides] = useState<Record<string, string>>({})
     const [inputErrors, setInputErrors] = useState<Record<string, string>>({})
+    const [equityMovementType, setEquityMovementType] = useState<'' | EquityMovementType>('')
+
+    // ¿El asiento imputa cuentas de patrimonio neto? (habilita la clasificación §9)
+    const touchesEquity = lines.some(l => {
+        if (!l.accountId) return false
+        return accounts.find(a => a.id === l.accountId)?.kind === 'EQUITY'
+    })
 
     // Refs for focus management
     const lineRefs = useRef<Array<{
@@ -123,7 +143,8 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
             await onSave({
                 date,
                 memo,
-                lines: lines.filter(l => l.accountId && (l.debit > 0 || l.credit > 0))
+                lines: lines.filter(l => l.accountId && (l.debit > 0 || l.credit > 0)),
+                equityMovementType: touchesEquity && equityMovementType !== '' ? equityMovementType : undefined,
             })
             onClose()
         } catch (error) {
@@ -487,6 +508,28 @@ export function NewEntryModal({ isOpen, onClose, onSave, accounts, initialDate }
                                     )}
                                 </div>
                             </div>
+
+                            {/* Clasificación del movimiento de PN (Fase 2F §9) */}
+                            {touchesEquity && (
+                                <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(139,92,246,0.05)', border: '1px solid rgba(139,92,246,0.25)', borderRadius: 10 }}>
+                                    <label style={{ display: 'grid', gap: 4, fontSize: '0.78rem', fontWeight: 600, color: '#6d28d9' }}>
+                                        Movimiento del patrimonio neto (para el EEPN)
+                                        <select
+                                            value={equityMovementType}
+                                            onChange={e => setEquityMovementType(e.target.value as '' | EquityMovementType)}
+                                            data-testid="equity-movement-type"
+                                            style={{ padding: '7px 10px', border: '1px solid #ddd6fe', borderRadius: 8, fontSize: '0.84rem' }}
+                                        >
+                                            <option value="">Clasificación automática (estructural)</option>
+                                            {EQUITY_MOVEMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                        </select>
+                                    </label>
+                                    <p style={{ fontSize: '0.7rem', color: '#7c3aed', margin: '6px 0 0', lineHeight: 1.4 }}>
+                                        La clasificación explícita queda grabada en el asiento y define la fila del
+                                        EEPN matricial (p. ej. AREA → &quot;Modificaciones de ejercicios anteriores&quot;).
+                                    </p>
+                                </div>
+                            )}
 
                             {/* Nota educativa (Fase 2A) */}
                             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
