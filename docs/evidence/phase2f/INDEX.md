@@ -19,6 +19,10 @@ Sin datos privados reales. Regenerable con `npm run e2e:visual` y `npm run e2e:e
 | EFE directo detalle | [efe-directo-detalle-1920](screenshots/efe-directo-detalle-1920.png) | ecuación + subcategorías |
 | EFE directo resumen | [efe-directo-resumen-1920](screenshots/efe-directo-resumen-1920.png) | modo resumen |
 | EFE indirecto detalle | [efe-indirecto-detalle-1920](screenshots/efe-indirecto-detalle-1920.png) | explicaciones de ajustes |
+| EFE moneda de cierre | [efe-moneda-cierre-1920](screenshots/efe-moneda-cierre-1920.png) | set de índices RC, REI conciliado |
+| Bienes de uso moneda de cierre | [bienes-de-uso-cierre-1920](screenshots/bienes-de-uso-cierre-1920.png) | VO nominal + ajuste = reexpresado |
+| Editor de reglas (preview) | [editor-reglas-preview-1920](screenshots/editor-reglas-preview-1920.png) | 70/30 con importes |
+| Regla aplicada al anexo | [editor-reglas-aplicada-anexo-1920](screenshots/editor-reglas-aplicada-anexo-1920.png) | 42.000/18.000 |
 | Notas | [notas-1920](screenshots/notas-1920.png) | numeradas, reconciliadas |
 | Nota créditos + previsión | [notas-creditos-prevision-1920](screenshots/notas-creditos-prevision-1920.png) | regularizadora en negativo |
 | Gastos por función | [gastos-por-funcion-1920](screenshots/gastos-por-funcion-1920.png) | regla 60/40 aplicada |

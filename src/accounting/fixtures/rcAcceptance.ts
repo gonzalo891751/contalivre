@@ -22,6 +22,7 @@ import { db } from '../../storage/db'
 import { postOperation, voidOperationEntry } from '../application/journalService'
 import { postClosing, generateOpeningEntry } from '../application/closingService'
 import { exerciseIdForYear } from '../application/contextService'
+import { saveIndexSet } from '../inflation/indexRegistry'
 import type { Account, ExpenseAllocationRule } from '../../core/models'
 
 export const RC_FIXTURE_MODULE = 'rc-fixture'
@@ -222,6 +223,13 @@ export async function loadRcAcceptanceDataset(): Promise<RcLoadResult> {
 
     for (let i = 0; i < RC_ENTRIES_CURRENT.length; i++) await post(RC_ENTRIES_CURRENT[i], i, RC_CURRENT_YEAR)
 
+    // Set de índices de EJEMPLO para probar la moneda de cierre (§13). Cubre
+    // todos los meses 2024-2025; identificado como ejemplo, no oficial.
+    const existingSet = (await db.inflationIndexSets.toArray()).some(s => s.name === RC_INDEX_SET_NAME)
+    if (!existingSet) {
+        await saveIndexSet({ name: RC_INDEX_SET_NAME, status: 'EXAMPLE', source: 'RC Acceptance (fixture didáctico)', values: rcIndexValues() })
+    }
+
     return {
         accounts: RC_ACCOUNTS.length,
         entriesPrior: RC_ENTRIES_PRIOR.length,
@@ -229,6 +237,21 @@ export async function loadRcAcceptanceDataset(): Promise<RcLoadResult> {
         closedPrior,
         idempotent,
     }
+}
+
+export const RC_INDEX_SET_NAME = 'Índices RC (ejemplo didáctico)'
+
+/** Índices mensuales crecientes 5%/mes, 2024-2025 (deterministas) */
+function rcIndexValues(): { period: string; value: number }[] {
+    const values: { period: string; value: number }[] = []
+    let v = 100
+    for (const y of [RC_PRIOR_YEAR, RC_CURRENT_YEAR]) {
+        for (let m = 1; m <= 12; m++) {
+            values.push({ period: `${y}-${String(m).padStart(2, '0')}`, value: Math.round(v * 100) / 100 })
+            v = v * 1.05
+        }
+    }
+    return values
 }
 
 const UNMAPPED_SOURCE_ID = 'rc-2025-unmapped-demo'

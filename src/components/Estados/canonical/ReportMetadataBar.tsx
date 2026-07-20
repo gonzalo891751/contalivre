@@ -7,7 +7,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import type { ReportMetadata } from '../../../reporting/loadReportingBundle'
+import type { AppliedInflationSet, ReportMetadata } from '../../../reporting/loadReportingBundle'
+import { InflationSetSelector } from './InflationSetSelector'
 
 const STATUS_CHIP: Record<string, { label: string; bg: string; color: string }> = {
     VALIDATED: { label: 'Validado', bg: 'rgba(34,197,94,0.12)', color: '#15803d' },
@@ -24,6 +25,10 @@ interface Props {
     onEditCompany: () => void
     onPublishSnapshot?: () => void
     snapshotInfo?: string
+    /** selección del set de índices para moneda de cierre (Fase 2F §13) */
+    inflationSetId?: string | null
+    onSelectInflationSet?: (id: string | null) => void
+    appliedInflationSet?: AppliedInflationSet | null
 }
 
 const fmtDate = (iso: string) => {
@@ -82,7 +87,7 @@ function TechDetailsPopover({ metadata }: { metadata: ReportMetadata }) {
     )
 }
 
-export function ReportMetadataBar({ metadata, showComparative, onToggleComparative, onExport, onEditCompany, onPublishSnapshot, snapshotInfo }: Props) {
+export function ReportMetadataBar({ metadata, showComparative, onToggleComparative, onExport, onEditCompany, onPublishSnapshot, snapshotInfo, inflationSetId, onSelectInflationSet, appliedInflationSet }: Props) {
     const chip = STATUS_CHIP[metadata.status] ?? STATUS_CHIP.LOADING
     return (
         <div className="card" style={{ padding: '12px 16px', marginBottom: 16 }}>
@@ -123,6 +128,15 @@ export function ReportMetadataBar({ metadata, showComparative, onToggleComparati
                     )}
                 </div>
             </div>
+            {onSelectInflationSet && (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
+                    <InflationSetSelector
+                        selectedId={inflationSetId ?? null}
+                        onSelect={onSelectInflationSet}
+                        applied={appliedInflationSet ?? null}
+                    />
+                </div>
+            )}
             {snapshotInfo && (
                 <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 6 }}>{snapshotInfo}</div>
             )}

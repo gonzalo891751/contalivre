@@ -80,6 +80,17 @@ test.describe('Aceptación visual — escritorio', () => {
         const closingBtn = page.getByRole('button', { name: 'Moneda de cierre' })
         await expect(closingBtn).toBeDisabled()
 
+        // seleccionar el set de índices RC habilita la moneda de cierre (§13)
+        const setOption = await page.getByTestId('inflation-set-select').locator('option', { hasText: 'Índices RC' }).getAttribute('value')
+        await page.getByTestId('inflation-set-select').selectOption(setOption!)
+        await expect(page.getByTestId('inflation-set-selector')).toContainText('Ejemplo')
+        await expect(page.getByRole('button', { name: 'Moneda de cierre' })).toBeEnabled({ timeout: 30_000 })
+        await page.getByRole('button', { name: 'Moneda de cierre' }).click()
+        await expect(page.getByText('el REI concilia con el efectivo del ESP')).toBeVisible()
+        await evidence(page, 'efe-moneda-cierre-1920')
+        // volver a nominal para el resto del recorrido
+        await page.getByRole('button', { name: 'Moneda nominal' }).click()
+
         // ── Notas y anexos ───────────────────────────────────
         await openEstadosTab(page, 'Notas y Anexos')
         await expect(page.getByText(/Nota 1/).first()).toBeVisible()
@@ -101,6 +112,12 @@ test.describe('Aceptación visual — escritorio', () => {
         await page.getByRole('tab', { name: 'Bienes de uso' }).click()
         await expect(page.getByText('Valor residual').first()).toBeVisible()
         await evidence(page, 'bienes-de-uso-1920')
+
+        // bienes de uso en moneda de cierre (el set sigue seleccionado, §12)
+        await page.getByRole('button', { name: 'Moneda de cierre' }).click()
+        await expect(page.getByText('VO reexpresado').first()).toBeVisible()
+        await evidence(page, 'bienes-de-uso-cierre-1920')
+        await page.getByRole('button', { name: 'Moneda nominal' }).click()
 
         await page.getByRole('tab', { name: 'Moneda extranjera' }).click()
         await expect(page.getByText('RC Banco cuenta en dólares').first()).toBeVisible()

@@ -246,6 +246,7 @@ export function NotesAndAnnexesTab({ bundle, focusNote, onDataChanged }: NotesAn
             {subtab === 'BIENES_USO' && (
                 <FixedAssetsAnnexView
                     annex={fixedAssets}
+                    restated={bundle.fixedAssetsRestated}
                     showComparative={showComparative}
                     onRowClick={(label, accountIds) => setTarget({ label, accountIds })}
                 />

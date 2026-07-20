@@ -275,6 +275,33 @@ export interface FixedAssetsAnnex {
     validations: ValidationCheck[]
 }
 
+/**
+ * Fila del anexo de bienes de uso en moneda de cierre (Fase 2F §12):
+ * valor nominal + ajuste por reexpresión = valor reexpresado, para el valor
+ * de origen y para la depreciación acumulada. La reexpresión proviene del
+ * motor de inflación y de los orígenes de cada movimiento (anticuación).
+ */
+export interface FixedAssetsRestatedRow {
+    assetClass: string
+    accountIds: string[]
+    grossNominal: number
+    grossAdjustment: number
+    grossRestated: number
+    depNominal: number
+    depAdjustment: number
+    depRestated: number
+    residualRestated: number
+}
+
+export interface FixedAssetsAnnexRestated {
+    rows: FixedAssetsRestatedRow[]
+    totals: FixedAssetsRestatedRow
+    /** período de cierre YYYY-MM contra el que se reexpresa */
+    closePeriod: string
+    /** faltan índices ⇒ no se reexpresa (no se estima con coeficiente 1) */
+    blockers: string[]
+}
+
 // ─────────────────────────────────────────────────────────────
 // Moneda extranjera (Fase 2E, §12)
 // ─────────────────────────────────────────────────────────────
