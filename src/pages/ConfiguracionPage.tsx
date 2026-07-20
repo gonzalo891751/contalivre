@@ -22,6 +22,10 @@ import { BackupPanel } from '../components/Configuracion/panels/BackupPanel'
 import { VersionInfoPanel } from '../components/Configuracion/panels/VersionInfoPanel'
 import { CapabilitiesPanel } from '../components/Configuracion/panels/CapabilitiesPanel'
 import { DangerZonePanel } from '../components/Configuracion/panels/DangerZonePanel'
+import { AcceptanceFixturePanel } from '../components/Configuracion/panels/AcceptanceFixturePanel'
+
+/** El fixture de aceptación RC solo existe fuera de producción (Fase 2F §5) */
+const SHOW_RC_FIXTURE = import.meta.env.MODE !== 'production'
 
 type SectionId =
     | 'general' | 'empresa' | 'ejercicios' | 'plan-cuentas'
@@ -162,7 +166,12 @@ export default function ConfiguracionPage() {
 
                     {active === 'respaldo' && <BackupPanel />}
 
-                    {active === 'datos' && <DangerZonePanel />}
+                    {active === 'datos' && (
+                        <div>
+                            {SHOW_RC_FIXTURE && <AcceptanceFixturePanel />}
+                            <DangerZonePanel />
+                        </div>
+                    )}
 
                     {active === 'acerca' && (
                         <div style={{ maxWidth: 760 }}>
