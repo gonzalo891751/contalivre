@@ -107,6 +107,14 @@ export interface ExpenseAllocationRule {
     createdBy: string
     createdAt: string
     version: number
+    /**
+     * DRAFT: editable/eliminable, el motor la IGNORA.
+     * ACTIVE: inmutable (solo puede finalizarse su vigencia); el motor la aplica.
+     * Ausente = ACTIVE (compatibilidad con reglas previas a 2F).
+     */
+    status?: 'DRAFT' | 'ACTIVE'
+    /** regla a la que reemplaza (historial de versiones) */
+    supersedesId?: string
 }
 
 /** Tipo de movimiento patrimonial (clasificación estructural, Fase 2E §6.4) */

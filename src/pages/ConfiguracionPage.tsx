@@ -23,6 +23,7 @@ import { VersionInfoPanel } from '../components/Configuracion/panels/VersionInfo
 import { CapabilitiesPanel } from '../components/Configuracion/panels/CapabilitiesPanel'
 import { DangerZonePanel } from '../components/Configuracion/panels/DangerZonePanel'
 import { AcceptanceFixturePanel } from '../components/Configuracion/panels/AcceptanceFixturePanel'
+import { ExpenseAllocationEditor } from '../components/Configuracion/panels/ExpenseAllocationEditor'
 
 /** El fixture de aceptación RC solo existe fuera de producción (Fase 2F §5) */
 const SHOW_RC_FIXTURE = import.meta.env.MODE !== 'production'
@@ -135,6 +136,7 @@ export default function ConfiguracionPage() {
                                 <button className="btn btn-secondary btn-sm" onClick={() => navigate('/cuentas')}>Abrir Plan de Cuentas</button>
                             </div>
                             <MapeosPanel />
+                            <ExpenseAllocationEditor />
                         </div>
                     )}
 
