@@ -19,4 +19,3 @@ export {
 export { computeTrialBalance, getBalanceStatusMessage } from './balance'
 
 // Estados contables
-export { computeStatements, getStatementsStatusMessage } from './statements'

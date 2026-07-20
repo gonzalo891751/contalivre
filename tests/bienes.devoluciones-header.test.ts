@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { Account } from '../src/core/models'
 import { computeLedger } from '../src/core/ledger'
 import { computeRollupTrialBalance } from '../src/core/balance'
-import { computeStatements } from '../src/core/statements'
+import { buildStatements } from '../src/reporting/engine/buildStatements'
+import type { JournalEntry } from '../src/core/models'
 import { normalizeReturnSplitAccountsForCounterparty } from '../src/storage/bienes'
 
 const mkAccount = (account: Account): Account => account
@@ -235,11 +236,18 @@ describe('devoluciones - normalizacion de cuentas header', () => {
 
         const ledger = computeLedger(entries, accounts)
         const trial = computeRollupTrialBalance(ledger, accounts)
-        const statements = computeStatements(trial, accounts)
+
+        // El motor CANÓNICO cierra el ESP y neta la devolución dentro de Ventas
+        const s = buildStatements({
+            context: { companyId: 'c1', exerciseId: 'ex-2025', exerciseLabel: '2025', periodStart: '2025-01-01', periodEnd: '2025-12-31' },
+            entries: entries as unknown as JournalEntry[],
+            openingBalances: new Map(),
+            accounts,
+        })
 
         expect(trial.rows.some(row => row.account.id === 'deud-header')).toBe(false)
         expect(trial.rows.some(row => row.account.id === 'deud-kiosco')).toBe(true)
-        expect(Math.abs(statements.balanceSheet.totalAssets - statements.balanceSheet.totalLiabilitiesAndEquity)).toBeLessThanOrEqual(0.01)
-        expect(statements.balanceSheet.isBalanced).toBe(true)
+        expect(s.balanceSheet.equationDifference).toBe(0)
+        expect(s.incomeStatement.sales.amount).toBe(50) // 100 ventas − 50 devolución = ventas netas
     })
 })
