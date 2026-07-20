@@ -85,7 +85,7 @@ describe('Fase 2E — determinación del costo de ventas', () => {
         expect(b.costOfSalesPerIncomeStatement).toBe(500)
         const check = b.validations.find(v => v.id === 'cmv-er')!
         expect(check.passed).toBe(false)
-        expect(check.detail).toContain('no se imputaron a CMV')
+        expect(check.detail).toContain('sin componente de costo mapeado')
         expect(s.validation.checks.find(c => c.id === 'cmv-puente')?.passed).toBe(false)
         // El resto del puente sigue siendo aritméticamente consistente
         expect(b.validations.find(v => v.id === 'cmv-ef-esp')?.passed).toBe(true)

@@ -56,7 +56,10 @@ export function deriveResultFunction(account: Account): ResultFunction | null {
     }
 }
 
-/** Regla vigente para la cuenta en el período (la de mayor versión si hay varias) */
+/**
+ * Regla vigente para la cuenta en el período (la de mayor versión si hay
+ * varias). Los BORRADORES nunca se aplican (Fase 2F §7).
+ */
 export function activeRuleFor(
     accountId: string,
     rules: ExpenseAllocationRule[],
@@ -64,6 +67,7 @@ export function activeRuleFor(
 ): ExpenseAllocationRule | null {
     const candidates = rules.filter(r =>
         r.accountId === accountId
+        && r.status !== 'DRAFT'
         && r.validFrom <= periodEnd
         && (!r.validTo || r.validTo >= periodEnd))
     if (candidates.length === 0) return null

@@ -24,6 +24,18 @@ function flattenLines(lines: ReportLine[], showComp: boolean): Cell[][] {
     return out
 }
 
+/** Filas del ESP sin duplicar: los totales de activo/pasivo se muestran como
+ *  línea de total sin reexpandir sus componentes (Fase 2F §16). */
+function balanceSheetRows(bundle: ReportingBundle, showComp: boolean): Cell[][] {
+    const bs = bundle.statements.balanceSheet
+    const asTotal = (l: ReportLine): ReportLine => ({ ...l, children: undefined })
+    return flattenLines([
+        bs.currentAssets, bs.nonCurrentAssets, asTotal(bs.totalAssets),
+        bs.currentLiabilities, bs.nonCurrentLiabilities, asTotal(bs.totalLiabilities),
+        bs.equity, asTotal(bs.totalLiabilitiesAndEquity),
+    ], showComp)
+}
+
 /** EEPN matricial (Fase 2E §13.2): una fila por movimiento, una columna por componente */
 function equityMatrixSheetRows(bundle: ReportingBundle, showComp: boolean): Cell[][] {
     const m = bundle.statements.equityMatrix
@@ -90,9 +102,13 @@ function annexSheets(bundle: ReportingBundle, showComp: boolean): WorkbookSheet[
             rows.push(row)
         }
         push('Existencia inicial', b.openingInventory)
-        push('Compras y costos incorporables', b.purchases)
+        push('Compras', b.purchases)
+        if (b.purchaseReturns.status === 'CALCULATED') push('(−) Devoluciones y bonificaciones', b.purchaseReturns)
+        if (b.acquisitionCosts.status === 'CALCULATED') push('(+) Costos de adquisición (fletes)', b.acquisitionCosts)
+        if (b.incorporableCosts.status === 'CALCULATED') push('(+) Otros costos incorporables', b.incorporableCosts)
         push('Bienes disponibles para la venta', b.goodsAvailableForSale)
         push('Existencia final', b.closingInventory)
+        if (b.abnormalLosses.status === 'CALCULATED') push('(−) Bajas / pérdidas anormales', b.abnormalLosses)
         push('Costo de ventas (puente)', b.costOfSales)
         rows.push(['Costo de ventas según ER', b.costOfSalesPerIncomeStatement])
         for (const v of b.validations) rows.push([v.passed ? 'OK' : 'FALLA', v.label, v.difference && v.difference !== 0 ? v.difference : ''])
@@ -116,11 +132,17 @@ function annexSheets(bundle: ReportingBundle, showComp: boolean): WorkbookSheet[
 
     // Moneda extranjera
     if (s.foreignCurrency.applicable) {
-        const rows: Cell[][] = [['Cuenta', 'Moneda', 'Tipo', 'Clasificación', 'Cantidad', 'Cotización', 'Medición', ...(showComp ? ['Comparativo'] : [])]]
+        const rows: Cell[][] = [['Cuenta', 'Moneda', 'Tipo', 'Clasificación', 'Cantidad', 'Cotización', 'Fuente', 'Fecha', 'Tipo cotiz.', 'Medición (Diario)', 'Diferencia', ...(showComp ? ['Comparativo'] : [])]]
         for (const r of s.foreignCurrency.rows) {
+            const has = r.quantityStatus === 'CALCULATED'
             const row: Cell[] = [`${r.code} ${r.name}`, r.currency,
                 r.side === 'ASSET' ? 'Activo' : r.side === 'LIABILITY' ? 'Pasivo' : 'Otro',
-                r.monetary, 'Información insuficiente', 'Información insuficiente', r.measurement]
+                r.monetary,
+                has ? (r.quantity ?? null) : 'Información insuficiente',
+                has ? (r.rate ?? null) : 'Información insuficiente',
+                r.rateSource ?? '', r.rateDate ?? '', r.rateType ?? '',
+                r.measurement,
+                has ? (r.reconciliationDifference ?? 0) : '']
             if (showComp) row.push(r.comparativeMeasurement ?? null)
             rows.push(row)
         }
@@ -154,7 +176,6 @@ export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
     const showComp = bundle.metadata.hasComparative
     const headerRow = (): Cell[] => showComp ? ['Concepto', 'Ejercicio actual', 'Ejercicio anterior'] : ['Concepto', 'Ejercicio actual']
 
-    const bs = bundle.statements.balanceSheet
     const eepn = bundle.statements.equityStatement
     const efe = bundle.statements.cashFlowDirect
     const efeInd = bundle.statements.cashFlowIndirect
@@ -195,7 +216,7 @@ export function buildReportSheets(bundle: ReportingBundle): WorkbookSheet[] {
     // ── ESP ──────────────────────────────────────────────────
     sheets.push({
         name: 'ESP',
-        rows: [headerRow(), ...flattenLines([bs.currentAssets, bs.nonCurrentAssets, bs.totalAssets, bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities, bs.equity, bs.totalLiabilitiesAndEquity], showComp)],
+        rows: [headerRow(), ...balanceSheetRows(bundle, showComp)],
     })
 
     // ── ER ───────────────────────────────────────────────────
@@ -298,8 +319,7 @@ export function buildSelectedReportSheets(bundle: ReportingBundle, options: Expo
     })
 
     if (c.esp) {
-        const bs = s.balanceSheet
-        sheets.push({ name: 'ESP', rows: [headerRow(), ...flattenLines([bs.currentAssets, bs.nonCurrentAssets, bs.totalAssets, bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities, bs.equity, bs.totalLiabilitiesAndEquity], showComp)] })
+        sheets.push({ name: 'ESP', rows: [headerRow(), ...balanceSheetRows(bundle, showComp)] })
     }
     if (c.er) {
         sheets.push({ name: 'ER', rows: [headerRow(), ...incomeStatementSheetRows(bundle, showComp)] })

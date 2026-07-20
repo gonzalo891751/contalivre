@@ -118,12 +118,25 @@ export function CostOfSalesBridgeView({ bridge, showComparative, onDrilldown }: 
                 />
                 <Step
                     op="+"
-                    title="Compras y costos incorporables"
+                    title="Compras"
                     value={bridge.purchases}
                     hint={bridge.purchases.detail}
                     comparative={showComparative}
-                    onClick={onDrilldown ? () => onDrilldown('Compras y costos incorporables', bridge.purchases.accountIds) : undefined}
+                    onClick={onDrilldown ? () => onDrilldown('Compras', bridge.purchases.accountIds) : undefined}
                 />
+                {/* Componentes estructurados (§10): solo cuando hay mapping */}
+                {bridge.purchaseReturns.status === 'CALCULATED' && (
+                    <Step op="−" title="Devoluciones y bonificaciones de compras" value={bridge.purchaseReturns} hint={bridge.purchaseReturns.detail} comparative={showComparative}
+                        onClick={onDrilldown ? () => onDrilldown('Devoluciones y bonificaciones', bridge.purchaseReturns.accountIds) : undefined} />
+                )}
+                {bridge.acquisitionCosts.status === 'CALCULATED' && (
+                    <Step op="+" title="Costos de adquisición (fletes)" value={bridge.acquisitionCosts} hint={bridge.acquisitionCosts.detail} comparative={showComparative}
+                        onClick={onDrilldown ? () => onDrilldown('Costos de adquisición', bridge.acquisitionCosts.accountIds) : undefined} />
+                )}
+                {bridge.incorporableCosts.status === 'CALCULATED' && (
+                    <Step op="+" title="Otros costos incorporables" value={bridge.incorporableCosts} hint={bridge.incorporableCosts.detail} comparative={showComparative}
+                        onClick={onDrilldown ? () => onDrilldown('Otros costos incorporables', bridge.incorporableCosts.accountIds) : undefined} />
+                )}
                 <Step
                     op="="
                     title="Bienes disponibles para la venta"
@@ -139,6 +152,10 @@ export function CostOfSalesBridgeView({ bridge, showComparative, onDrilldown }: 
                     comparative={showComparative}
                     onClick={onDrilldown ? () => onDrilldown('Existencia final', bridge.closingInventory.accountIds) : undefined}
                 />
+                {bridge.abnormalLosses.status === 'CALCULATED' && (
+                    <Step op="−" title="Bajas / pérdidas anormales (no son CMV)" value={bridge.abnormalLosses} hint={bridge.abnormalLosses.detail} comparative={showComparative}
+                        onClick={onDrilldown ? () => onDrilldown('Bajas anormales', bridge.abnormalLosses.accountIds) : undefined} />
+                )}
                 <Step
                     op="="
                     title="Costo de ventas (CMV)"

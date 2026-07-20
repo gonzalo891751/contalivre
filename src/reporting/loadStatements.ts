@@ -14,17 +14,23 @@ import {
 import { getExercise, exerciseIdForYear } from '../accounting/application/contextService'
 import { buildStatements } from './engine/buildStatements'
 import { buildCashFlows } from './engine/buildCashFlow'
+import { loadForeignCurrencyDetails } from './loadForeignCurrency'
 import type { ReportingInput, StatementsBundle } from './domain/types'
 
 export async function loadReportingInput(year: number): Promise<ReportingInput> {
     const ctx = await resolveContextForYear(year)
     const exercise = await getExercise(exerciseIdForYear(year))
-    const [entries, openingBalances, accounts, allocationRules] = await Promise.all([
+    const [entries, openingBalances, accounts, allocationRules, allDisclosures, foreignCurrencyDetails] = await Promise.all([
         getEntriesForContext(ctx),
         getOpeningBalances(ctx),
         db.accounts.toArray(),
         db.expenseAllocationRules.toArray(),
+        db.manualDisclosures.where('exerciseId').equals(ctx.exerciseId).toArray(),
+        loadForeignCurrencyDetails(ctx.periodEnd),
     ])
+    // vigentes = las que ninguna otra reemplaza
+    const superseded = new Set(allDisclosures.map(d => d.supersedesId).filter(Boolean))
+    const manualDisclosures = allDisclosures.filter(d => !superseded.has(d.id))
     return {
         context: {
             companyId: ctx.companyId,
@@ -37,6 +43,8 @@ export async function loadReportingInput(year: number): Promise<ReportingInput> 
         openingBalances,
         accounts,
         allocationRules,
+        manualDisclosures,
+        foreignCurrencyDetails,
     }
 }
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { APP_VERSION } from '../../accounting/migration/versions'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
     SquaresFour,
@@ -228,7 +229,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                     <div className="sidebar-credits">
                         <p>&copy; 2026 Gonzalo Mendez</p>
                         <p>Todos los derechos reservados.</p>
-                        <p className="version">ContaLivre v1.0.4</p>
+                        <p className="version">ContaLivre v{APP_VERSION}</p>
                     </div>
                 )}
             </div>

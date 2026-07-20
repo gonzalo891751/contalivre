@@ -40,6 +40,7 @@ export default function Estados() {
     const empresaName = companyProfile?.legalName || 'Empresa ContaLivre'
 
     const [showComparative, setShowComparative] = useState(false)
+    const [inflationSetId, setInflationSetId] = useState<string | null>(null)
     const [bundle, setBundle] = useState<ReportingBundle | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
@@ -61,7 +62,7 @@ export default function Estados() {
 
     const handlePublishSnapshot = useCallback(async () => {
         if (!bundle) return
-        const snap = await createSnapshot(bundle, { status: 'PUBLISHED' })
+        const snap = await createSnapshot(bundle, { status: 'PUBLISHED', indexSetId: bundle.inflationSet?.id })
         setSnapshotInfo(`Versión validada guardada (${snap.status}, v${snap.reportVersion}, ${snap.createdAt.slice(0, 10)}).`)
         setReloadKey(k => k + 1)
     }, [bundle])
@@ -70,11 +71,11 @@ export default function Estados() {
         let cancelled = false
         setLoading(true)
         setError(null)
-        loadReportingBundle(year, { withComparative: showComparative })
+        loadReportingBundle(year, { withComparative: showComparative, inflationIndexSetId: inflationSetId ?? undefined })
             .then(b => { if (!cancelled) { setBundle(b); setLoading(false) } })
             .catch(e => { if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); setLoading(false) } })
         return () => { cancelled = true }
-    }, [year, showComparative, reloadKey])
+    }, [year, showComparative, inflationSetId, reloadKey])
 
     return (
         <div className="estados-page">
@@ -108,13 +109,16 @@ export default function Estados() {
                             onEditCompany={() => setShowCompanyProfileModal(true)}
                             onPublishSnapshot={handlePublishSnapshot}
                             snapshotInfo={snapshotInfo ?? undefined}
+                            inflationSetId={inflationSetId}
+                            onSelectInflationSet={setInflationSetId}
+                            appliedInflationSet={bundle.inflationSet}
                         />
 
                         {activeTab === 'ESP' && <ESPCanonicalTab bundle={bundle} onOpenNote={openNote} />}
                         {activeTab === 'ER' && <ERCanonicalTab bundle={bundle} onOpenNote={openNote} />}
                         {activeTab === 'EPN' && <EEPNCanonicalTab bundle={bundle} />}
                         {activeTab === 'EFE' && <FlujoEfectivoCanonicalTab bundle={bundle} />}
-                        {activeTab === 'NA' && <NotasCanonicalTab bundle={bundle} focusNote={noteFocus} />}
+                        {activeTab === 'NA' && <NotasCanonicalTab bundle={bundle} focusNote={noteFocus} onDataChanged={() => setReloadKey(k => k + 1)} />}
                     </div>
                 )}
             </main>

@@ -32,8 +32,11 @@ import {
     verticalIncomeStatement,
 } from './metrics/analysis'
 import { reexpressCashFlow } from './engine/cashFlowInflation'
+import { reexpressFixedAssetsAnnex } from './engine/fixedAssetsInflation'
+import { getIndexSet, indexSetToMap } from '../accounting/inflation/indexRegistry'
 import type { MetricCatalogEntry, HorizontalAnalysisRow, VerticalAnalysisRow } from './metrics/types'
-import type { CashFlowStatement2B, StatementsBundle } from './domain/types'
+import type { CashFlowStatement2B, FixedAssetsAnnexRestated, StatementsBundle } from './domain/types'
+import type { IndexSetStatus } from '../accounting/inflation/types'
 
 const COMMIT_SHA: string =
     (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env?.VITE_COMMIT_SHA) || 'desconocido'
@@ -78,6 +81,21 @@ export interface ReportingBundleAnalysis {
     horizontalIncomeStatement: HorizontalAnalysisRow[]
 }
 
+/** Identidad del set de índices aplicado a las expresiones en moneda de cierre */
+export interface AppliedInflationSet {
+    id: string
+    name: string
+    status: IndexSetStatus
+    source: string
+    importedAt: string
+    contentHash: string
+    /** rango de períodos cubiertos por el set */
+    coverageFrom: string
+    coverageTo: string
+    /** períodos requeridos por el ejercicio que faltan en el set */
+    missingPeriods: string[]
+}
+
 export interface ReportingBundle {
     statements: StatementsBundle
     /** EFE en moneda de cierre (null si faltan índices para reexpresar) */
@@ -86,6 +104,10 @@ export interface ReportingBundle {
         indirect: CashFlowStatement2B
         blockers: string[]
     } | null
+    /** Anexo de bienes de uso en moneda de cierre (Fase 2F §12; null sin set) */
+    fixedAssetsRestated: FixedAssetsAnnexRestated | null
+    /** Set de índices aplicado a TODO el juego en moneda de cierre (Fase 2F §13) */
+    inflationSet: AppliedInflationSet | null
     notes: StatementNote[]
     metrics: MetricCatalogEntry[]
     analysis: ReportingBundleAnalysis
@@ -94,8 +116,12 @@ export interface ReportingBundle {
 
 export interface LoadReportingBundleOptions {
     withComparative?: boolean
-    /** set de índices para el EFE en moneda de cierre (opcional) */
-    inflationIndexes?: Map<string, number>
+    /**
+     * set de índices para las expresiones en moneda de cierre (Fase 2F §13):
+     * el MISMO set alimenta EFE, bienes de uso y demás. Se identifica por id
+     * para garantizar que todo el juego use una única serie.
+     */
+    inflationIndexSetId?: string
 }
 
 function hashString(s: string): string {
@@ -126,10 +152,30 @@ export async function loadReportingBundle(
     statements.cashFlowIndirect = cashFlows.indirect
     statements.validation = cashFlows.validation
 
-    // EFE en moneda de cierre (Fase 2C, §9): solo si se aportan índices
+    // Expresiones en moneda de cierre (Fase 2C §9 / Fase 2F §12-13): un ÚNICO
+    // set de índices alimenta EFE y bienes de uso. Se carga por id, se verifica
+    // el hash (integridad) y se computa la cobertura y los períodos faltantes.
     let cashFlowRestated: ReportingBundle['cashFlowRestated'] = null
-    if (options.inflationIndexes && options.inflationIndexes.size > 0) {
-        cashFlowRestated = reexpressCashFlow(input, statements, options.inflationIndexes)
+    let fixedAssetsRestated: FixedAssetsAnnexRestated | null = null
+    let inflationSet: AppliedInflationSet | null = null
+    if (options.inflationIndexSetId) {
+        const set = await getIndexSet(options.inflationIndexSetId)
+        if (set) {
+            const indexes = indexSetToMap(set) // lanza si el hash no coincide
+            cashFlowRestated = reexpressCashFlow(input, statements, indexes)
+            fixedAssetsRestated = reexpressFixedAssetsAnnex(input, statements.fixedAssetsAnnex, indexes)
+            const periods = set.values.map(v => v.period).sort()
+            const closePeriod = input.context.periodEnd.slice(0, 7)
+            const startPeriod = input.context.periodStart.slice(0, 7)
+            const missing: string[] = []
+            for (const p of [startPeriod, closePeriod]) if (!indexes.has(p)) missing.push(p)
+            inflationSet = {
+                id: set.id, name: set.name, status: set.status, source: set.source,
+                importedAt: set.importedAt, contentHash: set.contentHash,
+                coverageFrom: periods[0] ?? '—', coverageTo: periods[periods.length - 1] ?? '—',
+                missingPeriods: missing,
+            }
+        }
     }
 
     const notes = buildNotes(input, statements)
@@ -184,5 +230,5 @@ export async function loadReportingBundle(
         status,
     }
 
-    return { statements, cashFlowRestated, notes, metrics, analysis, metadata }
+    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, metadata }
 }

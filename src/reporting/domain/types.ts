@@ -7,7 +7,7 @@
  * Cada línea lleva linaje (cuentas y asientos que la forman).
  */
 
-import type { Account, ExpenseAllocationRule, JournalEntry, ResultFunction } from '../../core/models'
+import type { Account, ExpenseAllocationRule, JournalEntry, ManualDisclosure, ResultFunction } from '../../core/models'
 
 export interface EngineContext {
     companyId: string
@@ -26,6 +26,10 @@ export interface ReportingInput {
     accounts: Account[]
     /** Reglas versionadas de distribución de gastos por función (Fase 2E §9.2) */
     allocationRules?: ExpenseAllocationRule[]
+    /** Notas manuales persistentes vigentes del ejercicio (Fase 2F §8) */
+    manualDisclosures?: ManualDisclosure[]
+    /** Detalle operativo de posiciones en moneda extranjera (Fase 2F §11) */
+    foreignCurrencyDetails?: ForeignCurrencyDetail[]
     /** Bundle comparativo (ejercicio anterior, derivado con el mismo motor) */
     comparative?: StatementsBundle | null
 }
@@ -219,10 +223,21 @@ export interface CostOfSalesBridge {
     mode: CostOfSalesMode
     openingInventory: CostOfSalesValue
     purchases: CostOfSalesValue
+    /** devoluciones y bonificaciones de compras (restan; Fase 2F §10) */
+    purchaseReturns: CostOfSalesValue
+    /** fletes y costos de adquisición (suman; Fase 2F §10) */
+    acquisitionCosts: CostOfSalesValue
+    /** otros costos incorporables (suman; Fase 2F §10) */
     incorporableCosts: CostOfSalesValue
     goodsAvailableForSale: CostOfSalesValue
     closingInventory: CostOfSalesValue
-    /** CMV por el puente: disponibles − existencia final */
+    /**
+     * Pérdidas/bajas anormales que salieron de inventario pero NO son CMV
+     * (siniestros, obsolescencia). Se exponen como diferencia real, jamás
+     * mezcladas con el costo (Fase 2F §10.1).
+     */
+    abnormalLosses: CostOfSalesValue
+    /** CMV por el puente: disponibles − existencia final − bajas anormales */
     costOfSales: CostOfSalesValue
     /** CMV según el ER (registro perpetuo); la igualdad se VERIFICA, no se fuerza */
     costOfSalesPerIncomeStatement: number
@@ -260,6 +275,33 @@ export interface FixedAssetsAnnex {
     validations: ValidationCheck[]
 }
 
+/**
+ * Fila del anexo de bienes de uso en moneda de cierre (Fase 2F §12):
+ * valor nominal + ajuste por reexpresión = valor reexpresado, para el valor
+ * de origen y para la depreciación acumulada. La reexpresión proviene del
+ * motor de inflación y de los orígenes de cada movimiento (anticuación).
+ */
+export interface FixedAssetsRestatedRow {
+    assetClass: string
+    accountIds: string[]
+    grossNominal: number
+    grossAdjustment: number
+    grossRestated: number
+    depNominal: number
+    depAdjustment: number
+    depRestated: number
+    residualRestated: number
+}
+
+export interface FixedAssetsAnnexRestated {
+    rows: FixedAssetsRestatedRow[]
+    totals: FixedAssetsRestatedRow
+    /** período de cierre YYYY-MM contra el que se reexpresa */
+    closePeriod: string
+    /** faltan índices ⇒ no se reexpresa (no se estima con coeficiente 1) */
+    blockers: string[]
+}
+
 // ─────────────────────────────────────────────────────────────
 // Moneda extranjera (Fase 2E, §12)
 // ─────────────────────────────────────────────────────────────
@@ -276,6 +318,21 @@ export interface ForeignCurrencyRow {
     comparativeMeasurement?: number | null
     /** cantidad y cotización: sin datos estructurados ⇒ INSUFFICIENT */
     quantityStatus: 'CALCULATED' | 'INSUFFICIENT_INFORMATION'
+    /** cantidad en moneda extranjera (módulo operativo), si está disponible */
+    quantity?: number | null
+    /** cotización efectivamente utilizada (ARS/ME) */
+    rate?: number | null
+    rateType?: string
+    rateSource?: string
+    rateDate?: string
+    /** medición implícita = cantidad × cotización (módulo operativo) */
+    impliedMeasurement?: number | null
+    /**
+     * diferencia entre la medición contable (Diario) y la implícita del
+     * módulo operativo. La fuente del saldo es SIEMPRE el Diario; cualquier
+     * diferencia se expone, no se oculta (Fase 2F §11).
+     */
+    reconciliationDifference?: number | null
     statementLineId: string
 }
 
@@ -283,6 +340,23 @@ export interface ForeignCurrencyDisclosure {
     applicable: boolean
     rows: ForeignCurrencyRow[]
     note: string
+    /** true si el detalle operativo reconcilia con el Diario en todas las cuentas */
+    reconciled: boolean
+}
+
+/**
+ * Detalle operativo de una posición en moneda extranjera (Fase 2F §11),
+ * normalizado desde el módulo de moneda extranjera. El motor lo usa para
+ * enriquecer la nota; la fuente del saldo sigue siendo el Diario.
+ */
+export interface ForeignCurrencyDetail {
+    ledgerAccountId: string
+    currency: string
+    quantity: number
+    rate: number
+    rateType?: string
+    rateSource?: string
+    rateDate?: string
 }
 
 export interface EquityMatrixViewModel {

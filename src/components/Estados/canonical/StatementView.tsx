@@ -172,15 +172,17 @@ function TotalRow({ line, showComparative }: { line: ReportLine; showComparative
 }
 
 /** Renderiza una lista de ReportLine decidiendo el estilo por su `level`. */
-export function StatementRows({ lines, showComparative, onLineClick, onNoteClick }: {
+export function StatementRows({ lines, showComparative, onLineClick, onNoteClick, hideColumnHeaders }: {
     lines: ReportLine[]
     showComparative: boolean
     onLineClick?: (l: ReportLine) => void
     onNoteClick?: (ref: string) => void
+    /** para bloques encadenados (p.ej. ER en segmentos): solo el primero muestra la cabecera */
+    hideColumnHeaders?: boolean
 }) {
     return (
         <div className="stmt-rows">
-            {showComparative && (
+            {showComparative && !hideColumnHeaders && (
                 <div className="stmt-column-headers" aria-hidden>
                     <div>Rubro</div>
                     <div className="stmt-col-right">Actual</div>

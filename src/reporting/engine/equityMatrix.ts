@@ -264,7 +264,12 @@ export function buildEquityMatrix(
         const equityLines = entry.lines.filter(l => componentOf(l.accountId) !== null)
         if (equityLines.length === 0) continue
 
-        const kind = classifyEntry(entry, componentOf)
+        // Clasificación EXPLÍCITA persistida en el asiento (Fase 2F §9):
+        // manda sobre la estructural. OPENING_BALANCE/CURRENT_RESULT no son
+        // tipos de asiento válidos (tienen fila propia) ⇒ caen a estructural.
+        const explicit = entry.equityMovementType
+        const useExplicit = explicit && explicit !== 'OPENING_BALANCE' && explicit !== 'CURRENT_RESULT'
+        const kind = useExplicit ? explicit : classifyEntry(entry, componentOf)
         for (const l of equityLines) {
             const component = componentOf(l.accountId)!
             trackColumnAccount(component, l.accountId)

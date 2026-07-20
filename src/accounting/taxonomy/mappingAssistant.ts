@@ -139,6 +139,8 @@ export type EditableMappingField =
     | 'cashFlowCategory'
     | 'accountClass'
     | 'resultFunction'
+    | 'costComponent'
+    | 'equityComponent'
     | 'active'
 
 export interface MappingChange {
@@ -157,7 +159,7 @@ export interface MappingImpact {
 export function describeImpact(account: Account, proposed: Partial<Account>): MappingImpact {
     const changes: MappingChange[] = []
     const descriptions: string[] = []
-    const fields: EditableMappingField[] = ['statementGroup', 'currentClassification', 'monetaryClassification', 'cashFlowCategory', 'accountClass', 'resultFunction', 'active']
+    const fields: EditableMappingField[] = ['statementGroup', 'currentClassification', 'monetaryClassification', 'cashFlowCategory', 'accountClass', 'resultFunction', 'costComponent', 'equityComponent', 'active']
 
     for (const field of fields) {
         if (proposed[field] === undefined) continue
@@ -183,6 +185,12 @@ export function describeImpact(account: Account, proposed: Partial<Account>): Ma
                 break
             case 'resultFunction':
                 descriptions.push(`Incluirá "${account.name}" en la función ${to ?? '(sin función)'} del anexo de gastos por función.`)
+                break
+            case 'costComponent':
+                descriptions.push(`Clasificará "${account.name}" como ${to ?? '(sin componente)'} en la determinación del costo de ventas.`)
+                break
+            case 'equityComponent':
+                descriptions.push(`Expondrá "${account.name}" en la columna ${to ?? '(sin componente)'} del EEPN matricial.`)
                 break
             default:
                 descriptions.push(`Actualizará ${field} de "${account.name}".`)

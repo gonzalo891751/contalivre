@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { APP_VERSION } from '../../accounting/migration/versions'
 import { NavLink, useLocation, Link } from 'react-router-dom'
 import {
     SquaresFour,
@@ -194,7 +195,7 @@ export default function MobileDrawer({ isOpen, onClose }: MobileDrawerProps) {
                 {/* Footer */}
                 <div className="mobile-drawer-footer">
                     <p>&copy; 2026 Gonzalo Mendez</p>
-                    <p className="mobile-drawer-version">ContaLivre v1.0.4</p>
+                    <p className="mobile-drawer-version">ContaLivre v{APP_VERSION}</p>
                 </div>
             </div>
         </div>

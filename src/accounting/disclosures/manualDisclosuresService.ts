@@ -1,0 +1,125 @@
+/**
+ * Notas manuales persistentes — Fase 2F (§8).
+ *
+ * Cada guardado crea una VERSIÓN nueva (la anterior queda en el historial vía
+ * supersedesId; nada se borra). El contenido se sanitiza a texto plano (sin
+ * HTML). Guardar una nota VALIDATED invalida los snapshots del ejercicio:
+ * una versión congelada no puede seguir vigente si su información
+ * complementaria cambió. Las notas manuales JAMÁS modifican una nota derivada.
+ */
+
+import { db, generateId } from '../../storage/db'
+import { appendAuditEvent } from '../audit/auditLog'
+import { invalidateSnapshotsForExercise } from '../../reporting/snapshots/snapshotService'
+import { LOCAL_ACTOR } from '../domain/types'
+import type { ManualDisclosure, ManualNoteType } from '../../core/models'
+
+export const MANUAL_NOTE_TYPES: { type: ManualNoteType; title: string }[] = [
+    { type: 'hechos-posteriores', title: 'Hechos posteriores al cierre' },
+    { type: 'contingencias', title: 'Contingencias' },
+    { type: 'partes-relacionadas', title: 'Operaciones con partes relacionadas' },
+    { type: 'compromisos', title: 'Compromisos asumidos' },
+    { type: 'politicas-adicionales', title: 'Políticas contables adicionales' },
+    { type: 'otra-informacion', title: 'Otra información complementaria' },
+]
+
+/**
+ * Sanitiza a TEXTO PLANO: remueve etiquetas y colapsa entidades peligrosas.
+ * La UI siempre renderiza como texto (React escapa), pero el dato almacenado
+ * tampoco debe contener HTML.
+ */
+export function sanitizeContent(raw: string): string {
+    const noHtml = raw
+        .replace(/<[^>]*>/g, '')          // etiquetas
+        .replace(/javascript:/gi, '')     // urls activas
+    // Elimina caracteres de control C0 (excepto tab, LF y CR) sin usar un
+    // regex con control-chars (no-control-regex).
+    let out = ''
+    for (const ch of noHtml) {
+        const code = ch.codePointAt(0)!
+        if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) continue
+        out += ch
+    }
+    return out.trim().slice(0, 20000)
+}
+
+export interface SaveDisclosureInput {
+    exerciseId: string
+    companyId: string
+    noteType: ManualNoteType
+    content: string
+    status: 'DRAFT' | 'VALIDATED'
+    notApplicable?: boolean
+}
+
+/** Última versión de cada tipo para un ejercicio */
+export async function getCurrentDisclosures(exerciseId: string): Promise<ManualDisclosure[]> {
+    const all = await db.manualDisclosures.where('exerciseId').equals(exerciseId).toArray()
+    const superseded = new Set(all.map(d => d.supersedesId).filter(Boolean))
+    return all.filter(d => !superseded.has(d.id))
+}
+
+export async function getHistory(exerciseId: string, noteType: ManualNoteType): Promise<ManualDisclosure[]> {
+    const all = await db.manualDisclosures.where('exerciseId').equals(exerciseId).toArray()
+    return all.filter(d => d.noteType === noteType).sort((a, b) => b.version - a.version)
+}
+
+/**
+ * Guarda una versión nueva de la nota (histórico intacto). Si la nota queda
+ * VALIDATED (o reemplaza a una VALIDATED), se invalidan los snapshots del
+ * ejercicio: la información complementaria cambió.
+ */
+export async function saveDisclosure(input: SaveDisclosureInput, actorId = LOCAL_ACTOR): Promise<ManualDisclosure> {
+    const spec = MANUAL_NOTE_TYPES.find(t => t.type === input.noteType)
+    if (!spec) throw new Error(`Tipo de nota manual desconocido: ${input.noteType}`)
+
+    const content = sanitizeContent(input.content)
+    if (!input.notApplicable && !content) {
+        throw new Error('El contenido es obligatorio (o marcá "No aplicable" con su fundamento).')
+    }
+    if (input.notApplicable && !content) {
+        throw new Error('"No aplicable" requiere un fundamento breve.')
+    }
+
+    const history = await getHistory(input.exerciseId, input.noteType)
+    const current = history[0]
+    const now = new Date().toISOString()
+
+    const disclosure: ManualDisclosure = {
+        id: `mdisc-${generateId()}`,
+        companyId: input.companyId,
+        exerciseId: input.exerciseId,
+        noteType: input.noteType,
+        title: spec.title,
+        content,
+        status: input.status,
+        notApplicable: input.notApplicable ?? false,
+        version: (current?.version ?? 0) + 1,
+        createdAt: current?.createdAt ?? now,
+        createdBy: current?.createdBy ?? actorId,
+        updatedAt: now,
+        updatedBy: actorId,
+        supersedesId: current?.id,
+    }
+    await db.manualDisclosures.put(disclosure)
+
+    await appendAuditEvent({
+        eventType: 'ENTRY_REPLACED',
+        entityType: 'company',
+        entityId: disclosure.id,
+        actorId,
+        reason: `Nota manual "${spec.title}" v${disclosure.version} (${disclosure.status}${disclosure.notApplicable ? ', no aplicable' : ''})`,
+        before: current ? { supersedes: current.id, version: current.version } : undefined,
+        after: { noteType: disclosure.noteType, status: disclosure.status, version: disclosure.version },
+        metadata: { kind: 'manual-disclosure', exerciseId: input.exerciseId },
+    })
+
+    // Invalidación de snapshots: la información complementaria cambió
+    if (disclosure.status === 'VALIDATED' || current?.status === 'VALIDATED') {
+        await invalidateSnapshotsForExercise(
+            input.exerciseId,
+            `Nota manual "${spec.title}" modificada (v${disclosure.version})`)
+    }
+
+    return disclosure
+}

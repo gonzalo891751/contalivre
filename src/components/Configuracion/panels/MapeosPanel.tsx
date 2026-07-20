@@ -28,6 +28,7 @@ const MONETARY: MonetaryClassification[] = ['MONETARY', 'NON_MONETARY', 'MIXED',
 const CURRENT: CurrentClassification[] = ['CURRENT', 'NON_CURRENT', 'NOT_APPLICABLE']
 const CASHFLOW = ['OPERATING', 'INVESTING', 'FINANCING', 'CASH_EQUIVALENT', 'NOT_APPLICABLE'] as const
 const RESULT_FUNCTIONS = ['ADMINISTRATION', 'SELLING', 'PRODUCTION', 'FINANCIAL', 'OTHER'] as const
+const COST_COMPONENTS = ['PURCHASES', 'PURCHASE_RETURNS', 'ACQUISITION_COST', 'OTHER_INCORPORABLE_COST', 'ABNORMAL_LOSS'] as const
 
 const fmt = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -99,6 +100,18 @@ function EditRow({ status, onSaved }: { status: AccountMappingStatus; onSaved: (
                     </select>
                 ) : <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>N/A</span>}
             </td>
+            <td style={{ padding: '6px 8px' }}>
+                {account.kind === 'EXPENSE' || account.kind === 'INCOME' ? (
+                    <select
+                        value={(draft.costComponent ?? account.costComponent ?? '') as string}
+                        onChange={e => set('costComponent', e.target.value)}
+                        title="Componente del costo de ventas (compras, devoluciones, fletes, baja anormal)"
+                    >
+                        <option value="">— comp. costo —</option>
+                        {COST_COMPONENTS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                ) : <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>N/A</span>}
+            </td>
             <td style={{ padding: '6px 8px', maxWidth: 320 }}>
                 {Object.keys(proposal).length > 0 && Object.keys(draft).length === 0 && (
                     <button className="btn btn-secondary btn-sm" onClick={() => setDraft(proposal)} title="Aplicar propuesta heurística (revisá antes de guardar)">
@@ -154,6 +167,7 @@ export function MapeosPanel() {
                             <th style={{ padding: '8px' }}>Corriente</th>
                             <th style={{ padding: '8px' }}>EFE</th>
                             <th style={{ padding: '8px' }}>Función gasto</th>
+                            <th style={{ padding: '8px' }}>Comp. costo</th>
                             <th style={{ padding: '8px' }}>Impacto</th>
                             <th style={{ padding: '8px' }}></th>
                         </tr>

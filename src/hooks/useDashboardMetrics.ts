@@ -1,24 +1,20 @@
+/**
+ * useDashboardMetrics — Fase 2F (§14): el Dashboard deriva TODAS sus cifras
+ * financieras del motor canónico (loadReportingBundle), igual que Estados.
+ *
+ * Ya NO usa core/statements, core/ledger ni core/balance: activo, pasivo, PN,
+ * efectivo, liquidez y composición salen del mismo ReportingBundle, de modo
+ * que Inicio y Estados muestran exactamente los mismos totales. Solo la
+ * detección de setup y la actividad reciente usan una consulta liviana.
+ */
+
 import { useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../storage/db'
-import { computeLedger } from '../core/ledger'
-import { computeTrialBalance } from '../core/balance'
-import { computeStatements } from '../core/statements'
-import type { Account, JournalEntry, StatementGroup, BalanceSheet } from '../core/models'
+import type { Account, JournalEntry, StatementGroup } from '../core/models'
+import type { ReportLine } from '../reporting/domain/types'
 import { usePeriodYear } from './usePeriodYear'
-
-// Chart colors consistent with ContaLivre brand
-const CHART_COLORS = {
-    CASH_AND_BANKS: '#3B82F6',     // Blue
-    TRADE_RECEIVABLES: '#10B981',  // Green
-    INVENTORIES: '#F59E0B',        // Amber
-    PPE: '#8B5CF6',                // Violet
-    OTHER: '#94A3B8',              // Slate
-    TRADE_PAYABLES: '#EF4444',     // Red
-    TAX_LIABILITIES: '#F97316',    // Orange
-    LOANS: '#6366F1',              // Indigo
-    PAYROLL_LIABILITIES: '#EC4899', // Pink
-}
+import { useReportingBundle } from './useReportingBundle'
 
 interface ChartDataPoint {
     name: string
@@ -39,8 +35,6 @@ export interface DashboardMetrics {
     unmappedCount: number
     isSetupComplete: boolean
     hasEntries: boolean
-
-    // Totals by category
     totals: {
         cash: number
         inventories: number
@@ -52,8 +46,6 @@ export interface DashboardMetrics {
         liabilitiesTotal: number
         equity: number
     }
-
-    // KPI ratios
     kpis: {
         workingCapital: number
         currentRatio: number
@@ -61,8 +53,6 @@ export interface DashboardMetrics {
         solvencyRatio: number
         equityRatio: number
     }
-
-    // Chart data
     charts: {
         equation: Array<{
             name: string
@@ -75,285 +65,135 @@ export interface DashboardMetrics {
         assetsComposition: ChartDataPoint[]
         liabilitiesComposition: ChartDataPoint[]
     }
-
-    // Recent activity
     recentActivity: RecentActivity[]
 }
 
-/**
- * Computes how many journal lines reference non-existent accounts
- */
-function computeUnmappedCount(entries: JournalEntry[], accounts: Account[]): number {
-    const accountIds = new Set(accounts.map(a => a.id))
-    const accountCodes = new Set(accounts.map(a => a.code))
+const CHART_COLORS: Record<string, string> = {
+    CASH_AND_BANKS: '#10B981', TRADE_RECEIVABLES: '#3B82F6', OTHER_RECEIVABLES: '#6366F1',
+    TAX_CREDITS: '#8B5CF6', INVENTORIES: '#F59E0B', PPE: '#EF4444', INTANGIBLES: '#EC4899',
+    INVESTMENTS: '#14B8A6', TRADE_PAYABLES: '#F97316', TAX_LIABILITIES: '#DC2626',
+    PAYROLL_LIABILITIES: '#7C3AED', LOANS: '#DB2777', OTHER_PAYABLES: '#0EA5E9',
+    DEFERRED_INCOME: '#64748B', OTHER: '#94A3B8',
+}
 
+const GROUP_LABELS: Record<string, string> = {
+    CASH_AND_BANKS: 'Caja y Bancos', TRADE_RECEIVABLES: 'Créditos', OTHER_RECEIVABLES: 'Otros Créditos',
+    TAX_CREDITS: 'Créditos Fiscales', INVENTORIES: 'Bienes de Cambio', PPE: 'Bienes de Uso',
+    INTANGIBLES: 'Intangibles', INVESTMENTS: 'Inversiones', TRADE_PAYABLES: 'Proveedores',
+    TAX_LIABILITIES: 'Deudas Fiscales', PAYROLL_LIABILITIES: 'Deudas Laborales', LOANS: 'Préstamos',
+    OTHER_PAYABLES: 'Otras Deudas', DEFERRED_INCOME: 'Ingresos Diferidos', OTHER: 'Otros',
+}
+
+const EMPTY_METRICS: DashboardMetrics = {
+    isLoading: true, hasCOA: false, unmappedCount: 0, isSetupComplete: false, hasEntries: false,
+    totals: { cash: 0, inventories: 0, assetsCurrent: 0, assetsNonCurrent: 0, assetsTotal: 0, liabilitiesCurrent: 0, liabilitiesNonCurrent: 0, liabilitiesTotal: 0, equity: 0 },
+    kpis: { workingCapital: 0, currentRatio: 0, acidTest: 0, solvencyRatio: 0, equityRatio: 0 },
+    charts: { equation: [], assetsComposition: [], liabilitiesComposition: [] },
+    recentActivity: [],
+}
+
+function computeUnmappedCount(entries: JournalEntry[], accounts: Account[]): number {
+    const ids = new Set(accounts.map(a => a.id))
+    const codes = new Set(accounts.map(a => a.code))
     let count = 0
     for (const entry of entries) {
         for (const line of entry.lines) {
-            // Skip empty lines
             if (!line.accountId) continue
-            // Check by ID first, then by code
-            if (!accountIds.has(line.accountId) && !accountCodes.has(line.accountId)) {
-                count++
-            }
+            if (!ids.has(line.accountId) && !codes.has(line.accountId)) count++
         }
     }
     return count
 }
 
-/**
- * Extract total for a specific statementGroup from a section
- */
-function extractByGroup(section: { accounts: Array<{ account: Account; balance: number }> }, group: StatementGroup): number {
-    return section.accounts
-        .filter(a => a.account.statementGroup === group)
-        .reduce((sum, a) => sum + Math.abs(a.balance), 0)
+/** Suma por statementGroup los importes de las cuentas (level 2) de una sección canónica */
+function compositionByGroup(section: ReportLine, groupOf: Map<string, StatementGroup | null>): ChartDataPoint[] {
+    const totals = new Map<string, number>()
+    const walk = (l: ReportLine) => {
+        if (l.level === 2 && l.accountIds.length === 1) {
+            const g = groupOf.get(l.accountIds[0]) ?? 'OTHER'
+            totals.set(g, (totals.get(g) ?? 0) + Math.abs(l.amount))
+        }
+        for (const c of l.children ?? []) walk(c)
+    }
+    walk(section)
+    return [...totals.entries()]
+        .filter(([, v]) => v > 0)
+        .map(([g, v]) => ({ name: GROUP_LABELS[g] ?? g, value: Math.round(v * 100) / 100, color: CHART_COLORS[g] ?? CHART_COLORS.OTHER }))
+        .sort((a, b) => b.value - a.value)
 }
 
-/**
- * Build composition chart data from section accounts
- */
-function buildCompositionData(
-    balanceSheet: BalanceSheet,
-    sections: Array<'currentAssets' | 'nonCurrentAssets' | 'currentLiabilities' | 'nonCurrentLiabilities'>,
-    colorMap: Record<string, string>
-): ChartDataPoint[] {
-    const groupTotals = new Map<string, number>()
-
-    for (const sectionKey of sections) {
-        const section = balanceSheet[sectionKey]
-        for (const { account, balance } of section.accounts) {
-            const group = account.statementGroup || 'OTHER'
-            const current = groupTotals.get(group) || 0
-            groupTotals.set(group, current + Math.abs(balance))
-        }
+function sumGroup(section: ReportLine, groupOf: Map<string, StatementGroup | null>, group: StatementGroup): number {
+    let total = 0
+    const walk = (l: ReportLine) => {
+        if (l.level === 2 && l.accountIds.length === 1 && groupOf.get(l.accountIds[0]) === group) total += Math.abs(l.amount)
+        for (const c of l.children ?? []) walk(c)
     }
-
-    // Map statementGroup to readable Spanish labels
-    const labels: Record<string, string> = {
-        CASH_AND_BANKS: 'Caja y Bancos',
-        TRADE_RECEIVABLES: 'Créditos',
-        OTHER_RECEIVABLES: 'Otros Créditos',
-        TAX_CREDITS: 'Créditos Fiscales',
-        INVENTORIES: 'Bienes de Cambio',
-        PPE: 'Bienes de Uso',
-        INTANGIBLES: 'Intangibles',
-        INVESTMENTS: 'Inversiones',
-        TRADE_PAYABLES: 'Proveedores',
-        TAX_LIABILITIES: 'Deudas Fiscales',
-        PAYROLL_LIABILITIES: 'Deudas Laborales',
-        LOANS: 'Préstamos',
-        OTHER_PAYABLES: 'Otras Deudas',
-        DEFERRED_INCOME: 'Ingresos Diferidos',
-        OTHER: 'Otros',
-    }
-
-    const result: ChartDataPoint[] = []
-
-    for (const [group, value] of groupTotals.entries()) {
-        if (value > 0) {
-            result.push({
-                name: labels[group] || group,
-                value: Math.round(value * 100) / 100,
-                color: colorMap[group] || CHART_COLORS.OTHER,
-            })
-        }
-    }
-
-    // Sort by value descending
-    result.sort((a, b) => b.value - a.value)
-
-    return result
+    walk(section)
+    return total
 }
 
-/**
- * Custom hook that provides all dashboard metrics
- */
 export function useDashboardMetrics(): DashboardMetrics {
-    const { start: periodStart, end: periodEnd } = usePeriodYear()
+    const { year, start: periodStart, end: periodEnd } = usePeriodYear()
+    const { bundle, loading } = useReportingBundle(year)
     const accounts = useLiveQuery(() => db.accounts.orderBy('code').toArray())
-    const entries = useLiveQuery(() => db.entries.where('date').between(periodStart, periodEnd, true, true).reverse().toArray(), [periodStart, periodEnd])
+    const entries = useLiveQuery(
+        () => db.entries.where('date').between(periodStart, periodEnd, true, true).reverse().toArray(),
+        [periodStart, periodEnd])
 
     return useMemo(() => {
-        // Loading state
-        if (!accounts || !entries) {
-            return {
-                isLoading: true,
-                hasCOA: false,
-                unmappedCount: 0,
-                isSetupComplete: false,
-                hasEntries: false,
-                totals: {
-                    cash: 0,
-                    inventories: 0,
-                    assetsCurrent: 0,
-                    assetsNonCurrent: 0,
-                    assetsTotal: 0,
-                    liabilitiesCurrent: 0,
-                    liabilitiesNonCurrent: 0,
-                    liabilitiesTotal: 0,
-                    equity: 0,
-                },
-                kpis: {
-                    workingCapital: 0,
-                    currentRatio: 0,
-                    acidTest: 0,
-                    solvencyRatio: 0,
-                    equityRatio: 0,
-                },
-                charts: {
-                    equation: [],
-                    assetsComposition: [],
-                    liabilitiesComposition: [],
-                },
-                recentActivity: [],
-            }
-        }
+        if (loading || !bundle || !accounts || !entries) return EMPTY_METRICS
 
-        // Setup state
         const hasCOA = accounts.length > 0
         const hasEntries = entries.length > 0
         const unmappedCount = computeUnmappedCount(entries, accounts)
         const isSetupComplete = hasCOA && unmappedCount === 0
 
-        // Compute financial data
-        let totals = {
-            cash: 0,
-            inventories: 0,
-            assetsCurrent: 0,
-            assetsNonCurrent: 0,
-            assetsTotal: 0,
-            liabilitiesCurrent: 0,
-            liabilitiesNonCurrent: 0,
-            liabilitiesTotal: 0,
-            equity: 0,
+        const groupOf = new Map(accounts.map(a => [a.id, a.statementGroup]))
+        const bs = bundle.statements.balanceSheet
+
+        const totals = {
+            cash: sumGroup(bs.currentAssets, groupOf, 'CASH_AND_BANKS'),
+            inventories: sumGroup(bs.currentAssets, groupOf, 'INVENTORIES'),
+            assetsCurrent: bs.currentAssets.amount,
+            assetsNonCurrent: bs.nonCurrentAssets.amount,
+            assetsTotal: bs.totalAssets.amount,
+            liabilitiesCurrent: bs.currentLiabilities.amount,
+            liabilitiesNonCurrent: bs.nonCurrentLiabilities.amount,
+            liabilitiesTotal: bs.totalLiabilities.amount,
+            equity: bs.equity.amount,
         }
 
         const charts = {
-            equation: [] as Array<{
-                name: string
-                activoCorriente: number
-                activoNoCorriente: number
-                pasivoCorriente: number
-                pasivoNoCorriente: number
-                pn: number
-            }>,
-            assetsComposition: [] as ChartDataPoint[],
-            liabilitiesComposition: [] as ChartDataPoint[],
+            equation: [
+                { name: 'Activo', activoCorriente: totals.assetsCurrent, activoNoCorriente: totals.assetsNonCurrent, pasivoCorriente: 0, pasivoNoCorriente: 0, pn: 0 },
+                { name: 'Origen', activoCorriente: 0, activoNoCorriente: 0, pasivoCorriente: totals.liabilitiesCurrent, pasivoNoCorriente: totals.liabilitiesNonCurrent, pn: totals.equity },
+            ],
+            assetsComposition: [...compositionByGroup(bs.currentAssets, groupOf), ...compositionByGroup(bs.nonCurrentAssets, groupOf)].sort((a, b) => b.value - a.value),
+            liabilitiesComposition: [...compositionByGroup(bs.currentLiabilities, groupOf), ...compositionByGroup(bs.nonCurrentLiabilities, groupOf)].sort((a, b) => b.value - a.value),
         }
 
-        if (hasCOA && hasEntries) {
-            const ledger = computeLedger(entries, accounts)
-            const trialBalance = computeTrialBalance(ledger, accounts)
-            const statements = computeStatements(trialBalance, accounts)
-            const { balanceSheet } = statements
-
-            // Extract totals
-            const assetsNonCurrent = balanceSheet.nonCurrentAssets.netTotal
-            const liabilitiesNonCurrent = balanceSheet.nonCurrentLiabilities.netTotal
-
-            totals = {
-                cash: extractByGroup(balanceSheet.currentAssets, 'CASH_AND_BANKS'),
-                inventories: extractByGroup(balanceSheet.currentAssets, 'INVENTORIES'),
-                assetsCurrent: balanceSheet.currentAssets.netTotal,
-                assetsNonCurrent,
-                assetsTotal: balanceSheet.totalAssets,
-                liabilitiesCurrent: balanceSheet.currentLiabilities.netTotal,
-                liabilitiesNonCurrent,
-                liabilitiesTotal: balanceSheet.totalLiabilities,
-                equity: balanceSheet.totalEquity,
-            }
-
-            // Equation chart data (for segmented stacked bar)
-            charts.equation = [
-                {
-                    name: 'Activo',
-                    activoCorriente: totals.assetsCurrent,
-                    activoNoCorriente: assetsNonCurrent,
-                    pasivoCorriente: 0,
-                    pasivoNoCorriente: 0,
-                    pn: 0,
-                },
-                {
-                    name: 'Origen',
-                    activoCorriente: 0,
-                    activoNoCorriente: 0,
-                    pasivoCorriente: totals.liabilitiesCurrent,
-                    pasivoNoCorriente: liabilitiesNonCurrent,
-                    pn: totals.equity,
-                },
-            ]
-
-            // Composition charts
-            charts.assetsComposition = buildCompositionData(
-                balanceSheet,
-                ['currentAssets', 'nonCurrentAssets'],
-                CHART_COLORS
-            )
-
-            charts.liabilitiesComposition = buildCompositionData(
-                balanceSheet,
-                ['currentLiabilities', 'nonCurrentLiabilities'],
-                CHART_COLORS
-            )
+        const kpis = {
+            workingCapital: totals.assetsCurrent - totals.liabilitiesCurrent,
+            currentRatio: totals.liabilitiesCurrent > 0 ? totals.assetsCurrent / totals.liabilitiesCurrent : 0,
+            acidTest: totals.liabilitiesCurrent > 0 ? (totals.assetsCurrent - totals.inventories) / totals.liabilitiesCurrent : 0,
+            solvencyRatio: totals.liabilitiesTotal > 0 ? totals.assetsTotal / totals.liabilitiesTotal : 0,
+            equityRatio: totals.assetsTotal > 0 ? totals.equity / totals.assetsTotal : 0,
         }
 
-        // KPI calculations
-        const workingCapital = totals.assetsCurrent - totals.liabilitiesCurrent
-        const currentRatio = totals.liabilitiesCurrent > 0
-            ? totals.assetsCurrent / totals.liabilitiesCurrent
-            : 0
-        const acidTest = totals.liabilitiesCurrent > 0
-            ? (totals.assetsCurrent - totals.inventories) / totals.liabilitiesCurrent
-            : 0
-        const solvencyRatio = totals.liabilitiesTotal > 0
-            ? totals.assetsTotal / totals.liabilitiesTotal
-            : 0
-        const equityRatio = totals.assetsTotal > 0
-            ? totals.equity / totals.assetsTotal
-            : 0
+        const recentActivity: RecentActivity[] = entries.slice(0, 5).map(entry => ({
+            id: entry.id,
+            date: formatDate(entry.date),
+            concept: entry.memo || 'Sin concepto',
+            amount: entry.lines.reduce((sum, line) => sum + line.debit, 0),
+        }))
 
-        // Recent activity (last 5 entries)
-        const recentActivity: RecentActivity[] = entries.slice(0, 5).map(entry => {
-            const totalAmount = entry.lines.reduce((sum, line) => sum + line.debit, 0)
-            return {
-                id: entry.id,
-                date: formatDate(entry.date),
-                concept: entry.memo || 'Sin concepto',
-                amount: totalAmount,
-            }
-        })
-
-        return {
-            isLoading: false,
-            hasCOA,
-            unmappedCount,
-            isSetupComplete,
-            hasEntries,
-            totals,
-            kpis: {
-                workingCapital,
-                currentRatio,
-                acidTest,
-                solvencyRatio,
-                equityRatio,
-            },
-            charts,
-            recentActivity,
-        }
-    }, [accounts, entries])
+        return { isLoading: false, hasCOA, unmappedCount, isSetupComplete, hasEntries, totals, kpis, charts, recentActivity }
+    }, [bundle, loading, accounts, entries])
 }
 
-/**
- * Format ISO date to short Spanish format
- */
 function formatDate(isoDate: string): string {
     try {
-        const date = new Date(isoDate)
-        return date.toLocaleDateString('es-AR', {
-            day: '2-digit',
-            month: 'short',
-        })
+        return new Date(isoDate).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })
     } catch {
         return isoDate
     }

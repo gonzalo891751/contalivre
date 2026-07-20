@@ -42,30 +42,50 @@ export function ForeignCurrencyView({ disclosure, showComparative, onRowClick }:
                             <th scope="col">Clasificación</th>
                             <th scope="col" className="num">Cantidad</th>
                             <th scope="col" className="num">Cotización</th>
-                            <th scope="col" className="num">Medición actual</th>
+                            <th scope="col">Fuente / fecha</th>
+                            <th scope="col" className="num">Medición (Diario)</th>
+                            <th scope="col" className="num">Diferencia</th>
                             {showComparative && <th scope="col" className="num">Comparativo</th>}
                         </tr>
                     </thead>
                     <tbody>
-                        {disclosure.rows.map(r => (
-                            <tr
-                                key={r.accountId}
-                                className={onRowClick ? 'is-clickable' : undefined}
-                                onClick={onRowClick ? () => onRowClick(`${r.code} ${r.name}`, [r.accountId]) : undefined}
-                                tabIndex={onRowClick ? 0 : undefined}
-                                onKeyDown={onRowClick ? e => { if (e.key === 'Enter') onRowClick(`${r.code} ${r.name}`, [r.accountId]) } : undefined}
-                                title={onRowClick ? 'Ver trazabilidad hasta los asientos' : undefined}
-                            >
-                                <td className="left">{r.code} {r.name}</td>
-                                <td>{r.currency}</td>
-                                <td>{SIDE_LABEL[r.side]}</td>
-                                <td>{r.monetary === 'MONETARY' ? 'Monetaria' : r.monetary === 'NON_MONETARY' ? 'No monetaria' : r.monetary}</td>
-                                <td className="num na" title="Sin datos estructurados de cantidad por moneda">Insuf.</td>
-                                <td className="num na" title="Sin cotización con fuente y fecha identificadas">Insuf.</td>
-                                <td className="num">{nf.format(r.measurement)}</td>
-                                {showComparative && <td className="num comp">{r.comparativeMeasurement == null ? '–' : nf.format(r.comparativeMeasurement)}</td>}
-                            </tr>
-                        ))}
+                        {disclosure.rows.map(r => {
+                            const hasDetail = r.quantityStatus === 'CALCULATED'
+                            const diff = r.reconciliationDifference ?? 0
+                            return (
+                                <tr
+                                    key={r.accountId}
+                                    className={onRowClick ? 'is-clickable' : undefined}
+                                    onClick={onRowClick ? () => onRowClick(`${r.code} ${r.name}`, [r.accountId]) : undefined}
+                                    tabIndex={onRowClick ? 0 : undefined}
+                                    onKeyDown={onRowClick ? e => { if (e.key === 'Enter') onRowClick(`${r.code} ${r.name}`, [r.accountId]) } : undefined}
+                                    title={onRowClick ? 'Ver trazabilidad hasta los asientos' : undefined}
+                                >
+                                    <td className="left">{r.code} {r.name}</td>
+                                    <td>{r.currency}</td>
+                                    <td>{SIDE_LABEL[r.side]}</td>
+                                    <td>{r.monetary === 'MONETARY' ? 'Monetaria' : r.monetary === 'NON_MONETARY' ? 'No monetaria' : r.monetary}</td>
+                                    {hasDetail ? (
+                                        <>
+                                            <td className="num">{nf.format(r.quantity ?? 0)}</td>
+                                            <td className="num">{r.rate == null ? '–' : nf.format(r.rate)}</td>
+                                            <td className="src">{r.rateSource ?? '—'}{r.rateDate ? ` · ${r.rateDate}` : ''}{r.rateType ? ` (${r.rateType})` : ''}</td>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <td className="num na" title="Sin detalle operativo cargado">Insuf.</td>
+                                            <td className="num na" title="Sin cotización con fuente y fecha identificadas">Insuf.</td>
+                                            <td className="src na">—</td>
+                                        </>
+                                    )}
+                                    <td className="num">{nf.format(r.measurement)}</td>
+                                    <td className={`num ${hasDetail && diff !== 0 ? 'diff' : 'ok'}`}>
+                                        {hasDetail ? (diff === 0 ? '✓ 0,00' : nf.format(diff)) : '—'}
+                                    </td>
+                                    {showComparative && <td className="num comp">{r.comparativeMeasurement == null ? '–' : nf.format(r.comparativeMeasurement)}</td>}
+                                </tr>
+                            )
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -85,6 +105,9 @@ const styles = `
 .fx-table td { padding: 7px 12px; border-top: 1px solid #f1f5f9; color: #334155; text-align: center; }
 .fx-table td.na { color: #a16207; font-size: 0.74rem; font-weight: 600; }
 .fx-table td.comp { color: #64748b; }
+.fx-table td.src { font-size: 0.72rem; color: #64748b; }
+.fx-table td.diff { color: #b91c1c; font-weight: 700; }
+.fx-table td.ok { color: #059669; font-weight: 600; }
 .fx-table tr.is-clickable { cursor: pointer; }
 .fx-table tr.is-clickable:hover td { background: #f8fafc; }
 `
