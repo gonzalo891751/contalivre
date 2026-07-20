@@ -26,8 +26,8 @@ describe('Fase 2B — notas y linaje', () => {
         notes = buildNotes(input, bundle)
     })
 
-    it('la nota de deudas reconcilia exactamente con el pasivo del ESP', () => {
-        const deudas = notes.find(n => n.id === 'nota-deudas')!
+    it('la nota de deudas comerciales reconcilia exactamente con el pasivo del ESP', () => {
+        const deudas = notes.find(n => n.id === 'nota-deudas-comerciales')!
         expect(deudas.total).toBe(300000)
         expect(deudas.reconciled).toBe(true)
         expect(deudas.lines.every(l => l.origin === 'DERIVED')).toBe(true)

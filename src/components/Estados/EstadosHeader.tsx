@@ -39,7 +39,7 @@ export function EstadosHeader({ activeTab, onTabChange, empresaName }: EstadosHe
                     <div className="estados-header-titles">
                         <span className="estados-header-label">Reportes Contables</span>
                         <h1 className="estados-header-title">ESTADOS CONTABLES</h1>
-                        <p className="estados-header-subtitle">Los 4 estados contables básicos</p>
+                        <p className="estados-header-subtitle">4 estados contables básicos e información complementaria</p>
                     </div>
 
                     {/* Context Bar */}

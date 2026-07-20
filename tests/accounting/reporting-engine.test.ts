@@ -82,12 +82,12 @@ describe('Fase 2B — motor único: golden comercial 2025', () => {
         expect(efe.unclassified.amount).toBe(0)
     })
 
-    it('EFE directo: subcategorías operativas estructurales', () => {
+    it('EFE directo: subcategorías operativas estructurales (apertura 2E)', () => {
         const children = bundle.cashFlowDirect!.operating.children!
         const byLabel = new Map(children.map(c => [c.label, c.amount]))
         expect(byLabel.get('Cobros de clientes')).toBe(150000)
-        expect(byLabel.get('Pagos a proveedores')).toBe(-260000) // 200.000 contado + 60.000 pago
-        expect(byLabel.get('Otros cobros y pagos operativos')).toBe(-10000)
+        expect(byLabel.get('Pagos a proveedores de bienes y servicios')).toBe(-260000) // 200.000 contado + 60.000 pago
+        expect(byLabel.get('Pagos de gastos de administración y comercialización')).toBe(-10000)
     })
 
     it('EFE indirecto = directo (verificado, no forzado)', () => {

@@ -78,20 +78,30 @@ export function flowBucket(account: Account | undefined): FlowBucket {
     return 'UNCLASSIFIED'
 }
 
-/** Subcategoría operativa del método directo (estructural) */
-function directOperatingSubcategory(account: Account): string {
+/**
+ * Subcategoría operativa del método directo (Fase 2E §7.2): estructural por
+ * statementGroup de la contrapartida; jamás por nombre. Compartida con la
+ * reexpresión a moneda de cierre para que ambas expresiones expongan el mismo
+ * nivel de apertura.
+ */
+export function directOperatingSubcategory(account: Account): string {
     const g = account.statementGroup
     if (g === 'TRADE_RECEIVABLES' || g === 'SALES') return 'Cobros de clientes'
-    if (g === 'TRADE_PAYABLES' || g === 'INVENTORIES' || g === 'COGS') return 'Pagos a proveedores'
-    if (g === 'PAYROLL_LIABILITIES') return 'Pagos al personal'
-    if (g === 'TAX_LIABILITIES' || g === 'TAX_CREDITS') return 'Pagos/cobros de impuestos'
+    if (g === 'OTHER_OPERATING_INCOME' || g === 'OTHER_INCOME') return 'Cobros por otros ingresos operativos'
+    if (g === 'TRADE_PAYABLES' || g === 'INVENTORIES' || g === 'COGS') return 'Pagos a proveedores de bienes y servicios'
+    if (g === 'PAYROLL_LIABILITIES') return 'Pagos al personal y cargas sociales'
+    if (g === 'ADMIN_EXPENSES' || g === 'SELLING_EXPENSES') return 'Pagos de gastos de administración y comercialización'
+    if (g === 'INCOME_TAX') return 'Pagos de impuesto a las ganancias'
+    if (g === 'TAX_LIABILITIES' || g === 'TAX_CREDITS') return 'Pagos y cobros de otros impuestos'
+    if (g === 'FINANCIAL_INCOME') return 'Intereses y rendimientos cobrados'
+    if (g === 'FINANCIAL_EXPENSES') return 'Intereses y costos financieros pagados'
     return 'Otros cobros y pagos operativos'
 }
 
 interface FlowTotals {
     operating: Map<string, { cents: number; accountIds: Set<string> }>
-    investing: { cents: number; accountIds: Set<string> }
-    financing: { cents: number; accountIds: Set<string> }
+    investing: { cents: number; accountIds: Set<string>; byAccount: Map<string, number> }
+    financing: { cents: number; accountIds: Set<string>; byAccount: Map<string, number> }
     unclassified: { cents: number; accountIds: Set<string> }
     cashDelta: number
     openingCash: number
@@ -135,20 +145,23 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     // ── Método directo: línea por línea de asientos con efectivo ──
     const totals: FlowTotals = {
         operating: new Map(),
-        investing: { cents: 0, accountIds: new Set() },
-        financing: { cents: 0, accountIds: new Set() },
+        investing: { cents: 0, accountIds: new Set(), byAccount: new Map() },
+        financing: { cents: 0, accountIds: new Set(), byAccount: new Map() },
         unclassified: { cents: 0, accountIds: new Set() },
         cashDelta: 0,
         openingCash: openingCashCents,
         closingCash: 0,
     }
 
-    // Componentes del método indirecto
+    // Componentes del método indirecto (con detalle por cuenta, Fase 2E §7.3)
     let wcAssetDeltaCents = 0
     let wcLiabDeltaCents = 0
     const wcAssetIds = new Set<string>()
     const wcLiabIds = new Set<string>()
+    const wcAssetByAccount = new Map<string, number>()
+    const wcLiabByAccount = new Map<string, number>()
     let nonCashInvFinCents = 0 // inv_N + fin_N (asientos sin efectivo)
+    const adjustmentsByAccount = new Map<string, number>()
     const nonMonetaryDisclosures: ReportLine[] = []
 
     for (const entry of flowEntries) {
@@ -167,8 +180,16 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
             const account = byId.get(l.accountId)
             const bucket = flowBucket(account)
             const netDC = toCents(l.debit || 0) - toCents(l.credit || 0)
-            if (bucket === 'WC_ASSET') { wcAssetDeltaCents += netDC; wcAssetIds.add(l.accountId) }
-            if (bucket === 'WC_LIAB') { wcLiabDeltaCents += netDC; wcLiabIds.add(l.accountId) }
+            if (bucket === 'WC_ASSET') {
+                wcAssetDeltaCents += netDC
+                wcAssetIds.add(l.accountId)
+                wcAssetByAccount.set(l.accountId, (wcAssetByAccount.get(l.accountId) ?? 0) + netDC)
+            }
+            if (bucket === 'WC_LIAB') {
+                wcLiabDeltaCents += netDC
+                wcLiabIds.add(l.accountId)
+                wcLiabByAccount.set(l.accountId, (wcLiabByAccount.get(l.accountId) ?? 0) + netDC)
+            }
         }
 
         if (touchesCash && cashCents !== 0) {
@@ -194,10 +215,12 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
                     case 'INVESTING':
                         totals.investing.cents += contribution
                         totals.investing.accountIds.add(l.accountId)
+                        totals.investing.byAccount.set(l.accountId, (totals.investing.byAccount.get(l.accountId) ?? 0) + contribution)
                         break
                     case 'FINANCING':
                         totals.financing.cents += contribution
                         totals.financing.accountIds.add(l.accountId)
+                        totals.financing.byAccount.set(l.accountId, (totals.financing.byAccount.get(l.accountId) ?? 0) + contribution)
                         break
                     case 'UNCLASSIFIED':
                         totals.unclassified.cents += contribution
@@ -212,7 +235,11 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
             for (const l of entry.lines) {
                 const bucket = flowBucket(byId.get(l.accountId))
                 const netDC = toCents(l.debit || 0) - toCents(l.credit || 0)
-                if (bucket === 'INVESTING' || bucket === 'FINANCING') invFin += netDC
+                if (bucket === 'INVESTING' || bucket === 'FINANCING') {
+                    invFin += netDC
+                    // X = −netDC: la depreciación (crédito a amort. acum.) suma
+                    adjustmentsByAccount.set(l.accountId, (adjustmentsByAccount.get(l.accountId) ?? 0) - netDC)
+                }
             }
             if (invFin !== 0) {
                 nonCashInvFinCents += invFin
@@ -244,15 +271,38 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     const line = (id: string, label: string, centsValue: number, accountIds: string[] = [], children?: ReportLine[]): ReportLine =>
         ({ id, label, level: children ? 1 : 0, amount: fromCents(centsValue), accountIds, children })
 
+    /** Detalle por cuenta (label estructural código + nombre; nunca inferencias) */
+    const accountDetail = (idPrefix: string, byAccount: Map<string, number>, sign: 1 | -1 = 1): ReportLine[] => {
+        const out: ReportLine[] = []
+        for (const [accountId, cents] of byAccount) {
+            if (cents === 0) continue
+            const account = byId.get(accountId)
+            out.push({
+                id: `${idPrefix}:${accountId}`,
+                label: account ? `${account.code} ${account.name}` : `⚠ Cuenta inexistente (${accountId})`,
+                level: 2,
+                amount: fromCents(sign * cents),
+                accountIds: [accountId],
+            })
+        }
+        out.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+        return out
+    }
+
     const netChangeCents = operatingCents + totals.investing.cents + totals.financing.cents + totals.unclassified.cents
+
+    const investingChildren = accountDetail('efe:inv', totals.investing.byAccount)
+    const financingChildren = accountDetail('efe:fin', totals.financing.byAccount)
 
     const direct: CashFlowStatement2B = {
         method: 'DIRECT',
         openingCash: line('efe:inicial', 'Efectivo y equivalentes al inicio', openingCashCents),
         operating: line('efe:operativas', 'Actividades operativas', operatingCents,
             operatingChildren.flatMap(c => c.accountIds), operatingChildren),
-        investing: line('efe:inversion', 'Actividades de inversión', totals.investing.cents, Array.from(totals.investing.accountIds)),
-        financing: line('efe:financiacion', 'Actividades de financiación', totals.financing.cents, Array.from(totals.financing.accountIds)),
+        investing: line('efe:inversion', 'Actividades de inversión', totals.investing.cents, Array.from(totals.investing.accountIds),
+            investingChildren.length > 0 ? investingChildren : undefined),
+        financing: line('efe:financiacion', 'Actividades de financiación', totals.financing.cents, Array.from(totals.financing.accountIds),
+            financingChildren.length > 0 ? financingChildren : undefined),
         unclassified: line('efe:sin-clasificar', 'Flujos sin clasificación (regularizar)', totals.unclassified.cents, Array.from(totals.unclassified.accountIds)),
         netChange: line('efe:variacion', 'Variación neta del efectivo', netChangeCents),
         closingCash: line('efe:final', 'Efectivo y equivalentes al cierre', totals.closingCash),
@@ -266,9 +316,21 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
 
     const indirectChildren: ReportLine[] = [
         { id: 'efe:ind:resultado', label: 'Resultado del ejercicio', level: 2, amount: fromCents(resultCents), accountIds: bundle.incomeStatement.netIncome.accountIds },
-        { id: 'efe:ind:ajustes', label: 'Partidas devengadas sin efecto en el efectivo (depreciaciones, altas no monetarias, etc.)', level: 2, amount: fromCents(adjustmentsCents), accountIds: [] },
-        { id: 'efe:ind:wc-activos', label: 'Variación de créditos, inventarios y otros activos operativos', level: 2, amount: fromCents(-wcAssetDeltaCents), accountIds: Array.from(wcAssetIds) },
-        { id: 'efe:ind:wc-pasivos', label: 'Variación de proveedores y otros pasivos operativos', level: 2, amount: fromCents(-wcLiabDeltaCents), accountIds: Array.from(wcLiabIds) },
+        {
+            id: 'efe:ind:ajustes', label: 'Partidas devengadas sin efecto en el efectivo (depreciaciones, altas no monetarias, etc.)',
+            level: 2, amount: fromCents(adjustmentsCents), accountIds: Array.from(adjustmentsByAccount.keys()),
+            children: accountDetail('efe:ind:ajuste', adjustmentsByAccount),
+        },
+        {
+            id: 'efe:ind:wc-activos', label: 'Variación de créditos, inventarios y otros activos operativos',
+            level: 2, amount: fromCents(-wcAssetDeltaCents), accountIds: Array.from(wcAssetIds),
+            children: accountDetail('efe:ind:wca', wcAssetByAccount, -1),
+        },
+        {
+            id: 'efe:ind:wc-pasivos', label: 'Variación de proveedores y otros pasivos operativos',
+            level: 2, amount: fromCents(-wcLiabDeltaCents), accountIds: Array.from(wcLiabIds),
+            children: accountDetail('efe:ind:wcl', wcLiabByAccount, -1),
+        },
     ]
     if (totals.unclassified.cents !== 0) {
         indirectChildren.push({ id: 'efe:ind:sin-clasificar', label: 'Flujos sin clasificación (regularizar)', level: 2, amount: fromCents(totals.unclassified.cents), accountIds: Array.from(totals.unclassified.accountIds) })

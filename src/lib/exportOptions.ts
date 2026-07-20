@@ -8,7 +8,7 @@
  */
 
 export type ExportFormat = 'PDF_FORMAL' | 'SPREADSHEET'
-export type EfeMethodChoice = 'DIRECT' | 'INDIRECT'
+export type EfeMethodChoice = 'DIRECT' | 'INDIRECT' | 'BOTH'
 export type CurrencyChoice = 'NOMINAL' | 'CLOSING'
 
 export interface ExportContentSelection {
@@ -17,6 +17,8 @@ export interface ExportContentSelection {
     eepn: boolean
     efe: boolean
     notas: boolean
+    /** anexos 2E: gastos por función, CMV, bienes de uso, moneda extranjera */
+    anexos: boolean
     indicadores: boolean
     analisis: boolean
 }
@@ -38,6 +40,7 @@ export const DEFAULT_EXPORT_CONTENT: ExportContentSelection = {
     eepn: true,
     efe: true,
     notas: true,
+    anexos: true,
     indicadores: false,
     analisis: false,
 }
@@ -55,5 +58,5 @@ export function defaultExportOptions(hasComparative: boolean): ExportEstadosOpti
 
 /** Un contenido seleccionado como mínimo para poder exportar. */
 export function hasAnyContent(c: ExportContentSelection): boolean {
-    return c.esp || c.er || c.eepn || c.efe || c.notas || c.indicadores || c.analisis
+    return c.esp || c.er || c.eepn || c.efe || c.notas || c.anexos || c.indicadores || c.analisis
 }

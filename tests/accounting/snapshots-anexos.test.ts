@@ -67,7 +67,7 @@ describe('Fase 2C — anexo de evolución de bienes de uso', () => {
         await seedTestAccounts()
     })
 
-    it('produce el cuadro con altas y depreciación derivadas del Diario', async () => {
+    it('la nota de bienes de uso expone la regularizadora en negativo y reconcilia con el ANC', async () => {
         await postNewEntry({ date: '2025-01-10', memo: 'aporte', lines: simpleLines('caja', 'capital', 1000000) })
         await postNewEntry({ date: '2025-02-01', memo: 'alta rodado', lines: simpleLines('bienes-uso', 'caja', 500000) })
         await postNewEntry({ date: '2025-12-31', memo: 'depreciación', lines: simpleLines('deprec', 'amort-acum', 50000) })
@@ -75,15 +75,17 @@ describe('Fase 2C — anexo de evolución de bienes de uso', () => {
         const bundle = await loadStatementsForYear(2025)
         const input = await loadReportingInput(2025)
         const notes = buildNotes(input, bundle)
-        const anexo = notes.find(n => n.id === 'anexo-bienes-uso')!
-        expect(anexo).toBeDefined()
+        const nota = notes.find(n => n.id === 'nota-bienes-uso')!
+        expect(nota).toBeDefined()
 
-        const rodado = anexo.lines.find(l => l.label.includes('Rodados'))!
-        expect(rodado.label).toContain('Altas 500000')
-        const amort = anexo.lines.find(l => l.label.includes('Amortización'))!
-        expect(amort.label).toContain('Depreciación acumulada 50000')
+        const rodado = nota.lines.find(l => l.label.includes('Rodados'))!
+        expect(rodado.amount).toBe(500000)
+        const amort = nota.lines.find(l => l.label.includes('Amortización'))!
+        expect(amort.amount).toBe(-50000)   // regularizadora en negativo, no escondida
+        expect(amort.isContra).toBe(true)
 
-        // El neto del anexo (500.000 − 50.000) coincide con el ANC del ESP
-        expect(anexo.total).toBe(bundle.balanceSheet.nonCurrentAssets.amount)
+        // El neto de la nota (500.000 − 50.000) coincide con el ANC del ESP
+        expect(nota.total).toBe(bundle.balanceSheet.nonCurrentAssets.amount)
+        expect(nota.reconciled).toBe(true)
     })
 })

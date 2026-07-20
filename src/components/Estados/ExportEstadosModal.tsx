@@ -27,9 +27,10 @@ interface Props {
 const CONTENT_LABELS: { key: keyof ExportContentSelection; label: string }[] = [
     { key: 'esp', label: 'Situación Patrimonial (ESP)' },
     { key: 'er', label: 'Resultados (ER)' },
-    { key: 'eepn', label: 'Evolución del PN (EEPN)' },
+    { key: 'eepn', label: 'Evolución del PN (EEPN, matriz de doble entrada)' },
     { key: 'efe', label: 'Flujo de Efectivo (EFE)' },
     { key: 'notas', label: 'Notas' },
+    { key: 'anexos', label: 'Anexos (gastos por función, costo de ventas, bienes de uso, moneda extranjera)' },
     { key: 'indicadores', label: 'Indicadores' },
     { key: 'analisis', label: 'Análisis vertical y horizontal' },
 ]
@@ -134,6 +135,7 @@ export function ExportEstadosModal({ bundle, onClose }: Props) {
                                     <div className="exp-pills">
                                         <button type="button" className={`exp-pill${opts.efeMethod === 'DIRECT' ? ' active' : ''}`} onClick={() => setOpts(o => ({ ...o, efeMethod: 'DIRECT' }))}>Directo</button>
                                         <button type="button" className={`exp-pill${opts.efeMethod === 'INDIRECT' ? ' active' : ''}`} onClick={() => setOpts(o => ({ ...o, efeMethod: 'INDIRECT' }))}>Indirecto</button>
+                                        <button type="button" className={`exp-pill${opts.efeMethod === 'BOTH' ? ' active' : ''}`} onClick={() => setOpts(o => ({ ...o, efeMethod: 'BOTH' }))}>Ambos</button>
                                     </div>
                                 </div>
                                 <div className="exp-field">

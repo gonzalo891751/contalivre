@@ -301,6 +301,10 @@ const SEED_ACCOUNTS: SeedAccount[] = [
     { code: '4.7.06', name: 'Recupero previsión', kind: 'INCOME', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_INCOME', parentCode: '4.7' },
     { code: '4.7.07', name: 'Recupero deudores incobrables', kind: 'INCOME', section: 'OTHER', group: 'Otros resultados', statementGroup: 'OTHER_INCOME', parentCode: '4.7' },
 
+    // 4.9 - Impuesto a las ganancias (mapping estructural INCOME_TAX, Fase 2E §5.2)
+    { code: '4.9', name: 'Impuesto a las ganancias', kind: 'EXPENSE', section: 'OTHER', group: 'Impuesto a las ganancias', statementGroup: 'INCOME_TAX', parentCode: '4', isHeader: true },
+    { code: '4.9.01', name: 'Impuesto a las ganancias', kind: 'EXPENSE', section: 'OTHER', group: 'Impuesto a las ganancias', statementGroup: 'INCOME_TAX', parentCode: '4.9' },
+
     // 4.8 - Movimiento de mercaderías (transitorias)
     { code: '4.8', name: 'Movimiento de mercaderías', kind: 'EXPENSE', section: 'COST', group: 'Movimiento de mercaderías', statementGroup: 'COGS', parentCode: '4', isHeader: true },
     { code: '4.8.01', name: 'Compras', kind: 'EXPENSE', section: 'COST', group: 'Movimiento de mercaderías', statementGroup: 'COGS', parentCode: '4.8' },

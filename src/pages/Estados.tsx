@@ -27,7 +27,13 @@ import { createSnapshot, listSnapshots } from '../reporting/snapshots/snapshotSe
 
 export default function Estados() {
     const [activeTab, setActiveTab] = useState<EstadosTab>('ESP')
+    const [noteFocus, setNoteFocus] = useState<string | null>(null)
     const { year } = usePeriodYear()
+
+    const openNote = useCallback((ref: string) => {
+        setNoteFocus(ref)
+        setActiveTab('NA')
+    }, [])
 
     const { profile: companyProfile, save: saveCompanyProfile, isSaving: isSavingCompanyProfile } = useCompanyProfile()
     const [showCompanyProfileModal, setShowCompanyProfileModal] = useState(false)
@@ -46,7 +52,7 @@ export default function Estados() {
             const forYear = list.filter(s => s.exerciseId.includes(String(year)))
             if (forYear.length > 0) {
                 const last = forYear[0]
-                setSnapshotInfo(`${forYear.length} snapshot(s) de este ejercicio · último: ${last.status} (${last.createdAt.slice(0, 10)}, v${last.reportVersion})`)
+                setSnapshotInfo(`${forYear.length} versión(es) validada(s) de este ejercicio · última: ${last.status} (${last.createdAt.slice(0, 10)}, v${last.reportVersion})`)
             } else {
                 setSnapshotInfo(null)
             }
@@ -56,7 +62,7 @@ export default function Estados() {
     const handlePublishSnapshot = useCallback(async () => {
         if (!bundle) return
         const snap = await createSnapshot(bundle, { status: 'PUBLISHED' })
-        setSnapshotInfo(`Snapshot ${snap.status} creado (v${snap.reportVersion}, ${snap.createdAt.slice(0, 10)}).`)
+        setSnapshotInfo(`Versión validada guardada (${snap.status}, v${snap.reportVersion}, ${snap.createdAt.slice(0, 10)}).`)
         setReloadKey(k => k + 1)
     }, [bundle])
 
@@ -104,11 +110,11 @@ export default function Estados() {
                             snapshotInfo={snapshotInfo ?? undefined}
                         />
 
-                        {activeTab === 'ESP' && <ESPCanonicalTab bundle={bundle} />}
-                        {activeTab === 'ER' && <ERCanonicalTab bundle={bundle} />}
+                        {activeTab === 'ESP' && <ESPCanonicalTab bundle={bundle} onOpenNote={openNote} />}
+                        {activeTab === 'ER' && <ERCanonicalTab bundle={bundle} onOpenNote={openNote} />}
                         {activeTab === 'EPN' && <EEPNCanonicalTab bundle={bundle} />}
                         {activeTab === 'EFE' && <FlujoEfectivoCanonicalTab bundle={bundle} />}
-                        {activeTab === 'NA' && <NotasCanonicalTab bundle={bundle} />}
+                        {activeTab === 'NA' && <NotasCanonicalTab bundle={bundle} focusNote={noteFocus} />}
                     </div>
                 )}
             </main>
