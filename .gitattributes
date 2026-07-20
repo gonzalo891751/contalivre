@@ -1,2 +1,6 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Binarios: nunca conversion de fin de linea (Fase 2F)
+*.pdf binary
+*.png binary
+*.xlsx binary
+*.ico binary
+*.zip binary
