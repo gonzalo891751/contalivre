@@ -114,7 +114,7 @@ export default function Estados() {
                         {activeTab === 'ER' && <ERCanonicalTab bundle={bundle} onOpenNote={openNote} />}
                         {activeTab === 'EPN' && <EEPNCanonicalTab bundle={bundle} />}
                         {activeTab === 'EFE' && <FlujoEfectivoCanonicalTab bundle={bundle} />}
-                        {activeTab === 'NA' && <NotasCanonicalTab bundle={bundle} focusNote={noteFocus} />}
+                        {activeTab === 'NA' && <NotasCanonicalTab bundle={bundle} focusNote={noteFocus} onDataChanged={() => setReloadKey(k => k + 1)} />}
                     </div>
                 )}
             </main>

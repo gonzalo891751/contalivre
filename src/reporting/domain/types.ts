@@ -7,7 +7,7 @@
  * Cada línea lleva linaje (cuentas y asientos que la forman).
  */
 
-import type { Account, ExpenseAllocationRule, JournalEntry, ResultFunction } from '../../core/models'
+import type { Account, ExpenseAllocationRule, JournalEntry, ManualDisclosure, ResultFunction } from '../../core/models'
 
 export interface EngineContext {
     companyId: string
@@ -26,6 +26,8 @@ export interface ReportingInput {
     accounts: Account[]
     /** Reglas versionadas de distribución de gastos por función (Fase 2E §9.2) */
     allocationRules?: ExpenseAllocationRule[]
+    /** Notas manuales persistentes vigentes del ejercicio (Fase 2F §8) */
+    manualDisclosures?: ManualDisclosure[]
     /** Bundle comparativo (ejercicio anterior, derivado con el mismo motor) */
     comparative?: StatementsBundle | null
 }

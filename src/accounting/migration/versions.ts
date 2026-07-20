@@ -12,7 +12,7 @@
 
 import pkg from '../../../package.json'
 
-export const CURRENT_SCHEMA_VERSION = 20
+export const CURRENT_SCHEMA_VERSION = 21
 
 export const APP_VERSION: string =
     (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env?.VITE_APP_VERSION)

@@ -331,19 +331,47 @@ export function buildNotes(input: ReportingInput, bundle: StatementsBundle): Sta
         bundle.incomeStatement.financialResults.noteRef = String(note.number)
     }
 
-    // Notas manuales (hechos posteriores, contingencias, partes relacionadas)
-    for (const [id, title] of [
-        ['nota-hechos-posteriores', 'Hechos posteriores al cierre'],
-        ['nota-contingencias', 'Contingencias'],
-        ['nota-partes-relacionadas', 'Operaciones con partes relacionadas'],
+    // Notas manuales persistentes (Fase 2F §8): SIEMPRE identificadas como
+    // manuales; jamás modifican una nota derivada. Sin carga ⇒ NOT_AVAILABLE
+    // (nunca texto de ejemplo como si fuera información real).
+    const manualByType = new Map((input.manualDisclosures ?? []).map(d => [d.noteType, d]))
+    for (const [noteType, id, title] of [
+        ['hechos-posteriores', 'nota-hechos-posteriores', 'Hechos posteriores al cierre'],
+        ['contingencias', 'nota-contingencias', 'Contingencias'],
+        ['partes-relacionadas', 'nota-partes-relacionadas', 'Operaciones con partes relacionadas'],
+        ['compromisos', 'nota-compromisos', 'Compromisos asumidos'],
+        ['politicas-adicionales', 'nota-politicas-adicionales', 'Políticas contables adicionales'],
+        ['otra-informacion', 'nota-otra-informacion', 'Otra información complementaria'],
     ] as const) {
-        notes.push({
-            id, number: ++n, title,
-            text: 'Información de carga manual: no disponible hasta que el usuario la complete.',
-            lines: [{ label: 'Sin información cargada', amount: null, origin: 'NOT_AVAILABLE', accountIds: [] }],
-            total: null,
-            reconciled: null,
-        })
+        const disclosure = manualByType.get(noteType)
+        if (!disclosure) {
+            notes.push({
+                id, number: ++n, title,
+                text: 'Información de carga manual: no disponible hasta que el usuario la complete.',
+                lines: [{ label: 'Sin información cargada', amount: null, origin: 'NOT_AVAILABLE', accountIds: [] }],
+                total: null,
+                reconciled: null,
+            })
+        } else if (disclosure.notApplicable) {
+            notes.push({
+                id, number: ++n, title,
+                text: `No aplicable. Fundamento: ${disclosure.content}`,
+                lines: [{ label: `No aplicable (carga manual, v${disclosure.version})`, amount: null, origin: 'NOT_APPLICABLE', accountIds: [] }],
+                total: null,
+                reconciled: null,
+            })
+        } else {
+            notes.push({
+                id, number: ++n, title,
+                text: disclosure.content,
+                lines: [{
+                    label: `Información de carga manual (v${disclosure.version}, ${disclosure.status === 'VALIDATED' ? 'validada' : 'borrador'})`,
+                    amount: null, origin: 'MANUAL', accountIds: [],
+                }],
+                total: null,
+                reconciled: null,
+            })
+        }
     }
 
     return notes

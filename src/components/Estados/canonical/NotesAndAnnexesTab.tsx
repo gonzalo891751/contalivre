@@ -15,6 +15,7 @@ import { ExpensesByFunctionView } from './ExpensesByFunctionView'
 import { CostOfSalesBridgeView } from './CostOfSalesBridgeView'
 import { FixedAssetsAnnexView } from './FixedAssetsAnnexView'
 import { ForeignCurrencyView } from './ForeignCurrencyView'
+import { ManualNotesEditor } from './ManualNotesEditor'
 import { statementStyles } from './statementFormat'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 import type { StatementNote, NoteLine } from '../../../reporting/engine/buildNotes'
@@ -155,9 +156,11 @@ export interface NotesAndAnnexesTabProps {
     bundle: ReportingBundle
     /** número de nota a enfocar (referencia cruzada desde ESP/ER) */
     focusNote?: string | null
+    /** recarga del bundle tras guardar una nota manual (Fase 2F §8) */
+    onDataChanged?: () => void
 }
 
-export function NotesAndAnnexesTab({ bundle, focusNote }: NotesAndAnnexesTabProps) {
+export function NotesAndAnnexesTab({ bundle, focusNote, onDataChanged }: NotesAndAnnexesTabProps) {
     const [subtab, setSubtab] = useState<NotesSubTab>('NOTAS')
     const [target, setTarget] = useState<{ label: string; accountIds: string[] } | null>(null)
     const showComparative = bundle.metadata.hasComparative
@@ -205,6 +208,13 @@ export function NotesAndAnnexesTab({ bundle, focusNote }: NotesAndAnnexesTabProp
                         Composición de cada rubro derivada del motor canónico, con regularizadoras en negativo y estado de reconciliación.
                         La información de carga manual se identifica y nunca modifica un total derivado.
                     </p>
+                    {onDataChanged && (
+                        <ManualNotesEditor
+                            exerciseId={bundle.statements.context.exerciseId}
+                            companyId={bundle.metadata.companyId}
+                            onSaved={onDataChanged}
+                        />
+                    )}
                     {bundle.notes.map(note => (
                         <NoteCard
                             key={note.id}

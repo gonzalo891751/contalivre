@@ -117,6 +117,38 @@ export interface ExpenseAllocationRule {
     supersedesId?: string
 }
 
+/**
+ * Nota manual persistente (Fase 2F, §8): información complementaria de carga
+ * manual, versionada. Cada guardado crea una fila nueva que reemplaza a la
+ * anterior (supersedesId); el historial nunca se borra. El contenido es TEXTO
+ * PLANO (el servicio elimina cualquier HTML); jamás pisa una nota derivada.
+ */
+export type ManualNoteType =
+    | 'hechos-posteriores'
+    | 'contingencias'
+    | 'partes-relacionadas'
+    | 'compromisos'
+    | 'politicas-adicionales'
+    | 'otra-informacion'
+
+export interface ManualDisclosure {
+    id: string
+    companyId: string
+    exerciseId: string
+    noteType: ManualNoteType
+    title: string
+    content: string
+    status: 'DRAFT' | 'VALIDATED'
+    /** "No aplicable" con fundamento en content */
+    notApplicable?: boolean
+    version: number
+    createdAt: string
+    createdBy: string
+    updatedAt: string
+    updatedBy: string
+    supersedesId?: string
+}
+
 /** Tipo de movimiento patrimonial (clasificación estructural, Fase 2E §6.4) */
 export type EquityMovementType =
     | 'OPENING_BALANCE'

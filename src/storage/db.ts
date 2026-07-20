@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Account, ExpenseAllocationRule, JournalEntry } from '../core/models'
+import type { Account, ExpenseAllocationRule, JournalEntry, ManualDisclosure } from '../core/models'
 import type {
     AccountingExercise,
     AccountingPeriod,
@@ -13,6 +13,7 @@ import { migrateToV17 } from '../accounting/migration/migrateV17'
 import { migrateToV18 } from '../accounting/migration/migrateV18'
 import { migrateToV19 } from '../accounting/migration/migrateV19'
 import { migrateToV20 } from '../accounting/migration/migrateV20'
+import { migrateToV21 } from '../accounting/migration/migrateV21'
 import type {
     InventoryProduct,
     InventoryMovement,
@@ -128,6 +129,8 @@ class ContableDatabase extends Dexie {
     reportSnapshots!: EntityTable<ReportSnapshot, 'id'>
     // ── Fase 2E: reglas de distribución de gastos por función ──
     expenseAllocationRules!: EntityTable<ExpenseAllocationRule, 'id'>
+    // ── Fase 2F: notas manuales persistentes ──
+    manualDisclosures!: EntityTable<ManualDisclosure, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -577,6 +580,11 @@ class ContableDatabase extends Dexie {
         this.version(20).stores({
             expenseAllocationRules: 'id, accountId, validFrom',
         }).upgrade(migrateToV20)
+
+        // Version 21 (Fase 2F): notas manuales persistentes y versionadas (§8).
+        this.version(21).stores({
+            manualDisclosures: 'id, companyId, exerciseId, noteType, status',
+        }).upgrade(migrateToV21)
     }
 }
 

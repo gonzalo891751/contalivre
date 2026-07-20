@@ -19,12 +19,16 @@ import type { ReportingInput, StatementsBundle } from './domain/types'
 export async function loadReportingInput(year: number): Promise<ReportingInput> {
     const ctx = await resolveContextForYear(year)
     const exercise = await getExercise(exerciseIdForYear(year))
-    const [entries, openingBalances, accounts, allocationRules] = await Promise.all([
+    const [entries, openingBalances, accounts, allocationRules, allDisclosures] = await Promise.all([
         getEntriesForContext(ctx),
         getOpeningBalances(ctx),
         db.accounts.toArray(),
         db.expenseAllocationRules.toArray(),
+        db.manualDisclosures.where('exerciseId').equals(ctx.exerciseId).toArray(),
     ])
+    // vigentes = las que ninguna otra reemplaza
+    const superseded = new Set(allDisclosures.map(d => d.supersedesId).filter(Boolean))
+    const manualDisclosures = allDisclosures.filter(d => !superseded.has(d.id))
     return {
         context: {
             companyId: ctx.companyId,
@@ -37,6 +41,7 @@ export async function loadReportingInput(year: number): Promise<ReportingInput> 
         openingBalances,
         accounts,
         allocationRules,
+        manualDisclosures,
     }
 }
 
