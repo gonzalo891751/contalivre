@@ -269,3 +269,30 @@ npm run build         → OK (warning de chunks preexistente) ✅
 npm audit --omit=dev  → 3 moderate (preexistentes, exceljs→uuid) ✅
 git status            → árbol limpio ✅
 ```
+
+---
+
+## Fe de erratas (verificada al inicio de la Fase 2F, 2026-07-19)
+
+Reproducción del baseline sobre el HEAD final de 2E, sin alterar la historia Git:
+
+1. **Cantidad de archivos de test**: el informe dice "388 (58 archivos)"; el conteo
+   real de `npx vitest run` es **388 tests en 57 archivos**. Los 388 tests son
+   correctos y reproducibles.
+2. **Pruebas nuevas**: en la comunicación de cierre se mencionó "61 pruebas
+   nuevas"; el número correcto es **71** (388 − 317). La tabla del §21.13 ya
+   sumaba 71 (13+9+6+7+6+6+6+6+5+7); la cifra errada fue solo la del resumen.
+3. **HEAD exacto de la Fase 2E**: `7721be9c82a0c3dfb69f51cc9cc689bc49da2361`
+   (`7721be9`, "Fase 2E hito 11: validación final e informe"). El informe lo
+   refería como "(este commit)" sin hash.
+4. **Versiones desalineadas** (§21.2 las reportó sin conciliar): `package.json`
+   declara `0.1.0` mientras `APP_VERSION` (runtime, `versions.ts`) cae a
+   `0.3.0` cuando `VITE_APP_VERSION` no está definida; el motor declara
+   `2B.1`. La Fase 2F unifica la fuente de versión (RC `0.4.0-rc.1`).
+5. **Node**: el baseline se ejecutó con Node v25.9.0 (no LTS) mientras
+   `docs/DEPLOY_CLOUDFLARE_PAGES.md` declaraba "Node 20 LTS" — versión que
+   alcanzó su EOL en abril de 2026. La Fase 2F repinea el entorno a una LTS
+   vigente con prueba real de tests y build.
+6. **Diff acumulado**: "59 archivos, ~5.400 inserciones" es reproducible con
+   `git diff --stat 98fb9ab..7721be9` (59 files, 5.387+/5.120−); sin corrección,
+   se deja constancia del comando de verificación.
