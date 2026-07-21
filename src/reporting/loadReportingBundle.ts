@@ -32,6 +32,7 @@ import {
     verticalIncomeStatement,
 } from './metrics/analysis'
 import { reexpressCashFlow } from './engine/cashFlowInflation'
+import { buildPublicationGate, type PublicationGate } from './engine/publicationGate'
 import { reexpressFixedAssetsAnnex } from './engine/fixedAssetsInflation'
 import { getIndexSet, indexSetToMap } from '../accounting/inflation/indexRegistry'
 import type { MetricCatalogEntry, HorizontalAnalysisRow, VerticalAnalysisRow } from './metrics/types'
@@ -111,6 +112,8 @@ export interface ReportingBundle {
     notes: StatementNote[]
     metrics: MetricCatalogEntry[]
     analysis: ReportingBundleAnalysis
+    /** puerta de publicación unificada: gobierna status, snapshots y exports (§5.3) */
+    publicationGate: PublicationGate
     metadata: ReportMetadata
 }
 
@@ -196,8 +199,15 @@ export async function loadReportingBundle(
             .filter(e => e.status === 'DRAFT').count(),
     ])
 
-    const canPublish = statements.validation.canPublish
-    const status: ReportStatus = !canPublish ? 'BLOCKED' : hasDrafts > 0 ? 'DRAFT' : 'VALIDATED'
+    // Puerta de publicación unificada (§5.3): considera controles nominales y
+    // reexpresados, y la cobertura del set de índices. Un blocker en cualquier
+    // expresión solicitada impide el estado VALIDATED.
+    const publicationGate = buildPublicationGate({
+        validation: statements.validation,
+        restated: cashFlowRestated,
+        inflationSet: inflationSet ? { name: inflationSet.name, missingPeriods: inflationSet.missingPeriods } : null,
+    })
+    const status: ReportStatus = !publicationGate.canPublish ? 'BLOCKED' : hasDrafts > 0 ? 'DRAFT' : 'VALIDATED'
 
     const contentSignature = hashString(JSON.stringify({
         ctx: input.context,
@@ -230,5 +240,5 @@ export async function loadReportingBundle(
         status,
     }
 
-    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, metadata }
+    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, publicationGate, metadata }
 }

@@ -21,7 +21,7 @@
 import { toCents } from '../../accounting/domain/money'
 import { isStructuralClosingEntry } from '../../utils/resultsStatement'
 import { getCoefficient } from '../../accounting/inflation/engine'
-import { directOperatingSubcategory, flowBucket, isCashAccount } from './buildCashFlow'
+import { detectDisposalFold, directOperatingSubcategory, flowBucket, isCashAccount } from './buildCashFlow'
 import type { CashFlowStatement2B, ReportLine, ReportingInput, StatementsBundle } from '../domain/types'
 
 const fromCents = (c: number) => c / 100
@@ -65,6 +65,9 @@ export function reexpressCashFlow(
     // Indirecto reexpresado por período
     let resultCents = 0, wcAssetCents = 0, wcLiabCents = 0, nonCashInvFinCents = 0
     const resultIds = new Set<string>(), wcAIds = new Set<string>(), wcLIds = new Set<string>()
+    // Resultados de venta plegados a inversión/financiación (EFE-001), reexpresados
+    let disposalResultCents = 0
+    const disposalResultIds = new Set<string>()
 
     // Misma apertura estructural que el método directo nominal (Fase 2E §7.2)
     const subcat = (accountId: string): string => {
@@ -96,25 +99,49 @@ export function reexpressCashFlow(
         }
 
         if (touchesCash && cashCents !== 0) {
-            for (const l of entry.lines) {
-                const account = byId.get(l.accountId)
-                const bucket = flowBucket(account)
-                if (bucket === 'CASH') continue
-                const contribCents = Math.round((toCents(l.credit || 0) - toCents(l.debit || 0)) * factor)
-                if (contribCents === 0) continue
-                switch (bucket) {
-                    case 'RESULT':
-                    case 'WC_ASSET':
-                    case 'WC_LIAB': {
-                        const key = subcat(l.accountId)
-                        const s = operating.get(key) ?? { cents: 0, ids: new Set<string>() }
-                        s.cents += contribCents; s.ids.add(l.accountId)
-                        operating.set(key, s)
-                        break
+            const fold = detectDisposalFold(entry.lines, byId)
+            if (fold) {
+                // Disposición con resultado (EFE-001): el flujo BRUTO reexpresado va
+                // íntegro a la actividad; el resultado se elimina del operativo.
+                let resultRex = 0
+                for (const l of entry.lines) {
+                    const bucket = flowBucket(byId.get(l.accountId))
+                    if (bucket === 'CASH') continue
+                    const contribCents = Math.round((toCents(l.credit || 0) - toCents(l.debit || 0)) * factor)
+                    if (contribCents === 0) continue
+                    if (bucket === 'RESULT') {
+                        resultRex += contribCents
+                        disposalResultCents += contribCents
+                        disposalResultIds.add(l.accountId)
+                    } else if (fold === 'INVESTING') {
+                        investingCents += contribCents; investIds.add(l.accountId)
+                    } else {
+                        financingCents += contribCents; finIds.add(l.accountId)
                     }
-                    case 'INVESTING': investingCents += contribCents; investIds.add(l.accountId); break
-                    case 'FINANCING': financingCents += contribCents; finIds.add(l.accountId); break
-                    case 'UNCLASSIFIED': unclassifiedCents += contribCents; unclIds.add(l.accountId); break
+                }
+                if (fold === 'INVESTING') investingCents += resultRex
+                else financingCents += resultRex
+            } else {
+                for (const l of entry.lines) {
+                    const account = byId.get(l.accountId)
+                    const bucket = flowBucket(account)
+                    if (bucket === 'CASH') continue
+                    const contribCents = Math.round((toCents(l.credit || 0) - toCents(l.debit || 0)) * factor)
+                    if (contribCents === 0) continue
+                    switch (bucket) {
+                        case 'RESULT':
+                        case 'WC_ASSET':
+                        case 'WC_LIAB': {
+                            const key = subcat(l.accountId)
+                            const s = operating.get(key) ?? { cents: 0, ids: new Set<string>() }
+                            s.cents += contribCents; s.ids.add(l.accountId)
+                            operating.set(key, s)
+                            break
+                        }
+                        case 'INVESTING': investingCents += contribCents; investIds.add(l.accountId); break
+                        case 'FINANCING': financingCents += contribCents; finIds.add(l.accountId); break
+                        case 'UNCLASSIFIED': unclassifiedCents += contribCents; unclIds.add(l.accountId); break
+                    }
                 }
             }
         } else if (!touchesCash) {
@@ -187,13 +214,21 @@ export function reexpressCashFlow(
 
     // Indirecto reexpresado
     const adjustmentsCents = -nonCashInvFinCents
-    const opIndCents = resultCents - wcAssetCents - wcLiabCents + adjustmentsCents + unclassifiedCents
+    // Se elimina el resultado de venta (pertenece a inversión/financiación) y se
+    // incluye una sola vez la partida sin clasificar (EFE-001, EFE-004).
+    const opIndCents = resultCents - wcAssetCents - wcLiabCents + adjustmentsCents - disposalResultCents + unclassifiedCents
     const indChildren: ReportLine[] = [
         line('efe-mc:ind:resultado', 'Resultado del ejercicio (reexpresado)', resultCents, 2, Array.from(resultIds)),
         line('efe-mc:ind:ajustes', 'Partidas devengadas sin efecto en el efectivo (reexpresadas)', adjustmentsCents, 2),
         line('efe-mc:ind:wca', 'Variación de activos operativos (reexpresada)', -wcAssetCents, 2, Array.from(wcAIds)),
         line('efe-mc:ind:wcl', 'Variación de pasivos operativos (reexpresada)', -wcLiabCents, 2, Array.from(wcLIds)),
     ]
+    if (disposalResultCents !== 0) {
+        indChildren.push(line('efe-mc:ind:result-no-operativo', 'Resultados de venta reclasificados a inversión o financiación (reexpresados)', -disposalResultCents, 2, Array.from(disposalResultIds)))
+    }
+    if (unclassifiedCents !== 0) {
+        indChildren.push(line('efe-mc:ind:sin-clasificar', 'Flujos sin clasificación (regularizar)', unclassifiedCents, 2, Array.from(unclIds)))
+    }
 
     const indirect: CashFlowStatement2B = {
         method: 'INDIRECT',
@@ -202,7 +237,9 @@ export function reexpressCashFlow(
         investing: direct.investing,
         financing: direct.financing,
         unclassified: direct.unclassified,
-        netChange: line('efe-mc:variacion-ind', 'Variación neta (flujos + REI)', opIndCents + investingCents + financingCents + unclassifiedCents + reiCents),
+        // Variación = operativo (ya incluye sin clasificar) + inversión + financiación + REI.
+        // NO se vuelve a sumar el sin clasificar (corrige EFE-004).
+        netChange: line('efe-mc:variacion-ind', 'Variación neta (flujos + REI)', opIndCents + investingCents + financingCents + reiCents),
         closingCash: direct.closingCash,
         nonMonetaryDisclosures: [reiLine],
     }
