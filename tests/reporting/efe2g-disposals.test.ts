@@ -1,12 +1,10 @@
 /**
  * Fase 2G — Disposición de bienes de uso y flujo bruto (EFE-001, spec §5.1, §17.1-3).
  *
- * Los casos con ganancia/pérdida están marcados `it.fails`: HOY el motor los
- * clasifica mal (bucketea línea por línea: el valor contable va a inversión y
- * el resultado va a operativo). Esas pruebas están ROJAS de forma controlada
- * hasta HITO 2, donde el flujo BRUTO de la venta se expone en inversión y el
- * resultado se elimina del operativo (directo e indirecto). Al corregir, se
- * quita el `.fails` y deben quedar verdes.
+ * HITO 2 corrigió el defecto: el flujo BRUTO de la venta se expone en inversión
+ * y el resultado se elimina del operativo (directo e indirecto). Estas pruebas
+ * fueron `it.fails` en HITO 1 (documentando el defecto) y ahora son verdes.
+ * Regresión permanente de EFE-001.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -43,7 +41,7 @@ function run(opening: Map<string, { debit: number; credit: number }>, entries: J
 }
 
 describe('Fase 2G — disposición de PPE: flujo bruto en inversión (EFE-001)', () => {
-    it.fails('venta con ganancia: cobro bruto 30.000 en inversión, ganancia fuera de operativo', () => {
+    it('venta con ganancia: cobro bruto 30.000 en inversión, ganancia fuera de operativo', () => {
         const flows = run(
             new Map([['ppe', { debit: 20000, credit: 0 }], ['capital', { debit: 0, credit: 20000 }]]),
             [entry('2025-06-10', [
@@ -64,7 +62,7 @@ describe('Fase 2G — disposición de PPE: flujo bruto en inversión (EFE-001)',
         expect(flows.validation.checks.find(c => c.id === 'efe-metodos')!.passed).toBe(true)
     })
 
-    it.fails('venta con pérdida: cobro bruto 15.000 en inversión, pérdida fuera de operativo', () => {
+    it('venta con pérdida: cobro bruto 15.000 en inversión, pérdida fuera de operativo', () => {
         const flows = run(
             new Map([['ppe', { debit: 20000, credit: 0 }], ['capital', { debit: 0, credit: 20000 }]]),
             [entry('2025-06-10', [

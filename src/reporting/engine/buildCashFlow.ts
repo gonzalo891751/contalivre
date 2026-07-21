@@ -79,6 +79,47 @@ export function flowBucket(account: Account | undefined): FlowBucket {
 }
 
 /**
+ * Detección de disposición de activos/pasivos NO operativos con resultado
+ * asociado (Fase 2G §5.1, EFE-001). El cobro/pago BRUTO de una venta de bienes
+ * de uso, intangibles o inversiones pertenece íntegro a la actividad de
+ * inversión (o financiación); el resultado por la venta NO es un flujo
+ * operativo. RT 54 (TO RT 59) párr. 656.
+ *
+ * Regla conservadora y exacta: sólo se pliega cuando el asiento toca efectivo y
+ * sus contrapartidas NO cash pertenecen exclusivamente a UNA actividad no
+ * operativa (inversión XOR financiación) y existe al menos un resultado. Si el
+ * asiento mezcla capital de trabajo, ambas actividades o partidas sin
+ * clasificar (ej. venta a crédito con cobro parcial), NO se pliega: esos casos
+ * requieren evidencia transaccional/override y se tratan en hitos posteriores,
+ * nunca con una reclasificación silenciosa.
+ *
+ * @returns 'INVESTING' | 'FINANCING' si corresponde plegar; null en otro caso.
+ */
+export function detectDisposalFold(
+    lines: { accountId: string; debit?: number; credit?: number }[],
+    byId: Map<string, Account>,
+): 'INVESTING' | 'FINANCING' | null {
+    let hasResult = false, hasInv = false, hasFin = false, hasWc = false, hasUncl = false
+    for (const l of lines) {
+        const bucket = flowBucket(byId.get(l.accountId))
+        if (bucket === 'CASH') continue
+        const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
+        if (contribution === 0) continue
+        switch (bucket) {
+            case 'RESULT': hasResult = true; break
+            case 'WC_ASSET': case 'WC_LIAB': hasWc = true; break
+            case 'INVESTING': hasInv = true; break
+            case 'FINANCING': hasFin = true; break
+            case 'UNCLASSIFIED': hasUncl = true; break
+        }
+    }
+    if (!hasResult || hasWc || hasUncl) return null
+    if (hasInv && !hasFin) return 'INVESTING'
+    if (hasFin && !hasInv) return 'FINANCING'
+    return null
+}
+
+/**
  * Subcategoría operativa del método directo (Fase 2E §7.2): estructural por
  * statementGroup de la contrapartida; jamás por nombre. Compartida con la
  * reexpresión a moneda de cierre para que ambas expresiones expongan el mismo
@@ -163,6 +204,10 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     let nonCashInvFinCents = 0 // inv_N + fin_N (asientos sin efectivo)
     const adjustmentsByAccount = new Map<string, number>()
     const nonMonetaryDisclosures: ReportLine[] = []
+    // Resultados de venta de activos/pasivos no operativos plegados a inversión/
+    // financiación (EFE-001): deben eliminarse del resultado en el indirecto.
+    let disposalResultCents = 0
+    const disposalResultIds = new Set<string>()
 
     for (const entry of flowEntries) {
         let cashCents = 0
@@ -194,38 +239,70 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
 
         if (touchesCash && cashCents !== 0) {
             totals.cashDelta += cashCents
-            // Contrapartidas: contribución exacta por línea = Haber − Debe
-            for (const l of entry.lines) {
-                const account = byId.get(l.accountId)
-                const bucket = flowBucket(account)
-                if (bucket === 'CASH') continue
-                const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
-                if (contribution === 0) continue
-                switch (bucket) {
-                    case 'RESULT':
-                    case 'WC_ASSET':
-                    case 'WC_LIAB': {
-                        const sub = directOperatingSubcategory(account!)
-                        const s = totals.operating.get(sub) ?? { cents: 0, accountIds: new Set<string>() }
-                        s.cents += contribution
-                        s.accountIds.add(l.accountId)
-                        totals.operating.set(sub, s)
-                        break
+            const fold = detectDisposalFold(entry.lines, byId)
+            if (fold) {
+                // Disposición de activo/pasivo NO operativo con resultado: el flujo
+                // BRUTO (todo el efectivo del asiento) pertenece a la actividad; el
+                // resultado se elimina del operativo (EFE-001, §5.1).
+                const target = fold === 'INVESTING' ? totals.investing : totals.financing
+                let primaryId: string | undefined
+                let primaryAbs = -1
+                let resultOfEntry = 0
+                for (const l of entry.lines) {
+                    const bucket = flowBucket(byId.get(l.accountId))
+                    if (bucket === 'CASH') continue
+                    const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
+                    if (contribution === 0) continue
+                    if (bucket === 'RESULT') {
+                        resultOfEntry += contribution
+                        disposalResultCents += contribution
+                        disposalResultIds.add(l.accountId)
+                    } else {
+                        target.accountIds.add(l.accountId)
+                        target.byAccount.set(l.accountId, (target.byAccount.get(l.accountId) ?? 0) + contribution)
+                        if (Math.abs(contribution) > primaryAbs) { primaryAbs = Math.abs(contribution); primaryId = l.accountId }
                     }
-                    case 'INVESTING':
-                        totals.investing.cents += contribution
-                        totals.investing.accountIds.add(l.accountId)
-                        totals.investing.byAccount.set(l.accountId, (totals.investing.byAccount.get(l.accountId) ?? 0) + contribution)
-                        break
-                    case 'FINANCING':
-                        totals.financing.cents += contribution
-                        totals.financing.accountIds.add(l.accountId)
-                        totals.financing.byAccount.set(l.accountId, (totals.financing.byAccount.get(l.accountId) ?? 0) + contribution)
-                        break
-                    case 'UNCLASSIFIED':
-                        totals.unclassified.cents += contribution
-                        totals.unclassified.accountIds.add(l.accountId)
-                        break
+                }
+                // El resultado se atribuye a la cuenta principal para que el detalle
+                // por cuenta sume el flujo bruto de efectivo de la operación.
+                if (primaryId !== undefined && resultOfEntry !== 0) {
+                    target.byAccount.set(primaryId, (target.byAccount.get(primaryId) ?? 0) + resultOfEntry)
+                }
+                target.cents += cashCents
+            } else {
+                // Contrapartidas: contribución exacta por línea = Haber − Debe
+                for (const l of entry.lines) {
+                    const account = byId.get(l.accountId)
+                    const bucket = flowBucket(account)
+                    if (bucket === 'CASH') continue
+                    const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
+                    if (contribution === 0) continue
+                    switch (bucket) {
+                        case 'RESULT':
+                        case 'WC_ASSET':
+                        case 'WC_LIAB': {
+                            const sub = directOperatingSubcategory(account!)
+                            const s = totals.operating.get(sub) ?? { cents: 0, accountIds: new Set<string>() }
+                            s.cents += contribution
+                            s.accountIds.add(l.accountId)
+                            totals.operating.set(sub, s)
+                            break
+                        }
+                        case 'INVESTING':
+                            totals.investing.cents += contribution
+                            totals.investing.accountIds.add(l.accountId)
+                            totals.investing.byAccount.set(l.accountId, (totals.investing.byAccount.get(l.accountId) ?? 0) + contribution)
+                            break
+                        case 'FINANCING':
+                            totals.financing.cents += contribution
+                            totals.financing.accountIds.add(l.accountId)
+                            totals.financing.byAccount.set(l.accountId, (totals.financing.byAccount.get(l.accountId) ?? 0) + contribution)
+                            break
+                        case 'UNCLASSIFIED':
+                            totals.unclassified.cents += contribution
+                            totals.unclassified.accountIds.add(l.accountId)
+                            break
+                    }
                 }
             }
         } else if (!touchesCash) {
@@ -312,7 +389,9 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     // ── Método indirecto (componentes reales, sin plug) ─────
     const resultCents = toCents(bundle.incomeStatement.netIncome.amount)
     const adjustmentsCents = -nonCashInvFinCents // X = −(inv_N + fin_N)
-    const operatingIndirectCents = resultCents - wcAssetDeltaCents - wcLiabDeltaCents + adjustmentsCents + totals.unclassified.cents
+    // Se eliminan del operativo los resultados de venta cuyo flujo pertenece a
+    // inversión/financiación (EFE-001): el efectivo bruto ya está en esa actividad.
+    const operatingIndirectCents = resultCents - wcAssetDeltaCents - wcLiabDeltaCents + adjustmentsCents - disposalResultCents + totals.unclassified.cents
 
     const indirectChildren: ReportLine[] = [
         { id: 'efe:ind:resultado', label: 'Resultado del ejercicio', level: 2, amount: fromCents(resultCents), accountIds: bundle.incomeStatement.netIncome.accountIds },
@@ -332,6 +411,13 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
             children: accountDetail('efe:ind:wcl', wcLiabByAccount, -1),
         },
     ]
+    if (disposalResultCents !== 0) {
+        indirectChildren.push({
+            id: 'efe:ind:result-no-operativo',
+            label: 'Resultados de venta de activos reclasificados a inversión o financiación',
+            level: 2, amount: fromCents(-disposalResultCents), accountIds: Array.from(disposalResultIds),
+        })
+    }
     if (totals.unclassified.cents !== 0) {
         indirectChildren.push({ id: 'efe:ind:sin-clasificar', label: 'Flujos sin clasificación (regularizar)', level: 2, amount: fromCents(totals.unclassified.cents), accountIds: Array.from(totals.unclassified.accountIds) })
     }
