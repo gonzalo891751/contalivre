@@ -60,6 +60,10 @@ export function isCashAccount(account: Account | undefined): boolean {
 export function flowBucket(account: Account | undefined): FlowBucket {
     if (!account) return 'UNCLASSIFIED'
     if (isCashAccount(account)) return 'CASH'
+    // NOT_APPLICABLE (§6, EFE-010): la cuenta queda FUERA de la derivación
+    // estructural. Si un flujo la toca, cae en "sin clasificar" (se expone y
+    // bloquea, nunca se asigna en silencio a inversión/financiación).
+    if (account.cashFlowCategory === 'NOT_APPLICABLE') return 'UNCLASSIFIED'
     // Override explícito por cuenta
     if (account.cashFlowCategory === 'INVESTING') return 'INVESTING'
     if (account.cashFlowCategory === 'FINANCING') return 'FINANCING'

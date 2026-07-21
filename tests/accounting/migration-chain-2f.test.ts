@@ -16,12 +16,14 @@ import { exportBackup, restoreBackup } from '../../src/accounting/backup/backupS
 import { resetApplication } from '../../src/accounting/maintenance/resetService'
 import { createRule } from '../../src/accounting/taxonomy/allocationRulesService'
 import { saveDisclosure } from '../../src/accounting/disclosures/manualDisclosuresService'
+import { ensureDefaultPolicy, getActivePolicy } from '../../src/reporting/policy/policyRepository'
 import { CURRENT_SCHEMA_VERSION } from '../../src/accounting/migration/versions'
 import { migrateToV17 } from '../../src/accounting/migration/migrateV17'
 import { migrateToV18 } from '../../src/accounting/migration/migrateV18'
 import { migrateToV19 } from '../../src/accounting/migration/migrateV19'
 import { migrateToV20 } from '../../src/accounting/migration/migrateV20'
 import { migrateToV21 } from '../../src/accounting/migration/migrateV21'
+import { migrateToV22 } from '../../src/accounting/migration/migrateV22'
 
 const DBN = 'ChainMigrationTestDb'
 
@@ -61,6 +63,7 @@ function defineChainDb(): Dexie {
     d.version(19).stores({ reportSnapshots: 'id, companyId, exerciseId, status, createdAt' }).upgrade(migrateToV19)
     d.version(20).stores({ expenseAllocationRules: 'id, accountId, validFrom' }).upgrade(migrateToV20)
     d.version(21).stores({ manualDisclosures: 'id, companyId, exerciseId, noteType, status' }).upgrade(migrateToV21)
+    d.version(22).stores({ cashFlowPolicies: 'id, companyId, exerciseId, status' }).upgrade(migrateToV22)
     return d
 }
 
@@ -79,13 +82,19 @@ describe('Fase 2F — cadena de migraciones v16 → v21', () => {
         // contexto asignado por v17
         expect((await chain.table('entries').get('leg-1')).status).toBe('POSTED')
         // tablas nuevas existen y son usables
-        expect(chain.tables.map(t => t.name)).toEqual(expect.arrayContaining(['expenseAllocationRules', 'manualDisclosures', 'reportSnapshots', 'inflationIndexSets']))
+        expect(chain.tables.map(t => t.name)).toEqual(expect.arrayContaining(['expenseAllocationRules', 'manualDisclosures', 'reportSnapshots', 'inflationIndexSets', 'cashFlowPolicies']))
         await chain.table('manualDisclosures').add({ id: 'm1', companyId: 'c', exerciseId: 'e', noteType: 'contingencias', title: 't', content: 'x', status: 'DRAFT', version: 1, createdAt: 'now', createdBy: 'a', updatedAt: 'now', updatedBy: 'a' })
         expect(await chain.table('manualDisclosures').count()).toBe(1)
-        // metadata de sistema en v21
+        // v22: política EFE heredada creada de forma determinista para la empresa
+        const policies = await chain.table('cashFlowPolicies').toArray()
+        expect(policies.length).toBe(1)
+        expect(policies[0].companyId).toBe('company-default')
+        expect(policies[0].requiresReview).toBe(true)
+        expect(policies[0].cashClassifications.some((c: { accountId: string }) => c.accountId === 'caja')).toBe(true)
+        // metadata de sistema en v22
         const meta = await chain.table('systemMeta').get('system')
-        expect(meta.schemaVersion).toBe(21)
-        expect(meta.lastMigrationId).toBe('v21-manual-disclosures')
+        expect(meta.schemaVersion).toBe(22)
+        expect(meta.lastMigrationId).toBe('v22-cashflow-policies')
 
         chain.close()
     })
@@ -118,6 +127,27 @@ describe('Fase 2F — backup / reset / restore en el schema actual', () => {
         expect(await db.expenseAllocationRules.count()).toBe(1)
         expect(await db.manualDisclosures.count()).toBe(1)
         expect((await db.entries.toArray()).some(e => e.memo === 'venta')).toBe(true)
+    })
+
+    it('ensureDefaultPolicy es idempotente (instalación fresca v22, sin migración)', async () => {
+        // Base fresca (resetDb): las upgrades no corren en una base creada en v22.
+        expect(await db.cashFlowPolicies.count()).toBe(0)
+        const p1 = await ensureDefaultPolicy('company-default')
+        const p2 = await ensureDefaultPolicy('company-default')
+        expect(await db.cashFlowPolicies.count()).toBe(1)
+        expect(p2.id).toBe(p1.id)
+        const active = await getActivePolicy('company-default')
+        expect(active?.interestsPaid).toBe('OPERATING')
+    })
+
+    it('el backup incluye la tabla de políticas EFE y el restore la recupera', async () => {
+        await ensureDefaultPolicy('company-default')
+        const backup = await exportBackup()
+        expect(backup.tables.cashFlowPolicies.length).toBe(1)
+        await resetApplication()
+        expect(await db.cashFlowPolicies.count()).toBe(0)
+        await restoreBackup(backup)
+        expect(await db.cashFlowPolicies.count()).toBe(1)
     })
 
     it('rechaza un backup de un schema más nuevo (no destruye datos actuales)', async () => {
