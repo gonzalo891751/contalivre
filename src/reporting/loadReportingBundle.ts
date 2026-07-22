@@ -33,7 +33,7 @@ import {
 } from './metrics/analysis'
 import { reexpressCashFlow } from './engine/cashFlowInflation'
 import { buildPublicationGate, type PublicationGate } from './engine/publicationGate'
-import { buildCashFlowPreparation, type CashFlowPreparationModel } from './preparation/cashFlowPreparation'
+import { buildCashFlowPreparation, buildCashFlowPreparationRestated, type CashFlowPreparationModel } from './preparation/cashFlowPreparation'
 import { reexpressFixedAssetsAnnex } from './engine/fixedAssetsInflation'
 import { getIndexSet, indexSetToMap } from '../accounting/inflation/indexRegistry'
 import type { MetricCatalogEntry, HorizontalAnalysisRow, VerticalAnalysisRow } from './metrics/types'
@@ -117,6 +117,12 @@ export interface ReportingBundle {
     publicationGate: PublicationGate
     /** modelo de preparación (papel de trabajo matricial) del EFE nominal (§7) */
     preparation: CashFlowPreparationModel
+    /**
+     * modelo de preparación en MONEDA DE CIERRE (Fase 2G.1 §3). null si no se
+     * solicitó set de índices o el set no existe. Modelo HERMANO del nominal: la
+     * matriz no cambia en silencio según un selector.
+     */
+    preparationRestated: CashFlowPreparationModel | null
     metadata: ReportMetadata
 }
 
@@ -175,11 +181,16 @@ export async function loadReportingBundle(
     let cashFlowRestated: ReportingBundle['cashFlowRestated'] = null
     let fixedAssetsRestated: FixedAssetsAnnexRestated | null = null
     let inflationSet: AppliedInflationSet | null = null
+    let preparationRestated: CashFlowPreparationModel | null = null
     if (options.inflationIndexSetId) {
         const set = await getIndexSet(options.inflationIndexSetId)
         if (set) {
             const indexes = indexSetToMap(set) // lanza si el hash no coincide
             cashFlowRestated = reexpressCashFlow(input, statements, indexes)
+            preparationRestated = buildCashFlowPreparationRestated(
+                input, statements, cashFlows, cashFlowRestated,
+                { indexes, indexSetId: set.id, indexSetHash: set.contentHash },
+            )
             fixedAssetsRestated = reexpressFixedAssetsAnnex(input, statements.fixedAssetsAnnex, indexes)
             const periods = set.values.map(v => v.period).sort()
             const closePeriod = input.context.periodEnd.slice(0, 7)
@@ -255,5 +266,5 @@ export async function loadReportingBundle(
         status,
     }
 
-    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, publicationGate, preparation, metadata }
+    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, publicationGate, preparation, preparationRestated, metadata }
 }

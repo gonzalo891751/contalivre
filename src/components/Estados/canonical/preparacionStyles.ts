@@ -88,9 +88,32 @@ export const preparacionStyles = `
 .prep-detail-grid dt { opacity: .65; font-size: .78rem; }
 .prep-detail-grid dd { margin: 0; font-size: .84rem; }
 
+.prep-export { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
+.prep-export-label { font-size: .78rem; opacity: .7; }
+.prep-export-btn { font-size: .78rem; font-weight: 600; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--prep-line); background: #4c6ef5; color: #fff; cursor: pointer; }
+.prep-export-btn.is-secondary { background: transparent; color: inherit; }
+.prep-export-btn:hover { filter: brightness(1.05); }
+
+/* Reexpresión — moneda de cierre (Fase 2G.1 §3.D) */
+.prep-rex-banner { border: 1px solid var(--prep-line); border-radius: 12px; padding: 12px 14px; margin: 0 0 12px; background: color-mix(in srgb, #4c6ef5 8%, transparent); }
+.prep-rex-banner-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.prep-rex-badge { font-size: .74rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #4c6ef5; color: #fff; }
+.prep-rex-badge.is-blocked { background: #e03131; }
+.prep-rex-help { font-size: .8rem; opacity: .8; margin: 6px 0 0; }
+.prep-rex-blockers { margin: 8px 0 0; padding-left: 4px; list-style: none; display: grid; gap: 4px; }
+.prep-rex-blockers li { font-size: .78rem; color: #c92a2a; }
+.prep-bridge-item.is-rei strong { color: #d9480f; }
+.prep-detail-rex { padding: 0 16px 16px; }
+.prep-detail-rex-title { font-weight: 700; font-size: .82rem; margin-bottom: 6px; }
+.prep-rex-table { width: 100%; border-collapse: collapse; font-size: .76rem; }
+.prep-rex-table th, .prep-rex-table td { border-bottom: 1px solid var(--prep-line); padding: 4px 6px; text-align: right; white-space: nowrap; }
+.prep-rex-table th:first-child, .prep-rex-table td:first-child { text-align: left; }
+.prep-rex-table tr.is-blocked td { color: #c92a2a; }
+
 @media (max-width: 640px) {
   .prep-table-wrap { display: none; }
   .prep-cards { display: block; }
   .prep-steps { grid-template-columns: 1fr; }
+  .prep-detail-rex { overflow-x: auto; }
 }
 `
