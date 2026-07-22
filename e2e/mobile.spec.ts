@@ -4,7 +4,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { evidence, gotoEstados, loadRcDataset, openEstadosTab, pinPeriod2025 } from './helpers'
+import { evidence, evidence2g, gotoEstados, loadRcDataset, openEstadosTab, pinPeriod2025 } from './helpers'
 
 test.describe('Aceptación visual — móvil 390×844', () => {
     test('estados en móvil con el dataset RC', async ({ page }) => {
@@ -41,7 +41,7 @@ test.describe('Aceptación visual — móvil 390×844', () => {
             return { scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }
         })
         expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
-        await evidence(page, 'efe-preparacion-movil-390')
+        await evidence2g(page, 'preparacion-movil-390')
 
         await openEstadosTab(page, 'Notas y Anexos')
         await evidence(page, 'notas-movil-390')

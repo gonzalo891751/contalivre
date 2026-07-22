@@ -14,7 +14,17 @@ export const EVIDENCE_DIR = path.resolve(HERE, '..', 'docs', 'evidence', 'phase2
 export const SCREENSHOTS_DIR = path.join(EVIDENCE_DIR, 'screenshots')
 export const EXPORTS_DIR = path.join(EVIDENCE_DIR, 'exports')
 
-for (const dir of [SCREENSHOTS_DIR, EXPORTS_DIR]) fs.mkdirSync(dir, { recursive: true })
+/** Evidencia de la Fase 2G (§22) */
+export const EVIDENCE_2G_DIR = path.resolve(HERE, '..', 'docs', 'evidence', 'phase2g')
+export const SCREENSHOTS_2G_DIR = path.join(EVIDENCE_2G_DIR, 'screenshots')
+
+for (const dir of [SCREENSHOTS_DIR, EXPORTS_DIR, SCREENSHOTS_2G_DIR]) fs.mkdirSync(dir, { recursive: true })
+
+/** Captura de evidencia Fase 2G en docs/evidence/phase2g/screenshots */
+export async function evidence2g(page: Page, name: string, fullPage = true): Promise<void> {
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: path.join(SCREENSHOTS_2G_DIR, `${name}.png`), fullPage })
+}
 
 /** Fija el período 2025 (dataset RC) ANTES de cargar la app */
 export async function pinPeriod2025(page: Page): Promise<void> {

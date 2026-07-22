@@ -19,7 +19,7 @@ export const APP_VERSION: string =
     || pkg.version
 
 /** Versión del motor contable (servicio + reporting engine) */
-export const ACCOUNTING_ENGINE_VERSION = '2F.0'
+export const ACCOUNTING_ENGINE_VERSION = '2G.0'
 
 /** Marco normativo declarado (ver capacidades y notas) */
 export const NORMATIVE_BASELINE = 'RT 54 (texto ordenado por RT 59) — alcance educativo comercial/servicios'
