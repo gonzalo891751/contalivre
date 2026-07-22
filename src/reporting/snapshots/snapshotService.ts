@@ -14,15 +14,64 @@ export interface CreateSnapshotOptions {
     actorId?: string
 }
 
+function hashString(s: string): string {
+    let h = 5381
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+    return (h >>> 0).toString(16)
+}
+
 /**
- * Congela el bundle actual como snapshot. No permite publicar un reporte no
- * validado (§16.1): si el bundle no es publicable, se guarda como DRAFT.
+ * Serializa TODO el contenido material del EFE y estados que debe congelarse
+ * (Fase 2G §15): ambos métodos nominales y reexpresados, comparativo,
+ * revelaciones, REI, preparación, puerta de publicación y validación. Se guarda
+ * para consulta histórica (incluye timestamps de generación).
+ */
+export function serializeBundleForSnapshot(bundle: ReportingBundle): string {
+    return JSON.stringify({
+        balanceSheet: bundle.statements.balanceSheet,
+        incomeStatement: bundle.statements.incomeStatement,
+        equityStatement: bundle.statements.equityStatement,
+        cashFlowDirect: bundle.statements.cashFlowDirect,
+        cashFlowIndirect: bundle.statements.cashFlowIndirect,
+        cashFlowRestated: bundle.cashFlowRestated,
+        preparation: bundle.preparation,
+        publicationGate: bundle.publicationGate,
+        validation: bundle.statements.validation,
+        inflationSet: bundle.inflationSet,
+        hasComparative: bundle.metadata.hasComparative,
+    })
+}
+
+/**
+ * Proyección DETERMINISTA para el hash de contenido: excluye timestamps de
+ * generación (generatedAt/checkedAt) para que el hash sólo cambie ante cambios
+ * MATERIALES (asientos, mappings, políticas, índices, método, moneda, reglas).
+ */
+function materialHashInput(bundle: ReportingBundle): string {
+    return JSON.stringify({
+        prepHash: bundle.preparation.identity.contentHash,
+        mappingsHash: bundle.preparation.identity.mappingsHash,
+        policyVersion: bundle.preparation.identity.policyVersion,
+        cashFlowDirect: bundle.statements.cashFlowDirect,
+        cashFlowIndirect: bundle.statements.cashFlowIndirect,
+        cashFlowRestated: bundle.cashFlowRestated,
+        canPublish: bundle.publicationGate.canPublish,
+        blockers: bundle.publicationGate.blockers.map(b => b.id),
+        indexSetHash: bundle.inflationSet?.contentHash ?? null,
+        hasComparative: bundle.metadata.hasComparative,
+    })
+}
+
+/**
+ * Congela el bundle actual como snapshot. No permite publicar un reporte con
+ * blockers en la puerta unificada (§5.3, §15): si no es publicable, DRAFT.
  */
 export async function createSnapshot(bundle: ReportingBundle, opts: CreateSnapshotOptions = {}): Promise<ReportSnapshot> {
-    const canPublish = bundle.statements.validation.canPublish
+    const canPublish = bundle.publicationGate.canPublish
     const requested = opts.status ?? 'VALIDATED'
     const status: ReportSnapshotStatus = canPublish ? requested : 'DRAFT'
 
+    const bundleJson = serializeBundleForSnapshot(bundle)
     const snapshot: ReportSnapshot = {
         id: generateId(),
         companyId: bundle.metadata.companyId,
@@ -31,20 +80,17 @@ export async function createSnapshot(bundle: ReportingBundle, opts: CreateSnapsh
         status,
         createdAt: new Date().toISOString(),
         createdBy: opts.actorId ?? LOCAL_ACTOR,
-        contentHash: bundle.metadata.reportVersion,
+        contentHash: hashString(materialHashInput(bundle)),
         reportVersion: bundle.metadata.reportVersion,
         engineVersion: bundle.metadata.engineVersion,
         schemaVersion: bundle.metadata.schemaVersion,
         normative: bundle.metadata.normative,
-        indexSetId: opts.indexSetId,
+        indexSetId: opts.indexSetId ?? bundle.inflationSet?.id,
+        indexSetHash: bundle.inflationSet?.contentHash ?? null,
+        mappingsHash: bundle.preparation.identity.mappingsHash,
+        policyVersion: bundle.preparation.identity.policyVersion,
         hasComparative: bundle.metadata.hasComparative,
-        bundleJson: JSON.stringify({
-            balanceSheet: bundle.statements.balanceSheet,
-            incomeStatement: bundle.statements.incomeStatement,
-            equityStatement: bundle.statements.equityStatement,
-            cashFlowDirect: bundle.statements.cashFlowDirect,
-            validation: bundle.statements.validation,
-        }),
+        bundleJson,
     }
 
     await db.reportSnapshots.add(snapshot)
@@ -59,6 +105,16 @@ export async function createSnapshot(bundle: ReportingBundle, opts: CreateSnapsh
         metadata: { kind: 'report-snapshot', snapshotId: snapshot.id, status, reportVersion: snapshot.reportVersion },
     })
     return snapshot
+}
+
+/**
+ * ¿El cálculo actual difiere del snapshot congelado? (Fase 2G §15). Compara el
+ * hash de contenido completo: si cambió un asiento, mapping, política, índice,
+ * método, moneda o revelación, el snapshot queda "congelado pero divergente" y
+ * la UI puede advertirlo sin borrarlo.
+ */
+export function snapshotDivergesFromCurrent(snapshot: ReportSnapshot, bundle: ReportingBundle): boolean {
+    return snapshot.contentHash !== hashString(materialHashInput(bundle))
 }
 
 export async function listSnapshots(exerciseId?: string): Promise<ReportSnapshot[]> {

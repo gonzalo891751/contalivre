@@ -17,6 +17,7 @@ import {
 import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { CompanyProfileModal, CompanyProfileCard } from '../components/CompanyProfile'
 import { MapeosPanel } from '../components/Configuracion/panels/MapeosPanel'
+import { EfePoliticasPanel } from '../components/Configuracion/panels/EfePoliticasPanel'
 import { EjerciciosPanel } from '../components/Configuracion/panels/EjerciciosPanel'
 import { BackupPanel } from '../components/Configuracion/panels/BackupPanel'
 import { VersionInfoPanel } from '../components/Configuracion/panels/VersionInfoPanel'
@@ -136,6 +137,7 @@ export default function ConfiguracionPage() {
                                 <button className="btn btn-secondary btn-sm" onClick={() => navigate('/cuentas')}>Abrir Plan de Cuentas</button>
                             </div>
                             <MapeosPanel />
+                            <EfePoliticasPanel />
                             <ExpenseAllocationEditor />
                         </div>
                     )}

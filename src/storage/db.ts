@@ -14,6 +14,8 @@ import { migrateToV18 } from '../accounting/migration/migrateV18'
 import { migrateToV19 } from '../accounting/migration/migrateV19'
 import { migrateToV20 } from '../accounting/migration/migrateV20'
 import { migrateToV21 } from '../accounting/migration/migrateV21'
+import { migrateToV22 } from '../accounting/migration/migrateV22'
+import type { CashFlowPolicy } from '../reporting/policy/cashFlowPolicy'
 import type {
     InventoryProduct,
     InventoryMovement,
@@ -131,6 +133,8 @@ class ContableDatabase extends Dexie {
     expenseAllocationRules!: EntityTable<ExpenseAllocationRule, 'id'>
     // ── Fase 2F: notas manuales persistentes ──
     manualDisclosures!: EntityTable<ManualDisclosure, 'id'>
+    // ── Fase 2G: política del Estado de Flujo de Efectivo versionada ──
+    cashFlowPolicies!: EntityTable<CashFlowPolicy, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -585,6 +589,11 @@ class ContableDatabase extends Dexie {
         this.version(21).stores({
             manualDisclosures: 'id, companyId, exerciseId, noteType, status',
         }).upgrade(migrateToV21)
+
+        // Version 22 (Fase 2G): política del EFE versionada por entidad (§6).
+        this.version(22).stores({
+            cashFlowPolicies: 'id, companyId, exerciseId, status',
+        }).upgrade(migrateToV22)
     }
 }
 

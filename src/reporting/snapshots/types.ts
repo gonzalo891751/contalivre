@@ -26,6 +26,12 @@ export interface ReportSnapshot {
     normative: string
     /** id del set de índices usado para inflación, si aplica */
     indexSetId?: string
+    /** hash del set de índices aplicado (integridad de la serie); null si nominal */
+    indexSetHash?: string | null
+    /** hash de mappings (metadata de cuentas) al momento del snapshot */
+    mappingsHash?: string
+    /** versión de la política EFE aplicada */
+    policyVersion?: number
     hasComparative: boolean
     /** copia serializada de los estados (para consulta histórica) */
     bundleJson: string

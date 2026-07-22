@@ -22,7 +22,7 @@ import {
 } from '../accounting/migration/versions'
 import { loadReportingInput } from './loadStatements'
 import { buildStatements } from './engine/buildStatements'
-import { buildCashFlows } from './engine/buildCashFlow'
+import { buildCashFlows, attachCashFlowComparative } from './engine/buildCashFlow'
 import { buildNotes, type StatementNote } from './engine/buildNotes'
 import { buildMetricsCatalog } from './metrics/metrics'
 import {
@@ -32,6 +32,8 @@ import {
     verticalIncomeStatement,
 } from './metrics/analysis'
 import { reexpressCashFlow } from './engine/cashFlowInflation'
+import { buildPublicationGate, type PublicationGate } from './engine/publicationGate'
+import { buildCashFlowPreparation, type CashFlowPreparationModel } from './preparation/cashFlowPreparation'
 import { reexpressFixedAssetsAnnex } from './engine/fixedAssetsInflation'
 import { getIndexSet, indexSetToMap } from '../accounting/inflation/indexRegistry'
 import type { MetricCatalogEntry, HorizontalAnalysisRow, VerticalAnalysisRow } from './metrics/types'
@@ -111,6 +113,10 @@ export interface ReportingBundle {
     notes: StatementNote[]
     metrics: MetricCatalogEntry[]
     analysis: ReportingBundleAnalysis
+    /** puerta de publicación unificada: gobierna status, snapshots y exports (§5.3) */
+    publicationGate: PublicationGate
+    /** modelo de preparación (papel de trabajo matricial) del EFE nominal (§7) */
+    preparation: CashFlowPreparationModel
     metadata: ReportMetadata
 }
 
@@ -139,10 +145,12 @@ export async function loadReportingBundle(
 ): Promise<ReportingBundle> {
     const input = await loadReportingInput(year)
 
+    let prevInput: Awaited<ReturnType<typeof loadReportingInput>> | null = null
     if (options.withComparative) {
-        const prevInput = await loadReportingInput(year - 1)
-        if (prevInput.entries.length > 0 || prevInput.openingBalances.size > 0) {
-            input.comparative = buildStatements(prevInput)
+        const candidate = await loadReportingInput(year - 1)
+        if (candidate.entries.length > 0 || candidate.openingBalances.size > 0) {
+            prevInput = candidate
+            input.comparative = buildStatements(candidate)
         }
     }
 
@@ -151,6 +159,15 @@ export async function loadReportingBundle(
     statements.cashFlowDirect = cashFlows.direct
     statements.cashFlowIndirect = cashFlows.indirect
     statements.validation = cashFlows.validation
+
+    // Comparativo del EFE (§10, EFE-005): MISMO motor sobre el ejercicio anterior
+    // (sus asientos, apertura, mappings e índices). Se adosa comparativeAmount a
+    // las líneas del EFE actual; la UI/PDF/XLSX muestran Actual y Anterior.
+    if (prevInput && input.comparative) {
+        const prevCashFlows = buildCashFlows(prevInput, input.comparative)
+        attachCashFlowComparative(cashFlows.direct, prevCashFlows.direct)
+        attachCashFlowComparative(cashFlows.indirect, prevCashFlows.indirect)
+    }
 
     // Expresiones en moneda de cierre (Fase 2C §9 / Fase 2F §12-13): un ÚNICO
     // set de índices alimenta EFE y bienes de uso. Se carga por id, se verifica
@@ -178,6 +195,7 @@ export async function loadReportingBundle(
         }
     }
 
+    const preparation = buildCashFlowPreparation(input, statements, cashFlows)
     const notes = buildNotes(input, statements)
     const metrics = buildMetricsCatalog(statements, input.accounts, input.comparative ?? null)
     const analysis: ReportingBundleAnalysis = {
@@ -196,8 +214,15 @@ export async function loadReportingBundle(
             .filter(e => e.status === 'DRAFT').count(),
     ])
 
-    const canPublish = statements.validation.canPublish
-    const status: ReportStatus = !canPublish ? 'BLOCKED' : hasDrafts > 0 ? 'DRAFT' : 'VALIDATED'
+    // Puerta de publicación unificada (§5.3): considera controles nominales y
+    // reexpresados, y la cobertura del set de índices. Un blocker en cualquier
+    // expresión solicitada impide el estado VALIDATED.
+    const publicationGate = buildPublicationGate({
+        validation: statements.validation,
+        restated: cashFlowRestated,
+        inflationSet: inflationSet ? { name: inflationSet.name, missingPeriods: inflationSet.missingPeriods } : null,
+    })
+    const status: ReportStatus = !publicationGate.canPublish ? 'BLOCKED' : hasDrafts > 0 ? 'DRAFT' : 'VALIDATED'
 
     const contentSignature = hashString(JSON.stringify({
         ctx: input.context,
@@ -230,5 +255,5 @@ export async function loadReportingBundle(
         status,
     }
 
-    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, metadata }
+    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, publicationGate, preparation, metadata }
 }

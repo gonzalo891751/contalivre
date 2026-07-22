@@ -26,8 +26,11 @@ describe('Fase 2C — snapshots de reportes', () => {
         expect(bundle.statements.validation.canPublish).toBe(true)
         const snap = await createSnapshot(bundle, { status: 'PUBLISHED' })
         expect(snap.status).toBe('PUBLISHED')
-        expect(snap.contentHash).toBe(bundle.metadata.reportVersion)
-        expect(snap.bundleJson).toContain('balanceSheet')
+        // Fase 2G: hash de contenido FUERTE (no el reportVersion débil)
+        expect(snap.contentHash).toBeTruthy()
+        expect(snap.reportVersion).toBe(bundle.metadata.reportVersion)
+        expect(snap.bundleJson).toContain('cashFlowIndirect') // congela ambos métodos
+        expect(snap.bundleJson).toContain('preparation')
 
         const list = await listSnapshots(exerciseIdForYear(2025))
         expect(list).toHaveLength(1)

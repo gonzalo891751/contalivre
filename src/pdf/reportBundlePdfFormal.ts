@@ -94,9 +94,26 @@ function buildSections(bundle: ReportingBundle, options: ExportEstadosOptions): 
     if (c.efe) {
         for (const { cf, method, closingUsed } of efeStatements(bundle, options)) {
             const suffix = `${method === 'INDIRECT' ? 'método indirecto' : 'método directo'}${closingUsed ? ' — moneda de cierre' : ''}`
+            const lines: ReportLine[] = [cf.openingCash]
+            // Modificaciones de ejercicios anteriores (AREA) → efectivo inicial modificado (§11)
+            if (cf.priorAdjustments) lines.push(cf.priorAdjustments)
+            if (cf.adjustedOpening) lines.push(cf.adjustedOpening)
+            lines.push(cf.operating, cf.investing, cf.financing)
+            if (cf.unclassified.amount !== 0) lines.push(cf.unclassified)
+            // RFyT/REI del efectivo (moneda de cierre): integra la conciliación de
+            // la variación (EFE-002). La suma visible reconcilia con la variación.
+            if (closingUsed) for (const d of cf.nonMonetaryDisclosures) lines.push(d)
+            lines.push(cf.netChange, cf.closingCash)
+            sections.push({ title: `Estado de Flujo de Efectivo (${suffix})`, lines })
+        }
+        // Operaciones de inversión y financiación que no afectaron el efectivo:
+        // revelación SEPARADA (no integran el total). Se conservan aunque se
+        // exponga en moneda de cierre (§5.4).
+        const nominalDisc = bundle.statements.cashFlowDirect?.nonMonetaryDisclosures ?? []
+        if (nominalDisc.length > 0) {
             sections.push({
-                title: `Estado de Flujo de Efectivo (${suffix})`,
-                lines: [cf.openingCash, cf.operating, cf.investing, cf.financing, ...(cf.unclassified.amount !== 0 ? [cf.unclassified] : []), cf.netChange, cf.closingCash],
+                title: 'Operaciones de inversión y financiación que no afectaron el efectivo',
+                lines: nominalDisc,
             })
         }
     }

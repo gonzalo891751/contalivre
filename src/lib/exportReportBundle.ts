@@ -338,7 +338,20 @@ export function buildSelectedReportSheets(bundle: ReportingBundle, options: Expo
             const cf: CashFlowStatement2B | null = method === 'INDIRECT' ? src.indirect : src.direct
             if (!cf) continue
             const name = `EFE ${method === 'INDIRECT' ? 'indirecto' : 'directo'}${wantClosing ? ' (cierre)' : ''}`
-            sheets.push({ name, rows: [['Concepto', 'Importe'], ...flattenLines([cf.openingCash, cf.operating, cf.investing, cf.financing, cf.unclassified, cf.netChange, cf.closingCash], false)] })
+            const lines: ReportLine[] = [cf.openingCash]
+            if (cf.priorAdjustments) lines.push(cf.priorAdjustments)
+            if (cf.adjustedOpening) lines.push(cf.adjustedOpening)
+            lines.push(cf.operating, cf.investing, cf.financing)
+            if (cf.unclassified.amount !== 0) lines.push(cf.unclassified)
+            // RFyT/REI del efectivo en moneda de cierre (EFE-002): reconcilia la variación
+            if (wantClosing) for (const d of cf.nonMonetaryDisclosures) lines.push(d)
+            lines.push(cf.netChange, cf.closingCash)
+            sheets.push({ name, rows: [headerRow(), ...flattenLines(lines, showComp)] })
+        }
+        // Operaciones que no afectaron el efectivo: revelación separada (§5.4)
+        const nominalDisc = s.cashFlowDirect?.nonMonetaryDisclosures ?? []
+        if (nominalDisc.length > 0) {
+            sheets.push({ name: 'EFE no monetarias', rows: [['Operaciones de inversión y financiación que no afectaron el efectivo', 'Importe'], ...flattenLines(nominalDisc, false)] })
         }
     }
     if (c.notas) {

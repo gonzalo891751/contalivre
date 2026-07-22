@@ -60,6 +60,10 @@ export function isCashAccount(account: Account | undefined): boolean {
 export function flowBucket(account: Account | undefined): FlowBucket {
     if (!account) return 'UNCLASSIFIED'
     if (isCashAccount(account)) return 'CASH'
+    // NOT_APPLICABLE (§6, EFE-010): la cuenta queda FUERA de la derivación
+    // estructural. Si un flujo la toca, cae en "sin clasificar" (se expone y
+    // bloquea, nunca se asigna en silencio a inversión/financiación).
+    if (account.cashFlowCategory === 'NOT_APPLICABLE') return 'UNCLASSIFIED'
     // Override explícito por cuenta
     if (account.cashFlowCategory === 'INVESTING') return 'INVESTING'
     if (account.cashFlowCategory === 'FINANCING') return 'FINANCING'
@@ -76,6 +80,47 @@ export function flowBucket(account: Account | undefined): FlowBucket {
     if (g && INVESTING_GROUPS.has(g)) return 'INVESTING'
     if (g && FINANCING_GROUPS.has(g)) return 'FINANCING'
     return 'UNCLASSIFIED'
+}
+
+/**
+ * Detección de disposición de activos/pasivos NO operativos con resultado
+ * asociado (Fase 2G §5.1, EFE-001). El cobro/pago BRUTO de una venta de bienes
+ * de uso, intangibles o inversiones pertenece íntegro a la actividad de
+ * inversión (o financiación); el resultado por la venta NO es un flujo
+ * operativo. RT 54 (TO RT 59) párr. 656.
+ *
+ * Regla conservadora y exacta: sólo se pliega cuando el asiento toca efectivo y
+ * sus contrapartidas NO cash pertenecen exclusivamente a UNA actividad no
+ * operativa (inversión XOR financiación) y existe al menos un resultado. Si el
+ * asiento mezcla capital de trabajo, ambas actividades o partidas sin
+ * clasificar (ej. venta a crédito con cobro parcial), NO se pliega: esos casos
+ * requieren evidencia transaccional/override y se tratan en hitos posteriores,
+ * nunca con una reclasificación silenciosa.
+ *
+ * @returns 'INVESTING' | 'FINANCING' si corresponde plegar; null en otro caso.
+ */
+export function detectDisposalFold(
+    lines: { accountId: string; debit?: number; credit?: number }[],
+    byId: Map<string, Account>,
+): 'INVESTING' | 'FINANCING' | null {
+    let hasResult = false, hasInv = false, hasFin = false, hasWc = false, hasUncl = false
+    for (const l of lines) {
+        const bucket = flowBucket(byId.get(l.accountId))
+        if (bucket === 'CASH') continue
+        const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
+        if (contribution === 0) continue
+        switch (bucket) {
+            case 'RESULT': hasResult = true; break
+            case 'WC_ASSET': case 'WC_LIAB': hasWc = true; break
+            case 'INVESTING': hasInv = true; break
+            case 'FINANCING': hasFin = true; break
+            case 'UNCLASSIFIED': hasUncl = true; break
+        }
+    }
+    if (!hasResult || hasWc || hasUncl) return null
+    if (hasInv && !hasFin) return 'INVESTING'
+    if (hasFin && !hasInv) return 'FINANCING'
+    return null
 }
 
 /**
@@ -114,14 +159,33 @@ export interface CashFlowsResult {
     validation: StatementValidationReport
 }
 
+/**
+ * Adosa los importes del ejercicio anterior a las líneas del EFE actual (§10,
+ * EFE-005). El comparativo se calcula con el MISMO motor sobre el ejercicio
+ * previo; acá sólo se copian los importes ya calculados.
+ */
+export function attachCashFlowComparative(current: CashFlowStatement2B, prev: CashFlowStatement2B): void {
+    current.openingCash.comparativeAmount = prev.openingCash.amount
+    current.operating.comparativeAmount = prev.operating.amount
+    current.investing.comparativeAmount = prev.investing.amount
+    current.financing.comparativeAmount = prev.financing.amount
+    current.netChange.comparativeAmount = prev.netChange.amount
+    current.closingCash.comparativeAmount = prev.closingCash.amount
+    current.unclassified.comparativeAmount = prev.unclassified.amount
+    if (current.adjustedOpening) current.adjustedOpening.comparativeAmount = prev.adjustedOpening?.amount ?? prev.openingCash.amount
+}
+
 export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle): CashFlowsResult {
     const byId = new Map(input.accounts.map(a => [a.id, a]))
 
-    // Asientos de flujo: sin borradores, sin refundición/transferencia, sin apertura
+    // Asientos de flujo: sin borradores, sin refundición/transferencia, sin
+    // apertura y sin modificaciones de ejercicios anteriores (AREA): estas
+    // últimas modifican el efectivo INICIAL (§11), no son flujos del período.
     const flowEntries = input.entries.filter(e =>
         e.status !== 'DRAFT'
         && !isStructuralClosingEntry(e)
-        && !(e.sourceModule === 'closing' && e.sourceType === 'apertura'))
+        && !(e.sourceModule === 'closing' && e.sourceType === 'apertura')
+        && e.equityMovementType !== 'PRIOR_PERIOD_ADJUSTMENT')
 
     // ── Efectivo inicial y final ─────────────────────────────
     let openingCashCents = 0
@@ -141,6 +205,22 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
             }
         }
     }
+
+    // Modificaciones de ejercicios anteriores (AREA) que afectan el efectivo:
+    // reexpresan el efectivo INICIAL (efectivo inicial modificado), no integran
+    // los flujos del período (§11, EFE-012).
+    let priorAdjustmentsCents = 0
+    for (const entry of input.entries) {
+        if (entry.status === 'DRAFT') continue
+        if (entry.equityMovementType === 'PRIOR_PERIOD_ADJUSTMENT') {
+            for (const l of entry.lines) {
+                if (isCashAccount(byId.get(l.accountId))) {
+                    priorAdjustmentsCents += toCents(l.debit || 0) - toCents(l.credit || 0)
+                }
+            }
+        }
+    }
+    const openingAdjustedCents = openingCashCents + priorAdjustmentsCents
 
     // ── Método directo: línea por línea de asientos con efectivo ──
     const totals: FlowTotals = {
@@ -163,6 +243,10 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     let nonCashInvFinCents = 0 // inv_N + fin_N (asientos sin efectivo)
     const adjustmentsByAccount = new Map<string, number>()
     const nonMonetaryDisclosures: ReportLine[] = []
+    // Resultados de venta de activos/pasivos no operativos plegados a inversión/
+    // financiación (EFE-001): deben eliminarse del resultado en el indirecto.
+    let disposalResultCents = 0
+    const disposalResultIds = new Set<string>()
 
     for (const entry of flowEntries) {
         let cashCents = 0
@@ -194,38 +278,70 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
 
         if (touchesCash && cashCents !== 0) {
             totals.cashDelta += cashCents
-            // Contrapartidas: contribución exacta por línea = Haber − Debe
-            for (const l of entry.lines) {
-                const account = byId.get(l.accountId)
-                const bucket = flowBucket(account)
-                if (bucket === 'CASH') continue
-                const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
-                if (contribution === 0) continue
-                switch (bucket) {
-                    case 'RESULT':
-                    case 'WC_ASSET':
-                    case 'WC_LIAB': {
-                        const sub = directOperatingSubcategory(account!)
-                        const s = totals.operating.get(sub) ?? { cents: 0, accountIds: new Set<string>() }
-                        s.cents += contribution
-                        s.accountIds.add(l.accountId)
-                        totals.operating.set(sub, s)
-                        break
+            const fold = detectDisposalFold(entry.lines, byId)
+            if (fold) {
+                // Disposición de activo/pasivo NO operativo con resultado: el flujo
+                // BRUTO (todo el efectivo del asiento) pertenece a la actividad; el
+                // resultado se elimina del operativo (EFE-001, §5.1).
+                const target = fold === 'INVESTING' ? totals.investing : totals.financing
+                let primaryId: string | undefined
+                let primaryAbs = -1
+                let resultOfEntry = 0
+                for (const l of entry.lines) {
+                    const bucket = flowBucket(byId.get(l.accountId))
+                    if (bucket === 'CASH') continue
+                    const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
+                    if (contribution === 0) continue
+                    if (bucket === 'RESULT') {
+                        resultOfEntry += contribution
+                        disposalResultCents += contribution
+                        disposalResultIds.add(l.accountId)
+                    } else {
+                        target.accountIds.add(l.accountId)
+                        target.byAccount.set(l.accountId, (target.byAccount.get(l.accountId) ?? 0) + contribution)
+                        if (Math.abs(contribution) > primaryAbs) { primaryAbs = Math.abs(contribution); primaryId = l.accountId }
                     }
-                    case 'INVESTING':
-                        totals.investing.cents += contribution
-                        totals.investing.accountIds.add(l.accountId)
-                        totals.investing.byAccount.set(l.accountId, (totals.investing.byAccount.get(l.accountId) ?? 0) + contribution)
-                        break
-                    case 'FINANCING':
-                        totals.financing.cents += contribution
-                        totals.financing.accountIds.add(l.accountId)
-                        totals.financing.byAccount.set(l.accountId, (totals.financing.byAccount.get(l.accountId) ?? 0) + contribution)
-                        break
-                    case 'UNCLASSIFIED':
-                        totals.unclassified.cents += contribution
-                        totals.unclassified.accountIds.add(l.accountId)
-                        break
+                }
+                // El resultado se atribuye a la cuenta principal para que el detalle
+                // por cuenta sume el flujo bruto de efectivo de la operación.
+                if (primaryId !== undefined && resultOfEntry !== 0) {
+                    target.byAccount.set(primaryId, (target.byAccount.get(primaryId) ?? 0) + resultOfEntry)
+                }
+                target.cents += cashCents
+            } else {
+                // Contrapartidas: contribución exacta por línea = Haber − Debe
+                for (const l of entry.lines) {
+                    const account = byId.get(l.accountId)
+                    const bucket = flowBucket(account)
+                    if (bucket === 'CASH') continue
+                    const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
+                    if (contribution === 0) continue
+                    switch (bucket) {
+                        case 'RESULT':
+                        case 'WC_ASSET':
+                        case 'WC_LIAB': {
+                            const sub = directOperatingSubcategory(account!)
+                            const s = totals.operating.get(sub) ?? { cents: 0, accountIds: new Set<string>() }
+                            s.cents += contribution
+                            s.accountIds.add(l.accountId)
+                            totals.operating.set(sub, s)
+                            break
+                        }
+                        case 'INVESTING':
+                            totals.investing.cents += contribution
+                            totals.investing.accountIds.add(l.accountId)
+                            totals.investing.byAccount.set(l.accountId, (totals.investing.byAccount.get(l.accountId) ?? 0) + contribution)
+                            break
+                        case 'FINANCING':
+                            totals.financing.cents += contribution
+                            totals.financing.accountIds.add(l.accountId)
+                            totals.financing.byAccount.set(l.accountId, (totals.financing.byAccount.get(l.accountId) ?? 0) + contribution)
+                            break
+                        case 'UNCLASSIFIED':
+                            totals.unclassified.cents += contribution
+                            totals.unclassified.accountIds.add(l.accountId)
+                            break
+                    }
                 }
             }
         } else if (!touchesCash) {
@@ -254,7 +370,7 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
         }
     }
 
-    totals.closingCash = openingCashCents + totals.cashDelta
+    totals.closingCash = openingAdjustedCents + totals.cashDelta
 
     // ── Presentación método directo ──────────────────────────
     const operatingChildren: ReportLine[] = []
@@ -297,6 +413,12 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     const direct: CashFlowStatement2B = {
         method: 'DIRECT',
         openingCash: line('efe:inicial', 'Efectivo y equivalentes al inicio', openingCashCents),
+        priorAdjustments: priorAdjustmentsCents !== 0
+            ? line('efe:mod-apertura', 'Modificaciones de ejercicios anteriores (AREA)', priorAdjustmentsCents)
+            : undefined,
+        adjustedOpening: priorAdjustmentsCents !== 0
+            ? line('efe:inicial-modificado', 'Efectivo y equivalentes al inicio modificado', openingAdjustedCents)
+            : undefined,
         operating: line('efe:operativas', 'Actividades operativas', operatingCents,
             operatingChildren.flatMap(c => c.accountIds), operatingChildren),
         investing: line('efe:inversion', 'Actividades de inversión', totals.investing.cents, Array.from(totals.investing.accountIds),
@@ -312,7 +434,9 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     // ── Método indirecto (componentes reales, sin plug) ─────
     const resultCents = toCents(bundle.incomeStatement.netIncome.amount)
     const adjustmentsCents = -nonCashInvFinCents // X = −(inv_N + fin_N)
-    const operatingIndirectCents = resultCents - wcAssetDeltaCents - wcLiabDeltaCents + adjustmentsCents + totals.unclassified.cents
+    // Se eliminan del operativo los resultados de venta cuyo flujo pertenece a
+    // inversión/financiación (EFE-001): el efectivo bruto ya está en esa actividad.
+    const operatingIndirectCents = resultCents - wcAssetDeltaCents - wcLiabDeltaCents + adjustmentsCents - disposalResultCents + totals.unclassified.cents
 
     const indirectChildren: ReportLine[] = [
         { id: 'efe:ind:resultado', label: 'Resultado del ejercicio', level: 2, amount: fromCents(resultCents), accountIds: bundle.incomeStatement.netIncome.accountIds },
@@ -332,6 +456,13 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
             children: accountDetail('efe:ind:wcl', wcLiabByAccount, -1),
         },
     ]
+    if (disposalResultCents !== 0) {
+        indirectChildren.push({
+            id: 'efe:ind:result-no-operativo',
+            label: 'Resultados de venta de activos reclasificados a inversión o financiación',
+            level: 2, amount: fromCents(-disposalResultCents), accountIds: Array.from(disposalResultIds),
+        })
+    }
     if (totals.unclassified.cents !== 0) {
         indirectChildren.push({ id: 'efe:ind:sin-clasificar', label: 'Flujos sin clasificación (regularizar)', level: 2, amount: fromCents(totals.unclassified.cents), accountIds: Array.from(totals.unclassified.accountIds) })
     }
@@ -339,6 +470,8 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     const indirect: CashFlowStatement2B = {
         method: 'INDIRECT',
         openingCash: direct.openingCash,
+        priorAdjustments: direct.priorAdjustments,
+        adjustedOpening: direct.adjustedOpening,
         operating: line('efe:operativas-ind', 'Actividades operativas (método indirecto)', operatingIndirectCents,
             indirectChildren.flatMap(c => c.accountIds), indirectChildren),
         investing: direct.investing,
@@ -352,8 +485,8 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     // ── Invariantes EFE (§11.6) ──────────────────────────────
     const checks: ValidationCheck[] = [...bundle.validation.checks]
 
-    checks.push(mkCheck('efe-variacion', 'EFE: variación neta = efectivo final − inicial',
-        totals.closingCash - openingCashCents, netChangeCents))
+    checks.push(mkCheck('efe-variacion', 'EFE: variación neta = efectivo final − inicial modificado',
+        totals.closingCash - openingAdjustedCents, netChangeCents))
 
     // Efectivo del EFE = Caja y equivalentes del ESP
     let cashInBalanceCents = 0
