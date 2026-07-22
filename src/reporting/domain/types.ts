@@ -378,6 +378,10 @@ export type CashFlowMethod = 'DIRECT' | 'INDIRECT'
 export interface CashFlowStatement2B {
     method: CashFlowMethod
     openingCash: ReportLine
+    /** modificaciones de ejercicios anteriores (AREA) sobre el efectivo inicial (§11) */
+    priorAdjustments?: ReportLine
+    /** efectivo al inicio modificado = inicial + modificaciones (§11) */
+    adjustedOpening?: ReportLine
     operating: ReportLine
     investing: ReportLine
     financing: ReportLine

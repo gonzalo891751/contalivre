@@ -200,6 +200,8 @@ export function buildCashFlowPreparation(
 
     // ── Puente del efectivo ──────────────────────────────────
     const openingCash = toCents(cashFlows.direct.openingCash.amount)
+    const priorAdjustments = toCents(cashFlows.direct.priorAdjustments?.amount ?? 0)
+    const openingAdjusted = openingCash + priorAdjustments
     const closingCash = toCents(cashFlows.direct.closingCash.amount)
     const netChange = toCents(cashFlows.direct.netChange.amount)
     let espClosing = 0
@@ -267,9 +269,11 @@ export function buildCashFlowPreparation(
     const columns: PrepColumnControl[] = activities
         .filter(a => columnTech.has(a))
         .map(a => ({ activity: a, technicalCents: columnTech.get(a) ?? 0, economicCents: -(columnTech.get(a) ?? 0) }))
-    const totalControl = nonCashVariationCents + netChange // debe ser 0 (el balance cierra)
+    // Identidad completa del balance: Σ variaciones no efectivo + variación del
+    // efectivo (flujos + modificación de apertura) = 0.
+    const totalControl = nonCashVariationCents + netChange + priorAdjustments
     const methodControl = toCents(cashFlows.direct.operating.amount) - toCents(cashFlows.indirect.operating.amount)
-    const cashControl = (openingCash + netChange) - closingCash
+    const cashControl = (openingAdjusted + netChange) - closingCash
     const espControl = espClosing - closingCash
     const rowsWithDifference = matrixRows.filter(r => r.control !== 0).length
     const allReconciled = totalControl === 0 && methodControl === 0 && cashControl === 0 && espControl === 0 && rowsWithDifference === 0
@@ -364,8 +368,8 @@ export function buildCashFlowPreparation(
 
     const cashBridge: CashBridge = {
         openingPublishedCents: openingCash,
-        priorAdjustmentsCents: 0,
-        openingAdjustedCents: openingCash,
+        priorAdjustmentsCents: priorAdjustments,
+        openingAdjustedCents: openingAdjusted,
         closingCents: closingCash,
         netChangeCents: netChange,
         components,

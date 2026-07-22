@@ -22,7 +22,7 @@ import {
 } from '../accounting/migration/versions'
 import { loadReportingInput } from './loadStatements'
 import { buildStatements } from './engine/buildStatements'
-import { buildCashFlows } from './engine/buildCashFlow'
+import { buildCashFlows, attachCashFlowComparative } from './engine/buildCashFlow'
 import { buildNotes, type StatementNote } from './engine/buildNotes'
 import { buildMetricsCatalog } from './metrics/metrics'
 import {
@@ -145,10 +145,12 @@ export async function loadReportingBundle(
 ): Promise<ReportingBundle> {
     const input = await loadReportingInput(year)
 
+    let prevInput: Awaited<ReturnType<typeof loadReportingInput>> | null = null
     if (options.withComparative) {
-        const prevInput = await loadReportingInput(year - 1)
-        if (prevInput.entries.length > 0 || prevInput.openingBalances.size > 0) {
-            input.comparative = buildStatements(prevInput)
+        const candidate = await loadReportingInput(year - 1)
+        if (candidate.entries.length > 0 || candidate.openingBalances.size > 0) {
+            prevInput = candidate
+            input.comparative = buildStatements(candidate)
         }
     }
 
@@ -157,6 +159,15 @@ export async function loadReportingBundle(
     statements.cashFlowDirect = cashFlows.direct
     statements.cashFlowIndirect = cashFlows.indirect
     statements.validation = cashFlows.validation
+
+    // Comparativo del EFE (§10, EFE-005): MISMO motor sobre el ejercicio anterior
+    // (sus asientos, apertura, mappings e índices). Se adosa comparativeAmount a
+    // las líneas del EFE actual; la UI/PDF/XLSX muestran Actual y Anterior.
+    if (prevInput && input.comparative) {
+        const prevCashFlows = buildCashFlows(prevInput, input.comparative)
+        attachCashFlowComparative(cashFlows.direct, prevCashFlows.direct)
+        attachCashFlowComparative(cashFlows.indirect, prevCashFlows.indirect)
+    }
 
     // Expresiones en moneda de cierre (Fase 2C §9 / Fase 2F §12-13): un ÚNICO
     // set de índices alimenta EFE y bienes de uso. Se carga por id, se verifica

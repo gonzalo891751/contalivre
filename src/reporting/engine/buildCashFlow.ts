@@ -159,14 +159,33 @@ export interface CashFlowsResult {
     validation: StatementValidationReport
 }
 
+/**
+ * Adosa los importes del ejercicio anterior a las líneas del EFE actual (§10,
+ * EFE-005). El comparativo se calcula con el MISMO motor sobre el ejercicio
+ * previo; acá sólo se copian los importes ya calculados.
+ */
+export function attachCashFlowComparative(current: CashFlowStatement2B, prev: CashFlowStatement2B): void {
+    current.openingCash.comparativeAmount = prev.openingCash.amount
+    current.operating.comparativeAmount = prev.operating.amount
+    current.investing.comparativeAmount = prev.investing.amount
+    current.financing.comparativeAmount = prev.financing.amount
+    current.netChange.comparativeAmount = prev.netChange.amount
+    current.closingCash.comparativeAmount = prev.closingCash.amount
+    current.unclassified.comparativeAmount = prev.unclassified.amount
+    if (current.adjustedOpening) current.adjustedOpening.comparativeAmount = prev.adjustedOpening?.amount ?? prev.openingCash.amount
+}
+
 export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle): CashFlowsResult {
     const byId = new Map(input.accounts.map(a => [a.id, a]))
 
-    // Asientos de flujo: sin borradores, sin refundición/transferencia, sin apertura
+    // Asientos de flujo: sin borradores, sin refundición/transferencia, sin
+    // apertura y sin modificaciones de ejercicios anteriores (AREA): estas
+    // últimas modifican el efectivo INICIAL (§11), no son flujos del período.
     const flowEntries = input.entries.filter(e =>
         e.status !== 'DRAFT'
         && !isStructuralClosingEntry(e)
-        && !(e.sourceModule === 'closing' && e.sourceType === 'apertura'))
+        && !(e.sourceModule === 'closing' && e.sourceType === 'apertura')
+        && e.equityMovementType !== 'PRIOR_PERIOD_ADJUSTMENT')
 
     // ── Efectivo inicial y final ─────────────────────────────
     let openingCashCents = 0
@@ -186,6 +205,22 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
             }
         }
     }
+
+    // Modificaciones de ejercicios anteriores (AREA) que afectan el efectivo:
+    // reexpresan el efectivo INICIAL (efectivo inicial modificado), no integran
+    // los flujos del período (§11, EFE-012).
+    let priorAdjustmentsCents = 0
+    for (const entry of input.entries) {
+        if (entry.status === 'DRAFT') continue
+        if (entry.equityMovementType === 'PRIOR_PERIOD_ADJUSTMENT') {
+            for (const l of entry.lines) {
+                if (isCashAccount(byId.get(l.accountId))) {
+                    priorAdjustmentsCents += toCents(l.debit || 0) - toCents(l.credit || 0)
+                }
+            }
+        }
+    }
+    const openingAdjustedCents = openingCashCents + priorAdjustmentsCents
 
     // ── Método directo: línea por línea de asientos con efectivo ──
     const totals: FlowTotals = {
@@ -335,7 +370,7 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
         }
     }
 
-    totals.closingCash = openingCashCents + totals.cashDelta
+    totals.closingCash = openingAdjustedCents + totals.cashDelta
 
     // ── Presentación método directo ──────────────────────────
     const operatingChildren: ReportLine[] = []
@@ -378,6 +413,12 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     const direct: CashFlowStatement2B = {
         method: 'DIRECT',
         openingCash: line('efe:inicial', 'Efectivo y equivalentes al inicio', openingCashCents),
+        priorAdjustments: priorAdjustmentsCents !== 0
+            ? line('efe:mod-apertura', 'Modificaciones de ejercicios anteriores (AREA)', priorAdjustmentsCents)
+            : undefined,
+        adjustedOpening: priorAdjustmentsCents !== 0
+            ? line('efe:inicial-modificado', 'Efectivo y equivalentes al inicio modificado', openingAdjustedCents)
+            : undefined,
         operating: line('efe:operativas', 'Actividades operativas', operatingCents,
             operatingChildren.flatMap(c => c.accountIds), operatingChildren),
         investing: line('efe:inversion', 'Actividades de inversión', totals.investing.cents, Array.from(totals.investing.accountIds),
@@ -429,6 +470,8 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     const indirect: CashFlowStatement2B = {
         method: 'INDIRECT',
         openingCash: direct.openingCash,
+        priorAdjustments: direct.priorAdjustments,
+        adjustedOpening: direct.adjustedOpening,
         operating: line('efe:operativas-ind', 'Actividades operativas (método indirecto)', operatingIndirectCents,
             indirectChildren.flatMap(c => c.accountIds), indirectChildren),
         investing: direct.investing,
@@ -442,8 +485,8 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     // ── Invariantes EFE (§11.6) ──────────────────────────────
     const checks: ValidationCheck[] = [...bundle.validation.checks]
 
-    checks.push(mkCheck('efe-variacion', 'EFE: variación neta = efectivo final − inicial',
-        totals.closingCash - openingCashCents, netChangeCents))
+    checks.push(mkCheck('efe-variacion', 'EFE: variación neta = efectivo final − inicial modificado',
+        totals.closingCash - openingAdjustedCents, netChangeCents))
 
     // Efectivo del EFE = Caja y equivalentes del ESP
     let cashInBalanceCents = 0
