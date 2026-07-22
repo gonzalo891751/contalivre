@@ -15,6 +15,7 @@ import { useState } from 'react'
 import { ArrowRight, ChevronRight } from 'lucide-react'
 import ValidationBanner from './ValidationBanner'
 import LineageModal from './LineageModal'
+import PreparacionEfe from './PreparacionEfe'
 import { money, statementStyles } from './statementFormat'
 import type { CashFlowStatement2B, ReportLine } from '../../../reporting/domain/types'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
@@ -22,6 +23,7 @@ import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 type Method = 'DIRECT' | 'INDIRECT'
 type Currency = 'NOMINAL' | 'CLOSING'
 type Detail = 'SUMMARY' | 'DETAIL'
+type View = 'EXPOSICION' | 'PREPARACION'
 
 /** Por qué cada ajuste del método indirecto se suma o se resta (§7.3) */
 const INDIRECT_HINTS: Record<string, string> = {
@@ -182,6 +184,7 @@ function ActivityCard({ line, share, hint, detail, onLineage, defaultOpen }: {
 }
 
 export default function FlujoEfectivoCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
+    const [view, setView] = useState<View>('EXPOSICION')
     const [method, setMethod] = useState<Method>('DIRECT')
     const [currency, setCurrency] = useState<Currency>('NOMINAL')
     const [detail, setDetail] = useState<Detail>('DETAIL')
@@ -193,6 +196,27 @@ export default function FlujoEfectivoCanonicalTab({ bundle }: { bundle: Reportin
 
     if (!nominalDirect || !nominalIndirect) {
         return <div className="stmt-card" style={{ padding: 16 }}>El EFE no está disponible para este contexto.<style>{statementStyles}</style></div>
+    }
+
+    const viewSwitch = (
+        <div className="efe-toolbar" style={{ marginBottom: 12 }}>
+            <Segmented<View>
+                label="Vista"
+                value={view}
+                onChange={setView}
+                options={[{ value: 'EXPOSICION', label: 'Exposición' }, { value: 'PREPARACION', label: 'Preparación' }]}
+            />
+        </div>
+    )
+
+    if (view === 'PREPARACION') {
+        return (
+            <div>
+                {viewSwitch}
+                <PreparacionEfe bundle={bundle} />
+                <style>{statementStyles}</style>
+            </div>
+        )
     }
 
     const showClosing = currency === 'CLOSING'
@@ -218,6 +242,7 @@ export default function FlujoEfectivoCanonicalTab({ bundle }: { bundle: Reportin
 
     return (
         <div>
+            {viewSwitch}
             <div className="efe-toolbar">
                 <Segmented<Method>
                     label="Método"
