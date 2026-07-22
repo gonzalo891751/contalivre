@@ -26,6 +26,7 @@
 import type { Account } from '../../core/models'
 import { toCents } from '../../accounting/domain/money'
 import { isStructuralClosingEntry } from '../../utils/resultsStatement'
+import { disposalOverrideForEntry, type CashFlowPolicy, type CashFlowOverride } from '../policy/cashFlowPolicy'
 import type {
     CashFlowStatement2B,
     ReportLine,
@@ -124,6 +125,31 @@ export function detectDisposalFold(
 }
 
 /**
+ * Firma de una disposición de activo NO operativo que NO es plegable
+ * automáticamente (Fase 2G.1 §4): baja de un activo de inversión/financiación
+ * (crédito) + resultado por la venta + un crédito por cobrar (venta a crédito o
+ * mixta). Estos casos NO se clasifican en silencio: si no hay override que los
+ * resuelva, se DETECTAN y bloquean (`UNRESOLVED_DISPOSAL`). Es una firma estrecha
+ * (exige el crédito por cobrar) para no confundir con depreciaciones ni compras.
+ */
+export function isCreditOrMixedDisposal(
+    lines: { accountId: string; debit?: number; credit?: number }[],
+    byId: Map<string, Account>,
+): boolean {
+    let hasResult = false, hasNonOpAssetDerecognition = false, hasReceivable = false
+    for (const l of lines) {
+        const account = byId.get(l.accountId)
+        const bucket = flowBucket(account)
+        const netDC = toCents(l.debit || 0) - toCents(l.credit || 0)
+        if (netDC === 0) continue
+        if (bucket === 'RESULT') hasResult = true
+        if ((bucket === 'INVESTING' || bucket === 'FINANCING') && account?.kind === 'ASSET' && netDC < 0) hasNonOpAssetDerecognition = true
+        if (bucket === 'WC_ASSET' && netDC > 0) hasReceivable = true
+    }
+    return hasResult && hasNonOpAssetDerecognition && hasReceivable
+}
+
+/**
  * Subcategoría operativa del método directo (Fase 2E §7.2): estructural por
  * statementGroup de la contrapartida; jamás por nombre. Compartida con la
  * reexpresión a moneda de cierre para que ambas expresiones expongan el mismo
@@ -175,7 +201,7 @@ export function attachCashFlowComparative(current: CashFlowStatement2B, prev: Ca
     if (current.adjustedOpening) current.adjustedOpening.comparativeAmount = prev.adjustedOpening?.amount ?? prev.openingCash.amount
 }
 
-export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle): CashFlowsResult {
+export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle, policy?: CashFlowPolicy | null): CashFlowsResult {
     const byId = new Map(input.accounts.map(a => [a.id, a]))
 
     // Asientos de flujo: sin borradores, sin refundición/transferencia, sin
@@ -186,6 +212,32 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
         && !isStructuralClosingEntry(e)
         && !(e.sourceModule === 'closing' && e.sourceType === 'apertura')
         && e.equityMovementType !== 'PRIOR_PERIOD_ADJUSTMENT')
+
+    // ── Resolución de disposiciones a crédito/parciales/mixtas (§4) ──
+    // Un override transaccional (target ENTRY/OPERATION → INVESTING/FINANCING)
+    // RESUELVE un asiento como disposición. Sin override, la firma de disposición
+    // a crédito/mixta se DETECTA y bloquea (UNRESOLVED_DISPOSAL): nunca se
+    // clasifica en silencio.
+    const overriddenDisposal = new Map<string, { activity: 'INVESTING' | 'FINANCING'; override: CashFlowOverride }>()
+    const unresolvedDisposals: { entryId: string; date: string; memo: string }[] = []
+    const overAssignBlockers: string[] = []
+    for (const entry of flowEntries) {
+        const ov = disposalOverrideForEntry(policy, entry)
+        if (ov) {
+            const activity = ov.classification as 'INVESTING' | 'FINANCING'
+            overriddenDisposal.set(entry.id, { activity, override: ov })
+            // Control: el importe asignado no puede superar el efectivo real.
+            if (ov.assignedCents != null) {
+                let cashCents = 0
+                for (const l of entry.lines) if (isCashAccount(byId.get(l.accountId))) cashCents += toCents(l.debit || 0) - toCents(l.credit || 0)
+                if (Math.abs(ov.assignedCents) > Math.abs(cashCents)) {
+                    overAssignBlockers.push(`El override ${ov.id} asigna ${(ov.assignedCents / 100).toFixed(2)} a la disposición, mayor que el efectivo real (${(cashCents / 100).toFixed(2)}) del asiento ${entry.id}.`)
+                }
+            }
+        } else if (isCreditOrMixedDisposal(entry.lines, byId) && !detectDisposalFold(entry.lines, byId)) {
+            unresolvedDisposals.push({ entryId: entry.id, date: entry.date, memo: entry.memo })
+        }
+    }
 
     // ── Efectivo inicial y final ─────────────────────────────
     let openingCashCents = 0
@@ -249,6 +301,10 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
     const disposalResultIds = new Set<string>()
 
     for (const entry of flowEntries) {
+        // Disposición resuelta por override (§4.6): el asiento se pliega a la
+        // actividad indicada (inversión/financiación); sus líneas NO son capital
+        // de trabajo operativo y el resultado se elimina del operativo.
+        const ovDisp = overriddenDisposal.get(entry.id)
         let cashCents = 0
         for (const l of entry.lines) {
             if (isCashAccount(byId.get(l.accountId))) {
@@ -259,8 +315,9 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
         const touchesCash = cashCents !== 0 ||
             entry.lines.some(l => isCashAccount(byId.get(l.accountId)))
 
-        // Acumular Δ capital de trabajo (todas las operaciones de flujo)
-        for (const l of entry.lines) {
+        // Acumular Δ capital de trabajo (todas las operaciones de flujo salvo
+        // disposiciones resueltas: sus créditos/PPE no son capital de trabajo).
+        if (!ovDisp) for (const l of entry.lines) {
             const account = byId.get(l.accountId)
             const bucket = flowBucket(account)
             const netDC = toCents(l.debit || 0) - toCents(l.credit || 0)
@@ -278,7 +335,7 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
 
         if (touchesCash && cashCents !== 0) {
             totals.cashDelta += cashCents
-            const fold = detectDisposalFold(entry.lines, byId)
+            const fold = ovDisp ? ovDisp.activity : detectDisposalFold(entry.lines, byId)
             if (fold) {
                 // Disposición de activo/pasivo NO operativo con resultado: el flujo
                 // BRUTO (todo el efectivo del asiento) pertenece a la actividad; el
@@ -343,6 +400,26 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
                             break
                     }
                 }
+            }
+        } else if (!touchesCash && ovDisp) {
+            // Disposición a crédito RESUELTA sin efectivo aún (§4.1): no genera
+            // flujo; se revela lo pendiente de cobro y se elimina el resultado del
+            // operativo (su efectivo será inversión/financiación al cobrarse).
+            let pendingCents = 0
+            for (const l of entry.lines) {
+                const bucket = flowBucket(byId.get(l.accountId))
+                const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
+                if (contribution === 0) continue
+                if (bucket === 'RESULT') { disposalResultCents += contribution; disposalResultIds.add(l.accountId) }
+                if (bucket === 'WC_ASSET') pendingCents += toCents(l.debit || 0) - toCents(l.credit || 0)
+            }
+            if (pendingCents !== 0) {
+                nonMonetaryDisclosures.push({
+                    id: `efe:pendiente:${entry.id}`,
+                    label: `${entry.date} — ${entry.memo} (venta pendiente de cobro)`,
+                    level: 2, amount: fromCents(Math.abs(pendingCents)),
+                    accountIds: entry.lines.map(l => l.accountId),
+                })
             }
         } else if (!touchesCash) {
             // Asiento sin efectivo: aporta a X del indirecto y, si toca
@@ -507,6 +584,19 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle):
         detail: totals.unclassified.cents !== 0
             ? `Cuentas sin categoría EFE: ${Array.from(totals.unclassified.accountIds).join(', ')}`
             : undefined,
+    })
+
+    // Disposiciones de activos no operativos sin resolver (§4): venta a crédito,
+    // cobro parcial u operación mixta que no se pliega y no tiene override. NO se
+    // clasifica en silencio: se detecta y bloquea (UNRESOLVED_DISPOSAL).
+    checks.push({
+        id: 'efe-disposicion',
+        label: 'EFE: disposiciones de activos resueltas (sin ventas a crédito/mixtas sin clasificar)',
+        passed: unresolvedDisposals.length === 0 && overAssignBlockers.length === 0,
+        actual: unresolvedDisposals.length,
+        detail: unresolvedDisposals.length > 0
+            ? `Disposiciones no resueltas (resolver con override): ${unresolvedDisposals.map(d => `${d.date} ${d.memo}`).join('; ')}`
+            : overAssignBlockers.length > 0 ? overAssignBlockers.join(' · ') : undefined,
     })
 
     const allPassed = checks.every(c => c.passed)

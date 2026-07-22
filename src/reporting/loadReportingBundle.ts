@@ -34,6 +34,7 @@ import {
 import { reexpressCashFlow } from './engine/cashFlowInflation'
 import { buildPublicationGate, type PublicationGate } from './engine/publicationGate'
 import { buildCashFlowPreparation, buildCashFlowPreparationRestated, type CashFlowPreparationModel } from './preparation/cashFlowPreparation'
+import { getActivePolicy } from './policy/policyRepository'
 import { reexpressFixedAssetsAnnex } from './engine/fixedAssetsInflation'
 import { getIndexSet, indexSetToMap } from '../accounting/inflation/indexRegistry'
 import type { MetricCatalogEntry, HorizontalAnalysisRow, VerticalAnalysisRow } from './metrics/types'
@@ -160,8 +161,12 @@ export async function loadReportingBundle(
         }
     }
 
+    // Política EFE vigente (§4, §5): el motor consume overrides de disposición y
+    // clasificaciones de efectivo. null si la empresa aún no tiene política.
+    const policy = await getActivePolicy(input.context.companyId, input.context.exerciseId).catch(() => null)
+
     const statements = buildStatements(input)
-    const cashFlows = buildCashFlows(input, statements)
+    const cashFlows = buildCashFlows(input, statements, policy)
     statements.cashFlowDirect = cashFlows.direct
     statements.cashFlowIndirect = cashFlows.indirect
     statements.validation = cashFlows.validation
