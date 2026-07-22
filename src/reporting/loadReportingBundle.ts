@@ -33,6 +33,7 @@ import {
 } from './metrics/analysis'
 import { reexpressCashFlow } from './engine/cashFlowInflation'
 import { buildPublicationGate, type PublicationGate } from './engine/publicationGate'
+import { buildCashFlowPreparation, type CashFlowPreparationModel } from './preparation/cashFlowPreparation'
 import { reexpressFixedAssetsAnnex } from './engine/fixedAssetsInflation'
 import { getIndexSet, indexSetToMap } from '../accounting/inflation/indexRegistry'
 import type { MetricCatalogEntry, HorizontalAnalysisRow, VerticalAnalysisRow } from './metrics/types'
@@ -114,6 +115,8 @@ export interface ReportingBundle {
     analysis: ReportingBundleAnalysis
     /** puerta de publicación unificada: gobierna status, snapshots y exports (§5.3) */
     publicationGate: PublicationGate
+    /** modelo de preparación (papel de trabajo matricial) del EFE nominal (§7) */
+    preparation: CashFlowPreparationModel
     metadata: ReportMetadata
 }
 
@@ -181,6 +184,7 @@ export async function loadReportingBundle(
         }
     }
 
+    const preparation = buildCashFlowPreparation(input, statements, cashFlows)
     const notes = buildNotes(input, statements)
     const metrics = buildMetricsCatalog(statements, input.accounts, input.comparative ?? null)
     const analysis: ReportingBundleAnalysis = {
@@ -240,5 +244,5 @@ export async function loadReportingBundle(
         status,
     }
 
-    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, publicationGate, metadata }
+    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, publicationGate, preparation, metadata }
 }
