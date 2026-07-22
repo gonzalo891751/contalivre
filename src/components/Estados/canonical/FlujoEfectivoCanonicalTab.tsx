@@ -432,6 +432,14 @@ const efeStyles = `
 .efe-row-amount.is-neg { color: #dc2626; }
 .efe-row-hint { font-size: 0.72rem; color: #94a3b8; margin: 0 12px 6px; line-height: 1.4; }
 
+/* Móvil (EFE-014): la cabecera de actividad se apila en vez de recortarse */
+@media (max-width: 430px) {
+    .efe-card-head { flex-wrap: wrap; align-items: flex-start; }
+    .efe-card-title { min-width: 0; flex: 1 1 100%; }
+    .efe-card-meta { flex-wrap: wrap; gap: 6px 12px; margin-top: 4px; flex-shrink: 1; }
+    .efe-card-share { white-space: nowrap; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .efe-row-caret, .efe-segmented-btn { transition: none; }
 }

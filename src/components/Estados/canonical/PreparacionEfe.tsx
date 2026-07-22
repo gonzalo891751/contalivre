@@ -7,7 +7,7 @@
  * total y celda interactiva con fórmula, operandos y lineage. Móvil: tarjetas.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { money } from './statementFormat'
 import { preparacionStyles } from './preparacionStyles'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
@@ -37,20 +37,45 @@ function ControlChip({ label, cents, ok }: { label: string; cents?: number; ok: 
     )
 }
 
-/** Panel de detalle de una fila/celda: fórmula, sustitución, regla y lineage (§12.5) */
+/** Panel de detalle de una fila/celda: fórmula, sustitución, regla y lineage (§12.5).
+ * Accesible (§13): foco inicial, trampa de foco, Escape y retorno de foco. */
 function CellDetail({ row, imputation, onClose }: { row: PrepMatrixRow; imputation?: PrepImputation; onClose: () => void }) {
+    const dialogRef = useRef<HTMLDivElement>(null)
+    const closeRef = useRef<HTMLButtonElement>(null)
+    const titleId = `prep-detail-title-${row.accountId}`
+
+    useEffect(() => {
+        const previouslyFocused = document.activeElement as HTMLElement | null
+        closeRef.current?.focus() // foco inicial
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') { e.preventDefault(); onClose(); return }
+            if (e.key !== 'Tab') return
+            const focusables = dialogRef.current?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+            if (!focusables || focusables.length === 0) return
+            const first = focusables[0]
+            const last = focusables[focusables.length - 1]
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+        }
+        document.addEventListener('keydown', onKey)
+        return () => {
+            document.removeEventListener('keydown', onKey)
+            previouslyFocused?.focus() // retorno de foco al origen
+        }
+    }, [onClose])
+
     const operandsText = imputation
         ? Object.entries(imputation.operands).map(([k, v]) => `${k} = ${money(v)}`).join('   ')
         : `saldo final = ${money(row.closingCents / 100)}   saldo inicial = ${money(row.openingCents / 100)}`
     return (
-        <div className="prep-detail-backdrop" role="dialog" aria-modal="true" aria-label={`Detalle de ${row.name}`} onClick={onClose}>
-            <div className="prep-detail" onClick={e => e.stopPropagation()}>
+        <div className="prep-detail-backdrop" onClick={onClose}>
+            <div className="prep-detail" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={dialogRef} onClick={e => e.stopPropagation()}>
                 <div className="prep-detail-head">
                     <div>
-                        <div className="prep-detail-title">{row.code} {row.name}</div>
+                        <div className="prep-detail-title" id={titleId}>{row.code} {row.name}</div>
                         <div className="prep-detail-sub">{imputation?.causeLabel ?? row.causeLabel} · {ACTIVITY_LABEL[row.activity]}</div>
                     </div>
-                    <button type="button" className="prep-detail-close" onClick={onClose} aria-label="Cerrar">✕</button>
+                    <button type="button" className="prep-detail-close" onClick={onClose} aria-label="Cerrar" ref={closeRef}>✕</button>
                 </div>
                 <dl className="prep-detail-grid">
                     <dt>Fórmula</dt><dd className="prep-mono">{imputation?.formula ?? 'saldo final − saldo inicial'}</dd>
