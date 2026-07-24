@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContaLivre — Brand Book & UI System 2026</title>
+    
+    <!-- Google Fonts: Outfit (Titular), Inter (Cuerpo), JetBrains Mono (Código/Numérico) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons (para UI y Mascota) -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        :root {
+            /* --- 1. BRAND CORE PALETTE --- */
+            --brand-primary: #3B82F6; /* Azul Eléctrico */
+            --brand-secondary: #10B981; /* Verde Teal */
+            --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+            --brand-gradient-hover: linear-gradient(135deg, #1D4ED8 0%, #059669 100%);
+            
+            /* --- 2. NEUTRALS (Light Mode Base) --- */
+            --bg-app: #F8FAFC;
+            --bg-paper: #FFFFFF;
+            --text-main: #0F172A;
+            --text-secondary: #64748B;
+            --text-tertiary: #94A3B8;
+            --border-light: #E2E8F0;
+            --border-focus: #3B82F6;
+
+            /* --- 3. SEMANTIC --- */
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --info: #3B82F6;
+
+            /* --- 4. TYPOGRAPHY --- */
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+
+            /* --- 5. EFFECTS --- */
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            --glass-bg: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --blur: blur(12px);
+            
+            /* --- 6. SPACING --- */
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 24px;
+        }
+
+        /* --- TOGGLE SWITCH (NUEVO) --- */
+        .toggle-wrapper { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: var(--border-light);
+            transition: .3s cubic-bezier(0.4, 0.0, 0.2, 1);
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s cubic-bezier(0.4, 0.0, 0.2, 1);
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        input:checked + .slider { background-color: var(--brand-secondary); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        /* RESET & BASE */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #E2E8F0; /* Fondo gris para la vista de edición */
+            font-family: var(--font-body);
+            color: var(--text-main);
+            -webkit-font-smoothing: antialiased;
+            display: flex;
+            justify-content: center;
+            padding: 2rem 0;
+            transition: all 0.3s ease;
+        }
+
+        /* --- CONTROLS --- */
+        .controls {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            display: flex;
+            gap: 1rem;
+            z-index: 9999;
+            background: var(--text-main);
+            padding: 0.5rem;
+            border-radius: 50px;
+            box-shadow: var(--shadow-lg);
+        }
+        .btn-toggle {
+            background: transparent;
+            border: none;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 40px;
+            cursor: pointer;
+            font-family: var(--font-display);
+            font-weight: 600;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn-toggle.active { background: var(--brand-secondary); color: var(--text-main); }
+        .btn-toggle:hover:not(.active) { background: rgba(255,255,255,0.1); }
+
+        /* --- DOCUMENT CONTAINER --- */
+        #doc-container {
+            width: 100%;
+            max-width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2rem;
+        }
+
+        /* --- PAGE / SLIDE STYLES --- */
+        .page {
+            background: var(--bg-paper);
+            position: relative;
+            overflow: hidden;
+            box-shadow: var(--shadow-md);
+            transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* A4 MODE (Default) */
+        body.mode-doc .page {
+            width: 210mm;
+            height: 297mm; /* A4 Ratio */
+            padding: 15mm;
+        }
+
+        /* PRESENTATION MODE */
+        body.mode-deck .page {
+            width: 1280px;
+            height: 720px; /* 16:9 Ratio */
+            padding: 60px;
+            font-size: 1.25rem; /* Escala tipográfica aumentada */
+            border-radius: var(--radius-md);
+        }
+        body.mode-deck .page h1 { font-size: 4rem; }
+        body.mode-deck .page h2 { font-size: 2.5rem; }
+        body.mode-deck .col-2 { gap: 4rem; }
+
+        /* --- TYPOGRAPHY & LAYOUT UTILS --- */
+        h1, h2, h3, h4 { font-family: var(--font-display); line-height: 1.1; margin-bottom: 1rem; }
+        h1 { font-size: 3rem; font-weight: 800; letter-spacing: -0.02em; background: var(--brand-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        h2 { font-size: 2rem; color: var(--text-main); margin-top: 1rem; }
+        h3 { font-size: 1.25rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+        p { line-height: 1.6; color: var(--text-secondary); margin-bottom: 1rem; max-width: 65ch; }
+        
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+        
+        .flex-center { display: flex; align-items: center; justify-content: center; height: 100%; }
+        .flex-col { display: flex; flex-direction: column; }
+        .mt-auto { margin-top: auto; }
+        .mb-4 { margin-bottom: 2rem; }
+
+        /* --- HEADER / FOOTER (Contextual) --- */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-light);
+            padding-bottom: 1rem;
+            margin-bottom: 2rem;
+        }
+        .page-footer {
+            margin-top: auto;
+            border-top: 1px solid var(--border-light);
+            padding-top: 1rem;
+            display: flex;
+            justify-content: space-between;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-tertiary);
+        }
+        .logo-mini { font-weight: 800; font-family: var(--font-display); color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; }
+        .logo-mini i { color: var(--brand-primary); font-size: 1.2em; }
+
+        /* --- SPECIFIC COMPONENT STYLES --- */
+        
+        /* Color Chips */
+        .color-chip {
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+        }
+        .color-preview { height: 100px; width: 100%; }
+        .color-info { padding: 1rem; background: var(--bg-app); font-family: var(--font-mono); font-size: 0.8rem; }
+        .color-name { font-weight: 700; display: block; margin-bottom: 0.25rem; font-family: var(--font-display); }
+
+        /* Typography Scale */
+        .type-row { display: flex; align-items: baseline; gap: 2rem; border-bottom: 1px solid var(--border-light); padding: 1rem 0; }
+        .type-label { width: 100px; font-family: var(--font-mono); color: var(--text-tertiary); font-size: 0.8rem; }
+
+        /* UI Components Preview */
+        .ui-preview-box {
+            background: var(--bg-app);
+            padding: 2rem;
+            border-radius: var(--radius-lg);
+            border: 1px dashed var(--border-light);
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.75rem 1.5rem;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            gap: 0.5rem;
+        }
+        .btn-primary { background: var(--brand-gradient); color: white; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4); }
+        .btn-secondary { background: white; border: 1px solid var(--border-light); color: var(--text-main); }
+        .btn-ghost { background: transparent; color: var(--brand-primary); }
+
+        /* Forms */
+        .input-group label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.4rem; }
+        .input-field {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-body);
+            transition: border 0.2s;
+        }
+        .input-field:focus { outline: none; border-color: var(--brand-primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+
+        /* Accounting Table */
+        .table-container {
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            background: white;
+        }
+        .acc-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .acc-table th { background: var(--bg-app); text-align: left; padding: 0.75rem 1rem; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-light); }
+        .acc-table td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-light); }
+        .acc-table td.num { font-family: var(--font-mono); text-align: right; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+        .acc-table tr:last-child td { font-weight: 700; background: #F0FDF4; }
+        .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+        .badge-debit { background: #FEF2F2; color: var(--error); }
+        .badge-credit { background: #ECFDF5; color: var(--success); }
+
+        /* Mascot */
+        .robot-showcase {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            background: var(--bg-app);
+            padding: 2rem;
+            border-radius: var(--radius-lg);
+        }
+        .robot-pose { text-align: center; }
+        .robot-icon { font-size: 4rem; color: var(--text-main); margin-bottom: 1rem; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1)); }
+        .robot-label { font-size: 0.85rem; color: var(--text-secondary); }
+
+        /* Logo Construction */
+        .logo-grid {
+            background-image: linear-gradient(var(--border-light) 1px, transparent 1px), linear-gradient(90deg, var(--border-light) 1px, transparent 1px);
+            background-size: 20px 20px;
+            height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-light);
+        }
+        .main-logo { font-size: 4rem; font-weight: 800; font-family: var(--font-display); letter-spacing: -0.03em; display: flex; align-items: center; gap: 1rem; }
+        .main-logo i { color: var(--brand-secondary); background: linear-gradient(135deg, #E0F2FE 0%, #DCFCE7 100%); padding: 0.2em; border-radius: 20%; border: 2px solid var(--brand-primary); }
+
+        /* Icon Grid specific */
+        .icon-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1.5rem;
+            background: white;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+        .icon-box:hover { border-color: var(--brand-primary); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .icon-usage-label {
+            margin-top: 1rem;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-tertiary);
+            font-weight: 600;
+        }
+
+        /* Navigation Menu Specifics */
+        .nav-demo-container {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 3rem;
+            margin-top: 2rem;
+        }
+        .sidebar-mock {
+            width: 280px;
+            background: white;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: 1.5rem 1rem;
+            box-shadow: var(--shadow-md);
+        }
+        .nav-group { margin-bottom: 1.5rem; }
+        .nav-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-tertiary);
+            font-weight: 600;
+            padding: 0 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 0.75rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-weight: 500;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+        .nav-item:hover { background: var(--bg-app); color: var(--text-main); }
+        .nav-item.active {
+            background: #EFF6FF;
+            color: var(--brand-primary);
+        }
+        .nav-item i { font-size: 1.2rem; }
+        
+        .nav-subgroup {
+            margin-left: 2.25rem;
+            padding-left: 1rem;
+            border-left: 1px solid var(--border-light);
+            margin-top: 0.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .nav-subitem {
+            padding: 0.4rem 0;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .nav-subitem:hover { color: var(--text-main); }
+        .nav-subitem.active { color: var(--brand-primary); font-weight: 600; }
+
+        /* Dark Mode Presentation Specifics */
+        .dark-mode-card {
+            background-color: #0F172A; /* Slate 900 */
+            color: #F8FAFC;
+            padding: 2rem;
+            border-radius: var(--radius-lg);
+            position: relative;
+            overflow: hidden;
+        }
+        .dark-mode-card .main-logo { color: white; }
+        .dark-mode-card .main-logo i { background: transparent; border-color: #3B82F6; color: #3B82F6; }
+        
+        .mockup-dark {
+            background: #0F172A;
+            border: 1px solid #334155;
+            color: #F8FAFC;
+        }
+        .mockup-dark .sidebar {
+            background: #1E293B; /* Slate 800 */
+            border-right: 1px solid #334155;
+        }
+        .mockup-dark .content-card {
+            background: #1E293B;
+            border: 1px solid #334155;
+        }
+        .mockup-dark .text-sec { color: #94A3B8; }
+        .mockup-dark .btn-primary { box-shadow: none; }
+
+        /* Code Block */
+        pre { background: #1E293B; color: #E2E8F0; padding: 1.5rem; border-radius: var(--radius-sm); overflow-x: auto; font-family: var(--font-mono); font-size: 0.85rem; }
+
+        /* --- PRINT CSS --- */
+        @media print {
+            body { background: white; padding: 0; display: block; }
+            .controls { display: none !important; }
+            .page { 
+                width: 100% !important; 
+                height: auto !important; 
+                box-shadow: none !important; 
+                border: none !important;
+                margin: 0 !important;
+                break-after: page; 
+                page-break-after: always;
+            }
+            /* Reset Deck Mode overrides if printing */
+            body.mode-deck .page { font-size: initial; padding: 15mm; border-radius: 0; }
+        }
+    </style>
+</head>
+<body class="mode-doc">
+
+    <!-- CONTROLS -->
+    <div class="controls">
+        <button class="btn-toggle active" id="btnDoc" onclick="setMode('doc')">
+            <i class="ph ph-file-text"></i> Brand Book (A4)
+        </button>
+        <button class="btn-toggle" id="btnDeck" onclick="setMode('deck')">
+            <i class="ph ph-presentation-chart"></i> Deck (16:9)
+        </button>
+        <button class="btn-toggle" onclick="window.print()">
+            <i class="ph ph-printer"></i> Export PDF
+        </button>
+    </div>
+
+    <div id="doc-container">
+
+        <!-- ================= PAGE 1: COVER ================= -->
+        <article class="page">
+            <div class="flex-center flex-col" style="height: 100%; text-align: center;">
+                <div style="font-size: 6rem; color: var(--brand-primary); margin-bottom: 2rem;">
+                    <i class="ph-duotone ph-robot"></i>
+                </div>
+                <h1 style="font-size: 4rem; margin-bottom: 0.5rem;">ContaLivre</h1>
+                <p style="font-size: 1.5rem; color: var(--text-secondary); font-weight: 300;">Tu asistente contable</p>
+                
+                <div style="margin-top: 4rem; width: 60px; height: 4px; background: var(--brand-gradient); border-radius: 2px;"></div>
+                
+                <div class="mt-auto">
+                    <p style="font-weight: 600; color: var(--text-main);">Brand Book & UI System</p>
+                    <p style="font-family: var(--font-mono); font-size: 0.9rem;">Versión 2.0 // 2026</p>
+                </div>
+            </div>
+        </article>
+
+        <!-- ================= PAGE 2: INDEX & INTRO ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>02 — Intro</span>
+            </header>
+            
+            <div class="grid-2" style="height: 100%;">
+                <div>
+                    <h2>Índice</h2>
+                    <ul style="list-style: none; margin-top: 2rem; line-height: 2.2; font-weight: 500;">
+                        <li>03. Esencia de Marca</li>
+                        <li>04. Identidad Visual (Logo)</li>
+                        <li>05. Variantes de Logo (Fondos)</li>
+                        <li>06. Paleta Cromática</li>
+                        <li>07. Tipografía</li>
+                        <li>08. Mascota & Voz</li>
+                        <li>09. Iconografía</li>
+                        <li>10. Sistema UI & Componentes</li>
+                        <li><strong>11. Sistema de Navegación</strong></li>
+                        <li>12. Aplicaciones</li>
+                        <li>13. Dark Mode UI</li>
+                        <li>14. Dev Kit</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3>Manifiesto</h3>
+                    <p style="font-size: 1.1rem; color: var(--text-main); font-weight: 500;">
+                        "La contabilidad no debería ser un dolor de cabeza, sino una herramienta de crecimiento."
+                    </p>
+                    <p>
+                        ContaLivre nace en 2026 para democratizar la gestión financiera. Somos el puente entre la complejidad fiscal y el emprendedor moderno. No somos solo un software; somos un asistente proactivo que habla tu idioma.
+                    </p>
+                    <div style="background: #EFF6FF; padding: 1.5rem; border-radius: var(--radius-md); margin-top: 2rem; border-left: 4px solid var(--brand-primary);">
+                        <strong>Propósito:</strong> Liberar a contadores y emprendedores de la carga operativa mediante automatización inteligente y diseño humano.
+                    </div>
+                </div>
+            </div>
+
+            <footer class="page-footer">
+                <span>Guía de Estilo Corporativo</span>
+                <span>2026 © ContaLivre Inc.</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 3: ESSENCE ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>03 — Esencia</span>
+            </header>
+
+            <div class="grid-2">
+                <div>
+                    <h3>Nuestros Valores</h3>
+                    <div style="display: flex; flex-direction: column; gap: 1.5rem; margin-top: 1.5rem;">
+                        <div>
+                            <h4 style="margin-bottom: 0.2rem; color: var(--brand-primary);">Claridad Radical</h4>
+                            <p style="font-size: 0.9rem;">Hablamos en criollo. Traducimos "Activos Pasivos" a "Lo que tenés vs. Lo que debés". Sin jerga innecesaria.</p>
+                        </div>
+                        <div>
+                            <h4 style="margin-bottom: 0.2rem; color: var(--brand-secondary);">Empatía Tech</h4>
+                            <p style="font-size: 0.9rem;">Sabemos que equivocarse da miedo. Nuestro sistema perdona, permite "Deshacer" y explica los errores amablemente.</p>
+                        </div>
+                        <div>
+                            <h4 style="margin-bottom: 0.2rem; color: var(--text-main);">Automatización Invisible</h4>
+                            <p style="font-size: 0.9rem;">El mejor trabajo es el que no tenés que hacer. Automatizamos lo aburrido para que te enfoques en crecer.</p>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <h3>Tono de Voz</h3>
+                    <div style="background: var(--bg-app); padding: 1.5rem; border-radius: var(--radius-md);">
+                        <p><strong>Rioplatense Neutro:</strong> Cercano, profesional pero relajado. Usamos "vos", pero mantenemos el respeto.</p>
+                        
+                        <div style="margin-top: 2rem;">
+                            <span class="badge badge-debit" style="margin-bottom: 0.5rem;">NO DECIMOS</span>
+                            <p style="font-style: italic; color: var(--error);">"Error 404. Datos inválidos en la base de datos."</p>
+                            
+                            <span class="badge badge-credit" style="margin-bottom: 0.5rem; margin-top: 1rem;">SÍ DECIMOS</span>
+                            <p style="font-weight: 500; color: var(--success);">"Ups, no pudimos cargar esa factura. Chequeá que el número de CUIT esté bien escrito."</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="page-footer">
+                <span>Voice & Tone</span>
+                <span>Page 03</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 4: LOGO & IDENTITY ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>04 — Logo</span>
+            </header>
+
+            <h3>Construcción del Logotipo</h3>
+            <div class="logo-grid mb-4">
+                <div class="main-logo">
+                    <i class="ph-duotone ph-robot"></i>
+                    ContaLivre
+                </div>
+            </div>
+
+            <div class="grid-3">
+                <div>
+                    <h4>Clear Space</h4>
+                    <p style="font-size: 0.8rem;">El área de seguridad equivale a la altura de la "C" mayúscula alrededor de todo el logotipo.</p>
+                    <div style="border: 1px dashed var(--brand-primary); padding: 2rem; display: inline-block; margin-top: 1rem;">
+                        <span style="font-family: var(--font-display); font-weight: 800; font-size: 1.5rem;">ContaLivre</span>
+                    </div>
+                </div>
+                <div>
+                    <h4>Isotipo (App Icon)</h4>
+                    <p style="font-size: 0.8rem;">El robot se usa solo en avatares, favicon y loaders.</p>
+                    <div style="background: var(--brand-gradient); width: 64px; height: 64px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-top: 1rem; color: white; font-size: 2rem;">
+                        <i class="ph-fill ph-robot"></i>
+                    </div>
+                </div>
+                <div>
+                    <h4>Tamaño Mínimo</h4>
+                    <p style="font-size: 0.8rem;">Web: 24px alto<br>Print: 10mm alto</p>
+                </div>
+            </div>
+
+            <footer class="page-footer">
+                <span>Visual Identity System</span>
+                <span>Page 04</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 5: LOGO VARIANTS (NEW) ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>05 — Variantes de Logo</span>
+            </header>
+
+            <h3 style="margin-bottom: 2rem;">Comportamiento en Fondos</h3>
+
+            <div class="grid-2">
+                <!-- Light Background (Standard) -->
+                <div>
+                    <h4 style="font-size: 0.9rem; color: var(--text-secondary);">Fondo Claro (Standard)</h4>
+                    <div style="border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 3rem; display: flex; justify-content: center; align-items: center; background: #FFFFFF;">
+                         <div class="main-logo" style="font-size: 2.5rem;">
+                            <i class="ph-duotone ph-robot"></i>
+                            ContaLivre
+                        </div>
+                    </div>
+                    <p style="font-size: 0.8rem; margin-top: 0.5rem;">Uso: Documentos, Web, Apps Light Mode.</p>
+                </div>
+
+                <!-- Dark Background -->
+                <div>
+                    <h4 style="font-size: 0.9rem; color: var(--text-secondary);">Fondo Oscuro (Slate 900)</h4>
+                    <div style="border-radius: var(--radius-md); padding: 3rem; display: flex; justify-content: center; align-items: center; background: #0F172A;">
+                         <div class="main-logo" style="font-size: 2.5rem; color: white;">
+                            <i class="ph-duotone ph-robot" style="color: #3B82F6;"></i>
+                            ContaLivre
+                        </div>
+                    </div>
+                    <p style="font-size: 0.8rem; margin-top: 0.5rem;">Uso: Footer, Dark Mode, Presentaciones.</p>
+                </div>
+
+                <!-- Gradient Background -->
+                <div>
+                    <h4 style="font-size: 0.9rem; color: var(--text-secondary);">Fondo Brand Gradient</h4>
+                    <div style="border-radius: var(--radius-md); padding: 3rem; display: flex; justify-content: center; align-items: center; background: var(--brand-gradient);">
+                         <div class="main-logo" style="font-size: 2.5rem; color: white;">
+                            <i class="ph-fill ph-robot" style="color: white; border: none; background: rgba(255,255,255,0.2);"></i>
+                            ContaLivre
+                        </div>
+                    </div>
+                    <p style="font-size: 0.8rem; margin-top: 0.5rem;">Uso: Splash Screen, Publicidad, Banners.</p>
+                </div>
+
+                <!-- Monochrome -->
+                <div>
+                    <h4 style="font-size: 0.9rem; color: var(--text-secondary);">Monocromo (Tinta)</h4>
+                    <div style="border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 3rem; display: flex; justify-content: center; align-items: center; background: #FFFFFF;">
+                         <div class="main-logo" style="font-size: 2.5rem; color: black; filter: grayscale(100%);">
+                            <i class="ph-fill ph-robot" style="color: black; border: 2px solid black; background: transparent;"></i>
+                            ContaLivre
+                        </div>
+                    </div>
+                    <p style="font-size: 0.8rem; margin-top: 0.5rem;">Uso: Sellos, Impresión fiscal B/N.</p>
+                </div>
+            </div>
+
+            <footer class="page-footer">
+                <span>Visual Identity System</span>
+                <span>Page 05</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 6: COLOR PALETTE ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>06 — Color</span>
+            </header>
+
+            <h3>Brand Core</h3>
+            <div class="grid-3 mb-4">
+                <div class="color-chip">
+                    <div class="color-preview" style="background: var(--brand-primary);"></div>
+                    <div class="color-info">
+                        <span class="color-name">Electric Blue</span>
+                        HEX: #3B82F6<br>Var: --brand-primary
+                    </div>
+                </div>
+                <div class="color-chip">
+                    <div class="color-preview" style="background: var(--brand-secondary);"></div>
+                    <div class="color-info">
+                        <span class="color-name">Growth Teal</span>
+                        HEX: #10B981<br>Var: --brand-secondary
+                    </div>
+                </div>
+                <div class="color-chip">
+                    <div class="color-preview" style="background: var(--brand-gradient);"></div>
+                    <div class="color-info">
+                        <span class="color-name">Main Gradient</span>
+                        Blue -> Green<br>135 degrees
+                    </div>
+                </div>
+            </div>
+
+            <h3>Semantic & Functional</h3>
+            <div class="grid-4">
+                <div class="color-chip">
+                    <div class="color-preview" style="background: #0F172A; height: 60px;"></div>
+                    <div class="color-info">
+                        <span class="color-name">Slate 900</span>
+                        Text / Headings
+                    </div>
+                </div>
+                <div class="color-chip">
+                    <div class="color-preview" style="background: #EF4444; height: 60px;"></div>
+                    <div class="color-info">
+                        <span class="color-name">Error Red</span>
+                        Alerts / Debit
+                    </div>
+                </div>
+                <div class="color-chip">
+                    <div class="color-preview" style="background: #F59E0B; height: 60px;"></div>
+                    <div class="color-info">
+                        <span class="color-name">Warning Amber</span>
+                        Pending
+                    </div>
+                </div>
+                <div class="color-chip">
+                    <div class="color-preview" style="background: #F8FAFC; height: 60px; border: 1px solid #ddd;"></div>
+                    <div class="color-info">
+                        <span class="color-name">Surface Light</span>
+                        Backgrounds
+                    </div>
+                </div>
+            </div>
+
+            <footer class="page-footer">
+                <span>Color Palette</span>
+                <span>Page 06</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 7: TYPOGRAPHY ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>07 — Tipografía</span>
+            </header>
+
+            <div class="grid-2 mb-4">
+                <div>
+                    <h1 style="font-size: 5rem; margin: 0; line-height: 1; color: var(--text-main);">Aa</h1>
+                    <h3 style="color: var(--brand-primary); margin-top: 1rem;">Outfit</h3>
+                    <p>Usada para Titulares y Marketing. Geométrica, moderna y amigable.</p>
+                </div>
+                <div>
+                    <h1 style="font-size: 5rem; margin: 0; line-height: 1; font-family: var(--font-body); color: var(--text-main);">Aa</h1>
+                    <h3 style="color: var(--text-secondary); margin-top: 1rem;">Inter</h3>
+                    <p>Usada para UI y párrafos largos. Legibilidad máxima en pantallas.</p>
+                </div>
+            </div>
+
+            <h3>Escala Tipográfica</h3>
+            <div class="type-row">
+                <div class="type-label">H1 / Display</div>
+                <div style="font-family: var(--font-display); font-weight: 800; font-size: 2.5rem;">Tu asistente contable</div>
+            </div>
+            <div class="type-row">
+                <div class="type-label">H2 / Section</div>
+                <div style="font-family: var(--font-display); font-weight: 600; font-size: 1.75rem;">Resumen Mensual</div>
+            </div>
+            <div class="type-row">
+                <div class="type-label">Body</div>
+                <div style="font-family: var(--font-body); font-size: 1rem;">El flujo de caja se mantiene positivo este trimestre.</div>
+            </div>
+            <div class="type-row">
+                <div class="type-label">Monospace</div>
+                <div style="font-family: var(--font-mono); font-size: 0.9rem;">$ 1.250.400,00 (Tabular Nums)</div>
+            </div>
+
+            <footer class="page-footer">
+                <span>Typography System</span>
+                <span>Page 07</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 8: MASCOT & VOZ ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>08 — La Mascota</span>
+            </header>
+
+            <h3>"Boti" - El Asistente</h3>
+            <p>Boti no es un juguete, es un colega. Se utiliza para guiar, educar y suavizar mensajes de error. No se usa en documentos legales formales (ej. balances oficiales PDF).</p>
+
+            <div class="robot-showcase mt-auto mb-4">
+                <div class="robot-pose">
+                    <i class="ph-duotone ph-robot robot-icon" style="color: var(--brand-primary);"></i>
+                    <div class="robot-label"><strong>Neutro / Hola</strong><br>Dashboard y Menús</div>
+                </div>
+                <div class="robot-pose">
+                    <i class="ph-duotone ph-robot robot-icon" style="color: var(--success);"></i>
+                    <i class="ph-fill ph-check-circle" style="color: var(--success); position: absolute; margin-left: -20px; font-size: 1.5rem;"></i>
+                    <div class="robot-label"><strong>Éxito</strong><br>Tarea completada</div>
+                </div>
+                <div class="robot-pose">
+                    <i class="ph-duotone ph-robot robot-icon" style="color: var(--warning);"></i>
+                    <i class="ph-fill ph-question" style="color: var(--warning); position: absolute; margin-left: -20px; font-size: 1.5rem;"></i>
+                    <div class="robot-label"><strong>Duda / Ayuda</strong><br>Tooltips y Onboarding</div>
+                </div>
+                <div class="robot-pose">
+                    <i class="ph-duotone ph-robot robot-icon" style="color: var(--error);"></i>
+                    <i class="ph-fill ph-warning-circle" style="color: var(--error); position: absolute; margin-left: -20px; font-size: 1.5rem;"></i>
+                    <div class="robot-label"><strong>Error</strong><br>Estado vacío o Fallo</div>
+                </div>
+            </div>
+
+            <footer class="page-footer">
+                <span>Brand Assets</span>
+                <span>Page 08</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 9: ICONOGRAPHY ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>09 — Iconografía Crítica</span>
+            </header>
+
+            <h3>Set de Acciones Principales</h3>
+            <p>Estos íconos son el lenguaje visual primario de la aplicación. Deben usarse consistentemente para guiar al usuario.</p>
+
+            <div class="grid-3 mb-4" style="margin-top: 2rem;">
+                <!-- Aceptar -->
+                <div class="icon-box">
+                    <div style="width: 56px; height: 56px; background: #ECFDF5; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--success);">
+                        <i class="ph-bold ph-check" style="font-size: 2rem;"></i>
+                    </div>
+                    <span style="font-weight: 600; margin-top: 1rem; color: var(--text-main);">Aceptar / Guardar</span>
+                    <span class="icon-usage-label">Acción Positiva</span>
+                </div>
+
+                <!-- Cancelar -->
+                <div class="icon-box">
+                    <div style="width: 56px; height: 56px; background: #F1F5F9; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary);">
+                        <i class="ph-bold ph-x" style="font-size: 2rem;"></i>
+                    </div>
+                    <span style="font-weight: 600; margin-top: 1rem; color: var(--text-main);">Cancelar / Cerrar</span>
+                    <span class="icon-usage-label">Acción Neutra</span>
+                </div>
+
+                <!-- Error -->
+                <div class="icon-box">
+                    <div style="width: 56px; height: 56px; background: #FEF2F2; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--error);">
+                        <i class="ph-bold ph-warning-circle" style="font-size: 2rem;"></i>
+                    </div>
+                    <span style="font-weight: 600; margin-top: 1rem; color: var(--text-main);">Error / Alerta</span>
+                    <span class="icon-usage-label">Estado Crítico</span>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <!-- Exportar -->
+                <div style="background: var(--bg-app); padding: 1.5rem; border-radius: var(--radius-md); display: flex; align-items: center; gap: 1.5rem;">
+                    <i class="ph-duotone ph-export" style="font-size: 2.5rem; color: var(--brand-primary);"></i>
+                    <div>
+                        <h4 style="margin:0; font-size: 1rem;">Exportar</h4>
+                        <p style="font-size: 0.85rem; margin:0;">Usado en reportes PDF, Excel y descargas.</p>
+                    </div>
+                </div>
+
+                <!-- Información -->
+                <div style="background: var(--bg-app); padding: 1.5rem; border-radius: var(--radius-md); display: flex; align-items: center; gap: 1.5rem;">
+                    <i class="ph-duotone ph-info" style="font-size: 2.5rem; color: var(--info);"></i>
+                    <div>
+                        <h4 style="margin:0; font-size: 1rem;">Información</h4>
+                        <p style="font-size: 0.85rem; margin:0;">Tooltips, ayudas contextuales y notas.</p>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="page-footer">
+                <span>Iconography System</span>
+                <span>Page 09</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 10: UI SYSTEM ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>10 — UI & Componentes</span>
+            </header>
+
+            <div class="grid-2">
+                <div>
+                    <h3>Botones (Acciones)</h3>
+                    <div class="ui-preview-box">
+                        <!-- Aceptar / Principal -->
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <label style="font-size: 0.8rem; color: var(--text-secondary);">Principal / Aceptar</label>
+                            <button class="btn btn-primary">
+                                <i class="ph-bold ph-check"></i> Confirmar Operación
+                            </button>
+                        </div>
+                        
+                        <!-- Cancelar / Secundario -->
+                         <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <label style="font-size: 0.8rem; color: var(--text-secondary);">Secundario / Cancelar</label>
+                            <button class="btn btn-secondary">
+                                Cancelar
+                            </button>
+                        </div>
+
+                        <!-- Destructivo -->
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <label style="font-size: 0.8rem; color: var(--text-secondary);">Destructivo</label>
+                            <button class="btn btn-ghost" style="color: var(--error);">
+                                <i class="ph-bold ph-trash"></i> Eliminar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h3>Toggles & Slides</h3>
+                    <div class="ui-preview-box">
+                        <label class="toggle-wrapper">
+                            <div class="toggle-switch">
+                                <input type="checkbox" checked>
+                                <span class="slider"></span>
+                            </div>
+                            <span style="font-size: 0.95rem; font-weight: 500;">Modo Oscuro</span>
+                        </label>
+
+                        <label class="toggle-wrapper">
+                            <div class="toggle-switch">
+                                <input type="checkbox">
+                                <span class="slider"></span>
+                            </div>
+                            <span style="font-size: 0.95rem; font-weight: 500;">Notificaciones Email</span>
+                        </label>
+                        
+                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed var(--border-light);">
+                            <label style="display: block; font-size: 0.85rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Input Selector</label>
+                            <div class="input-field" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                                <span>Exportar a PDF</span>
+                                <i class="ph-bold ph-caret-down"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="margin-top: 2rem;">Tabla Contable (High Density)</h3>
+            <div class="table-container" style="box-shadow: var(--shadow-sm); border: 0;">
+                <table class="acc-table">
+                    <thead>
+                        <tr style="background: #F1F5F9;">
+                            <th style="text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">Fecha</th>
+                            <th style="text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">Descripción</th>
+                            <th style="text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; text-align: right;">Debe</th>
+                            <th style="text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; text-align: right;">Haber</th>
+                            <th style="text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; text-align: center;">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="color: var(--text-secondary); font-size: 0.85rem;">12 Feb</td>
+                            <td style="font-weight: 500;">Transferencia Recibida #992</td>
+                            <td class="num" style="color: var(--success); background: rgba(16, 185, 129, 0.05);">+ 120.000,00</td>
+                            <td class="num" style="color: var(--text-tertiary);">-</td>
+                            <td style="text-align: center;"><i class="ph-fill ph-check-circle" style="color: var(--success);"></i></td>
+                        </tr>
+                        <tr>
+                            <td style="color: var(--text-secondary); font-size: 0.85rem;">10 Feb</td>
+                            <td style="font-weight: 500;">Pago Servicio Hosting</td>
+                            <td class="num" style="color: var(--text-tertiary);">-</td>
+                            <td class="num" style="color: var(--text-main);">15.400,00</td>
+                            <td style="text-align: center;"><i class="ph-fill ph-check-circle" style="color: var(--success);"></i></td>
+                        </tr>
+                        <tr style="border-bottom: none;">
+                            <td style="color: var(--text-secondary); font-size: 0.85rem;">05 Feb</td>
+                            <td style="font-weight: 500;">Compra Insumos Oficina</td>
+                            <td class="num" style="color: var(--text-tertiary);">-</td>
+                            <td class="num" style="color: var(--text-main);">4.250,50</td>
+                            <td style="text-align: center;"><i class="ph-fill ph-clock" style="color: var(--warning);"></i></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <footer class="page-footer">
+                <span>UI Components</span>
+                <span>Page 10</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 11: NAVIGATION MENU (NEW) ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>11 — Sistema de Navegación</span>
+            </header>
+
+            <h3>Menú Lateral (Sidebar)</h3>
+            <p>Estructura jerárquica para la navegación principal. Priorizamos la claridad y el agrupamiento lógico de funciones contables.</p>
+
+            <div class="nav-demo-container">
+                
+                <!-- Sidebar Rendering -->
+                <div class="sidebar-mock">
+                    <div class="nav-group">
+                        <div class="nav-label">General</div>
+                        <div class="nav-item">
+                            <i class="ph ph-squares-four"></i>
+                            Dashboard
+                        </div>
+                    </div>
+
+                    <div class="nav-group">
+                        <div class="nav-label">Contabilidad</div>
+                        <div class="nav-item">
+                            <i class="ph ph-tree-structure"></i>
+                            Plan de Cuentas
+                        </div>
+                        <div class="nav-item active">
+                            <i class="ph-fill ph-notebook"></i>
+                            Libro Diario
+                        </div>
+                        <div class="nav-item">
+                            <i class="ph ph-book-bookmark"></i>
+                            Libro Mayor
+                        </div>
+                        <div class="nav-item">
+                            <i class="ph ph-scales"></i>
+                            Balance SyS
+                        </div>
+                        <div class="nav-item">
+                            <i class="ph ph-chart-line-up"></i>
+                            Estados Contables
+                        </div>
+                    </div>
+
+                    <div class="nav-group">
+                        <div class="nav-label">Herramientas</div>
+                        <div class="nav-item" style="color: var(--text-main);">
+                            <i class="ph ph-table"></i>
+                            Planillas
+                            <i class="ph-bold ph-caret-down" style="font-size: 0.8rem; margin-left: auto;"></i>
+                        </div>
+                        <!-- Expanded Submenu -->
+                        <div class="nav-subgroup">
+                            <div class="nav-subitem">Inventario</div>
+                            <div class="nav-subitem active">Conciliaciones</div>
+                            <div class="nav-subitem">Amortizaciones</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Specs -->
+                <div style="flex: 1;">
+                    <h4>Estados de Interacción</h4>
+                    <ul style="list-style: none; margin-top: 1rem; display: flex; flex-direction: column; gap: 1.5rem;">
+                        <li style="display: flex; gap: 1rem; align-items: center;">
+                            <span style="background: #EFF6FF; color: var(--brand-primary); padding: 0.5rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem;">ACTIVO</span>
+                            <p style="margin: 0; font-size: 0.9rem;">Fondo azul muy claro (#EFF6FF), ícono lleno (fill) y texto en color primario.</p>
+                        </li>
+                        <li style="display: flex; gap: 1rem; align-items: center;">
+                            <span style="background: white; border: 1px solid var(--border-light); color: var(--text-secondary); padding: 0.5rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem;">INACTIVO</span>
+                            <p style="margin: 0; font-size: 0.9rem;">Fondo transparente, ícono línea (regular) y texto gris secundario.</p>
+                        </li>
+                        <li style="display: flex; gap: 1rem; align-items: center;">
+                            <span style="background: white; border: 1px solid var(--border-light); color: var(--text-main); padding: 0.5rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem;">SUBMENÚ</span>
+                            <p style="margin: 0; font-size: 0.9rem;">Indentación a la izquierda. Indicador de despliegue (caret). Sub-ítems con menor peso visual.</p>
+                        </li>
+                    </ul>
+
+                    <div style="margin-top: 3rem; padding: 1.5rem; background: #FFF7ED; border-radius: var(--radius-md); border-left: 4px solid var(--warning);">
+                        <strong style="color: #C2410C; display: block; margin-bottom: 0.5rem;">Regla de UX</strong>
+                        <p style="margin: 0; font-size: 0.9rem; color: #9A3412;">
+                            Nunca ocultar el menú lateral completamente en desktop. Usar versión colapsada (solo iconos) si el espacio es reducido, pero mantener la visibilidad de la ubicación actual.
+                        </p>
+                    </div>
+                </div>
+
+            </div>
+
+            <footer class="page-footer">
+                <span>Navigation System</span>
+                <span>Page 11</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 12: APPLICATIONS ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>12 — Aplicaciones</span>
+            </header>
+
+            <h3>Dashboard Mockup</h3>
+            
+            <div style="background: var(--bg-app); border: 1px solid var(--border-light); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); height: 400px; display: grid; grid-template-columns: 200px 1fr;">
+                <!-- Sidebar Mock -->
+                <div style="background: white; border-right: 1px solid var(--border-light); padding: 1rem;">
+                    <div style="font-weight: 800; color: var(--brand-primary); margin-bottom: 2rem;"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">
+                        <div style="background: #EFF6FF; color: var(--brand-primary); padding: 0.5rem; border-radius: 6px; font-weight: 600;">Dashboard</div>
+                        <div style="padding: 0.5rem;">Movimientos</div>
+                        <div style="padding: 0.5rem;">Impuestos</div>
+                        <div style="padding: 0.5rem;">Reportes</div>
+                    </div>
+                </div>
+                
+                <!-- Content Mock -->
+                <div style="padding: 2rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                        <h4 style="margin:0;">Hola, Santiago 👋</h4>
+                        <div class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.8rem;">Nueva Factura</div>
+                    </div>
+                    
+                    <div class="grid-3">
+                        <div style="background: white; padding: 1rem; border-radius: 12px; box-shadow: var(--shadow-sm);">
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Ingresos (Mes)</div>
+                            <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 600; color: var(--success); margin-top: 0.5rem;">$ 1.2M</div>
+                        </div>
+                        <div style="background: white; padding: 1rem; border-radius: 12px; box-shadow: var(--shadow-sm);">
+                            <div style="font-size: 0.8rem; color: var(--text-secondary);">Gastos</div>
+                            <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 600; color: var(--text-main); margin-top: 0.5rem;">$ 400k</div>
+                        </div>
+                        <div style="background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%); padding: 1rem; border-radius: 12px; box-shadow: var(--shadow-sm); color: white;">
+                            <div style="font-size: 0.8rem; opacity: 0.9;">Próximo Vencimiento</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; margin-top: 0.5rem;">IVA - 20 Feb</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="page-footer">
+                <span>Brand Applications</span>
+                <span>Page 12</span>
+            </footer>
+        </article>
+
+        <!-- ================= PAGE 13: DARK MODE UI ================= -->
+        <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>13 — Dark Mode UI</span>
+            </header>
+
+            <h3>Adaptación a Entornos Oscuros</h3>
+            <p>En Dark Mode, los colores semánticos (verde, rojo) deben desaturarse ligeramente para evitar fatiga visual. Los fondos usan la escala de "Slate" (Pizarra).</p>
+            
+            <div class="mockup-dark" style="border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); height: 450px; display: grid; grid-template-columns: 200px 1fr;">
+                <!-- Sidebar Dark -->
+                <div class="sidebar" style="padding: 1rem;">
+                    <div style="font-weight: 800; color: white; margin-bottom: 2rem; display:flex; align-items:center; gap:0.5rem;">
+                        <i class="ph-duotone ph-robot" style="color:var(--brand-primary)"></i> ContaLivre
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.9rem; color: #94A3B8;">
+                        <div style="background: rgba(59, 130, 246, 0.2); color: #60A5FA; padding: 0.5rem; border-radius: 6px; font-weight: 600;">Dashboard</div>
+                        <div style="padding: 0.5rem;">Movimientos</div>
+                        <div style="padding: 0.5rem;">Impuestos</div>
+                        <div style="padding: 0.5rem;">Reportes</div>
+                    </div>
+                </div>
+                
+                <!-- Content Dark -->
+                <div style="padding: 2rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                        <h4 style="margin:0; color: white;">Hola, Santiago 👋</h4>
+                        <div class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.8rem;">Nueva Factura</div>
+                    </div>
+                    
+                    <div class="grid-3">
+                        <div class="content-card" style="padding: 1rem; border-radius: 12px;">
+                            <div class="text-sec" style="font-size: 0.8rem;">Ingresos (Mes)</div>
+                            <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 600; color: #34D399; margin-top: 0.5rem;">$ 1.2M</div>
+                        </div>
+                        <div class="content-card" style="padding: 1rem; border-radius: 12px;">
+                            <div class="text-sec" style="font-size: 0.8rem;">Gastos</div>
+                            <div style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: 600; color: #E2E8F0; margin-top: 0.5rem;">$ 400k</div>
+                        </div>
+                        <div style="background: linear-gradient(135deg, #1E3A8A 0%, #1E40AF 100%); padding: 1rem; border-radius: 12px; border: 1px solid #3B82F6; color: white;">
+                            <div style="font-size: 0.8rem; opacity: 0.8;">Próximo Vencimiento</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; margin-top: 0.5rem;">IVA - 20 Feb</div>
+                        </div>
+                    </div>
+
+                    <!-- Mini Table Dark -->
+                    <div style="margin-top: 2rem;">
+                         <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; font-size: 0.8rem; color: #94A3B8;">
+                            <span>Concepto</span>
+                            <span>Monto</span>
+                         </div>
+                         <div style="display: flex; justify-content: space-between; padding: 1rem 0; border-bottom: 1px solid #334155;">
+                            <span style="color: #E2E8F0;">Servicios Cloud</span>
+                            <span style="font-family: var(--font-mono); color: #E2E8F0;">$ 150.00</span>
+                         </div>
+                         <div style="display: flex; justify-content: space-between; padding: 1rem 0; border-bottom: 1px solid #334155;">
+                            <span style="color: #E2E8F0;">Consultoría</span>
+                            <span style="font-family: var(--font-mono); color: #34D399;">+ $ 2.500.00</span>
+                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="page-footer">
+                <span>UI System</span>
+                <span>Page 13</span>
+            </footer>
+        </article>
+
+         <!-- ================= PAGE 14: DEV KIT ================= -->
+         <article class="page">
+            <header class="page-header">
+                <div class="logo-mini"><i class="ph-duotone ph-robot"></i> ContaLivre</div>
+                <span>14 — Developer Kit</span>
+            </header>
+
+            <h3>CSS Tokens (Copy/Paste)</h3>
+            <p>Variables raíz listas para producción.</p>
+
+<pre>
+:root {
+  /* Brand */
+  --brand-primary: #3B82F6;
+  --brand-secondary: #10B981;
+  --brand-gradient: linear-gradient(135deg, #2563EB 0%, #10B981 100%);
+
+  /* Typography */
+  --font-display: 'Outfit', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Surfaces */
+  --surface-1: #FFFFFF;
+  --surface-2: #F8FAFC;
+  --surface-glass: rgba(255, 255, 255, 0.7);
+  --backdrop-blur: blur(12px);
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-pill: 999px;
+}
+
+/* Dark Mode Overrides */
+[data-theme="dark"] {
+  --surface-1: #0F172A;
+  --surface-2: #1E293B;
+  --text-main: #F8FAFC;
+  --text-secondary: #94A3B8;
+}
+</pre>
+
+            <h3 style="margin-top: 2rem;">Tailwind Config Extend</h3>
+<pre>
+module.exports = {
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          primary: '#3B82F6',
+          secondary: '#10B981',
+        }
+      },
+      fontFamily: {
+        sans: ['Inter', 'sans-serif'],
+        display: ['Outfit', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
+      }
+    }
+  }
+}
+</pre>
+
+            <footer class="page-footer">
+                <span>Implementation</span>
+                <span>Page 14</span>
+            </footer>
+        </article>
+
+    </div>
+
+    <script>
+        function setMode(mode) {
+            const body = document.body;
+            const btnDoc = document.getElementById('btnDoc');
+            const btnDeck = document.getElementById('btnDeck');
+
+            if (mode === 'doc') {
+                body.classList.remove('mode-deck');
+                body.classList.add('mode-doc');
+                btnDoc.classList.add('active');
+                btnDeck.classList.remove('active');
+            } else {
+                body.classList.remove('mode-doc');
+                body.classList.add('mode-deck');
+                btnDeck.classList.add('active');
+                btnDoc.classList.remove('active');
+            }
+        }
+    </script>
+</body>
+</html>

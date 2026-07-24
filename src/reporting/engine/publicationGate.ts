@@ -63,6 +63,7 @@ function actionForCheck(id: string): string | undefined {
         case 'efe-esp': return 'Conciliá el efectivo del EFE con Caja y equivalentes del ESP.'
         case 'efe-metodos': return 'El método directo debe igualar al indirecto en actividades operativas.'
         case 'efe-clasificacion': return 'Clasificá en Configuración las cuentas sin categoría de flujo de efectivo.'
+        case 'efe-disposicion': return 'Resolvé las disposiciones a crédito/mixtas con un override auditable (Configuración → Políticas del EFE).'
         default: return 'Revisá los estados y los mapeos de cuentas antes de publicar.'
     }
 }

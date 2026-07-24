@@ -210,10 +210,22 @@ export default function FlujoEfectivoCanonicalTab({ bundle }: { bundle: Reportin
     )
 
     if (view === 'PREPARACION') {
+        const prepRestatedAvailable = bundle.preparationRestated != null
         return (
             <div>
                 {viewSwitch}
-                <PreparacionEfe bundle={bundle} />
+                <div className="efe-toolbar" style={{ marginBottom: 12 }}>
+                    <Segmented<Currency>
+                        label="Expresión"
+                        value={currency}
+                        onChange={setCurrency}
+                        options={[
+                            { value: 'NOMINAL', label: 'Moneda nominal' },
+                            { value: 'CLOSING', label: 'Moneda de cierre', disabled: !prepRestatedAvailable, title: !prepRestatedAvailable ? 'Cargá un set de índices para ver la preparación en moneda de cierre' : undefined },
+                        ]}
+                    />
+                </div>
+                <PreparacionEfe bundle={bundle} expression={currency === 'CLOSING' ? 'CLOSING_CURRENCY' : 'NOMINAL'} />
                 <style>{statementStyles}</style>
             </div>
         )

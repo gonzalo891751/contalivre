@@ -10,8 +10,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { money } from './statementFormat'
 import { preparacionStyles } from './preparacionStyles'
+import { exportWorkingPaper } from '../../../lib/exportWorkingPaper'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
-import type { CashFlowPreparationModel, PrepMatrixRow, PrepImputation, PrepActivity } from '../../../reporting/preparation/cashFlowPreparation'
+import type { CashFlowPreparationModel, PrepMatrixRow, PrepImputation, PrepActivity, PrepContribution } from '../../../reporting/preparation/cashFlowPreparation'
 
 const ACTIVITY_LABEL: Record<PrepActivity, string> = {
     OPERATING: 'Operativas',
@@ -37,9 +38,13 @@ function ControlChip({ label, cents, ok }: { label: string; cents?: number; ok: 
     )
 }
 
+const COEF = (n: number | null) => (n == null ? '—' : n.toLocaleString('es-AR', { maximumFractionDigits: 6 }))
+const IDX = (n: number | null) => (n == null ? '—' : n.toLocaleString('es-AR', { maximumFractionDigits: 4 }))
+
 /** Panel de detalle de una fila/celda: fórmula, sustitución, regla y lineage (§12.5).
- * Accesible (§13): foco inicial, trampa de foco, Escape y retorno de foco. */
-function CellDetail({ row, imputation, onClose }: { row: PrepMatrixRow; imputation?: PrepImputation; onClose: () => void }) {
+ * Accesible (§13): foco inicial, trampa de foco, Escape y retorno de foco.
+ * En moneda de cierre añade la EVIDENCIA por contribución (índice/coeficiente). */
+function CellDetail({ row, imputation, contributions, restated, onClose }: { row: PrepMatrixRow; imputation?: PrepImputation; contributions?: PrepContribution[]; restated: boolean; onClose: () => void }) {
     const dialogRef = useRef<HTMLDivElement>(null)
     const closeRef = useRef<HTMLButtonElement>(null)
     const titleId = `prep-detail-title-${row.accountId}`
@@ -86,13 +91,40 @@ function CellDetail({ row, imputation, onClose }: { row: PrepMatrixRow; imputati
                     <dt>Control</dt><dd>{row.control === 0 ? 'Conciliado (0)' : money(row.control / 100)}</dd>
                     <dt>Asientos</dt><dd>{row.entryIds.length > 0 ? `${row.entryIds.length} asiento(s): ${row.entryIds.slice(0, 6).join(', ')}${row.entryIds.length > 6 ? '…' : ''}` : 'Sin movimientos del período'}</dd>
                 </dl>
+                {restated && contributions && contributions.length > 0 && (
+                    <div className="prep-detail-rex">
+                        <div className="prep-detail-rex-title">Reexpresión por contribución</div>
+                        <table className="prep-rex-table">
+                            <thead>
+                                <tr><th>Fecha</th><th>Nominal</th><th>Í. origen</th><th>Í. cierre</th><th>Coef.</th><th>Reexpresado</th><th>Redondeo</th></tr>
+                            </thead>
+                            <tbody>
+                                {contributions.map(cn => (
+                                    <tr key={cn.id} className={cn.blocked ? 'is-blocked' : ''}>
+                                        <td>{cn.originDate}</td>
+                                        <td className="prep-num">{money(cn.amountNominalCents / 100)}</td>
+                                        <td className="prep-num">{IDX(cn.originIndex)}</td>
+                                        <td className="prep-num">{IDX(cn.closeIndex)}</td>
+                                        <td className="prep-num">{cn.blocked ? '— (sin índice)' : COEF(cn.coefficient)}</td>
+                                        <td className="prep-num">{money(cn.restatedCents / 100)}</td>
+                                        <td className="prep-num">{cn.roundingDiffCents === 0 ? '0' : money(cn.roundingDiffCents / 100)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
         </div>
     )
 }
 
-export default function PreparacionEfe({ bundle }: { bundle: ReportingBundle }) {
-    const prep: CashFlowPreparationModel = bundle.preparation
+export default function PreparacionEfe({ bundle, expression = 'NOMINAL' }: { bundle: ReportingBundle; expression?: 'NOMINAL' | 'CLOSING_CURRENCY' }) {
+    // Modelo HERMANO: en moneda de cierre se consume `preparationRestated` (no una
+    // matriz nominal disfrazada). Si se pidió cierre pero no hay set, se degrada al
+    // nominal y NO se rotula como moneda de cierre (etiqueta honesta, §9).
+    const restated = expression === 'CLOSING_CURRENCY' && bundle.preparationRestated != null
+    const prep: CashFlowPreparationModel = restated ? bundle.preparationRestated! : bundle.preparation
     const [hideEmpty, setHideEmpty] = useState(true)
     const [onlyDiff, setOnlyDiff] = useState(false)
     const [activity, setActivity] = useState<PrepActivity | 'ALL'>('ALL')
@@ -105,6 +137,18 @@ export default function PreparacionEfe({ bundle }: { bundle: ReportingBundle }) 
         return m
     }, [prep.imputations])
 
+    const contribByAccount = useMemo(() => {
+        const m = new Map<string, PrepContribution[]>()
+        for (const cn of prep.contributions ?? []) {
+            const arr = m.get(cn.accountId) ?? []
+            arr.push(cn)
+            m.set(cn.accountId, arr)
+        }
+        return m
+    }, [prep.contributions])
+
+    const coverage = prep.identity.coverage
+
     const activities = prep.activities.length > 0 ? prep.activities : (['OPERATING', 'INVESTING', 'FINANCING'] as PrepActivity[])
 
     const rows = useMemo(() => prep.matrixRows.filter(r => {
@@ -116,9 +160,18 @@ export default function PreparacionEfe({ bundle }: { bundle: ReportingBundle }) 
     }), [prep.matrixRows, hideEmpty, onlyDiff, activity, search])
 
     const c = prep.controls
+    // Compatibilidad histórica (§10): se pidió cierre pero no hay modelo
+    // reexpresado (snapshot 2G o sin set). No se rotula "cierre" mostrando nominal.
+    const restatedRequestedButMissing = expression === 'CLOSING_CURRENCY' && bundle.preparationRestated == null
 
     return (
         <div className="prep-root">
+            {restatedRequestedButMissing && (
+                <div className="prep-rex-banner" role="status">
+                    <span className="prep-rex-badge is-blocked">Preparación en moneda de cierre no disponible</span>
+                    <p className="prep-rex-help">No hay un set de índices aplicado (o esta versión histórica no la conserva). Se muestra la preparación en moneda nominal. Seleccioná un set de índices para reexpresar.</p>
+                </div>
+            )}
             <header className="prep-header">
                 <h3 className="prep-h3">Cómo se construye el Estado de Flujo de Efectivo</h3>
                 <p className="prep-lead">Los saldos y movimientos contables se transforman en cobros, pagos y causas de la variación del efectivo.</p>
@@ -132,17 +185,41 @@ export default function PreparacionEfe({ bundle }: { bundle: ReportingBundle }) 
                 </ol>
             </header>
 
+            {restated && (
+                <section className="prep-rex-banner" aria-label="Preparación en moneda de cierre">
+                    <div className="prep-rex-banner-head">
+                        <span className="prep-rex-badge">Importes expresados en moneda de cierre</span>
+                        {coverage !== 'COVERED' && <span className="prep-rex-badge is-blocked">Bloqueado · cobertura {coverage === 'PARTIAL' ? 'parcial' : 'sin índices'}</span>}
+                    </div>
+                    <p className="prep-rex-help">Cada cobro, pago y ajuste fue reexpresado desde su período de origen utilizando el set de índices seleccionado.</p>
+                    {prep.identity.blockers.length > 0 && (
+                        <ul className="prep-rex-blockers">
+                            {prep.identity.blockers.map((b, i) => <li key={i}>⚠ {b}</li>)}
+                        </ul>
+                    )}
+                </section>
+            )}
+
             {/* Puente del efectivo */}
             <section className="prep-bridge" aria-label="Puente del efectivo">
-                <div className="prep-bridge-item"><span>Efectivo al inicio</span><strong>{money(prep.cashBridge.openingPublishedCents / 100)}</strong></div>
+                <div className="prep-bridge-item"><span>Efectivo al inicio{restated ? ' (publicado)' : ''}</span><strong>{money(prep.cashBridge.openingPublishedCents / 100)}</strong></div>
+                {restated && (
+                    <div className="prep-bridge-item is-adj"><span>Efectivo al inicio reexpresado</span><strong>{money((prep.cashBridge.openingRestatedCents ?? 0) / 100)}</strong></div>
+                )}
                 {prep.cashBridge.priorAdjustmentsCents !== 0 && (
                     <>
                         <div className="prep-bridge-item is-adj"><span>Modificaciones ej. anteriores (AREA)</span><strong>{money(prep.cashBridge.priorAdjustmentsCents / 100)}</strong></div>
                         <div className="prep-bridge-item"><span>Efectivo al inicio modificado</span><strong>{money(prep.cashBridge.openingAdjustedCents / 100)}</strong></div>
                     </>
                 )}
-                <div className="prep-bridge-item is-var"><span>Variación neta</span><strong>{money(prep.cashBridge.netChangeCents / 100)}</strong></div>
-                <div className="prep-bridge-item"><span>Efectivo al cierre</span><strong>{money(prep.cashBridge.closingCents / 100)}</strong></div>
+                {restated && (
+                    <>
+                        <div className="prep-bridge-item"><span>Σ flujos reexpresados</span><strong>{money((prep.cashBridge.flowsRestatedCents ?? 0) / 100)}</strong></div>
+                        <div className="prep-bridge-item is-rei"><span>REI del efectivo</span><strong>{money((prep.cashBridge.reiCents ?? 0) / 100)}</strong></div>
+                    </>
+                )}
+                <div className="prep-bridge-item is-var"><span>Variación neta{restated ? ' (flujos + REI)' : ''}</span><strong>{money(prep.cashBridge.netChangeCents / 100)}</strong></div>
+                <div className="prep-bridge-item"><span>Efectivo al cierre{restated ? ' (moneda de cierre)' : ''}</span><strong>{money(prep.cashBridge.closingCents / 100)}</strong></div>
             </section>
 
             {/* Panel de controles (§12.6): verde SOLO si el cálculo real lo aprueba */}
@@ -154,6 +231,19 @@ export default function PreparacionEfe({ bundle }: { bundle: ReportingBundle }) 
                 <ControlChip label="EFE = ESP" ok={c.espControlCents === 0} cents={c.espControlCents} />
                 <ControlChip label={bundle.publicationGate.canPublish ? 'Publicable' : 'Bloqueado'} ok={bundle.publicationGate.canPublish} />
             </section>
+
+            {/* Exportación del papel de trabajo (§3.E): nominal, cierre o ambas */}
+            <div className="prep-export" role="group" aria-label="Exportar papel de trabajo">
+                <span className="prep-export-label">Papel de trabajo (documento interno):</span>
+                <button type="button" className="prep-export-btn" onClick={() => exportWorkingPaper(bundle, restated ? 'CLOSING_CURRENCY' : 'NOMINAL')}>
+                    Exportar XLSX {restated ? '(moneda de cierre)' : '(nominal)'}
+                </button>
+                {bundle.preparationRestated && (
+                    <button type="button" className="prep-export-btn is-secondary" onClick={() => exportWorkingPaper(bundle, 'BOTH')}>
+                        Exportar ambas
+                    </button>
+                )}
+            </div>
 
             {/* Filtros */}
             <div className="prep-filters">
@@ -256,7 +346,7 @@ export default function PreparacionEfe({ bundle }: { bundle: ReportingBundle }) 
                 </section>
             )}
 
-            {selected && <CellDetail row={selected} imputation={impByAccount.get(selected.accountId)} onClose={() => setSelected(null)} />}
+            {selected && <CellDetail row={selected} imputation={impByAccount.get(selected.accountId)} contributions={contribByAccount.get(selected.accountId)} restated={restated} onClose={() => setSelected(null)} />}
             <style>{preparacionStyles}</style>
         </div>
     )

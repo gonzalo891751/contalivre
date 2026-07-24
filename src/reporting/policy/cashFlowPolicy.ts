@@ -67,6 +67,32 @@ export interface CashFlowOverride {
     validFrom?: string
     validTo?: string
     version: number
+    // ── Resolución de disposición a crédito / parcial / mixta (Fase 2G.1 §4.6) ──
+    /**
+     * importe de efectivo asignado a la disposición (centavos). Control:
+     * NUNCA puede superar el efectivo real relacionado. Si se omite, se asigna
+     * el efectivo bruto del asiento.
+     */
+    assignedCents?: number
+    /** asientos de cobro vinculados a esta disposición (evidencia/lineage) */
+    collectionEntryIds?: string[]
+    /** evidencia libre que justifica la resolución */
+    evidence?: string
+}
+
+/**
+ * Override que RESUELVE un asiento como disposición de activo no operativo
+ * (§4.6). Precedencia LINE > OPERATION > ENTRY > ACCOUNT sobre una actividad de
+ * inversión o financiación. Devuelve null si no hay resolución vigente.
+ */
+export function disposalOverrideForEntry(
+    policy: CashFlowPolicy | null | undefined,
+    entry: { id: string; sourceType?: string; date: string },
+): CashFlowOverride | null {
+    const ov = effectiveOverride(policy, { ENTRY: entry.id, OPERATION: entry.sourceType }, entry.date)
+    if (!ov) return null
+    if (ov.classification === 'INVESTING' || ov.classification === 'FINANCING') return ov
+    return null
 }
 
 export interface CashFlowPolicy {
