@@ -160,9 +160,18 @@ export default function PreparacionEfe({ bundle, expression = 'NOMINAL' }: { bun
     }), [prep.matrixRows, hideEmpty, onlyDiff, activity, search])
 
     const c = prep.controls
+    // Compatibilidad histórica (§10): se pidió cierre pero no hay modelo
+    // reexpresado (snapshot 2G o sin set). No se rotula "cierre" mostrando nominal.
+    const restatedRequestedButMissing = expression === 'CLOSING_CURRENCY' && bundle.preparationRestated == null
 
     return (
         <div className="prep-root">
+            {restatedRequestedButMissing && (
+                <div className="prep-rex-banner" role="status">
+                    <span className="prep-rex-badge is-blocked">Preparación en moneda de cierre no disponible</span>
+                    <p className="prep-rex-help">No hay un set de índices aplicado (o esta versión histórica no la conserva). Se muestra la preparación en moneda nominal. Seleccioná un set de índices para reexpresar.</p>
+                </div>
+            )}
             <header className="prep-header">
                 <h3 className="prep-h3">Cómo se construye el Estado de Flujo de Efectivo</h3>
                 <p className="prep-lead">Los saldos y movimientos contables se transforman en cobros, pagos y causas de la variación del efectivo.</p>
