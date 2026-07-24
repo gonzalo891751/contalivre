@@ -35,10 +35,11 @@ export default defineConfig({
             testMatch: /mobile\.spec\.ts/,
         },
         {
-            // Segundo motor (§19): el flujo integral también en Firefox
+            // Segundo motor (§19 / Fase 2G.1 §7): flujo integral, preparación del
+            // EFE (incluida la moneda de cierre) y exportaciones también en Firefox.
             name: 'firefox-desktop',
             use: { ...devices['Desktop Firefox'], viewport: { width: 1440, height: 900 } },
-            testMatch: /full-flow\.spec\.ts/,
+            testMatch: /(full-flow|preparacion-efe|exports)\.spec\.ts/,
         },
     ],
     webServer: {
