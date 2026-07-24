@@ -87,15 +87,22 @@ por `effectiveOverride`, y las políticas de intereses/dividendos/IG. La histori
 (`validFrom/validTo/version`) evita reclasificar períodos cerrados o snapshots
 validados.
 
-## 4. Esquema
+## 4. Esquema — decisión final: NO se eleva (sigue en v22)
 
-`CashFlowPolicy` (schema v22) ya modela clasificación por rol con atributos,
-intereses/dividendos/IG/sobregiros y overrides con vigencia/versión. **Decisión:** no
-se eleva el esquema si los campos existentes resuelven el panel y las disposiciones;
-si un caso exige un campo nuevo persistido (p. ej. importe asignado y cobros
-vinculados del override de disposición), se eleva **v22→v23** con migración
-idempotente y no destructiva, backup/restore y pruebas v22→v23 + instalación fresca.
-La decisión final y su justificación se registran en el HITO 9.
+`CashFlowPolicy` (tabla `cashFlowPolicies`, schema v22) ya modela clasificación por
+rol con atributos, intereses/dividendos/IG/sobregiros y overrides con vigencia/
+versión. Los campos que 2G.1 agregó al override de disposición (`assignedCents`,
+`collectionEntryIds`, `evidence`) son **propiedades del documento JSON** que Dexie
+persiste como valor de la fila, **no columnas indexadas**: no requieren cambiar el
+`stores()` ni una migración. La preparación reexpresada (`preparationRestated`) es un
+DTO **calculado** en cada carga desde asientos + set de índices; no se persiste.
+
+**Por eso NO se eleva a v23** (regla §5.J: "no elevar el esquema si los campos
+existentes ya permiten resolver el panel"). Beneficio: cero riesgo de migración,
+compatibilidad total con políticas creadas en 2G, backup/restore y reset intactos
+(iteran `db.tables`). Si en el futuro se persistiera evidencia congelada de la
+preparación reexpresada dentro del snapshot, ese sí sería el disparador de un v23 con
+migración idempotente y pruebas v22→v23 + instalación fresca.
 
 ## 5. Snapshots e identidad
 
