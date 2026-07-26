@@ -12,7 +12,7 @@
 | `main` | `a45b986` | Base del proyecto. **Ya contiene 2G.1** (PR #26) |
 | `refactor/fase-2g1-cierre-efe` | `bbf22b8` | Cierre funcional del EFE (2G.1) |
 | `refactor/fase-2h-cobertura-sectorial-anexos-operaciones` | `12cce94` | Entrega parcial de 2H |
-| **`refactor/fase-2h-integrada-cierre-final`** | **`f9ce865`** *(ver §12)* | **Rama de integración de esta entrega** |
+| **`refactor/fase-2h-integrada-cierre-final`** | **`d664c70`** | **Rama de integración de esta entrega** |
 
 Hallazgo de la verificación inicial: **`main` se movió**. Estaba en `6152ea8` y ahora está en
 `a45b986`, que incorporó 2G.1 vía PR #26. El árbol de `main` y el de `refactor/fase-2g1-cierre-efe`
@@ -276,7 +276,7 @@ técnico accidental. Se deja como está y se señala por si preferís retirarlo.
 | `67b4e01` | feat: bases de distribución de gastos y costo por actividad (H5 y H6) |
 | `9f6d80f` | feat: circuito único de bienes de uso y anexo de moneda extranjera (H7 y H8) |
 | `f9ce865` | feat: exportar los anexos nuevos y verificar los artefactos (H11) |
-| *(ver §14)* | test/docs: E2E de la Fase 2H e informe final (H12) |
+| `d664c70` | test: aceptación E2E de la Fase 2H e informe integrado (H12) |
 
 Debajo del merge queda el historial completo de la rama 2H parcial (`773f054`, `74ff594`, `582467c`,
 `54a4c72`, `12cce94`) y el de 2G.1.
