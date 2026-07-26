@@ -13,7 +13,7 @@
 | HEAD anterior de la rama | `1939201` |
 | `origin/main` integrado | `a45b986` |
 | Commit de merge | `a587b8e` |
-| **HEAD final de la rama** | **`bc07945`** *(actualizado en §12)* |
+| **HEAD final de la rama** | **`815348a`** |
 | Respaldo previo | rama `backup/fase-2h-antes-de-sincronizar-main-1939201` y tag `backup-fase-2h-1939201` |
 | Árbol | Limpio |
 
@@ -59,7 +59,7 @@ rama y queda **una sola base de merge** (`a45b986`), así que GitHub deja de ver
 | `main` | `a45b986` | Base del proyecto. **Ya contiene 2G.1** (PR #26). No se modificó |
 | `refactor/fase-2g1-cierre-efe` | `bbf22b8` | Cierre funcional del EFE (2G.1). Intacta |
 | `refactor/fase-2h-cobertura-sectorial-anexos-operaciones` | `12cce94` | Entrega parcial de 2H. Intacta |
-| **`refactor/fase-2h-integrada-cierre-final`** | **`bc07945`** | **Rama del PR #28** |
+| **`refactor/fase-2h-integrada-cierre-final`** | **`815348a`** | **Rama del PR #28** |
 
 Hallazgo de la verificación inicial: **`main` se movió**. Estaba en `6152ea8` y ahora está en
 `a45b986`, que incorporó 2G.1 vía PR #26. El árbol de `main` y el de `refactor/fase-2g1-cierre-efe`
@@ -391,7 +391,7 @@ clave, junto al commit). La trazabilidad se conserva completa. No se tocaron cá
 | `2659fe0` | fix: asociar el perfil sectorial a cada empresa |
 | `9aae215` | fix: clarificar la provenance del PDF profesional |
 | `bc07945` | test: ampliar la aceptación móvil a las áreas de la Fase 2H |
-| *(este)* | docs: actualizar el cierre del PR #28 |
+| `815348a` | docs: actualizar el cierre del PR #28 |
 
 Debajo del merge queda el historial completo de la rama 2H parcial (`773f054`, `74ff594`, `582467c`,
 `54a4c72`, `12cce94`) y el de 2G.1.
