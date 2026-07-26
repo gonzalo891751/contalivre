@@ -21,7 +21,9 @@ import {
     deactivateSectorProfile,
     getActiveProfiles,
     listSectorAccounts,
+    resolveCompanyId,
 } from '../../../storage/sectorProfiles'
+import { db } from '../../../storage/db'
 
 const PROFILE_ICON: Record<ActivityProfile, typeof Plant> = {
     COMMERCIAL: Storefront,
@@ -36,9 +38,15 @@ export function SectorProfilesPanel() {
     const [installed, setInstalled] = useState<Record<string, number>>({})
     const [busy, setBusy] = useState<ActivityProfile | null>(null)
     const [message, setMessage] = useState<string | null>(null)
+    const [companyId, setCompanyId] = useState<string | null>(null)
+    const [companyName, setCompanyName] = useState<string | null>(null)
 
     const refresh = useCallback(async () => {
-        setActive(await getActiveProfiles())
+        // El perfil pertenece a la empresa corriente, no a la instalación.
+        const cid = await resolveCompanyId()
+        setCompanyId(cid)
+        setCompanyName((await db.companies.get(cid))?.legalName ?? null)
+        setActive(await getActiveProfiles(cid))
         const counts: Record<string, number> = {}
         for (const profile of ACTIVITY_PROFILES) {
             counts[profile] = (await listSectorAccounts(profile)).length
@@ -55,12 +63,12 @@ export function SectorProfilesPanel() {
         setMessage(null)
         try {
             if (isActive) {
-                await deactivateSectorProfile(profile)
+                await deactivateSectorProfile(profile, companyId ?? undefined)
                 setMessage(
                     `Se desactivó el perfil ${ACTIVITY_PROFILE_LABEL[profile]}. Las cuentas ya incorporadas se conservan: no se borró ninguna.`
                 )
             } else {
-                const result = await activateSectorProfile(profile)
+                const result = await activateSectorProfile(profile, companyId ?? undefined)
                 setMessage(
                     result.created.length > 0
                         ? `Se incorporaron ${result.created.length} cuentas del perfil ${ACTIVITY_PROFILE_LABEL[profile]}.`
@@ -82,6 +90,13 @@ export function SectorProfilesPanel() {
                 El plan de cuentas tiene un núcleo común y extensiones sectoriales. Activar un perfil agrega al plan las
                 cuentas que falten, con sus metadatos de exposición ya configurados. Desactivarlo no borra nada.
             </p>
+            {/* El perfil pertenece a la empresa: se deja explícito cuál se está configurando. */}
+            {companyName && (
+                <p className="text-xs text-slate-500 mt-2" data-testid="sector-profile-company">
+                    Perfil de <strong className="text-slate-700">{companyName}</strong>. Cada empresa tiene el suyo:
+                    cambiarlo acá no afecta a las demás.
+                </p>
+            )}
 
             <div className="mt-4 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
                 <Info weight="fill" size={16} className="text-blue-600 shrink-0 mt-0.5" aria-hidden />

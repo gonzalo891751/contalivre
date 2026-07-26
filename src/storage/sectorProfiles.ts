@@ -15,6 +15,7 @@
  */
 
 import { db, generateId } from './db'
+import { DEFAULT_COMPANY_ID, SYSTEM_META_ID } from '../accounting/migration/migrateV17'
 import { SECTOR_CATALOG } from '../core/sectorProfiles/catalog'
 import type { ActivityProfile } from '../core/sectorProfiles/types'
 import type { SectorAccountDefinition } from '../core/sectorProfiles/types'
@@ -24,22 +25,78 @@ const PROFILE_SETTINGS_ID = 'sector-profiles'
 
 interface SectorProfileSettings {
     id: string
-    active: ActivityProfile[]
+    /**
+     * Campo HISTÓRICO: perfiles globales de la primera versión de la Fase 2H.
+     * Se conserva para no perder datos y se migra a `byCompany` la primera vez
+     * que se lee. No se escribe más.
+     */
+    active?: ActivityProfile[]
+    /** Perfiles por empresa (Fase 2H, cierre del PR #28). */
+    byCompany?: Record<string, ActivityProfile[]>
     updatedAt: string
 }
 
-/** Perfiles activos. COMMERCIAL (el núcleo) siempre está presente. */
-export async function getActiveProfiles(): Promise<ActivityProfile[]> {
-    const row = (await db.settings.get(PROFILE_SETTINGS_ID)) as SectorProfileSettings | undefined
-    const stored = Array.isArray(row?.active) ? row.active : []
+/**
+ * Empresa cuyo perfil corresponde leer o escribir.
+ *
+ * Se toma de `systemMeta.currentCompanyId` y, si no está definida, de la empresa
+ * por defecto. Nunca se asume una empresa fija: el perfil sectorial pertenece a
+ * la entidad, no a la instalación.
+ */
+export async function resolveCompanyId(companyId?: string): Promise<string> {
+    if (companyId) return companyId
+    const meta = await db.systemMeta.get(SYSTEM_META_ID)
+    return meta?.currentCompanyId ?? DEFAULT_COMPANY_ID
+}
+
+async function readSettings(): Promise<SectorProfileSettings | undefined> {
+    return (await db.settings.get(PROFILE_SETTINGS_ID)) as SectorProfileSettings | undefined
+}
+
+/**
+ * Perfiles de una empresa, contemplando el valor global histórico.
+ *
+ * Migración lógica, no destructiva y sin filtraciones:
+ *
+ *  - si ya existe `byCompany`, esa es la única fuente: el campo global se ignora
+ *    (por eso desactivar un perfil no se "deshace" en la lectura siguiente);
+ *  - si todavía no existe, el arreglo global se atribuye ÚNICAMENTE a la empresa
+ *    por defecto, que es la que lo generó cuando la instalación era de una sola
+ *    empresa. Cualquier otra empresa arranca con el núcleo comercial.
+ *
+ * El campo `active` nunca se borra: queda como respaldo del valor anterior.
+ */
+function profilesOf(row: SectorProfileSettings | undefined, companyId: string): ActivityProfile[] {
+    if (row?.byCompany) return row.byCompany[companyId] ?? []
+    if (Array.isArray(row?.active) && companyId === DEFAULT_COMPANY_ID) return row.active
+    return []
+}
+
+/**
+ * Perfiles activos de una empresa. COMMERCIAL (el núcleo) siempre está presente.
+ * Sin `companyId` se usa la empresa corriente.
+ */
+export async function getActiveProfiles(companyId?: string): Promise<ActivityProfile[]> {
+    const cid = await resolveCompanyId(companyId)
+    const stored = profilesOf(await readSettings(), cid)
     return stored.includes('COMMERCIAL') ? stored : ['COMMERCIAL', ...stored]
 }
 
-async function setActiveProfiles(profiles: ActivityProfile[]): Promise<void> {
-    const unique = [...new Set<ActivityProfile>(['COMMERCIAL', ...profiles])]
+async function setActiveProfiles(profiles: ActivityProfile[], companyId: string): Promise<void> {
+    const row = await readSettings()
+    // Al escribir por primera vez se materializa el mapa, conservando lo que la
+    // empresa por defecto tenía en el campo global.
+    const byCompany: Record<string, ActivityProfile[]> = row?.byCompany
+        ? { ...row.byCompany }
+        : (Array.isArray(row?.active) && row.active.length > 0
+            ? { [DEFAULT_COMPANY_ID]: row.active }
+            : {})
+    byCompany[companyId] = [...new Set<ActivityProfile>(['COMMERCIAL', ...profiles])]
+
     await db.settings.put({
+        ...(row ?? {}),
         id: PROFILE_SETTINGS_ID,
-        active: unique,
+        byCompany,
         updatedAt: new Date().toISOString(),
     } as never)
 }
@@ -81,18 +138,27 @@ function toAccount(definition: SectorAccountDefinition, parentId: string | null)
 
 export interface ActivationResult {
     profile: ActivityProfile
+    companyId: string
     created: string[]
     alreadyPresent: string[]
 }
 
 /**
- * Activa un perfil incorporando al plan las cuentas que falten.
+ * Activa un perfil PARA UNA EMPRESA, incorporando al plan las cuentas que falten.
  *
  * La resolución del padre es por CÓDIGO, contra el plan real: si el usuario ya
  * tiene una cuenta con ese código (propia o del núcleo) se reutiliza y no se
  * crea una segunda.
+ *
+ * El plan de cuentas es compartido por la instalación; lo que pertenece a cada
+ * empresa es el PERFIL. Por eso, si otra empresa ya incorporó las cuentas del
+ * sector, acá se reutilizan en vez de duplicarlas.
  */
-export async function activateSectorProfile(profile: ActivityProfile): Promise<ActivationResult> {
+export async function activateSectorProfile(
+    profile: ActivityProfile,
+    companyId?: string
+): Promise<ActivationResult> {
+    const cid = await resolveCompanyId(companyId)
     const definitions = SECTOR_CATALOG[profile] ?? []
     const created: string[] = []
     const alreadyPresent: string[] = []
@@ -117,8 +183,8 @@ export async function activateSectorProfile(profile: ActivityProfile): Promise<A
         created.push(definition.code)
     }
 
-    await setActiveProfiles([...(await getActiveProfiles()), profile])
-    return { profile, created, alreadyPresent }
+    await setActiveProfiles([...(await getActiveProfiles(cid)), profile], cid)
+    return { profile, companyId: cid, created, alreadyPresent }
 }
 
 /**
@@ -126,10 +192,14 @@ export async function activateSectorProfile(profile: ActivityProfile): Promise<A
  * que la exposición vuelve al vocabulario que corresponda y las cuentas
  * sectoriales sin movimientos dejan de ofrecerse para nuevas imputaciones.
  */
-export async function deactivateSectorProfile(profile: ActivityProfile): Promise<void> {
+export async function deactivateSectorProfile(
+    profile: ActivityProfile,
+    companyId?: string
+): Promise<void> {
     if (profile === 'COMMERCIAL') return
-    const active = await getActiveProfiles()
-    await setActiveProfiles(active.filter(p => p !== profile))
+    const cid = await resolveCompanyId(companyId)
+    const active = await getActiveProfiles(cid)
+    await setActiveProfiles(active.filter(p => p !== profile), cid)
 }
 
 /**
