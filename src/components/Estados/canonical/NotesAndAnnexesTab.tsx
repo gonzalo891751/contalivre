@@ -17,6 +17,7 @@ import { FixedAssetsAnnexView } from './FixedAssetsAnnexView'
 import { ForeignCurrencyView } from './ForeignCurrencyView'
 import { ManualNotesEditor } from './ManualNotesEditor'
 import EmptyState from '../../../ui/EmptyState'
+import { FixedAssetsReconciliationPanel } from './FixedAssetsReconciliationPanel'
 import { statementStyles } from './statementFormat'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 import type { StatementNote, NoteLine } from '../../../reporting/engine/buildNotes'
@@ -278,12 +279,16 @@ export function NotesAndAnnexesTab({ bundle, focusNote, onDataChanged }: NotesAn
 
             {subtab === 'BIENES_USO' &&
                 (hasData.BIENES_USO ? (
-                    <FixedAssetsAnnexView
-                        annex={fixedAssets}
-                        restated={bundle.fixedAssetsRestated}
-                        showComparative={showComparative}
-                        onRowClick={(label, accountIds) => setTarget({ label, accountIds })}
-                    />
+                    <>
+                        <FixedAssetsAnnexView
+                            annex={fixedAssets}
+                            restated={bundle.fixedAssetsRestated}
+                            showComparative={showComparative}
+                            onRowClick={(label, accountIds) => setTarget({ label, accountIds })}
+                        />
+                        {/* Fase 2H §H7: cierre del circuito ficha → asiento → anexo. */}
+                        <FixedAssetsReconciliationPanel bundle={bundle} />
+                    </>
                 ) : (
                     <EmptyState
                         title="El anexo de bienes de uso todavía no tiene información"

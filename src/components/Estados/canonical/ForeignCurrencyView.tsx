@@ -13,6 +13,12 @@ const nf = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFra
 
 const SIDE_LABEL: Record<string, string> = { ASSET: 'Activo', LIABILITY: 'Pasivo', OTHER: 'Otro' }
 
+const CURRENT_LABEL: Record<string, string> = {
+    CURRENT: 'Corriente',
+    NON_CURRENT: 'No corriente',
+    NOT_APPLICABLE: '—',
+}
+
 export interface ForeignCurrencyViewProps {
     disclosure: ForeignCurrencyDisclosure
     showComparative: boolean
@@ -39,6 +45,7 @@ export function ForeignCurrencyView({ disclosure, showComparative, onRowClick }:
                             <th scope="col" className="left">Cuenta</th>
                             <th scope="col">Moneda</th>
                             <th scope="col">Tipo</th>
+                            <th scope="col">Corriente</th>
                             <th scope="col">Clasificación</th>
                             <th scope="col" className="num">Cantidad</th>
                             <th scope="col" className="num">Cotización</th>
@@ -64,6 +71,7 @@ export function ForeignCurrencyView({ disclosure, showComparative, onRowClick }:
                                     <td className="left">{r.code} {r.name}</td>
                                     <td>{r.currency}</td>
                                     <td>{SIDE_LABEL[r.side]}</td>
+                                    <td>{CURRENT_LABEL[r.currentClassification]}</td>
                                     <td>{r.monetary === 'MONETARY' ? 'Monetaria' : r.monetary === 'NON_MONETARY' ? 'No monetaria' : r.monetary}</td>
                                     {hasDetail ? (
                                         <>
@@ -87,8 +95,44 @@ export function ForeignCurrencyView({ disclosure, showComparative, onRowClick }:
                             )
                         })}
                     </tbody>
+                    <tfoot>
+                        {/* Cierre del cuadro por naturaleza (Fase 2H §H8). */}
+                        <tr className="fx-total">
+                            <th scope="row" className="left" colSpan={showComparative ? 7 : 7}>
+                                Total activos en moneda extranjera
+                            </th>
+                            <td className="num">{nf.format(disclosure.totals.assets)}</td>
+                            <td />
+                            {showComparative && <td />}
+                        </tr>
+                        <tr className="fx-total">
+                            <th scope="row" className="left" colSpan={7}>
+                                Total pasivos en moneda extranjera
+                            </th>
+                            <td className="num">{nf.format(disclosure.totals.liabilities)}</td>
+                            <td />
+                            {showComparative && <td />}
+                        </tr>
+                        <tr className="fx-total is-net">
+                            <th scope="row" className="left" colSpan={7}>
+                                Posición neta en moneda extranjera
+                            </th>
+                            <td className="num">{nf.format(disclosure.totals.net)}</td>
+                            <td />
+                            {showComparative && <td />}
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
+
+            {/* Diferencias de cambio del ejercicio (Fase 2H §H8) */}
+            <p className={`fx-diffs${disclosure.exchangeDifferences.status === 'CALCULATED' ? '' : ' is-insufficient'}`}>
+                <strong>Diferencias de cambio del ejercicio: </strong>
+                {disclosure.exchangeDifferences.status === 'CALCULATED'
+                    ? `${nf.format(disclosure.exchangeDifferences.total)} — ${disclosure.exchangeDifferences.detail}`
+                    : disclosure.exchangeDifferences.detail}
+            </p>
+
             <style>{styles}</style>
         </div>
     )
@@ -107,6 +151,10 @@ const styles = `
 .fx-table td.comp { color: #64748b; }
 .fx-table td.src { font-size: 0.72rem; color: #64748b; }
 .fx-table td.diff { color: #b91c1c; font-weight: 700; }
+.fx-table tfoot .fx-total th, .fx-table tfoot .fx-total td { border-top: 1px solid #e2e8f0; background: #f8fafc; font-weight: 700; color: #0f172a; padding: 7px 12px; }
+.fx-table tfoot .fx-total.is-net th, .fx-table tfoot .fx-total.is-net td { border-top: 2px solid #cbd5e1; }
+.fx-diffs { font-size: 0.8rem; color: #334155; margin: 12px 0 0; line-height: 1.5; max-width: 80ch; }
+.fx-diffs.is-insufficient { color: #854d0e; }
 .fx-table td.ok { color: #059669; font-weight: 600; }
 .fx-table tr.is-clickable { cursor: pointer; }
 .fx-table tr.is-clickable:hover td { background: #f8fafc; }

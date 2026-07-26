@@ -399,7 +399,28 @@ export interface ForeignCurrencyRow {
      * diferencia se expone, no se oculta (Fase 2F §11).
      */
     reconciliationDifference?: number | null
+    /**
+     * Clasificación corriente / no corriente de la partida (Fase 2H §H8). Se
+     * toma del mapping explícito y, si falta, se deriva de la sección de la
+     * cuenta. Nunca se infiere por el nombre.
+     */
+    currentClassification: 'CURRENT' | 'NON_CURRENT' | 'NOT_APPLICABLE'
     statementLineId: string
+}
+
+/**
+ * Diferencias de cambio del ejercicio (Fase 2H §H8).
+ *
+ * Se identifican por MAPPING (`notesGroup` de la cuenta), no por su nombre. Sin
+ * cuentas mapeadas el estado es INSUFFICIENT_INFORMATION: se dice que no se
+ * puede informar, en lugar de mostrar un cero que parecería un dato.
+ */
+export interface ForeignCurrencyExchangeDifferences {
+    status: 'CALCULATED' | 'INSUFFICIENT_INFORMATION'
+    /** resultado neto del ejercicio (positivo = ganancia) */
+    total: number
+    accountIds: string[]
+    detail: string
 }
 
 export interface ForeignCurrencyDisclosure {
@@ -408,6 +429,14 @@ export interface ForeignCurrencyDisclosure {
     note: string
     /** true si el detalle operativo reconcilia con el Diario en todas las cuentas */
     reconciled: boolean
+    /** diferencias de cambio del ejercicio (Fase 2H §H8) */
+    exchangeDifferences: ForeignCurrencyExchangeDifferences
+    /** totales por naturaleza, para el cierre del cuadro (Fase 2H §H8) */
+    totals: {
+        assets: number
+        liabilities: number
+        net: number
+    }
 }
 
 /**

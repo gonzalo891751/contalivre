@@ -84,11 +84,52 @@ export function buildForeignCurrency(
             rateDate: detail?.rateDate,
             impliedMeasurement,
             reconciliationDifference,
+            // Mapping explícito primero; derivación de respaldo por sección.
+            currentClassification: account.currentClassification
+                ?? (account.section === 'NON_CURRENT' ? 'NON_CURRENT' : account.section === 'CURRENT' ? 'CURRENT' : 'NOT_APPLICABLE'),
             statementLineId: side === 'LIABILITY' ? 'esp:pasivo' : 'esp:activo',
         })
     }
 
     rows.sort((a, b) => a.code.localeCompare(b.code))
+
+    // ── Totales por naturaleza (Fase 2H §H8) ─────────────────
+    let assetsCents = 0
+    let liabilitiesCents = 0
+    for (const r of rows) {
+        if (r.side === 'LIABILITY') liabilitiesCents += toCents(r.measurement)
+        else assetsCents += toCents(r.measurement)
+    }
+
+    // ── Diferencias de cambio del ejercicio (Fase 2H §H8) ────
+    // Identificación por MAPPING (`notesGroup`), jamás por el nombre de la cuenta.
+    const DIFF_NOTE_GROUP = 'Diferencias de cambio'
+    const diffAccountIds: string[] = []
+    let diffCents = 0
+    for (const row of tb.rows) {
+        const account = byId.get(row.accountId)
+        if (!account || account.notesGroup !== DIFF_NOTE_GROUP) continue
+        diffAccountIds.push(row.accountId)
+        // Resultado con signo económico: ingreso (haber) positivo.
+        diffCents += toCents(row.periodCredit) - toCents(row.periodDebit)
+    }
+
+    const exchangeDifferences: ForeignCurrencyDisclosure['exchangeDifferences'] =
+        diffAccountIds.length === 0
+            ? {
+                status: 'INSUFFICIENT_INFORMATION',
+                total: 0,
+                accountIds: [],
+                detail: 'Ninguna cuenta del plan está mapeada a la nota "Diferencias de cambio", '
+                    + 'por eso no se informa el resultado por diferencias de cambio del ejercicio. '
+                    + 'Asigná esa nota a las cuentas correspondientes en Configuración → Plan de cuentas y mapeos.',
+            }
+            : {
+                status: 'CALCULATED',
+                total: diffCents / 100 || 0,
+                accountIds: diffAccountIds,
+                detail: 'Resultado neto por diferencias de cambio del ejercicio, según las cuentas mapeadas a la nota.',
+            }
 
     const applicable = rows.length > 0
     const note = !applicable
@@ -101,5 +142,16 @@ export function buildForeignCurrency(
             + 'La medición corresponde al saldo del libro en moneda de curso legal. '
             + 'No se utiliza una cotización automática sin identificación de fuente y fecha.'
 
-    return { applicable, rows, note, reconciled: applicable && anyDetail && !anyUnreconciled }
+    return {
+        applicable,
+        rows,
+        note,
+        reconciled: applicable && anyDetail && !anyUnreconciled,
+        exchangeDifferences,
+        totals: {
+            assets: assetsCents / 100 || 0,
+            liabilities: liabilitiesCents / 100 || 0,
+            net: (assetsCents - liabilitiesCents) / 100 || 0,
+        },
+    }
 }
