@@ -17,6 +17,7 @@ import ValidationBanner from './ValidationBanner'
 import LineageModal from './LineageModal'
 import PreparacionEfe from './PreparacionEfe'
 import { money, statementStyles } from './statementFormat'
+import SegmentedControl from '../../../ui/SegmentedControl'
 import type { CashFlowStatement2B, ReportLine } from '../../../reporting/domain/types'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 
@@ -42,34 +43,6 @@ const ACTIVITY_HINTS: Record<string, string> = {
     operativas: 'Flujos del ciclo principal del negocio: cobros a clientes y pagos a proveedores, personal e impuestos.',
     inversion: 'Compras y ventas de bienes de uso, intangibles e inversiones: cómo la empresa aplica efectivo a su estructura.',
     financiacion: 'Aportes y retiros de los propietarios, préstamos recibidos y su cancelación: cómo se financia la empresa.',
-}
-
-function Segmented<T extends string>({ label, value, options, onChange }: {
-    label: string
-    value: T
-    options: { value: T; label: string; disabled?: boolean; title?: string }[]
-    onChange: (v: T) => void
-}) {
-    return (
-        <div className="efe-segmented" role="group" aria-label={label}>
-            <span className="efe-segmented-label">{label}</span>
-            <div className="efe-segmented-track">
-                {options.map(o => (
-                    <button
-                        key={o.value}
-                        type="button"
-                        className={`efe-segmented-btn${value === o.value ? ' active' : ''}`}
-                        aria-pressed={value === o.value}
-                        disabled={o.disabled}
-                        title={o.title}
-                        onClick={() => onChange(o.value)}
-                    >
-                        {o.label}
-                    </button>
-                ))}
-            </div>
-        </div>
-    )
 }
 
 function StatCell({ label, value, tone }: { label: string; value: number; tone?: 'pos' | 'neg' | 'neutral' }) {
@@ -200,10 +173,11 @@ export default function FlujoEfectivoCanonicalTab({ bundle }: { bundle: Reportin
 
     const viewSwitch = (
         <div className="efe-toolbar" style={{ marginBottom: 12 }}>
-            <Segmented<View>
+            <SegmentedControl<View>
                 label="Vista"
                 value={view}
                 onChange={setView}
+                testId="efe-vista"
                 options={[{ value: 'EXPOSICION', label: 'Exposición' }, { value: 'PREPARACION', label: 'Preparación' }]}
             />
         </div>
@@ -214,7 +188,9 @@ export default function FlujoEfectivoCanonicalTab({ bundle }: { bundle: Reportin
             <div>
                 {viewSwitch}
                 <PreparacionEfe bundle={bundle} />
-                <style>{statementStyles}</style>
+                {/* efeStyles también acá: la barra de vista usa .efe-toolbar. Omitirlo fue
+                    la causa del bug de Fase 2H (controles sin diseño en Preparación). */}
+                <style>{statementStyles}{efeStyles}</style>
             </div>
         )
     }
@@ -244,25 +220,35 @@ export default function FlujoEfectivoCanonicalTab({ bundle }: { bundle: Reportin
         <div>
             {viewSwitch}
             <div className="efe-toolbar">
-                <Segmented<Method>
+                <SegmentedControl<Method>
                     label="Método"
                     value={method}
                     onChange={setMethod}
+                    testId="efe-metodo"
                     options={[{ value: 'DIRECT', label: 'Directo' }, { value: 'INDIRECT', label: 'Indirecto' }]}
                 />
-                <Segmented<Currency>
+                <SegmentedControl<Currency>
                     label="Expresión"
                     value={currency}
                     onChange={setCurrency}
+                    testId="efe-expresion"
                     options={[
                         { value: 'NOMINAL', label: 'Moneda nominal' },
-                        { value: 'CLOSING', label: 'Moneda de cierre', disabled: !restated, title: !restated ? 'Cargá un set de índices en el módulo de inflación para ver el EFE en moneda de cierre' : undefined },
+                        {
+                            value: 'CLOSING',
+                            label: 'Moneda de cierre',
+                            disabled: !restated,
+                            disabledReason: !restated
+                                ? 'Cargá un set de índices en el módulo de inflación para ver el EFE en moneda de cierre'
+                                : undefined,
+                        },
                     ]}
                 />
-                <Segmented<Detail>
+                <SegmentedControl<Detail>
                     label="Modo"
                     value={detail}
                     onChange={setDetail}
+                    testId="efe-modo"
                     options={[{ value: 'SUMMARY', label: 'Resumen' }, { value: 'DETAIL', label: 'Detalle' }]}
                 />
             </div>
@@ -359,17 +345,7 @@ export default function FlujoEfectivoCanonicalTab({ bundle }: { bundle: Reportin
 
 const efeStyles = `
 .efe-toolbar { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 14px; }
-.efe-segmented { display: flex; flex-direction: column; gap: 5px; }
-.efe-segmented-label { font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; }
-.efe-segmented-track { display: inline-flex; padding: 3px; gap: 3px; background: rgba(241,245,249,0.9); border: 1px solid #e2e8f0; border-radius: 10px; width: fit-content; }
-.efe-segmented-btn {
-    padding: 7px 16px; font-size: 0.84rem; font-weight: 600; color: #64748b;
-    background: transparent; border: none; border-radius: 7px; cursor: pointer; transition: all 0.15s ease; white-space: nowrap;
-}
-.efe-segmented-btn:hover:not(.active):not(:disabled) { color: #334155; background: rgba(226,232,240,0.6); }
-.efe-segmented-btn.active { background: white; color: #3B82F6; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.efe-segmented-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.efe-segmented-btn:focus-visible { outline: 2px solid #3B82F6; outline-offset: 1px; }
+/* Los controles segmentados usan .cl-seg* desde la hoja global (Fase 2H §H1). */
 
 .efe-hint { font-size: 0.78rem; color: #a16207; margin: 0 0 10px; }
 .efe-alert { margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; background: rgba(239,68,68,0.10); border: 1px solid rgba(239,68,68,0.4); color: #b91c1c; font-size: 0.85rem; font-weight: 600; }
@@ -441,6 +417,6 @@ const efeStyles = `
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .efe-row-caret, .efe-segmented-btn { transition: none; }
+    .efe-row-caret { transition: none; }
 }
 `

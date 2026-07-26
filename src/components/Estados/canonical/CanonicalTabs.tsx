@@ -13,6 +13,7 @@ import { statementStyles } from './statementFormat'
 import ValidationBanner from './ValidationBanner'
 import LineageModal from './LineageModal'
 import { EquityMatrixView } from './EquityMatrixView'
+import SegmentedControl from '../../../ui/SegmentedControl'
 import type { ReportLine } from '../../../reporting/domain/types'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 
@@ -134,13 +135,22 @@ export function EEPNCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
         <div>
             <ValidationBanner report={bundle.statements.validation} status={bundle.metadata.status} />
 
-            <div className="eqm-toolbar" role="group" aria-label="Vista del EEPN" style={{ marginRight: 12 }}>
-                <button type="button" className={`eqm-filter-btn${view === 'MATRIX' ? ' active' : ''}`} aria-pressed={view === 'MATRIX'} onClick={() => setView('MATRIX')}>
-                    Vista matricial
-                </button>
-                <button type="button" className={`eqm-filter-btn${view === 'SUMMARY' ? ' active' : ''}`} aria-pressed={view === 'SUMMARY'} onClick={() => setView('SUMMARY')}>
-                    Vista resumida
-                </button>
+            {/* Fase 2H §H1: antes eran botones .eqm-filter-btn cuyo CSS vivía dentro de
+                EquityMatrixView. Al elegir "Vista resumida" ese componente se desmontaba,
+                el <style> desaparecía y los botones quedaban como texto plano
+                ("Vista matricialVista resumida"). SegmentedControl toma su CSS de la hoja
+                global, así que su diseño ya no depende de la rama de renderizado. */}
+            <div style={{ marginBottom: 12 }}>
+                <SegmentedControl<'MATRIX' | 'SUMMARY'>
+                    label="Vista del EEPN"
+                    value={view}
+                    onChange={setView}
+                    testId="eepn-vista"
+                    options={[
+                        { value: 'MATRIX', label: 'Vista matricial' },
+                        { value: 'SUMMARY', label: 'Vista resumida' },
+                    ]}
+                />
             </div>
 
             {view === 'MATRIX' ? (
