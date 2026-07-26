@@ -328,9 +328,11 @@ export function ExpenseAllocationEditor() {
                         {balance != null && sumPct === 100 && (
                             <div style={{ background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.25)', borderRadius: 10, padding: '10px 14px', fontSize: '0.82rem' }} data-testid="alloc-preview">
                                 <strong>Vista previa ({year}):</strong> gasto total $ {nf.format(balance)}
-                                {form.allocations.filter(a => a.percentage !== '').map(a => (
+                                {/* Se usa el porcentaje EFECTIVO (derivado del inductor cuando la
+                                    base no es manual), para que la vista previa no contradiga a la regla. */}
+                                {derived.map(a => (
                                     <div key={a.function} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                        {RESULT_FUNCTION_LABEL[a.function]} {a.percentage} %: $ {nf.format((balance * Number(a.percentage)) / 100)}
+                                        {RESULT_FUNCTION_LABEL[a.function]} {a.percentage.toFixed(2)} %: $ {nf.format((balance * a.percentage) / 100)}
                                     </div>
                                 ))}
                                 <div style={{ color: '#64748b', marginTop: 4 }}>Se modifica la exposición del anexo; el Diario no cambia.</div>
