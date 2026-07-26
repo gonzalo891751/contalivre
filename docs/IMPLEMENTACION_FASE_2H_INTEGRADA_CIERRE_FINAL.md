@@ -1,7 +1,54 @@
 # Fase 2H integrada — cierre final
 
-> Rama de integración de la Fase 2H sobre el cierre de la Fase 2G.1.
+> Rama del PR #28, sincronizada con `origin/main`.
 > **No fue mergeada ni desplegada.** Queda lista para revisión.
+
+---
+
+## 0. Cierre del PR #28 (sincronización con main)
+
+| Dato | Valor |
+|---|---|
+| Fecha de integración | 26/07/2026 |
+| HEAD anterior de la rama | `1939201` |
+| `origin/main` integrado | `a45b986` |
+| Commit de merge | `a587b8e` |
+| **HEAD final de la rama** | **`bc07945`** *(actualizado en §12)* |
+| Respaldo previo | rama `backup/fase-2h-antes-de-sincronizar-main-1939201` y tag `backup-fase-2h-1939201` |
+| Árbol | Limpio |
+
+### Por qué GitHub informaba conflictos
+
+No había conflicto de contenido: era una **historia en cruz (criss-cross)**. La rama y `main`
+tenían **dos** bases de merge, no una:
+
+```
+git merge-base --all a45b986 1939201
+→ bbf22b8   (cierre 2G.1)
+→ 6152ea8   (merge de la fase 2G)
+```
+
+La rama de integración se creó desde 2G.1 e incorporó la 2H parcial, que a su vez venía de
+`6152ea8`. `main`, por su lado, llegó al mismo contenido por otro camino al mergear el PR #26. Con
+dos bases, la comparación simple que usa GitHub marca conflicto **exactamente** en los archivos que
+2G.1 tocó y la 2H también — los tres que reportaba.
+
+Verificación de que no había divergencia real: `git diff bbf22b8 origin/main` es **vacío**; ambos
+árboles ya eran idénticos (`fd9d72e`).
+
+La estrategia `ort` de git construye una base virtual mergeando ambas bases y resuelve sin
+conflicto: *«Merge made by the 'ort' strategy»*, sin marcadores y sin intervención manual.
+
+**El merge no aporta contenido: aporta estructura.** A partir de él `origin/main` es ancestro de la
+rama y queda **una sola base de merge** (`a45b986`), así que GitHub deja de ver el cruce.
+
+### Resolución de cada archivo señalado
+
+| Archivo | Qué aportaba cada lado | Resolución |
+|---|---|---|
+| `src/components/Estados/canonical/FlujoEfectivoCanonicalTab.tsx` | **2G.1**: `prepRestatedAvailable`, conmutador de Expresión en Preparación y `PreparacionEfe` con la prop `expression`. **2H**: `SegmentedControl`, `efeStyles` en la rama de Preparación, `disabledReason` | **Ambos**. Verificado en el archivo final: `prepRestatedAvailable` (l. 187), `expression=` (l. 218), `SegmentedControl` en los cinco controles, `{statementStyles}{efeStyles}` en las **dos** ramas de renderizado (l. 219 y 367) |
+| `e2e/preparacion-efe.spec.ts` | **2G.1**: tres tests (matriz y detalle de celda, moneda de cierre con banner y export, panel de políticas). **2H**: selectores por rol accesible | **Ambos**. Los tres tests intactos, con `getByRole('radio')` y `toBeEnabled` sobre el control real |
+| `playwright.config.ts` | **2G.1**: proyecto `firefox-desktop` con su `testMatch`. **2H**: `fase2h` agregado a ese `testMatch` | **Ambos**. Los tres proyectos conservados con `baseURL`, `webServer`, `reuseExistingServer`, `timeout` 180 s, `expect.timeout` 15 s, `workers: 1`, `retries: 0`, `trace: retain-on-failure`, `screenshot: off`, `testDir`, `reporter`. Sin proyectos duplicados |
 
 ---
 
@@ -9,10 +56,10 @@
 
 | Rama | HEAD | Rol |
 |---|---|---|
-| `main` | `a45b986` | Base del proyecto. **Ya contiene 2G.1** (PR #26) |
-| `refactor/fase-2g1-cierre-efe` | `bbf22b8` | Cierre funcional del EFE (2G.1) |
-| `refactor/fase-2h-cobertura-sectorial-anexos-operaciones` | `12cce94` | Entrega parcial de 2H |
-| **`refactor/fase-2h-integrada-cierre-final`** | **`d664c70`** | **Rama de integración de esta entrega** |
+| `main` | `a45b986` | Base del proyecto. **Ya contiene 2G.1** (PR #26). No se modificó |
+| `refactor/fase-2g1-cierre-efe` | `bbf22b8` | Cierre funcional del EFE (2G.1). Intacta |
+| `refactor/fase-2h-cobertura-sectorial-anexos-operaciones` | `12cce94` | Entrega parcial de 2H. Intacta |
+| **`refactor/fase-2h-integrada-cierre-final`** | **`bc07945`** | **Rama del PR #28** |
 
 Hallazgo de la verificación inicial: **`main` se movió**. Estaba en `6152ea8` y ahora está en
 `a45b986`, que incorporó 2G.1 vía PR #26. El árbol de `main` y el de `refactor/fase-2g1-cierre-efe`
@@ -250,6 +297,61 @@ técnico accidental. Se deja como está y se señala por si preferís retirarlo.
 
 ---
 
+## 10.bis — Endurecimientos del cierre del PR #28
+
+### Perfil sectorial por empresa
+
+Era global de la instalación: activar «sin fines de lucro» en el club cambiaba la exposición de la
+empresa comercial y de la agropecuaria. Ahora vive en
+`settings['sector-profiles'].byCompany[companyId]`, y la empresa se resuelve desde
+`systemMeta.currentCompanyId` con la empresa por defecto como respaldo.
+
+**Sin elevar el esquema** (sigue en 22): `byCompany` es un campo dentro de un registro de `settings`
+que ya existía, no un store ni un índice nuevo.
+
+Migración lógica, no destructiva y **sin filtraciones**:
+
+- si ya existe `byCompany`, esa es la única fuente y el campo global se ignora (por eso desactivar un
+  perfil no se «deshace» en la lectura siguiente);
+- si todavía no existe, el arreglo global se atribuye **únicamente** a la empresa por defecto, que es
+  la que lo generó cuando la instalación era de una sola empresa;
+- el campo `active` **nunca se borra**: queda como respaldo del valor anterior.
+
+La primera versión de esta corrección tenía una filtración real (el global se aplicaba a cualquier
+empresa sin entrada propia, así que el club heredaba el perfil de la comercial). La prueba lo detectó
+y se corrigió antes de cerrar.
+
+Verificado en la aplicación con dos empresas: `company-default` expone «Estado de Recursos y Gastos»
+y `Club Social QA` expone «Estado de Resultados»; al activar Agropecuaria en el club, la empresa por
+defecto **no** se alteró. Estado persistido observado:
+
+```json
+{ "active": ["COMMERCIAL","NONPROFIT"],
+  "byCompany": { "company-default": ["COMMERCIAL","NONPROFIT"],
+                 "company-club-qa": ["COMMERCIAL","AGRICULTURAL"] } }
+```
+
+### Cobertura móvil (390×844)
+
+Tres escenarios nuevos sobre las áreas que tocó la fase, con aserciones geométricas reales:
+
+| Escenario | Qué verifica |
+|---|---|
+| **A — EFE en Preparación** | El conmutador conserva `border-style: solid` en 390 px, `aria-checked` correcto, el conmutador de Expresión de 2G.1 es alcanzable, ningún control fuera del viewport, sin desborde horizontal |
+| **B — Operaciones vacía** | Todo en `$ 0,00`, sin `320.000`, sin «Vencimientos», sin `-$ 0,00`, aviso presente, tarjetas apiladas en una columna (misma `x`), navegación funcional |
+| **C — Notas y Anexos** | Las cinco subpestañas habilitadas; se recorren los cuatro anexos verificando `aria-selected` y que cada uno muestre datos o su estado vacío, sin desborde en ninguno |
+
+### Pie de provenance del PDF
+
+Antes: `Motor 2G.0 · schema v22 · reporte ca341a6b · VALIDATED`.
+Ahora: **`ContaLivre 0.5.0-rc.1 · Motor contable 2G.0 · esquema v22 · VALIDADO`**.
+
+Se distingue la versión de la aplicación de la del motor contable, se traduce estado y esquema, y el
+identificador del reporte se mueve a los **metadatos** del archivo (título, autor, asunto y palabras
+clave, junto al commit). La trazabilidad se conserva completa. No se tocaron cálculos.
+
+---
+
 ## 11. Riesgos y deuda técnica
 
 1. **`db.amortizationState` (V1) sigue existiendo** (riesgo bajo). La planilla ya usa V2 por defecto
@@ -258,13 +360,15 @@ técnico accidental. Se deja como está y se señala por si preferís retirarlo.
 2. **Diferencias de cambio por cuenta** (riesgo bajo). Se informa el total del ejercicio, no la
    apertura por partida: no existe un mapping que ligue cada diferencia a su cuenta de origen. Se
    declara explícitamente en vez de estimarlo.
-3. **Perfil sectorial global, no por empresa** (riesgo bajo). Se guarda en `settings`, no por
-   `companyId`. Con varias empresas compartirían perfil.
-4. **`main` avanzó durante la fase** (riesgo bajo). La integración se basó en 2G.1, cuyo árbol es
-   idéntico al de `main` al momento de verificar. Conviene reconfirmar antes de abrir el PR.
-5. **Precisión del reparto por inductor** (riesgo bajo). El porcentaje derivado se persiste
+3. **Atribución del perfil global histórico** (riesgo bajo). Si una instalación previa tenía el
+   perfil global y su empresa corriente **no** era `company-default`, esa empresa arrancará con el
+   núcleo comercial y habrá que reactivar su perfil. No se pierde ninguna cuenta ni dato: sólo la
+   selección, que se rehace con un clic.
+4. **Precisión del reparto por inductor** (riesgo bajo). El porcentaje derivado se persiste
    redondeado a dos decimales como caché legible; la fuente de verdad es `driverValue`, y el reparto
    en centavos se hace sobre el porcentaje efectivo, no sobre el redondeado.
+5. **Historia en cruz ya neutralizada** (riesgo bajo). Si `main` vuelve a avanzar, basta repetir
+   `git fetch` + `git merge --no-ff origin/main`; ya no hay cruce porque `origin/main` es ancestro.
 
 ---
 
@@ -277,6 +381,17 @@ técnico accidental. Se deja como está y se señala por si preferís retirarlo.
 | `9f6d80f` | feat: circuito único de bienes de uso y anexo de moneda extranjera (H7 y H8) |
 | `f9ce865` | feat: exportar los anexos nuevos y verificar los artefactos (H11) |
 | `d664c70` | test: aceptación E2E de la Fase 2H e informe integrado (H12) |
+| `1939201` | docs: fijar los SHA finales en el informe integrado |
+
+### Cierre del PR #28
+
+| SHA | Contenido |
+|---|---|
+| `a587b8e` | merge: sincronizar Fase 2H con `origin/main` (a45b986) |
+| `2659fe0` | fix: asociar el perfil sectorial a cada empresa |
+| `9aae215` | fix: clarificar la provenance del PDF profesional |
+| `bc07945` | test: ampliar la aceptación móvil a las áreas de la Fase 2H |
+| *(este)* | docs: actualizar el cierre del PR #28 |
 
 Debajo del merge queda el historial completo de la rama 2H parcial (`773f054`, `74ff594`, `582467c`,
 `54a4c72`, `12cce94`) y el de 2G.1.
@@ -363,15 +478,35 @@ $env:PATH = "C:\Tools\node-v22.23.1-win-x64;" + $env:PATH; npx playwright test
 
 Todo ejecutado con **Node v22.23.1 / npm 10.9.8** desde `C:\Tools\node-v22.23.1-win-x64`.
 
+Ejecutado sobre el HEAD final `bc07945`, después de sincronizar con `origin/main`.
+
 | Comando | Resultado |
 |---|---|
-| `npm ci` | `added 776 packages in 6m` · exit 0 |
+| `node --version` | `v22.23.1` |
+| `npm --version` | `10.9.8` |
+| `npm ci` | exit 0 (instalación limpia) |
 | `npx tsc --noEmit` | Sin salida · **exit 0** |
 | `npm run lint` | `✖ 53 problems (0 errors, 53 warnings)` · **0 errores** |
-| `npm run build` | `dist/sw.js`, `dist/workbox-835c8c05.js` generados · **exit 0** |
-| `npx vitest run` | **90 archivos, 616 pruebas, 616 pasando** · 54,67 s |
-| `npx playwright test` | **38 pruebas, 38 pasando** · 4,2 min · **exit 0** |
-| `node scripts/inspect-exports.mjs` | 14 hojas XLSX y 3 PDF verificados (§10) |
+| `npm run build` | `precache 84 entries (7478.72 KiB)` · `dist/sw.js` generado · **exit 0** |
+| `npx vitest run` | **92 archivos, 634 pruebas, 634 pasando** · 63,57 s |
+| `npx playwright test` | **41 pruebas, 41 pasando** · 4,8 min · **exit 0** |
+| `node scripts/inspect-exports.mjs` | 14 hojas XLSX y 3 PDF verificados |
+
+### E2E por proyecto
+
+| Proyecto | Pruebas | Resultado |
+|---|---:|---|
+| `chromium-desktop` (1920×1080) | 23 | 23 pasando |
+| `chromium-mobile` (390×844) | 4 | 4 pasando |
+| `firefox-desktop` (1440×900) | 14 | 14 pasando |
+| **Total** | **41** | **41 pasando** |
+
+### Inspección de exportaciones sobre el HEAD final
+
+- **XLSX** — 14 hojas, incluida «Gastos (preparación)» con sus diez columnas.
+- **PDF** `juego-completo`, `eepn-matriz`, `efe-directo` — los tres con título de estado y RT 54;
+  pie con «Motor contable» y «esquema vNN»; **sin** `VALIDATED`, **sin** `schema v`, **sin** el id
+  técnico del reporte, sin botones, sin papel de trabajo y sin hashes.
 
 ### Warnings de lint
 
@@ -404,8 +539,15 @@ La combinación **sí rompió** pruebas que pasaban por separado. No se ocultaro
 
 ## 15. Confirmación
 
-- **No se hizo merge a `main`.** `main` sigue en `a45b986`.
+- **No se hizo merge a `main`.** `main` sigue en `a45b986`. El PR #28 queda listo para que lo mergee
+  quien corresponda.
 - **No se hizo deploy.**
 - **No hubo rebase, squash ni reescritura de historia.** Las tres ramas de origen quedaron intactas.
-- **No se saltearon ni se marcaron como skip pruebas** para conseguir verde.
+- **No se usó `--force` ni `--force-with-lease`.** El push es normal, sobre una rama que sólo avanza.
+- **No se modificó `main` directamente.**
+- **No se saltearon ni se marcaron como skip pruebas** para conseguir verde. No hay `test.skip`,
+  `describe.skip`, `fixme` ni reintentos artificiales (`retries: 0`).
+- Los 53 warnings de lint son exactamente la baseline; **no se agregó ninguno** y hay 0 errores.
+- Respaldo del estado previo en `backup/fase-2h-antes-de-sincronizar-main-1939201` y en el tag
+  `backup-fase-2h-1939201`.
 - El árbol termina limpio.
