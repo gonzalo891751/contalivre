@@ -16,6 +16,7 @@
 import type {
     AccountKind,
     AccountSection,
+    CostOfSalesComponent,
     CurrentClassification,
     EquityComponent,
     MonetaryClassification,
@@ -80,6 +81,11 @@ export interface SectorAccountDefinition {
     resultFunction?: ResultFunction
     cashFlowCategory?: 'OPERATING' | 'INVESTING' | 'FINANCING' | 'CASH_EQUIVALENT' | 'NOT_APPLICABLE'
     equityComponent?: EquityComponent
+    /**
+     * Componente del costo de ventas. Es lo que permite al motor aislar, por
+     * ejemplo, una merma del CMV en lugar de mezclarla con el costo.
+     */
+    costComponent?: CostOfSalesComponent
     /** Nota a la que pertenece la cuenta. */
     notesGroup?: string
     /** Anexo al que pertenece la cuenta. */

@@ -10,6 +10,8 @@
 import { useMemo, useState } from 'react'
 import type { ResultFunction } from '../../../core/models'
 import type { ExpensesByFunctionMatrix } from '../../../reporting/domain/types'
+import { ALLOCATION_BASIS_LABEL, RESULT_FUNCTION_LABEL } from '../../../reporting/engine/expensesByFunction'
+import SegmentedControl from '../../../ui/SegmentedControl'
 
 const nf = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const money = (v: number | null | undefined) => (v == null ? '–' : nf.format(v))
@@ -29,6 +31,9 @@ export interface ExpensesByFunctionViewProps {
 export function ExpensesByFunctionView({ matrix, showComparative, onAccountClick }: ExpensesByFunctionViewProps) {
     const [functionFilter, setFunctionFilter] = useState<ResultFunction | 'ALL'>('ALL')
     const [accountFilter, setAccountFilter] = useState('')
+    // Fase 2H §7: todo anexo tiene vista de exposición (limpia, para el PDF) y
+    // vista de preparación (papel de trabajo trazable).
+    const [view, setView] = useState<'EXPOSICION' | 'PREPARACION'>('EXPOSICION')
 
     const visibleColumns = useMemo(
         () => matrix.columns.filter(c => functionFilter === 'ALL' || c.function === functionFilter),
@@ -57,6 +62,24 @@ export function ExpensesByFunctionView({ matrix, showComparative, onAccountClick
 
     return (
         <div>
+            <div style={{ marginBottom: 12 }}>
+                <SegmentedControl<'EXPOSICION' | 'PREPARACION'>
+                    label="Vista del anexo"
+                    value={view}
+                    onChange={setView}
+                    size="sm"
+                    testId="gastos-vista"
+                    options={[
+                        { value: 'EXPOSICION', label: 'Exposición' },
+                        { value: 'PREPARACION', label: 'Preparación' },
+                    ]}
+                />
+            </div>
+
+            {view === 'PREPARACION' ? (
+                <AllocationWorkPaper matrix={matrix} />
+            ) : (
+            <>
             <p className="ebf-intro">
                 Cada gasto del ER abierto por función según su mapping estructural o su regla de distribución.
                 La suma de las funciones de cada cuenta es exactamente el total de la cuenta, y el total del
@@ -151,8 +174,96 @@ export function ExpensesByFunctionView({ matrix, showComparative, onAccountClick
                     </tbody>
                 </table>
             </div>
+            </>
+            )}
 
             <style>{styles}</style>
+        </div>
+    )
+}
+
+/**
+ * Papel de trabajo de la asignación funcional (Fase 2H §H5).
+ *
+ * Muestra, por cada asignación: cuenta, saldo contable, función, regla aplicada,
+ * base utilizada, valor del inductor, porcentaje resultante, importe asignado,
+ * origen y la diferencia de control. La suma de las funciones de una cuenta debe
+ * ser exactamente su saldo: cualquier desvío se muestra, no se oculta.
+ */
+function AllocationWorkPaper({ matrix }: { matrix: ExpensesByFunctionMatrix }) {
+    return (
+        <div>
+            <p className="ebf-intro">
+                Cómo se distribuyó cada gasto. La asignación es de <strong>exposición</strong>: no modifica el
+                asiento ni el saldo contable de la cuenta en el Libro Diario, y ningún gasto se computa dos veces.
+            </p>
+
+            <div className="ebf-scroll" role="region" aria-label="Papel de trabajo de la asignación funcional" tabIndex={0}>
+                <table className="ebf-table">
+                    <thead>
+                        <tr>
+                            <th className="ebf-corner" scope="col">Cuenta</th>
+                            <th className="ebf-head num" scope="col">Saldo contable</th>
+                            <th className="ebf-head" scope="col">Función</th>
+                            <th className="ebf-head" scope="col">Base</th>
+                            <th className="ebf-head num" scope="col">Valor de la base</th>
+                            <th className="ebf-head num" scope="col">Porcentaje</th>
+                            <th className="ebf-head num" scope="col">Importe asignado</th>
+                            <th className="ebf-head" scope="col">Origen</th>
+                            <th className="ebf-head num" scope="col">Control</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {matrix.rows.map(row => {
+                            const trace = row.allocationTrace ?? []
+                            const assigned = trace.reduce((sum, t) => sum + t.amount, 0)
+                            // Diferencia de control: saldo − suma de lo asignado.
+                            const difference = Math.round((row.total - assigned) * 100) / 100
+                            const basisLabel = row.basis
+                                ? row.basis === 'CUSTOM' && row.basisLabel
+                                    ? row.basisLabel
+                                    : ALLOCATION_BASIS_LABEL[row.basis]
+                                : 'Asignación estructural'
+
+                            return trace.map((t, index) => (
+                                <tr key={`${row.accountId}-${t.function}`}>
+                                    {index === 0 && (
+                                        <th scope="row" className="ebf-rowlabel" rowSpan={trace.length}>
+                                            {row.code} {row.name}
+                                        </th>
+                                    )}
+                                    {index === 0 && (
+                                        <td className="num strong" rowSpan={trace.length}>{money(row.total)}</td>
+                                    )}
+                                    <td>{RESULT_FUNCTION_LABEL[t.function]}</td>
+                                    {index === 0 && <td rowSpan={trace.length}>{basisLabel}</td>}
+                                    <td className="num">{t.driverValue != null ? nf.format(t.driverValue) : '—'}</td>
+                                    <td className="num">{t.percentage.toFixed(2)} %</td>
+                                    <td className="num strong">{money(t.amount)}</td>
+                                    {index === 0 && (
+                                        <td rowSpan={trace.length}>{SOURCE_LABEL[row.source]}</td>
+                                    )}
+                                    {index === 0 && (
+                                        <td
+                                            className={`num ${difference === 0 ? 'ebf-ok' : 'ebf-bad'}`}
+                                            rowSpan={trace.length}
+                                        >
+                                            {difference === 0 ? '✓ 0,00' : money(difference)}
+                                        </td>
+                                    )}
+                                </tr>
+                            ))
+                        })}
+                    </tbody>
+                </table>
+            </div>
+
+            {matrix.unmappedExpenses.length > 0 && (
+                <div role="alert" className="ebf-warning" style={{ marginTop: 12 }}>
+                    ⚠ Gastos sin asignar: {matrix.unmappedExpenses.map(u => `${u.code} ${u.name} (${money(u.total)})`).join(' · ')}.
+                    No se distribuyeron porque no tienen función ni una regla válida.
+                </div>
+            )}
         </div>
     )
 }
@@ -200,4 +311,6 @@ const styles = `
     background: rgba(139,92,246,0.1); color: #6d28d9; padding: 1px 6px; border-radius: 999px;
 }
 .ebf-total-row th, .ebf-total-row td { border-top: 2px solid #cbd5e1; background: #f8fafc; font-weight: 700; }
+.ebf-table td.ebf-ok { color: #059669; font-weight: 700; }
+.ebf-table td.ebf-bad { color: #dc2626; font-weight: 700; }
 `

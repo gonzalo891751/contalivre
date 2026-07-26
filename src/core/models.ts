@@ -87,7 +87,25 @@ export type ResultFunction =
     | 'OTHER'
 
 /**
- * Regla versionada de distribución de un gasto entre funciones (Fase 2E §9.2).
+ * Base de distribución de un gasto entre funciones (Fase 2H §H5).
+ *
+ * MANUAL_PERCENTAGE es el comportamiento histórico (2E): el usuario escribe los
+ * porcentajes. En las demás bases el usuario carga el VALOR del inductor por
+ * función (empleados, m², horas, unidades) y el porcentaje se DERIVA, de modo
+ * que siempre suma 100 por construcción y queda explicado por un dato objetivo.
+ */
+export type AllocationBasis =
+    | 'MANUAL_PERCENTAGE'
+    | 'EMPLOYEES'
+    | 'SURFACE'
+    | 'HOURS'
+    | 'UNITS_PRODUCED'
+    | 'CUSTOM'
+
+/**
+ * Regla versionada de distribución de un gasto entre funciones (Fase 2E §9.2,
+ * ampliada en Fase 2H §H5 con bases de distribución).
+ *
  * Es metadata de EXPOSICIÓN: no altera asientos históricos. La suma de
  * percentages debe ser exactamente 100 (validado por el motor).
  */
@@ -98,10 +116,24 @@ export interface ExpenseAllocationRule {
     validFrom: string
     /** ISO date hasta la que rige (abierta si falta) */
     validTo?: string
+    /**
+     * Base de distribución. Ausente = MANUAL_PERCENTAGE (compatibilidad con las
+     * reglas creadas antes de la Fase 2H, que sólo tenían porcentajes).
+     */
+    basis?: AllocationBasis
+    /** Nombre del inductor cuando la base es CUSTOM (ej. "kg despachados"). */
+    basisLabel?: string
     allocations: {
         function: ResultFunction
         /** porcentaje 0–100 con hasta 2 decimales */
         percentage: number
+        /**
+         * Valor del inductor para esta función (empleados, m², horas, unidades).
+         * Sólo se usa cuando `basis` no es MANUAL_PERCENTAGE; en ese caso el
+         * porcentaje se deriva de estos valores y `percentage` queda como cache
+         * legible, no como fuente de verdad.
+         */
+        driverValue?: number
     }[]
     reason: string
     createdBy: string

@@ -31,7 +31,7 @@ test.describe('Aceptación visual — móvil 390×844', () => {
         await evidence(page, 'efe-movil-390')
 
         // Fase 2G (§12.7/§18F): Preparación en móvil usa tarjetas, sin recorte.
-        await page.getByRole('button', { name: 'Preparación', exact: true }).click()
+        await page.getByRole('radio', { name: 'Preparación', exact: true }).click()
         await expect(page.getByRole('heading', { name: /Cómo se construye/ })).toBeVisible()
         // La tabla de escritorio está oculta; se muestran tarjetas por cuenta
         await expect(page.locator('.prep-card').first()).toBeVisible()

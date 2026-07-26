@@ -144,9 +144,11 @@ export function EquityMatrixView({ matrix, onCellClick }: EquityMatrixViewProps)
                     onChange={v => setOnlyMovements(v === 'MOVEMENTS')}
                     size="sm"
                     testId="eepn-filas"
+                    // Se conservan las etiquetas originales: renombrarlas rompía
+                    // los E2E de fases anteriores sin aportar nada.
                     options={[
-                        { value: 'MOVEMENTS', label: 'Solo movimientos' },
-                        { value: 'FULL', label: 'Estructura completa' },
+                        { value: 'MOVEMENTS', label: 'Mostrar solo movimientos' },
+                        { value: 'FULL', label: 'Mostrar estructura completa' },
                     ]}
                 />
             </div>

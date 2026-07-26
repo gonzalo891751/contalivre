@@ -14,7 +14,7 @@
  * validación lo reporta.
  */
 
-import type { Account, ExpenseAllocationRule, ResultFunction } from '../../core/models'
+import type { Account, AllocationBasis, ExpenseAllocationRule, ResultFunction } from '../../core/models'
 import { toCents } from '../../accounting/domain/money'
 import type {
     ExpenseAccountRow,
@@ -74,21 +74,86 @@ export function activeRuleFor(
     return candidates.reduce((a, b) => (b.version > a.version ? b : a))
 }
 
-/** ¿Los porcentajes suman exactamente 100? (en centésimas, sin tolerancia) */
-export function ruleIsValid(rule: ExpenseAllocationRule): boolean {
-    if (rule.allocations.length === 0) return false
-    const sumBps = rule.allocations.reduce((s, a) => s + Math.round(a.percentage * 100), 0)
-    return sumBps === 10000 && rule.allocations.every(a => a.percentage > 0 && KNOWN_FUNCTIONS.has(a.function))
+export const ALLOCATION_BASIS_LABEL: Record<AllocationBasis, string> = {
+    MANUAL_PERCENTAGE: 'Porcentaje manual',
+    EMPLOYEES: 'Cantidad de empleados',
+    SURFACE: 'Superficie (m²)',
+    HOURS: 'Horas',
+    UNITS_PRODUCED: 'Unidades producidas',
+    CUSTOM: 'Base personalizada',
 }
 
-/** Reparte centavos exactos según la regla; el residuo va al mayor porcentaje */
+/** Base de la regla. Ausente ⇒ porcentaje manual (reglas previas a 2H). */
+export function basisOf(rule: ExpenseAllocationRule): AllocationBasis {
+    return rule.basis ?? 'MANUAL_PERCENTAGE'
+}
+
+/** ¿La base se expresa con un inductor en vez de porcentajes escritos a mano? */
+export function isDriverBasis(basis: AllocationBasis): boolean {
+    return basis !== 'MANUAL_PERCENTAGE'
+}
+
+/**
+ * Porcentajes efectivos de la regla (Fase 2H §H5).
+ *
+ * Con base por inductor el porcentaje se DERIVA de los valores cargados
+ * (empleados, m², horas, unidades), así que suma 100 por construcción y no
+ * depende de que el usuario haga bien la cuenta. Con porcentaje manual se
+ * devuelven los valores tal como fueron escritos.
+ */
+export function effectivePercentages(
+    rule: ExpenseAllocationRule
+): { function: ResultFunction; percentage: number; driverValue?: number }[] {
+    const basis = basisOf(rule)
+    if (!isDriverBasis(basis)) {
+        return rule.allocations.map(a => ({ function: a.function, percentage: a.percentage }))
+    }
+    const totalDriver = rule.allocations.reduce((sum, a) => sum + (a.driverValue ?? 0), 0)
+    if (totalDriver <= 0) return []
+    return rule.allocations.map(a => ({
+        function: a.function,
+        percentage: ((a.driverValue ?? 0) / totalDriver) * 100,
+        driverValue: a.driverValue ?? 0,
+    }))
+}
+
+/**
+ * ¿La regla es aplicable?
+ *
+ * - Porcentaje manual: los porcentajes deben sumar exactamente 100, sin tolerancia.
+ * - Base por inductor: alcanza con que los valores sean no negativos y su suma
+ *   sea mayor que cero; el 100 % queda garantizado por la derivación.
+ *
+ * En ambos casos toda función debe ser conocida y aportar algo (>0): una
+ * función con 0 no agrega información y ensucia el anexo.
+ */
+export function ruleIsValid(rule: ExpenseAllocationRule): boolean {
+    if (rule.allocations.length === 0) return false
+    if (!rule.allocations.every(a => KNOWN_FUNCTIONS.has(a.function))) return false
+
+    if (isDriverBasis(basisOf(rule))) {
+        const values = rule.allocations.map(a => a.driverValue ?? 0)
+        if (values.some(v => !Number.isFinite(v) || v < 0)) return false
+        return values.reduce((s, v) => s + v, 0) > 0
+    }
+
+    const sumBps = rule.allocations.reduce((s, a) => s + Math.round(a.percentage * 100), 0)
+    return sumBps === 10000 && rule.allocations.every(a => a.percentage > 0)
+}
+
+/**
+ * Reparte centavos exactos según la regla; el residuo va al mayor porcentaje.
+ * Con base por inductor se reparte sobre los porcentajes derivados, de modo que
+ * la suma de las funciones es SIEMPRE igual al saldo contable de la cuenta.
+ */
 function allocateCents(totalCents: number, rule: ExpenseAllocationRule): Partial<Record<ResultFunction, number>> {
+    const effective = effectivePercentages(rule)
     const cells: Partial<Record<ResultFunction, number>> = {}
     let assigned = 0
-    let largest: ResultFunction = rule.allocations[0].function
+    let largest: ResultFunction = effective[0].function
     let largestPct = -1
-    for (const a of rule.allocations) {
-        const cents = Math.round(totalCents * (Math.round(a.percentage * 100) / 10000))
+    for (const a of effective) {
+        const cents = Math.round(totalCents * (a.percentage / 100))
         cells[a.function] = (cells[a.function] ?? 0) + cents
         assigned += cents
         if (a.percentage > largestPct) { largestPct = a.percentage; largest = a.function }
@@ -132,12 +197,14 @@ export function buildExpensesByFunction(
         let cellsCents: Partial<Record<ResultFunction, number>> | null = null
         let source: ExpenseAccountRow['source'] = 'DERIVED'
         let ruleId: string | undefined
+        let appliedRule: ExpenseAllocationRule | null = null
 
         if (rule) {
             if (ruleIsValid(rule)) {
                 cellsCents = allocateCents(cents, rule)
                 source = 'RULE'
                 ruleId = rule.id
+                appliedRule = rule
             } else {
                 invalidRules.push(`${account.code} ${account.name} (regla ${rule.id}: los porcentajes no suman 100)`)
             }
@@ -161,6 +228,26 @@ export function buildExpensesByFunction(
             totalsByFunction[fn as ResultFunction] = fromCents(toCents(totalsByFunction[fn as ResultFunction] ?? 0) + c!)
         }
         totalCents += cents
+
+        // Traza de la distribución (§H5): base, valor del inductor, porcentaje
+        // resultante e importe, para que cada celda sea explicable.
+        let allocationTrace: ExpenseAccountRow['allocationTrace']
+        if (appliedRule) {
+            allocationTrace = effectivePercentages(appliedRule).map(effective => ({
+                function: effective.function,
+                driverValue: effective.driverValue,
+                percentage: effective.percentage,
+                amount: fromCents(cellsCents![effective.function] ?? 0),
+            }))
+        } else {
+            // Asignación estructural: el 100 % va a una única función.
+            allocationTrace = Object.entries(cellsCents).map(([fn, c]) => ({
+                function: fn as ResultFunction,
+                percentage: 100,
+                amount: fromCents(c!),
+            }))
+        }
+
         rows.push({
             accountId: row.accountId,
             code: account.code,
@@ -170,6 +257,9 @@ export function buildExpensesByFunction(
             cells,
             source,
             ruleId,
+            basis: appliedRule ? basisOf(appliedRule) : undefined,
+            basisLabel: appliedRule?.basisLabel,
+            allocationTrace,
         })
     }
 

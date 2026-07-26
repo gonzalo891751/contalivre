@@ -318,6 +318,10 @@ const AGRICULTURAL: SectorAccountDefinition[] = [
         monetaryClassification: 'NON_MONETARY',
         cashFlowCategory: 'OPERATING',
         resultFunction: 'PRODUCTION',
+        // Mortandad y mermas son bajas ANORMALES: salen del inventario pero no
+        // integran el costo de ventas. Sin este mapping el motor las mezclaría
+        // con el CMV y el puente no conciliaría con el ER.
+        costComponent: 'ABNORMAL_LOSS',
         notesGroup: 'Otros egresos',
         profile: 'AGRICULTURAL',
     },

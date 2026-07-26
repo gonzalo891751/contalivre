@@ -49,27 +49,32 @@ test.describe('Aceptación visual — escritorio', () => {
         await expect(page.getByText('Saldos al cierre').first()).toBeVisible()
         await evidence(page, 'eepn-matriz-1920')
 
-        // estructura completa (filas con guiones, sin ceros)
-        await page.getByRole('button', { name: 'Mostrar estructura completa' }).click()
+        // Fase 2H: los controles segmentados pasaron a SegmentedControl, que es
+        // un radiogroup accesible. Los selectores siguen la misma etiqueta con el
+        // rol correcto (radio) y además se verifica el estado seleccionado, así
+        // que la aserción es más estricta que antes, no más laxa.
+        await page.getByRole('radio', { name: 'Mostrar estructura completa' }).click()
         await evidence(page, 'eepn-matriz-completa-1920')
 
         // vista resumida
-        await page.getByRole('button', { name: 'Vista resumida' }).click()
+        const vistaResumida = page.getByRole('radio', { name: 'Vista resumida' })
+        await vistaResumida.click()
+        await expect(vistaResumida).toHaveAttribute('aria-checked', 'true')
         await expect(page.getByText('Evolución del Patrimonio Neto')).toBeVisible()
         await evidence(page, 'eepn-resumen-1920')
-        await page.getByRole('button', { name: 'Vista matricial' }).click()
+        await page.getByRole('radio', { name: 'Vista matricial' }).click()
 
         // ── EFE ──────────────────────────────────────────────
         await openEstadosTab(page, 'Flujo de Efectivo')
         await expect(page.getByText('Variación neta').first()).toBeVisible()
         await evidence(page, 'efe-directo-detalle-1920')
 
-        const modo = page.getByRole('group', { name: 'Modo' })
-        await modo.getByRole('button', { name: 'Resumen' }).click()
+        const modo = page.getByRole('radiogroup', { name: 'Modo' })
+        await modo.getByRole('radio', { name: 'Resumen' }).click()
         await evidence(page, 'efe-directo-resumen-1920')
-        await modo.getByRole('button', { name: 'Detalle' }).click()
+        await modo.getByRole('radio', { name: 'Detalle' }).click()
 
-        await page.getByRole('button', { name: 'Indirecto' }).click()
+        await page.getByRole('radio', { name: 'Indirecto' }).click()
         await expect(page.getByText('Resultado del ejercicio').first()).toBeVisible()
         // la tarjeta de operativas abre por defecto en Detalle: las
         // explicaciones de por qué cada ajuste suma o resta están a la vista
@@ -77,19 +82,19 @@ test.describe('Aceptación visual — escritorio', () => {
         await evidence(page, 'efe-indirecto-detalle-1920')
 
         // moneda de cierre deshabilitada sin set de índices (bloqueo honesto)
-        const closingBtn = page.getByRole('button', { name: 'Moneda de cierre' })
+        const closingBtn = page.getByRole('radio', { name: 'Moneda de cierre' })
         await expect(closingBtn).toBeDisabled()
 
         // seleccionar el set de índices RC habilita la moneda de cierre (§13)
         const setOption = await page.getByTestId('inflation-set-select').locator('option', { hasText: 'Índices RC' }).getAttribute('value')
         await page.getByTestId('inflation-set-select').selectOption(setOption!)
         await expect(page.getByTestId('inflation-set-selector')).toContainText('Ejemplo')
-        await expect(page.getByRole('button', { name: 'Moneda de cierre' })).toBeEnabled({ timeout: 30_000 })
-        await page.getByRole('button', { name: 'Moneda de cierre' }).click()
+        await expect(page.getByRole('radio', { name: 'Moneda de cierre' })).toBeEnabled({ timeout: 30_000 })
+        await page.getByRole('radio', { name: 'Moneda de cierre' }).click()
         await expect(page.getByText('el REI concilia con el efectivo del ESP')).toBeVisible()
         await evidence(page, 'efe-moneda-cierre-1920')
         // volver a nominal para el resto del recorrido
-        await page.getByRole('button', { name: 'Moneda nominal' }).click()
+        await page.getByRole('radio', { name: 'Moneda nominal' }).click()
 
         // ── Notas y anexos ───────────────────────────────────
         await openEstadosTab(page, 'Notas y Anexos')
@@ -114,10 +119,10 @@ test.describe('Aceptación visual — escritorio', () => {
         await evidence(page, 'bienes-de-uso-1920')
 
         // bienes de uso en moneda de cierre (el set sigue seleccionado, §12)
-        await page.getByRole('button', { name: 'Moneda de cierre' }).click()
+        await page.getByRole('radio', { name: 'Moneda de cierre' }).click()
         await expect(page.getByText('VO reexpresado').first()).toBeVisible()
         await evidence(page, 'bienes-de-uso-cierre-1920')
-        await page.getByRole('button', { name: 'Moneda nominal' }).click()
+        await page.getByRole('radio', { name: 'Moneda nominal' }).click()
 
         await page.getByRole('tab', { name: 'Moneda extranjera' }).click()
         await expect(page.getByText('RC Banco cuenta en dólares').first()).toBeVisible()

@@ -56,6 +56,60 @@ function Step({ op, title, value, hint, emphasis, comparative, onClick }: {
     )
 }
 
+/**
+ * Apertura del costo de producción (Fase 2H §H6).
+ *
+ * "Costo de producción" es un SUBTOTAL DERIVADO de sus componentes, no una fila
+ * decorativa, y la cadena producción → terminados → vendidos se concilia contra
+ * el mismo CMV del puente de existencias.
+ */
+function ProductionSection({ production, mode, showComparative, onDrilldown }: {
+    production: NonNullable<CostOfSalesBridge['production']>
+    mode: CostOfSalesBridge['mode']
+    showComparative: boolean
+    onDrilldown?: (label: string, accountIds: string[]) => void
+}) {
+    const drill = (label: string, ids: string[]) =>
+        onDrilldown ? () => onDrilldown(label, ids) : undefined
+
+    return (
+        <section style={{ marginTop: 24 }} aria-label="Costo de producción">
+            <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>
+                {mode === 'AGRICULTURAL' ? 'Costo de la producción agropecuaria' : 'Costo de producción'}
+            </h4>
+            <p className="cmv-intro">
+                {mode === 'AGRICULTURAL'
+                    ? 'Los costos aplicados a la producción se acumulan hasta la obtención del producto agropecuario. El resultado por producción y por tenencia se expone por separado en el Estado de Resultados: no se duplica acá.'
+                    : 'Los consumos del período se acumulan en el costo de producción; las existencias en proceso y de productos terminados lo convierten en costo de lo vendido.'}
+            </p>
+
+            <div className="cmv-bridge">
+                <Step title="Materias primas e insumos consumidos" value={production.directMaterials} hint={production.directMaterials.detail} comparative={showComparative}
+                    onClick={drill('Materias primas', production.directMaterials.accountIds)} />
+                <Step op="+" title="Mano de obra directa" value={production.directLabor} hint={production.directLabor.detail} comparative={showComparative}
+                    onClick={drill('Mano de obra directa', production.directLabor.accountIds)} />
+                <Step op="+" title="Costos indirectos de producción" value={production.indirectCosts} hint={production.indirectCosts.detail} comparative={showComparative}
+                    onClick={drill('Costos indirectos', production.indirectCosts.accountIds)} />
+                <Step op="+" title="Depreciaciones afectadas a producción" value={production.productionDepreciation} hint={production.productionDepreciation.detail} comparative={showComparative}
+                    onClick={drill('Depreciaciones productivas', production.productionDepreciation.accountIds)} />
+                <Step op="=" title="Costo de producción del período" value={production.productionCost} emphasis comparative={showComparative} />
+
+                <Step op="+" title="Producción en proceso inicial" value={production.workInProcessOpening} comparative={showComparative}
+                    onClick={drill('Producción en proceso inicial', production.workInProcessOpening.accountIds)} />
+                <Step op="−" title="Producción en proceso final" value={production.workInProcessClosing} comparative={showComparative}
+                    onClick={drill('Producción en proceso final', production.workInProcessClosing.accountIds)} />
+                <Step op="=" title="Costo de productos terminados" value={production.finishedGoodsCost} emphasis comparative={showComparative} />
+
+                <Step op="+" title="Productos terminados iniciales" value={production.finishedGoodsOpening} comparative={showComparative}
+                    onClick={drill('Productos terminados iniciales', production.finishedGoodsOpening.accountIds)} />
+                <Step op="−" title="Productos terminados finales" value={production.finishedGoodsClosing} comparative={showComparative}
+                    onClick={drill('Productos terminados finales', production.finishedGoodsClosing.accountIds)} />
+                <Step op="=" title="Costo de los productos vendidos" value={production.costOfGoodsSold} emphasis comparative={showComparative} />
+            </div>
+        </section>
+    )
+}
+
 export interface CostOfSalesBridgeViewProps {
     bridge: CostOfSalesBridge
     showComparative: boolean
@@ -165,6 +219,15 @@ export function CostOfSalesBridgeView({ bridge, showComparative, onDrilldown }: 
                     onClick={onDrilldown ? () => onDrilldown('Costo de ventas', bridge.costOfSales.accountIds) : undefined}
                 />
             </div>
+
+            {bridge.production && (
+                <ProductionSection
+                    production={bridge.production}
+                    mode={bridge.mode}
+                    showComparative={showComparative}
+                    onDrilldown={onDrilldown}
+                />
+            )}
 
             {cmvCheck && (
                 <p className="cmv-footnote">

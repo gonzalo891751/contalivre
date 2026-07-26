@@ -66,6 +66,7 @@ function toAccount(definition: SectorAccountDefinition, parentId: string | null)
         resultFunction: definition.resultFunction,
         cashFlowCategory: definition.cashFlowCategory,
         equityComponent: definition.equityComponent,
+        costComponent: definition.costComponent,
         notesGroup: definition.notesGroup,
         annexGroup: definition.annexGroup,
         isPostable: !(definition.isHeader ?? false),

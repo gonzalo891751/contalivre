@@ -32,6 +32,8 @@ const SUPPORT_ACCOUNTS: Array<Pick<Account, 'code' | 'name' | 'kind' | 'section'
     { code: '1.2.01.01', name: 'Instalaciones', kind: 'ASSET', section: 'NON_CURRENT', group: 'Bienes de uso', statementGroup: 'PPE' },
     { code: '2.1.01.01', name: 'Proveedores', kind: 'LIABILITY', section: 'CURRENT', group: 'Deudas comerciales', statementGroup: 'TRADE_PAYABLES' },
     { code: '3.1.01', name: 'Capital social', kind: 'EQUITY', section: 'CURRENT', group: 'Capital', statementGroup: 'CAPITAL' },
+    { code: '4.1.01', name: 'Ventas', kind: 'INCOME', section: 'OPERATING', group: 'Ventas', statementGroup: 'SALES' },
+    { code: '4.3.01', name: 'Costo mercaderías vendidas', kind: 'EXPENSE', section: 'COST', group: 'Costo de ventas', statementGroup: 'COGS' },
 ]
 
 async function ensureSupportAccounts(): Promise<Map<string, string>> {
@@ -201,6 +203,138 @@ export async function loadAgroFixture(): Promise<{ entries: number }> {
     ]
 
     await postAll(entries, 'agro')
+    return { entries: entries.length }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Empresa industrial
+// ─────────────────────────────────────────────────────────────
+
+export const INDUSTRIAL_FIXTURE_YEAR = 2026
+
+/**
+ * Ciclo industrial mínimo para el anexo de costo de producción (§H6):
+ * compra de materia prima, consumo, mano de obra directa, costos indirectos,
+ * depreciación productiva, terminación de productos y venta con su costo.
+ */
+export async function loadIndustrialFixture(): Promise<{ entries: number }> {
+    await activateSectorProfile('INDUSTRIAL')
+    await ensureSupportAccounts()
+
+    const id = await resolveIds([
+        '1.1.01.01', // Caja
+        '2.1.01.01', // Proveedores
+        '3.1.01', // Capital
+        '1.1.10.01', // Materias primas
+        '1.1.10.02', // Productos en proceso
+        '1.1.10.03', // Productos terminados
+        '4.3.07.01', // Mano de obra directa
+        '4.3.07.02', // Materiales e insumos directos
+        '4.3.07.03', // Costos indirectos de producción
+        '4.3.07.04', // Depreciaciones afectadas a producción
+        '4.3.01', // Costo de mercaderías vendidas
+        '4.1.01', // Ventas
+    ])
+
+    const entries: FixtureEntry[] = [
+        {
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-01-02`,
+            memo: 'Aporte inicial',
+            type: 'aporte',
+            lines: [
+                { accountId: id['1.1.01.01'], debit: 1000000, credit: 0 },
+                { accountId: id['3.1.01'], debit: 0, credit: 1000000 },
+            ],
+        },
+        {
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-02-10`,
+            memo: 'Compra de materias primas',
+            type: 'compra-mp',
+            lines: [
+                { accountId: id['1.1.10.01'], debit: 400000, credit: 0 },
+                { accountId: id['2.1.01.01'], debit: 0, credit: 400000 },
+            ],
+        },
+        {
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-03-31`,
+            memo: 'Consumo de materias primas en producción',
+            type: 'consumo-mp',
+            lines: [
+                { accountId: id['4.3.07.02'], debit: 300000, credit: 0 },
+                { accountId: id['1.1.10.01'], debit: 0, credit: 300000 },
+            ],
+        },
+        {
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-03-31`,
+            memo: 'Mano de obra directa del período',
+            type: 'mod',
+            lines: [
+                { accountId: id['4.3.07.01'], debit: 200000, credit: 0 },
+                { accountId: id['1.1.01.01'], debit: 0, credit: 200000 },
+            ],
+        },
+        {
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-03-31`,
+            memo: 'Costos indirectos de producción',
+            type: 'cip',
+            lines: [
+                { accountId: id['4.3.07.03'], debit: 80000, credit: 0 },
+                { accountId: id['1.1.01.01'], debit: 0, credit: 80000 },
+            ],
+        },
+        {
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-12-31`,
+            memo: 'Depreciación de maquinaria fabril',
+            type: 'depreciacion-productiva',
+            lines: [
+                { accountId: id['4.3.07.04'], debit: 20000, credit: 0 },
+                { accountId: id['1.1.01.01'], debit: 0, credit: 20000 },
+            ],
+        },
+        {
+            // Los costos acumulados se capitalizan a producción en proceso: por
+            // eso las cuentas de costo quedan saldadas y el ER no duplica el CMV.
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-12-31`,
+            memo: 'Capitalización de los costos a producción en proceso',
+            type: 'capitalizacion',
+            lines: [
+                { accountId: id['1.1.10.02'], debit: 600000, credit: 0 },
+                { accountId: id['4.3.07.02'], debit: 0, credit: 300000 },
+                { accountId: id['4.3.07.01'], debit: 0, credit: 200000 },
+                { accountId: id['4.3.07.03'], debit: 0, credit: 80000 },
+                { accountId: id['4.3.07.04'], debit: 0, credit: 20000 },
+            ],
+        },
+        {
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-12-31`,
+            memo: 'Productos terminados en el período',
+            type: 'terminacion',
+            lines: [
+                { accountId: id['1.1.10.03'], debit: 600000, credit: 0 },
+                { accountId: id['1.1.10.02'], debit: 0, credit: 600000 },
+            ],
+        },
+        {
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-12-10`,
+            memo: 'Venta de productos terminados',
+            type: 'venta',
+            lines: [
+                { accountId: id['1.1.01.01'], debit: 900000, credit: 0 },
+                { accountId: id['4.1.01'], debit: 0, credit: 900000 },
+            ],
+        },
+        {
+            date: `${INDUSTRIAL_FIXTURE_YEAR}-12-10`,
+            memo: 'Costo de los productos vendidos',
+            type: 'costo-venta',
+            lines: [
+                { accountId: id['4.3.01'], debit: 600000, credit: 0 },
+                { accountId: id['1.1.10.03'], debit: 0, credit: 600000 },
+            ],
+        },
+    ]
+
+    await postAll(entries, 'industrial')
     return { entries: entries.length }
 }
 

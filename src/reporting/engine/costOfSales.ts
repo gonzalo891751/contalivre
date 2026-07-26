@@ -24,11 +24,88 @@ import type {
     CostOfSalesValue,
     IncomeStatement2B,
     NormalizedTrialBalance,
+    ProductionCostBlock,
     ReportingInput,
     ValidationCheck,
 } from '../domain/types'
 
 const fromCents = (c: number) => c / 100
+
+/**
+ * Componentes del costo de producción del período (Fase 2H §H6).
+ *
+ * Se agrupan por `costComponent` cuando está mapeado y, en su defecto, por la
+ * naturaleza declarada de la cuenta. La detección es estructural: una cuenta
+ * entra si es de costo (statementGroup COGS) y su función es PRODUCTION.
+ */
+function collectProductionCosts(input: ReportingInput, tb: NormalizedTrialBalance) {
+    const byId = new Map(input.accounts.map(a => [a.id, a]))
+    const buckets = {
+        materials: { cents: 0, ids: new Set<string>() },
+        labor: { cents: 0, ids: new Set<string>() },
+        indirect: { cents: 0, ids: new Set<string>() },
+        depreciation: { cents: 0, ids: new Set<string>() },
+    }
+    const accountIds = new Set<string>()
+    let totalCents = 0
+
+    for (const row of tb.rows) {
+        const account = byId.get(row.accountId)
+        if (!account || account.isHeader) continue
+        if (account.statementGroup !== 'COGS') continue
+        if (account.resultFunction !== 'PRODUCTION') continue
+
+        // Costo CARGADO a producción en el período. Se usa el débito del período
+        // y no el saldo de cierre porque, si el costo se capitalizó a producción
+        // en proceso, la cuenta queda saldada y el saldo sería cero pese a que el
+        // costo sí se incurrió.
+        const cents = toCents(row.periodDebit)
+        if (cents === 0 && row.entryIds.length === 0) continue
+
+        // Clasificación por el código de la subcuenta de costo de producción,
+        // que es parte del catálogo sectorial (no una heurística por nombre).
+        const bucket = account.code.includes('.01')
+            ? buckets.labor
+            : account.code.includes('.02')
+              ? buckets.materials
+              : account.code.includes('.04')
+                ? buckets.depreciation
+                : buckets.indirect
+
+        bucket.cents += cents
+        bucket.ids.add(row.accountId)
+        accountIds.add(row.accountId)
+        totalCents += cents
+    }
+
+    return { ...buckets, totalCents, accountIds }
+}
+
+/** Saldos de apertura y cierre de las cuentas de un annexGroup / código dado. */
+function stageBalances(
+    input: ReportingInput,
+    tb: NormalizedTrialBalance,
+    matches: (code: string) => boolean
+) {
+    const byId = new Map(input.accounts.map(a => [a.id, a]))
+    const ids = new Set<string>()
+    let openingCents = 0
+    let closingCents = 0
+
+    for (const [accountId, ob] of input.openingBalances) {
+        const account = byId.get(accountId)
+        if (!account || !matches(account.code)) continue
+        openingCents += toCents(ob.debit || 0) - toCents(ob.credit || 0)
+        ids.add(accountId)
+    }
+    for (const row of tb.rows) {
+        const account = byId.get(row.accountId)
+        if (!account || !matches(account.code)) continue
+        closingCents += toCents(row.closing)
+        ids.add(row.accountId)
+    }
+    return { openingCents, closingCents, ids }
+}
 
 function value(
     amountCents: number | null,
@@ -37,6 +114,78 @@ function value(
     detail?: string
 ): CostOfSalesValue {
     return { amount: amountCents === null ? null : fromCents(amountCents), status, accountIds, detail }
+}
+
+/**
+ * Arma el bloque de producción y sus conciliaciones (Fase 2H §H6).
+ *
+ * Todos los subtotales son DERIVADOS. Se agregan dos controles: que el costo de
+ * producción sea la suma exacta de sus componentes y que la cadena
+ * producción → terminados → vendidos cierre contra el CMV del puente.
+ */
+function buildProductionBlock(
+    input: ReportingInput,
+    tb: NormalizedTrialBalance,
+    production: ReturnType<typeof collectProductionCosts>,
+    bridgeCogsCents: number,
+    check: (id: string, label: string, expected: number, actual: number, detail?: string) => void
+): ProductionCostBlock {
+    // Etapas por código del catálogo sectorial: producción en proceso y
+    // productos terminados (industria) o producción agropecuaria en proceso.
+    const wip = stageBalances(input, tb, code => code.startsWith('1.1.10.02') || code.startsWith('1.1.08.03'))
+    const finished = stageBalances(input, tb, code => code.startsWith('1.1.10.03') || code.startsWith('1.1.08.01'))
+
+    const productionCostCents = production.materials.cents + production.labor.cents
+        + production.indirect.cents + production.depreciation.cents
+
+    check('costo-produccion-suma',
+        'Costo de producción = materia prima + mano de obra + costos indirectos + depreciaciones',
+        production.materials.cents + production.labor.cents + production.indirect.cents + production.depreciation.cents,
+        productionCostCents)
+
+    // Costo de lo terminado = costo de producción + PP inicial − PP final
+    const finishedCostCents = productionCostCents + wip.openingCents - wip.closingCents
+    // Costo de lo vendido = terminados + PT inicial − PT final
+    const soldCents = finishedCostCents + finished.openingCents - finished.closingCents
+
+    check('costo-produccion-terminados',
+        'Costo de productos terminados = costo de producción + producción en proceso inicial − final',
+        productionCostCents + wip.openingCents - wip.closingCents, finishedCostCents)
+
+    // Conciliación final: la vía de producción debe llegar al mismo costo que el
+    // puente de existencias. Si difiere, se expone; jamás se agrega un plug.
+    check('costo-produccion-cmv',
+        'Costo de productos vendidos por producción = CMV del puente de existencias',
+        bridgeCogsCents, soldCents,
+        bridgeCogsCents !== soldCents
+            ? `Diferencia ${fromCents(soldCents - bridgeCogsCents)}: revisar el mapping de las cuentas de costo de producción y de las etapas de inventario.`
+            : undefined)
+
+    const v = (cents: number, ids: Set<string>, detail?: string): CostOfSalesValue =>
+        ids.size === 0 && cents === 0
+            ? value(null, 'NOT_APPLICABLE', [], detail)
+            : value(cents, 'CALCULATED', Array.from(ids), detail)
+
+    return {
+        directMaterials: v(production.materials.cents, production.materials.ids,
+            'Materias primas e insumos consumidos en el período.'),
+        directLabor: v(production.labor.cents, production.labor.ids,
+            'Mano de obra directa afectada a producción.'),
+        indirectCosts: v(production.indirect.cents, production.indirect.ids,
+            'Costos indirectos de producción.'),
+        productionDepreciation: v(production.depreciation.cents, production.depreciation.ids,
+            'Depreciaciones de bienes afectados a producción (no implican salida de efectivo).'),
+        productionCost: value(productionCostCents, 'CALCULATED', Array.from(production.accountIds),
+            'Subtotal derivado: suma de los componentes del costo de producción del período.'),
+        workInProcessOpening: v(wip.openingCents, wip.ids, 'Producción en proceso al inicio.'),
+        workInProcessClosing: v(wip.closingCents, wip.ids, 'Producción en proceso al cierre.'),
+        finishedGoodsCost: value(finishedCostCents, 'CALCULATED', Array.from(wip.ids),
+            'Costo de lo terminado en el período.'),
+        finishedGoodsOpening: v(finished.openingCents, finished.ids, 'Productos terminados al inicio.'),
+        finishedGoodsClosing: v(finished.closingCents, finished.ids, 'Productos terminados al cierre.'),
+        costOfGoodsSold: value(soldCents, 'CALCULATED', Array.from(finished.ids),
+            'Costo de los productos vendidos determinado por la vía de producción.'),
+    }
 }
 
 export function buildCostOfSales(
@@ -76,9 +225,12 @@ export function buildCostOfSales(
     let purchaseReturnsCents = 0
     let abnormalLossCents = 0
     let cmvOutflowCents = 0
+    // Existencias que salieron del inventario hacia el proceso productivo: son
+    // salida real, pero no son costo de ventas (Fase 2H §H6).
+    let transferredToProductionCents = 0
     const componentAccountIds: Record<string, Set<string>> = {
         purchases: new Set(), acquisition: new Set(), other: new Set(),
-        returns: new Set(), abnormal: new Set(), cmv: new Set(),
+        returns: new Set(), abnormal: new Set(), cmv: new Set(), toProduction: new Set(),
     }
 
     const contraComponent = (entry: typeof input.entries[number]): string | undefined => {
@@ -90,36 +242,101 @@ export function buildCostOfSales(
         return undefined
     }
 
+    /**
+     * ¿El contra del asiento es el pool de costos de producción? (Fase 2H §H6)
+     *
+     * Cuando una existencia sale contra una cuenta de costo de producción
+     * (consumo de materia prima) NO es un costo de ventas: la mercadería pasó al
+     * proceso productivo y recién será costo cuando se venda el producto
+     * terminado. Se expone como transferencia a producción, que es una salida
+     * real del inventario pero no integra el CMV.
+     */
+    const contraIsProductionPool = (entry: typeof input.entries[number]): boolean =>
+        entry.lines.some(l => {
+            if (isInventory(l.accountId)) return false
+            const a = byId.get(l.accountId)
+            return a?.statementGroup === 'COGS' && a?.resultFunction === 'PRODUCTION'
+        })
+
     for (const entry of input.entries) {
         if (entry.status === 'DRAFT') continue
         if (isStructuralClosingEntry(entry)) continue
         if (entry.sourceModule === 'closing' && entry.sourceType === 'apertura') continue
         const cc = contraComponent(entry)
-        for (const l of entry.lines) {
-            if (!isInventory(l.accountId)) continue
+        const toProduction = contraIsProductionPool(entry)
+
+        const inventoryLines = entry.lines.filter(l => isInventory(l.accountId))
+        if (inventoryLines.length === 0) continue
+
+        let entryDebitCents = 0
+        let entryCreditCents = 0
+        for (const l of inventoryLines) {
             inventoryIds.add(l.accountId)
+            entryDebitCents += toCents(l.debit || 0)
+            entryCreditCents += toCents(l.credit || 0)
+        }
+
+        /**
+         * Transferencias internas entre etapas de existencias (Fase 2H §H6).
+         *
+         * Si un asiento debita y acredita cuentas de bienes de cambio (por
+         * ejemplo aplicar insumos a la producción en proceso, o pasar la
+         * producción a productos terminados), esa porción NO es una compra ni un
+         * costo de ventas: la mercadería sólo cambió de etapa. Contarla en
+         * ambos lados inflaba compras y CMV por el mismo importe.
+         *
+         * Se neutraliza la porción compensada y sólo se computa el neto, que es
+         * lo que realmente entró o salió del inventario.
+         */
+        const transferCents = Math.min(entryDebitCents, entryCreditCents)
+        const netCents = entryDebitCents - entryCreditCents
+
+        if (transferCents > 0 && netCents === 0) continue // transferencia pura
+
+        for (const l of inventoryLines) {
             const debitCents = toCents(l.debit || 0)
             const creditCents = toCents(l.credit || 0)
-            if (debitCents !== 0) {
-                if (cc === 'ACQUISITION_COST') { acquisitionCents += debitCents; componentAccountIds.acquisition.add(l.accountId) }
-                else if (cc === 'OTHER_INCORPORABLE_COST') { otherIncorporableCents += debitCents; componentAccountIds.other.add(l.accountId) }
-                else { purchasesCents += debitCents; componentAccountIds.purchases.add(l.accountId) }
+
+            // Con transferencia interna sólo se imputa la parte neta, repartida
+            // proporcionalmente entre las cuentas del lado dominante.
+            const effectiveDebit = transferCents > 0
+                ? (netCents > 0 && entryDebitCents > 0 ? Math.round((debitCents / entryDebitCents) * netCents) : 0)
+                : debitCents
+            const effectiveCredit = transferCents > 0
+                ? (netCents < 0 && entryCreditCents > 0 ? Math.round((creditCents / entryCreditCents) * -netCents) : 0)
+                : creditCents
+
+            if (effectiveDebit !== 0) {
+                if (cc === 'ACQUISITION_COST') { acquisitionCents += effectiveDebit; componentAccountIds.acquisition.add(l.accountId) }
+                else if (cc === 'OTHER_INCORPORABLE_COST') { otherIncorporableCents += effectiveDebit; componentAccountIds.other.add(l.accountId) }
+                else { purchasesCents += effectiveDebit; componentAccountIds.purchases.add(l.accountId) }
             }
-            if (creditCents !== 0) {
-                if (cc === 'PURCHASE_RETURNS') { purchaseReturnsCents += creditCents; componentAccountIds.returns.add(l.accountId) }
-                else if (cc === 'ABNORMAL_LOSS') { abnormalLossCents += creditCents; componentAccountIds.abnormal.add(l.accountId) }
-                else { cmvOutflowCents += creditCents; componentAccountIds.cmv.add(l.accountId) }
+            if (effectiveCredit !== 0) {
+                if (cc === 'PURCHASE_RETURNS') { purchaseReturnsCents += effectiveCredit; componentAccountIds.returns.add(l.accountId) }
+                else if (cc === 'ABNORMAL_LOSS') { abnormalLossCents += effectiveCredit; componentAccountIds.abnormal.add(l.accountId) }
+                else if (toProduction) { transferredToProductionCents += effectiveCredit; componentAccountIds.toProduction.add(l.accountId) }
+                else { cmvOutflowCents += effectiveCredit; componentAccountIds.cmv.add(l.accountId) }
             }
         }
     }
 
-    const totalOutflowCents = purchaseReturnsCents + abnormalLossCents + cmvOutflowCents
+    const totalOutflowCents = purchaseReturnsCents + abnormalLossCents + cmvOutflowCents + transferredToProductionCents
     const totalInflowCents = purchasesCents + acquisitionCents + otherIncorporableCents
     const closingCents = openingCents + totalInflowCents - totalOutflowCents
     const accountIds = Array.from(inventoryIds)
     const erCogsCents = toCents(incomeStatement.costOfSales.amount)
     const hasInventoryData = inventoryIds.size > 0 && (openingCents !== 0 || totalInflowCents !== 0 || totalOutflowCents !== 0 || closingCents !== 0)
     const hasCogs = erCogsCents !== 0 || incomeStatement.costOfSales.accountIds.length > 0
+
+    // ── Evidencia estructural de producción (Fase 2H §H6) ────
+    // Se detecta por MAPPING, nunca por el nombre de la cuenta: cuentas de costo
+    // (COGS) cuya función declarada es PRODUCTION y que tuvieron movimiento.
+    const production = collectProductionCosts(input, tb)
+    const hasProductionData = production.totalCents !== 0 || production.accountIds.size > 0
+    const hasAgroData = input.accounts.some(
+        a => a.sectorProfile === 'AGRICULTURAL'
+            && tb.rows.some(r => r.accountId === a.id && (r.closing !== 0 || r.entryIds.length > 0))
+    )
 
     const validations: ValidationCheck[] = []
     const check = (id: string, label: string, expected: number, actual: number, detail?: string) => {
@@ -156,13 +373,14 @@ export function buildCostOfSales(
     // ── Puente comercial ─────────────────────────────────────
     // Disponibles = EI + compras − devoluciones + adquisición + otros
     const availableCents = openingCents + purchasesCents - purchaseReturnsCents + acquisitionCents + otherIncorporableCents
-    // CMV puro = disponibles − EF − bajas anormales (que salieron pero no son costo)
-    const bridgeCogsCents = availableCents - closingCents - abnormalLossCents // = cmvOutflowCents
+    // CMV puro = disponibles − EF − bajas anormales − transferencias a producción
+    // (todas salieron del inventario, pero ninguna de las dos últimas es costo de ventas)
+    const bridgeCogsCents = availableCents - closingCents - abnormalLossCents - transferredToProductionCents
 
     check('cmv-disponibles', 'CMV: bienes disponibles = EI + compras − devoluciones + adquisición + otros',
         openingCents + purchasesCents - purchaseReturnsCents + acquisitionCents + otherIncorporableCents, availableCents)
-    check('cmv-puente-interno', 'CMV: disponibles − existencia final − bajas anormales = CMV del puente',
-        availableCents - closingCents - abnormalLossCents, bridgeCogsCents)
+    check('cmv-puente-interno', 'CMV: disponibles − existencia final − bajas anormales − transferencias a producción = CMV del puente',
+        availableCents - closingCents - abnormalLossCents - transferredToProductionCents, bridgeCogsCents)
 
     // Conciliación con el ER: con las bajas anormales YA aisladas, el puente
     // debe igualar al CMV del ER. Si aún difiere, se expone la diferencia sin plug.
@@ -184,8 +402,26 @@ export function buildCostOfSales(
     const comp = (cents: number, ids: Set<string>, detail?: string): CostOfSalesValue =>
         ids.size === 0 && cents === 0 ? value(null, 'NOT_APPLICABLE', [], detail) : value(cents, 'CALCULATED', Array.from(ids), detail)
 
+    // ── Alcance del anexo (Fase 2H §H6) ──────────────────────
+    // Precedencia estructural: agro > industria > comercio.
+    const mode: CostOfSalesBridge['mode'] = hasAgroData
+        ? 'AGRICULTURAL'
+        : hasProductionData
+          ? 'INDUSTRIAL'
+          : 'COMMERCIAL'
+
+    const modeReason = hasAgroData
+        ? 'Hay cuentas del perfil agropecuario con movimientos: el costo se expone con activos biológicos y productos agropecuarios.'
+        : hasProductionData
+          ? 'Hay cuentas de costo con función de producción: el anexo abre el costo de producción por etapas.'
+          : 'No hay evidencia de costos de producción: se expone el puente comercial.'
+
     const bridge: CostOfSalesBridge = {
-        mode: 'COMMERCIAL',
+        mode,
+        modeReason,
+        production: hasProductionData || hasAgroData
+            ? buildProductionBlock(input, tb, production, bridgeCogsCents, check)
+            : undefined,
         openingInventory: value(openingCents, 'CALCULATED', accountIds),
         purchases: value(purchasesCents, 'CALCULATED', Array.from(componentAccountIds.purchases),
             'Débitos del ejercicio a bienes de cambio: compras del período.'),

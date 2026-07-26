@@ -15,7 +15,7 @@ test.describe('Fase 2G — Preparación del EFE (escritorio)', () => {
         await evidence2g(page, 'exposicion-efe')
 
         // Conmutar Exposición → Preparación
-        await page.getByRole('button', { name: 'Preparación', exact: true }).click()
+        await page.getByRole('radio', { name: 'Preparación', exact: true }).click()
         await expect(page.getByRole('heading', { name: /Cómo se construye el Estado de Flujo de Efectivo/ })).toBeVisible()
 
         // Panel de controles y matriz presentes
@@ -52,9 +52,9 @@ test.describe('Fase 2G — Preparación del EFE (escritorio)', () => {
         await setSelect.selectOption(rcValue!)
 
         await openEstadosTab(page, 'Flujo de Efectivo')
-        await page.getByRole('button', { name: 'Preparación', exact: true }).click()
+        await page.getByRole('radio', { name: 'Preparación', exact: true }).click()
         // El bundle se recalcula con índices: esperar a que la moneda de cierre se habilite
-        const cierreBtn = page.getByRole('button', { name: 'Moneda de cierre', exact: true })
+        const cierreBtn = page.getByRole('radio', { name: 'Moneda de cierre', exact: true })
         await expect(cierreBtn).toBeEnabled({ timeout: 30_000 })
         await cierreBtn.click()
 
