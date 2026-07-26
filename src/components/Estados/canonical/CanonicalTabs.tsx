@@ -14,6 +14,7 @@ import ValidationBanner from './ValidationBanner'
 import LineageModal from './LineageModal'
 import { EquityMatrixView } from './EquityMatrixView'
 import SegmentedControl from '../../../ui/SegmentedControl'
+import { useSectorProfiles } from '../../../hooks/useSectorProfiles'
 import type { ReportLine } from '../../../reporting/domain/types'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 
@@ -80,6 +81,10 @@ const TAX_STATUS_INFO: Record<string, { label: string; hint: string }> = {
 
 export function ERCanonicalTab({ bundle, onOpenNote }: { bundle: ReportingBundle; onOpenNote?: (ref: string) => void }) {
     const { open, modal } = useLineage(bundle)
+    // Fase 2H §H4: la denominación del estado depende del perfil de la entidad.
+    // Una asociación civil expone "Estado de Recursos y Gastos"; las cifras las
+    // produce el MISMO motor, sólo cambia la exposición.
+    const { vocabulary } = useSectorProfiles()
     const er = bundle.statements.incomeStatement
     const showComp = bundle.metadata.hasComparative
     const taxCalculated = er.incomeTaxStatus === 'CALCULATED'
@@ -87,7 +92,7 @@ export function ERCanonicalTab({ bundle, onOpenNote }: { bundle: ReportingBundle
     return (
         <div>
             <ValidationBanner report={bundle.statements.validation} status={bundle.metadata.status} />
-            <StatementCard title="Estado de Resultados" accent="red" showComparative={showComp}>
+            <StatementCard title={vocabulary.incomeStatementTitle} accent="red" showComparative={showComp}>
                 <StatementRows
                     lines={[er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses, er.operatingResult, er.financialResults, er.otherResults, er.preTaxResult]}
                     showComparative={showComp}
