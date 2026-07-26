@@ -13,6 +13,8 @@ import { statementStyles } from './statementFormat'
 import ValidationBanner from './ValidationBanner'
 import LineageModal from './LineageModal'
 import { EquityMatrixView } from './EquityMatrixView'
+import SegmentedControl from '../../../ui/SegmentedControl'
+import { useSectorProfiles } from '../../../hooks/useSectorProfiles'
 import type { ReportLine } from '../../../reporting/domain/types'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 
@@ -79,6 +81,10 @@ const TAX_STATUS_INFO: Record<string, { label: string; hint: string }> = {
 
 export function ERCanonicalTab({ bundle, onOpenNote }: { bundle: ReportingBundle; onOpenNote?: (ref: string) => void }) {
     const { open, modal } = useLineage(bundle)
+    // Fase 2H §H4: la denominación del estado depende del perfil de la entidad.
+    // Una asociación civil expone "Estado de Recursos y Gastos"; las cifras las
+    // produce el MISMO motor, sólo cambia la exposición.
+    const { vocabulary } = useSectorProfiles()
     const er = bundle.statements.incomeStatement
     const showComp = bundle.metadata.hasComparative
     const taxCalculated = er.incomeTaxStatus === 'CALCULATED'
@@ -86,7 +92,7 @@ export function ERCanonicalTab({ bundle, onOpenNote }: { bundle: ReportingBundle
     return (
         <div>
             <ValidationBanner report={bundle.statements.validation} status={bundle.metadata.status} />
-            <StatementCard title="Estado de Resultados" accent="red" showComparative={showComp}>
+            <StatementCard title={vocabulary.incomeStatementTitle} accent="red" showComparative={showComp}>
                 <StatementRows
                     lines={[er.sales, er.costOfSales, er.grossProfit, er.adminExpenses, er.sellingExpenses, er.operatingResult, er.financialResults, er.otherResults, er.preTaxResult]}
                     showComparative={showComp}
@@ -134,13 +140,22 @@ export function EEPNCanonicalTab({ bundle }: { bundle: ReportingBundle }) {
         <div>
             <ValidationBanner report={bundle.statements.validation} status={bundle.metadata.status} />
 
-            <div className="eqm-toolbar" role="group" aria-label="Vista del EEPN" style={{ marginRight: 12 }}>
-                <button type="button" className={`eqm-filter-btn${view === 'MATRIX' ? ' active' : ''}`} aria-pressed={view === 'MATRIX'} onClick={() => setView('MATRIX')}>
-                    Vista matricial
-                </button>
-                <button type="button" className={`eqm-filter-btn${view === 'SUMMARY' ? ' active' : ''}`} aria-pressed={view === 'SUMMARY'} onClick={() => setView('SUMMARY')}>
-                    Vista resumida
-                </button>
+            {/* Fase 2H §H1: antes eran botones .eqm-filter-btn cuyo CSS vivía dentro de
+                EquityMatrixView. Al elegir "Vista resumida" ese componente se desmontaba,
+                el <style> desaparecía y los botones quedaban como texto plano
+                ("Vista matricialVista resumida"). SegmentedControl toma su CSS de la hoja
+                global, así que su diseño ya no depende de la rama de renderizado. */}
+            <div style={{ marginBottom: 12 }}>
+                <SegmentedControl<'MATRIX' | 'SUMMARY'>
+                    label="Vista del EEPN"
+                    value={view}
+                    onChange={setView}
+                    testId="eepn-vista"
+                    options={[
+                        { value: 'MATRIX', label: 'Vista matricial' },
+                        { value: 'SUMMARY', label: 'Vista resumida' },
+                    ]}
+                />
             </div>
 
             {view === 'MATRIX' ? (

@@ -15,6 +15,7 @@ import type {
     EquityMatrixRow,
     EquityMatrixViewModel,
 } from '../../../reporting/domain/types'
+import SegmentedControl from '../../../ui/SegmentedControl'
 
 const nf = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const money = (n: number) => nf.format(n)
@@ -136,23 +137,18 @@ export function EquityMatrixView({ matrix, onCellClick }: EquityMatrixViewProps)
 
     return (
         <div>
-            <div className="eqm-toolbar" role="group" aria-label="Filtro de filas del EEPN">
-                <button
-                    type="button"
-                    className={`eqm-filter-btn${onlyMovements ? ' active' : ''}`}
-                    aria-pressed={onlyMovements}
-                    onClick={() => setOnlyMovements(true)}
-                >
-                    Mostrar solo movimientos
-                </button>
-                <button
-                    type="button"
-                    className={`eqm-filter-btn${!onlyMovements ? ' active' : ''}`}
-                    aria-pressed={!onlyMovements}
-                    onClick={() => setOnlyMovements(false)}
-                >
-                    Mostrar estructura completa
-                </button>
+            <div style={{ marginBottom: 12 }}>
+                <SegmentedControl<'MOVEMENTS' | 'FULL'>
+                    label="Filas del EEPN"
+                    value={onlyMovements ? 'MOVEMENTS' : 'FULL'}
+                    onChange={v => setOnlyMovements(v === 'MOVEMENTS')}
+                    size="sm"
+                    testId="eepn-filas"
+                    options={[
+                        { value: 'MOVEMENTS', label: 'Solo movimientos' },
+                        { value: 'FULL', label: 'Estructura completa' },
+                    ]}
+                />
             </div>
 
             {/* ── Escritorio / tablet: matriz completa ── */}
@@ -254,10 +250,7 @@ export function EquityMatrixView({ matrix, onCellClick }: EquityMatrixViewProps)
 }
 
 const matrixStyles = `
-.eqm-toolbar { display: inline-flex; gap: 3px; padding: 3px; background: rgba(241,245,249,0.9); border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 12px; }
-.eqm-filter-btn { padding: 6px 14px; font-size: 0.8rem; font-weight: 600; color: #64748b; background: transparent; border: none; border-radius: 7px; cursor: pointer; }
-.eqm-filter-btn.active { background: white; color: #7c3aed; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.eqm-filter-btn:focus-visible { outline: 2px solid #7c3aed; outline-offset: 1px; }
+/* El filtro de filas usa SegmentedControl (.cl-seg*, hoja global) — Fase 2H §H1. */
 
 .eqm-scroll { overflow: auto; max-height: 72vh; border: 1px solid #e2e8f0; border-radius: 12px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .eqm-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: 0.82rem; }

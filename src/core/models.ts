@@ -256,6 +256,12 @@ export interface Account {
     validFrom?: string               // ISO date
     validTo?: string                 // ISO date
     systemAccount?: boolean          // cuenta de sistema, no eliminable
+    /**
+     * Perfil sectorial que aportó la cuenta (Fase 2H §H2). Campo de registro, no
+     * indexado: no requiere elevar la versión del esquema. Ausente en las
+     * cuentas del núcleo común y en las creadas por el usuario.
+     */
+    sectorProfile?: import('./sectorProfiles/types').ActivityProfile
     metadataVersion?: number
 
     // Legacy compatibility
