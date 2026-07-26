@@ -16,6 +16,33 @@ import type { ExportEstadosOptions } from '../lib/exportOptions'
 
 const fmt = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/** Estado del reporte en castellano, para no exponer el enum interno. */
+const REPORT_STATUS_LABEL: Record<string, string> = {
+    VALIDATED: 'VALIDADO',
+    BLOCKED: 'BLOQUEADO',
+    DRAFT: 'BORRADOR',
+    LOADING: 'EN PROCESO',
+}
+
+/**
+ * Pie de provenance del PDF profesional (cierre del PR #28).
+ *
+ * Antes decía `Motor 2G.0 · schema v22 · reporte ca341a6b · VALIDATED`, que se
+ * leía como si TODO el programa fuera una versión vieja, mezclaba inglés y
+ * exponía un identificador técnico sin contexto.
+ *
+ * Ahora se distingue la versión de la aplicación de la del motor contable, se
+ * traduce el estado y el identificador del reporte se mueve a los metadatos del
+ * archivo: la trazabilidad se conserva sin ensuciar el documento formal.
+ */
+export function reportProvenanceLine(
+    m: { appVersion: string; engineVersion: string; schemaVersion: number; status: string },
+    isDraft: boolean
+): string {
+    const status = isDraft ? 'BORRADOR' : (REPORT_STATUS_LABEL[m.status] ?? m.status)
+    return `ContaLivre ${m.appVersion} · Motor contable ${m.engineVersion} · esquema v${m.schemaVersion} · ${status}`
+}
+
 type Row = string[]
 
 function flatten(lines: ReportLine[], showComp: boolean): Row[] {
@@ -422,12 +449,25 @@ export async function exportReportBundlePdfFormal(bundle: ReportingBundle, optio
         // pie
         doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(120)
         doc.text(notesLegend, 40, ph - 40)
-        doc.text(
-            `Motor ${m.engineVersion} · schema v${m.schemaVersion} · reporte ${m.reportVersion} · ${isDraft ? 'BORRADOR' : m.status}`,
-            40, ph - 30,
-        )
+        doc.text(reportProvenanceLine(m, isDraft), 40, ph - 30)
         doc.text(`Página ${p} de ${pageCount}`, pw - 40, ph - 30, { align: 'right' })
     }
+
+    // El identificador técnico del reporte vive en los metadatos del archivo:
+    // se conserva la trazabilidad sin mostrarlo en el documento formal.
+    doc.setProperties({
+        title: `Estados contables — ${m.companyLegalName} — ${m.exerciseLabel}`,
+        author: m.companyLegalName,
+        creator: `ContaLivre ${m.appVersion}`,
+        subject: `${m.normative} · reporte ${m.reportVersion} · motor contable ${m.engineVersion} · esquema v${m.schemaVersion}`,
+        keywords: [
+            `reporte:${m.reportVersion}`,
+            `motor:${m.engineVersion}`,
+            `esquema:v${m.schemaVersion}`,
+            `estado:${m.status}`,
+            `commit:${m.commit}`,
+        ].join(', '),
+    })
 
     const dateStr = new Date().toISOString().slice(0, 10)
     const suffix = isDraft ? '_BORRADOR' : ''

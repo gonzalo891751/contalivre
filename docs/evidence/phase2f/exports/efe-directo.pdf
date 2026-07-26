@@ -10,7 +10,7 @@
 endobj
 4 0 obj
 <<
-/Length 10955
+/Length 10969
 >>
 stream
 0.200025 w
@@ -602,7 +602,7 @@ BT
 8.0499999999999989 TL
 0.471 g
 40. 30. Td
-(Motor 2G.0 · schema v22 · reporte ca341a6b · VALIDATED) Tj
+(ContaLivre 0.5.0-rc.1 · Motor contable 2G.0 · esquema v22 · VALIDADO) Tj
 ET
 BT
 /F1 7 Tf
@@ -783,7 +783,12 @@ endobj
 19 0 obj
 <<
 /Producer (jsPDF 4.2.1)
-/CreationDate (D:20260726153844-03'00')
+/Title (þÿ E s t a d o s   c o n t a b l e s      E m p r e s a   C o n t a L i v r e      E j e r c i c i o   2 0 2 5)
+/Subject (þÿ R T   5 4   \( t e x t o   o r d e n a d o   p o r   R T   5 9 \)      a l c a n c e   e d u c a t i v o   c o m e r c i a l / s e r v i c i o s   ·   r e p o r t e   c a 3 4 1 a 6 b   ·   m o t o r   c o n t a b l e   2 G . 0   ·   e s q u e m a   v 2 2)
+/Author (Empresa ContaLivre)
+/Keywords (reporte:ca341a6b, motor:2G.0, esquema:v22, estado:VALIDATED, commit:2659fe0)
+/Creator (ContaLivre 0.5.0-rc.1)
+/CreationDate (D:20260726170727-03'00')
 >>
 endobj
 20 0 obj
@@ -797,33 +802,33 @@ endobj
 xref
 0 21
 0000000000 65535 f 
-0000011160 00000 n 
-0000012977 00000 n 
+0000011174 00000 n 
+0000012991 00000 n 
 0000000015 00000 n 
 0000000152 00000 n 
-0000011217 00000 n 
-0000011342 00000 n 
-0000011472 00000 n 
-0000011605 00000 n 
-0000011742 00000 n 
-0000011865 00000 n 
-0000011994 00000 n 
-0000012126 00000 n 
-0000012262 00000 n 
-0000012390 00000 n 
-0000012517 00000 n 
-0000012646 00000 n 
-0000012779 00000 n 
-0000012881 00000 n 
-0000013225 00000 n 
-0000013311 00000 n 
+0000011231 00000 n 
+0000011356 00000 n 
+0000011486 00000 n 
+0000011619 00000 n 
+0000011756 00000 n 
+0000011879 00000 n 
+0000012008 00000 n 
+0000012140 00000 n 
+0000012276 00000 n 
+0000012404 00000 n 
+0000012531 00000 n 
+0000012660 00000 n 
+0000012793 00000 n 
+0000012895 00000 n 
+0000013239 00000 n 
+0000013867 00000 n 
 trailer
 <<
 /Size 21
 /Root 20 0 R
 /Info 19 0 R
-/ID [ <70E26B48236BD7C2AB3569B138877A49> <70E26B48236BD7C2AB3569B138877A49> ]
+/ID [ <7D4BBBDB2334AA4038193C557D96374E> <7D4BBBDB2334AA4038193C557D96374E> ]
 >>
 startxref
-13415
+13971
 %%EOF

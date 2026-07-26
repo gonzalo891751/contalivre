@@ -10,7 +10,7 @@
 endobj
 4 0 obj
 <<
-/Length 1187
+/Length 1201
 >>
 stream
 0.200025 w
@@ -66,7 +66,7 @@ BT
 8.0499999999999989 TL
 0.471 g
 40. 30. Td
-(Motor 2G.0 · schema v22 · reporte ca341a6b · VALIDATED) Tj
+(ContaLivre 0.5.0-rc.1 · Motor contable 2G.0 · esquema v22 · VALIDADO) Tj
 ET
 BT
 /F1 7 Tf
@@ -87,7 +87,7 @@ endobj
 endobj
 6 0 obj
 <<
-/Length 23810
+/Length 23824
 >>
 stream
 0.200025 w
@@ -1392,7 +1392,7 @@ BT
 8.0499999999999989 TL
 0.471 g
 40. 30. Td
-(Motor 2G.0 · schema v22 · reporte ca341a6b · VALIDATED) Tj
+(ContaLivre 0.5.0-rc.1 · Motor contable 2G.0 · esquema v22 · VALIDADO) Tj
 ET
 BT
 /F1 7 Tf
@@ -1573,7 +1573,12 @@ endobj
 21 0 obj
 <<
 /Producer (jsPDF 4.2.1)
-/CreationDate (D:20260726153843-03'00')
+/Title (þÿ E s t a d o s   c o n t a b l e s      E m p r e s a   C o n t a L i v r e      E j e r c i c i o   2 0 2 5)
+/Subject (þÿ R T   5 4   \( t e x t o   o r d e n a d o   p o r   R T   5 9 \)      a l c a n c e   e d u c a t i v o   c o m e r c i a l / s e r v i c i o s   ·   r e p o r t e   c a 3 4 1 a 6 b   ·   m o t o r   c o n t a b l e   2 G . 0   ·   e s q u e m a   v 2 2)
+/Author (Empresa ContaLivre)
+/Keywords (reporte:ca341a6b, motor:2G.0, esquema:v22, estado:VALIDATED, commit:2659fe0)
+/Creator (ContaLivre 0.5.0-rc.1)
+/CreationDate (D:20260726170726-03'00')
 >>
 endobj
 22 0 obj
@@ -1587,35 +1592,35 @@ endobj
 xref
 0 23
 0000000000 65535 f 
-0000025391 00000 n 
-0000027216 00000 n 
+0000025419 00000 n 
+0000027244 00000 n 
 0000000015 00000 n 
 0000000152 00000 n 
-0000001391 00000 n 
-0000001528 00000 n 
-0000025454 00000 n 
-0000025579 00000 n 
-0000025709 00000 n 
-0000025842 00000 n 
-0000025980 00000 n 
-0000026104 00000 n 
-0000026233 00000 n 
-0000026365 00000 n 
-0000026501 00000 n 
-0000026629 00000 n 
-0000026756 00000 n 
-0000026885 00000 n 
-0000027018 00000 n 
-0000027120 00000 n 
-0000027466 00000 n 
-0000027552 00000 n 
+0000001405 00000 n 
+0000001542 00000 n 
+0000025482 00000 n 
+0000025607 00000 n 
+0000025737 00000 n 
+0000025870 00000 n 
+0000026008 00000 n 
+0000026132 00000 n 
+0000026261 00000 n 
+0000026393 00000 n 
+0000026529 00000 n 
+0000026657 00000 n 
+0000026784 00000 n 
+0000026913 00000 n 
+0000027046 00000 n 
+0000027148 00000 n 
+0000027494 00000 n 
+0000028122 00000 n 
 trailer
 <<
 /Size 23
 /Root 22 0 R
 /Info 21 0 R
-/ID [ <733A80B783653C88B13D72DB152431DC> <733A80B783653C88B13D72DB152431DC> ]
+/ID [ <2700E9D5DA46D819B5E4E547FB674F62> <2700E9D5DA46D819B5E4E547FB674F62> ]
 >>
 startxref
-27656
+28226
 %%EOF

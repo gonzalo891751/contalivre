@@ -76,6 +76,11 @@ for (const f of ['juego-completo.pdf', 'eepn-matriz.pdf', 'efe-directo.pdf']) {
     ]
     console.log(`  ${/Estado de/i.test(t) ? 'OK ' : 'REVISAR'} tiene titulo de estado`)
     console.log(`  ${/RT ?54/i.test(t) ? 'OK ' : 'REVISAR'} menciona RT 54`)
+    // Pie de provenance clarificado (cierre del PR #28)
+    console.log(`  ${/Motor contable/i.test(t) ? 'OK ' : 'REVISAR'} pie dice "Motor contable"`)
+    console.log(`  ${/esquema v\d+/i.test(t) ? 'OK ' : 'REVISAR'} pie dice "esquema vNN"`)
+    console.log(`  ${!/VALIDATED|schema v/i.test(t) ? 'OK ' : 'REVISAR'} pie sin ingles (VALIDATED/schema)`)
+    console.log(`  ${!/reporte [0-9a-f]{6,}/i.test(t) ? 'OK ' : 'REVISAR'} pie sin id tecnico del reporte`)
     for (const [label, re] of forbidden) {
         const hit = t.match(re)
         console.log(`  ${hit ? 'REVISAR' : 'OK '} sin ${label}${hit ? ` -> "${hit[0].slice(0, 40)}"` : ''}`)
