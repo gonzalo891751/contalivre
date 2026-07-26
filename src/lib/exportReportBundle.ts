@@ -10,6 +10,7 @@ import { writeWorkbook, type WorkbookSheet } from './spreadsheet'
 import type { ReportingBundle } from '../reporting/loadReportingBundle'
 import type { ReportLine, CashFlowStatement2B } from '../reporting/domain/types'
 import type { ExportEstadosOptions } from './exportOptions'
+import { ALLOCATION_BASIS_LABEL, RESULT_FUNCTION_LABEL } from '../reporting/engine/expensesByFunction'
 
 type Cell = string | number | null
 
@@ -88,6 +89,37 @@ function annexSheets(bundle: ReportingBundle, showComp: boolean): WorkbookSheet[
         if (showComp) totalRow.push(m.totals.comparativeTotal ?? null)
         rows.push(totalRow)
         sheets.push({ name: 'Gastos por función', rows })
+
+        // Papel de trabajo de la asignación (Fase 2H §H5). El XLSX de trabajo SÍ
+        // puede llevar origen, regla, base y porcentajes: es lo que permite
+        // auditar de dónde sale cada importe.
+        const trace: Cell[][] = [[
+            'Cuenta', 'Saldo contable', 'Función', 'Base', 'Valor de la base',
+            'Porcentaje', 'Importe asignado', 'Origen', 'Regla', 'Control',
+        ]]
+        for (const r of m.rows) {
+            const detail = r.allocationTrace ?? []
+            const assigned = detail.reduce((sum, t) => sum + t.amount, 0)
+            const control = Math.round((r.total - assigned) * 100) / 100
+            const basisLabel = r.basis
+                ? (r.basis === 'CUSTOM' && r.basisLabel ? r.basisLabel : ALLOCATION_BASIS_LABEL[r.basis])
+                : 'Asignación estructural'
+            for (const t of detail) {
+                trace.push([
+                    `${r.code} ${r.name}`,
+                    r.total,
+                    RESULT_FUNCTION_LABEL[t.function],
+                    basisLabel,
+                    t.driverValue ?? '',
+                    Math.round(t.percentage * 100) / 100,
+                    t.amount,
+                    r.source,
+                    r.ruleId ?? '',
+                    control === 0 ? 'OK' : control,
+                ])
+            }
+        }
+        if (trace.length > 1) sheets.push({ name: 'Gastos (preparación)', rows: trace })
     }
 
     // Determinación del costo de ventas
@@ -111,6 +143,25 @@ function annexSheets(bundle: ReportingBundle, showComp: boolean): WorkbookSheet[
         if (b.abnormalLosses.status === 'CALCULATED') push('(−) Bajas / pérdidas anormales', b.abnormalLosses)
         push('Costo de ventas (puente)', b.costOfSales)
         rows.push(['Costo de ventas según ER', b.costOfSalesPerIncomeStatement])
+
+        // Apertura por etapas de producción (Fase 2H §H6)
+        if (b.production) {
+            const p = b.production
+            rows.push([])
+            rows.push([`Costo de producción (alcance: ${b.mode})`])
+            push('Materias primas e insumos consumidos', p.directMaterials)
+            push('(+) Mano de obra directa', p.directLabor)
+            push('(+) Costos indirectos de producción', p.indirectCosts)
+            push('(+) Depreciaciones afectadas a producción', p.productionDepreciation)
+            push('(=) Costo de producción del período', p.productionCost)
+            push('(+) Producción en proceso inicial', p.workInProcessOpening)
+            push('(−) Producción en proceso final', p.workInProcessClosing)
+            push('(=) Costo de productos terminados', p.finishedGoodsCost)
+            push('(+) Productos terminados iniciales', p.finishedGoodsOpening)
+            push('(−) Productos terminados finales', p.finishedGoodsClosing)
+            push('(=) Costo de los productos vendidos', p.costOfGoodsSold)
+        }
+
         for (const v of b.validations) rows.push([v.passed ? 'OK' : 'FALLA', v.label, v.difference && v.difference !== 0 ? v.difference : ''])
         sheets.push({ name: 'Costo de ventas', rows })
     }
@@ -132,11 +183,13 @@ function annexSheets(bundle: ReportingBundle, showComp: boolean): WorkbookSheet[
 
     // Moneda extranjera
     if (s.foreignCurrency.applicable) {
-        const rows: Cell[][] = [['Cuenta', 'Moneda', 'Tipo', 'Clasificación', 'Cantidad', 'Cotización', 'Fuente', 'Fecha', 'Tipo cotiz.', 'Medición (Diario)', 'Diferencia', ...(showComp ? ['Comparativo'] : [])]]
+        const rows: Cell[][] = [['Cuenta', 'Moneda', 'Tipo', 'Corriente', 'Clasificación', 'Cantidad', 'Cotización', 'Fuente', 'Fecha', 'Tipo cotiz.', 'Medición (Diario)', 'Diferencia', ...(showComp ? ['Comparativo'] : [])]]
         for (const r of s.foreignCurrency.rows) {
             const has = r.quantityStatus === 'CALCULATED'
             const row: Cell[] = [`${r.code} ${r.name}`, r.currency,
                 r.side === 'ASSET' ? 'Activo' : r.side === 'LIABILITY' ? 'Pasivo' : 'Otro',
+                r.currentClassification === 'CURRENT' ? 'Corriente'
+                    : r.currentClassification === 'NON_CURRENT' ? 'No corriente' : '—',
                 r.monetary,
                 has ? (r.quantity ?? null) : 'Información insuficiente',
                 has ? (r.rate ?? null) : 'Información insuficiente',
@@ -146,6 +199,19 @@ function annexSheets(bundle: ReportingBundle, showComp: boolean): WorkbookSheet[
             if (showComp) row.push(r.comparativeMeasurement ?? null)
             rows.push(row)
         }
+        // Totales por naturaleza y diferencias de cambio (Fase 2H §H8)
+        rows.push([])
+        rows.push(['Total activos en moneda extranjera', '', '', '', '', '', '', '', '', '', s.foreignCurrency.totals.assets])
+        rows.push(['Total pasivos en moneda extranjera', '', '', '', '', '', '', '', '', '', s.foreignCurrency.totals.liabilities])
+        rows.push(['Posición neta en moneda extranjera', '', '', '', '', '', '', '', '', '', s.foreignCurrency.totals.net])
+        rows.push([])
+        rows.push([
+            'Diferencias de cambio del ejercicio',
+            s.foreignCurrency.exchangeDifferences.status === 'CALCULATED'
+                ? s.foreignCurrency.exchangeDifferences.total
+                : 'Información insuficiente',
+        ])
+        rows.push([s.foreignCurrency.exchangeDifferences.detail])
         rows.push([s.foreignCurrency.note])
         sheets.push({ name: 'Moneda extranjera', rows })
     }
