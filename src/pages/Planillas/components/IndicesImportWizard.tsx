@@ -311,8 +311,11 @@ export function IndicesImportWizard({ isOpen, onClose, onImport }: IndicesImport
                                                 <td className="font-mono">
                                                     {row.period || <span className="text-muted">{String(row.periodRaw)}</span>}
                                                 </td>
+                                                {/* El valor se guarda tal cual viene de la fuente;
+                                                    la vista previa lo muestra con todos sus
+                                                    decimales para que se vea que no se degrada. */}
                                                 <td className="text-right font-mono">
-                                                    {row.index !== null ? row.index.toFixed(2) : <span className="text-muted">{String(row.indexRaw)}</span>}
+                                                    {row.index !== null ? String(row.index) : <span className="text-muted">{String(row.indexRaw)}</span>}
                                                 </td>
                                                 <td className="text-center">
                                                     {row.isValid ? (

@@ -134,7 +134,10 @@ describe('Fase 2B — análisis vertical y horizontal', () => {
         await seedTestAccounts()
         await postNewEntry({ date: '2025-03-01', memo: 'aporte 2025', lines: simpleLines('caja', 'capital', 1000) })
         await postNewEntry({ date: '2025-06-01', memo: 'venta 2025', lines: simpleLines('caja', 'ventas', 500) })
-        await postNewEntry({ date: '2026-04-01', memo: 'venta 2026', lines: simpleLines('caja', 'ventas', 750) })
+        await postNewEntry({
+            date: '2026-04-01', memo: 'venta 2026', lines: simpleLines('caja', 'ventas', 750),
+            allowExerciseProvisioning: true,
+        })
         bundle2026 = await loadStatementsForYear(2026, { withComparative: true })
     })
 

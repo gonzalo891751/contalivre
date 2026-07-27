@@ -22,8 +22,23 @@ describe('Fase 2A — aislamiento por ejercicio', () => {
         // Ejercicio 2025
         await postNewEntry({ date: '2025-02-01', memo: 'aporte 2025', lines: simpleLines('caja', 'capital', 1000) })
         await postNewEntry({ date: '2025-07-01', memo: 'venta 2025', lines: simpleLines('caja', 'ventas', 400) })
-        // Ejercicio 2026
-        await postNewEntry({ date: '2026-01-15', memo: 'venta 2026', lines: simpleLines('caja', 'ventas', 900) })
+        // Ejercicio 2026: desde la Fase 2I abrir un ejercicio nuevo es un acto
+        // deliberado; una fecha fuera de todo ejercicio ya no lo crea sola.
+        await postNewEntry({
+            date: '2026-01-15', memo: 'venta 2026', lines: simpleLines('caja', 'ventas', 900),
+            allowExerciseProvisioning: true,
+        })
+    })
+
+    it('una fecha fuera de todo ejercicio se rechaza en lugar de crear uno nuevo', async () => {
+        await expect(postNewEntry({
+            date: '2023-05-10', memo: 'año mal tipeado', lines: simpleLines('caja', 'ventas', 100),
+        })).rejects.toThrow(/no pertenece a ningún ejercicio/)
+
+        // Y no dejó rastro: ni ejercicio nuevo ni asiento escondido
+        const exercises = await listExercises()
+        expect(exercises.map(e => e.startDate.slice(0, 4)).sort()).toEqual(['2025', '2026'])
+        expect(await db.entries.where('date').equals('2023-05-10').count()).toBe(0)
     })
 
     it('crea ejercicios persistidos por año (no lista fija)', async () => {

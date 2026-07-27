@@ -165,6 +165,11 @@ export function computeRollupTrialBalance(
  * Genera un mensaje explicativo sobre el estado del balance
  */
 export function getBalanceStatusMessage(trialBalance: TrialBalance): string {
+    // Un balance sin movimientos no cuadra ni deja de cuadrar: afirmarlo daba
+    // una tranquilidad falsa sobre una contabilidad todavía vacía (DEF-A17).
+    if (trialBalance.rows.length === 0) {
+        return 'Todavía no hay movimientos para balancear. Cargá el primer asiento en el Libro Diario.'
+    }
     if (trialBalance.isBalanced) {
         return '✓ El balance cuadra perfectamente. Los totales de Debe y Haber coinciden.'
     }

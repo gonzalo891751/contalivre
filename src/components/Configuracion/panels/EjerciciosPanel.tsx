@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listExercises, getSystemMeta, setCurrentExercise } from '../../../accounting/application/contextService'
+import { listExercises, getSystemMeta, setCurrentExercise, createExercise } from '../../../accounting/application/contextService'
 import { reopenClosedExercise } from '../../../accounting/application/closingService'
 import type { AccountingExercise } from '../../../accounting/domain/types'
 import { CierreEjercicioPanel } from './CierreEjercicioPanel'
@@ -27,6 +27,7 @@ export function EjerciciosPanel() {
     const [reopenTarget, setReopenTarget] = useState<string | null>(null)
     const [reopenReason, setReopenReason] = useState('')
     const [closingTarget, setClosingTarget] = useState<string | null>(null)
+    const [newYear, setNewYear] = useState<string>(String(new Date().getFullYear()))
 
     const reload = async () => {
         const [list, meta] = await Promise.all([listExercises(), getSystemMeta().catch(() => null)])
@@ -146,6 +147,43 @@ export function EjerciciosPanel() {
                     </div>
                 </div>
             )}
+
+            {/*
+              * Alta explícita (DEF-A20 y DEF-A21): antes los ejercicios sólo
+              * nacían al contabilizar en una fecha sin ejercicio, y para auditar
+              * un año anterior había que forzarlo desde el selector de período.
+              */}
+            <div className="card" style={{ padding: 12, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.78rem', fontWeight: 600, color: '#475569' }}>
+                    Abrir un ejercicio
+                    <input
+                        type="number" min={1900} max={2999} value={newYear}
+                        onChange={e => setNewYear(e.target.value)}
+                        data-testid="ejercicio-nuevo-anio"
+                        style={{ padding: '7px 9px', border: '1px solid var(--border, #e2e8f0)', borderRadius: 8, width: 120, fontWeight: 400 }}
+                    />
+                </label>
+                <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={busy || !/^\d{4}$/.test(newYear)}
+                    data-testid="ejercicio-nuevo-crear"
+                    onClick={async () => {
+                        setBusy(true); setMessage(null)
+                        try {
+                            const ex = await createExercise({ year: Number(newYear) })
+                            await reload()
+                            setMessage(`Ejercicio "${ex.name}" disponible (${ex.startDate} a ${ex.endDate}).`)
+                        } catch (e) {
+                            setMessage(`No se pudo crear: ${e instanceof Error ? e.message : e}`)
+                        } finally { setBusy(false) }
+                    }}
+                >
+                    Crear ejercicio
+                </button>
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                    Contabilizar en una fecha fuera de todo ejercicio se rechaza: los ejercicios se abren acá.
+                </span>
+            </div>
 
             <button className="btn btn-secondary btn-sm" onClick={() => navigate('/planillas/cierre-valuacion')}>
                 Ir al papel de trabajo de AxI + Valuación

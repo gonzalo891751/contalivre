@@ -151,6 +151,14 @@ export interface EntryDraftInput {
     actorId?: string
     /** clasificación explícita del movimiento de PN (Fase 2F §9); opcional */
     equityMovementType?: import('../../core/models').EquityMovementType
+    /**
+     * Acto deliberado de crear el ejercicio que la fecha necesita (Fase 2I,
+     * DEF-A21). Por defecto una fecha fuera de todo ejercicio existente se
+     * RECHAZA, para que un año mal tipeado no esconda el asiento en libros que
+     * el usuario no está mirando. Sólo lo declaran quienes abren un ejercicio
+     * a propósito: la apertura del siguiente y las cargas de escenarios.
+     */
+    allowExerciseProvisioning?: boolean
 }
 
 export interface OperationPostingInput extends EntryDraftInput {

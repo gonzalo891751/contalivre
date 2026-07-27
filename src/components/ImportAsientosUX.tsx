@@ -503,14 +503,26 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
             concepto: ['concepto', 'memo', 'glosa', 'descripcion_asiento'],
             detalle: ['detalle', 'descripcion_linea', 'desc_linea', 'linea']
         }
-        headers.forEach(h => {
-            const norm = normalizeHeader(h)
+        /**
+         * Dos pasadas y sin reutilizar encabezados (DEF-A15).
+         *
+         * Con una sola pasada difusa, la columna `cuenta_codigo` también
+         * satisfacía el sinónimo `cuenta` de `cuenta_nombre` y terminaba
+         * asignada a los dos campos: el paso de mapeo aparentaba estar resuelto
+         * cuando no lo estaba. Ahora primero se resuelven las coincidencias
+         * exactas y después las aproximadas, y cada encabezado se usa una vez.
+         */
+        const used = new Set<string>()
+        const assign = (matches: (norm: string, field: keyof ImportMapping) => boolean) => {
             for (const field of Object.keys(synonyms) as Array<keyof ImportMapping>) {
-                if (!map[field] && synonyms[field].some((s: string) => norm === s || norm.includes(s))) {
-                    map[field] = h
-                }
+                if (map[field]) continue
+                const found = headers.find(h => !used.has(h) && matches(normalizeHeader(h), field))
+                if (found) { map[field] = found; used.add(found) }
             }
-        })
+        }
+
+        assign((norm, field) => synonyms[field].some((s: string) => norm === s))
+        assign((norm, field) => synonyms[field].some((s: string) => norm.includes(s)))
         return map
     }
 

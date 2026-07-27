@@ -46,7 +46,9 @@ import { appendAuditEvent } from '../audit/auditLog'
 import {
     DEFAULT_COMPANY_ID,
     ensureExerciseForDate,
+    getExerciseForDate,
     getPeriodForDate,
+    listExercises,
 } from './contextService'
 import { CURRENT_SCHEMA_VERSION as SCHEMA_VERSION } from '../migration/versions'
 import { inWriteTx } from './txUtils'
@@ -78,6 +80,28 @@ function normalizeLines(lines: EntryDraftInput['lines']): EntryLine[] {
         debit: Number.isFinite(l.debit) ? roundMoney(l.debit) : l.debit,
         credit: Number.isFinite(l.credit) ? roundMoney(l.credit) : l.credit,
     }))
+}
+
+/**
+ * Importes que la normalización va a redondear (Fase 2I, DEF-A22).
+ *
+ * Los libros se llevan en escala de centavos, así que redondear es correcto; lo
+ * que no lo era es hacerlo en silencio. El motor declara que nada se omite sin
+ * decirlo, y un tercer decimal cambiaba el importe sin ninguna señal.
+ */
+export function detectRoundedAmounts(
+    lines: EntryDraftInput['lines']
+): Array<{ index: number; field: 'debit' | 'credit'; original: number; rounded: number }> {
+    const out: Array<{ index: number; field: 'debit' | 'credit'; original: number; rounded: number }> = []
+    lines.forEach((l, index) => {
+        for (const field of ['debit', 'credit'] as const) {
+            const value = l[field]
+            if (!Number.isFinite(value) || value === 0) continue
+            const rounded = roundMoney(value)
+            if (rounded !== value) out.push({ index, field, original: value, rounded })
+        }
+    })
+    return out
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -190,8 +214,31 @@ interface PostContext {
     periodId: string
 }
 
-/** Resuelve y valida ejercicio/período/cuentas; lanza PostingError si falla */
-async function validateAndResolveContext(entry: JournalEntry, actorId: string): Promise<PostContext> {
+/** dd/mm/aaaa para los mensajes de rechazo */
+function fmtDate(iso: string): string {
+    const [y, m, d] = String(iso).split('-')
+    return d ? `${d}/${m}/${y}` : String(iso)
+}
+
+/**
+ * Resuelve y valida ejercicio/período/cuentas; lanza PostingError si falla.
+ *
+ * Fase 2I (DEF-A21): una fecha fuera de todo ejercicio existente YA NO
+ * aprovisiona uno nuevo en silencio. Un año mal tipeado creaba un ejercicio
+ * invisible y el asiento desaparecía de los libros que el usuario estaba
+ * mirando, sin ninguna señal: el balance del ejercicio en curso seguía
+ * cuadrando. Ahora se rechaza con las fechas de los ejercicios que sí existen,
+ * salvo que el llamador declare explícitamente que quiere crear el ejercicio.
+ *
+ * Se conserva el aprovisionamiento cuando todavía no hay NINGÚN ejercicio: es
+ * el nacimiento de la empresa y no hay libros de los que el asiento pueda
+ * desaparecer.
+ */
+async function validateAndResolveContext(
+    entry: JournalEntry,
+    actorId: string,
+    opts: { allowExerciseProvisioning?: boolean } = {}
+): Promise<PostContext> {
     // Fecha estructuralmente válida es prerrequisito para resolver contexto
     const structural = validateDraftStructure(entry)
     if (!structural.ok) {
@@ -199,7 +246,25 @@ async function validateAndResolveContext(entry: JournalEntry, actorId: string): 
         throw new PostingError(structural.errors)
     }
 
-    const exercise = await ensureExerciseForDate(entry.date, { actorId })
+    const companyId = entry.companyId ?? DEFAULT_COMPANY_ID
+    const existing = await getExerciseForDate(entry.date, companyId)
+    if (!existing && !opts.allowExerciseProvisioning) {
+        const all = await listExercises(companyId)
+        if (all.length > 0) {
+            const rangos = all
+                .map(e => `${e.name} (${fmtDate(e.startDate)} a ${fmtDate(e.endDate)})`)
+                .join(', ')
+            const errors = [
+                `La fecha ${fmtDate(entry.date)} no pertenece a ningún ejercicio abierto. ` +
+                `Ejercicios existentes: ${rangos}. ` +
+                `Corregí la fecha o creá explícitamente el ejercicio antes de contabilizar.`,
+            ]
+            await auditRejection(entry, errors, actorId)
+            throw new PostingError(errors)
+        }
+    }
+
+    const exercise = await ensureExerciseForDate(entry.date, { actorId, companyId })
     const period = await getPeriodForDate(entry.date, exercise.id)
     if (!period) {
         const errors = [`No existe un período contable para la fecha ${entry.date} en el ejercicio "${exercise.name}"`]
@@ -314,7 +379,22 @@ async function postNewEntryInternal(input: EntryDraftInput & {
         schemaVersion: SCHEMA_VERSION,
     }
 
-    const ctx = await validateAndResolveContext(candidate, actorId)
+    const ctx = await validateAndResolveContext(candidate, actorId, {
+        allowExerciseProvisioning: input.allowExerciseProvisioning,
+    })
+
+    // El redondeo a centavos se registra en la auditoría del asiento: el importe
+    // cambió respecto de lo que se ingresó y eso tiene que quedar dicho.
+    const rounded = detectRoundedAmounts(input.lines)
+    if (rounded.length > 0) {
+        candidate.metadata = {
+            ...(candidate.metadata ?? {}),
+            roundedAmounts: rounded.map(r => ({
+                linea: r.index + 1, campo: r.field === 'debit' ? 'Debe' : 'Haber',
+                ingresado: r.original, contabilizado: r.rounded,
+            })),
+        }
+    }
 
     let posted: JournalEntry | undefined
     let duplicate = false
