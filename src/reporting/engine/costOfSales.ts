@@ -258,12 +258,45 @@ export function buildCostOfSales(
             return a?.statementGroup === 'COGS' && a?.resultFunction === 'PRODUCTION'
         })
 
+    /**
+     * ¿El asiento consume o repone existencias contra el costo de ventas?
+     *
+     * En inventario permanente el costo se registra cuenta a cuenta contra la
+     * cuenta de CMV. Sin esta distinción estructural, un movimiento de
+     * existencias que NO toca el costo (una devolución al proveedor) se contaba
+     * como consumo, y un movimiento que SÍ lo toca en sentido inverso (el
+     * reingreso al costo de una devolución de un cliente) se contaba como
+     * compra. Ambos rompían el puente contra el ER sin que hubiera nada mal
+     * registrado, y el plan de cuentas base no trae `costComponent` con el que
+     * desambiguarlo.
+     */
+    const costOfSalesIds = new Set(incomeStatement.costOfSales.accountIds)
+    const contraIsCostOfSales = (entry: typeof input.entries[number]): boolean =>
+        entry.lines.some(l => !isInventory(l.accountId) && costOfSalesIds.has(l.accountId))
+
+    /**
+     * ¿La salida de existencias fue contra un tercero y no contra un resultado?
+     *
+     * Sólo entonces se trata de una devolución al proveedor. Si la contrapartida
+     * es una cuenta de resultado distinta del costo de ventas (un siniestro, una
+     * baja anormal sin mapear), la diferencia SIGUE expuesta: el puente no la
+     * absorbe y la publicación queda bloqueada, que es el comportamiento buscado.
+     */
+    const contraHasNoResult = (entry: typeof input.entries[number]): boolean =>
+        entry.lines.every(l => {
+            if (isInventory(l.accountId)) return true
+            const kind = byId.get(l.accountId)?.kind
+            return kind !== 'INCOME' && kind !== 'EXPENSE'
+        })
+
     for (const entry of input.entries) {
         if (entry.status === 'DRAFT') continue
         if (isStructuralClosingEntry(entry)) continue
         if (entry.sourceModule === 'closing' && entry.sourceType === 'apertura') continue
         const cc = contraComponent(entry)
         const toProduction = contraIsProductionPool(entry)
+        const againstCostOfSales = contraIsCostOfSales(entry)
+        const againstThirdPartyOnly = contraHasNoResult(entry)
 
         const inventoryLines = entry.lines.filter(l => isInventory(l.accountId))
         if (inventoryLines.length === 0) continue
@@ -309,12 +342,18 @@ export function buildCostOfSales(
             if (effectiveDebit !== 0) {
                 if (cc === 'ACQUISITION_COST') { acquisitionCents += effectiveDebit; componentAccountIds.acquisition.add(l.accountId) }
                 else if (cc === 'OTHER_INCORPORABLE_COST') { otherIncorporableCents += effectiveDebit; componentAccountIds.other.add(l.accountId) }
+                // Reingreso al inventario contra el costo de ventas (devolución
+                // de un cliente): no es una compra, es un consumo que se revierte.
+                else if (againstCostOfSales) { cmvOutflowCents -= effectiveDebit; componentAccountIds.cmv.add(l.accountId) }
                 else { purchasesCents += effectiveDebit; componentAccountIds.purchases.add(l.accountId) }
             }
             if (effectiveCredit !== 0) {
                 if (cc === 'PURCHASE_RETURNS') { purchaseReturnsCents += effectiveCredit; componentAccountIds.returns.add(l.accountId) }
                 else if (cc === 'ABNORMAL_LOSS') { abnormalLossCents += effectiveCredit; componentAccountIds.abnormal.add(l.accountId) }
                 else if (toProduction) { transferredToProductionCents += effectiveCredit; componentAccountIds.toProduction.add(l.accountId) }
+                // Salida de existencias contra un tercero y sin resultado
+                // asociado: es una devolución al proveedor, no un consumo.
+                else if (againstThirdPartyOnly) { purchaseReturnsCents += effectiveCredit; componentAccountIds.returns.add(l.accountId) }
                 else { cmvOutflowCents += effectiveCredit; componentAccountIds.cmv.add(l.accountId) }
             }
         }
