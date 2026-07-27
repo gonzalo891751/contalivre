@@ -39,8 +39,10 @@ export function CierreEjercicioPanel({ exercise, onChanged }: Props) {
     const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
     const [confirmPost, setConfirmPost] = useState(false)
 
-    const load = useCallback(async () => {
-        setLoading(true); setMessage(null)
+    /** Relee la vista previa sin pisar el mensaje del paso que acaba de correr */
+    const load = useCallback(async (keepMessage = false) => {
+        setLoading(true)
+        if (!keepMessage) setMessage(null)
         try { setPreview(await previewClosing(exercise.id)) }
         catch (e) { setMessage({ kind: 'error', text: e instanceof Error ? e.message : String(e) }) }
         finally { setLoading(false) }
@@ -56,7 +58,7 @@ export function CierreEjercicioPanel({ exercise, onChanged }: Props) {
         try {
             setMessage({ kind: 'ok', text: await action() })
             await onChanged()
-            await load()
+            await load(true)
         } catch (e) {
             setMessage({ kind: 'error', text: e instanceof Error ? e.message : String(e) })
         } finally {
@@ -128,7 +130,11 @@ export function CierreEjercicioPanel({ exercise, onChanged }: Props) {
                                 return `Se generaron ${n} asiento(s) de refundición EN BORRADOR. Revisalos en el Libro Diario antes de contabilizarlos.`
                             })}
                         >
-                            {busy === 'drafts' ? 'Generando…' : '1 · Generar refundición en borrador'}
+                            {busy === 'drafts'
+                                ? 'Generando…'
+                                : preview.closingDraftCount > 0
+                                    ? `1 · Regenerar la refundición (${preview.closingDraftCount} en borrador)`
+                                    : '1 · Generar refundición en borrador'}
                         </button>
 
                         {!confirmPost ? (
