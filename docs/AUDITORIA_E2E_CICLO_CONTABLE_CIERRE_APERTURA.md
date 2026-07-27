@@ -4,6 +4,32 @@
 
 ---
 
+> ## Fe de erratas
+>
+> Este informe se conserva tal como se emitió. La **Fase 2I** corrigió doce de
+> los defectos que acá figuran como documentados y detectó cinco imprecisiones
+> en el propio informe, que se enmiendan sin reescribir lo sucedido:
+>
+> 1. **Commits (§4).** La tabla lista 8 y termina en `5aed5e7`. Los commits de
+>    la rama son **9**: falta `e4489a4`, que es el que agrega este informe y no
+>    podía listarse a sí mismo. El HEAD `e4489a4` del resumen es correcto.
+> 2. **Cantidad de defectos.** El número correcto es **22**; algunos anexos
+>    decían 20 porque DEF-A21 y DEF-A22 se incorporaron después.
+> 3. **Nombre del producto.** Es **ContaLivre**. «ContaLibre» se deslizó en
+>    algunos pasajes; no son dos productos.
+> 4. **«Coinciden al centavo» (§10.1).** Vale **en moneda nominal**. En moneda
+>    de cierre no valía: el anexo de bienes de uso reexpresado tenía los errores
+>    DEF-A09 y DEF-A10, cuantificados en §10.3 de este mismo informe.
+> 5. **36 controles frente a 24 invariantes.** No se contradicen: las
+>    invariantes se verifican dentro de la aplicación; los controles del cuadro
+>    de conciliación las reverifican sobre los respaldos con aritmética
+>    independiente. Hoy son 45.
+>
+> Estado actualizado de los defectos y resultados en moneda de cierre:
+> [`docs/IMPLEMENTACION_FASE_2I_AXI_MEDICION_CIERRE_EXPORTABLES.md`](IMPLEMENTACION_FASE_2I_AXI_MEDICION_CIERRE_EXPORTABLES.md).
+
+---
+
 ## 1. Resumen ejecutivo
 
 Se auditó ContaLivre recorriendo el ciclo contable completo de una empresa

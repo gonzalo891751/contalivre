@@ -18,7 +18,8 @@ import {
     getEntriesForContext, getOpeningBalances, resolveContextForYear,
 } from '../../../accounting/reporting/reportingContext'
 import {
-    buildAccountTreatmentMatrix, type AccountTreatmentMatrix, type AccountTreatmentRow,
+    buildAccountTreatmentMatrix, monthsBetween, previousMonth,
+    type AccountTreatmentMatrix, type AccountTreatmentRow,
 } from '../../../reporting/inflation/accountTreatment'
 import { reconcileRecpam, type RecpamReconciliation } from '../../../reporting/inflation/recpam'
 import { usePeriodYear } from '../../../hooks/usePeriodYear'
@@ -325,23 +326,3 @@ function Stat({ label, value, accent, testId }: { label: string; value: string; 
 
 const th: React.CSSProperties = { padding: '8px 10px', fontWeight: 700, whiteSpace: 'nowrap' }
 const td: React.CSSProperties = { padding: '7px 10px' }
-
-/** Mes anterior a un período YYYY-MM */
-export function previousMonth(period: string): string {
-    const [y, m] = period.split('-').map(Number)
-    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
-}
-
-/** Meses inclusive entre dos períodos YYYY-MM */
-export function monthsBetween(from: string, to: string): string[] {
-    const out: string[] = []
-    let [y, m] = from.split('-').map(Number)
-    for (let guard = 0; guard < 600; guard++) {
-        const period = `${y}-${String(m).padStart(2, '0')}`
-        out.push(period)
-        if (period === to) break
-        m += 1
-        if (m > 12) { m = 1; y += 1 }
-    }
-    return out
-}

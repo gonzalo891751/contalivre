@@ -4,8 +4,8 @@ Generado por `scripts/auditoria/conciliar-checkpoints.mjs` a partir de los dos
 respaldos que produce el recorrido E2E. Cada cifra sale del respaldo, no de una
 transcripción manual.
 
-- Checkpoint A: `docs/auditoria/checkpoints/checkpoint-a-pre-cierre.json` (2026-07-27T22:22:28.604Z)
-- Checkpoint B: `docs/auditoria/checkpoints/checkpoint-b-cierre-y-apertura.json` (2026-07-27T22:22:36.859Z)
+- Checkpoint A: `docs/auditoria/checkpoints/checkpoint-a-pre-cierre.json` (2026-07-27T22:32:56.131Z)
+- Checkpoint B: `docs/auditoria/checkpoints/checkpoint-b-cierre-y-apertura.json` (2026-07-27T22:33:04.332Z)
 
 ## Resumen de los dos estados
 

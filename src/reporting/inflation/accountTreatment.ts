@@ -127,6 +127,26 @@ const NATURALEZA: Record<Account['kind'], string> = {
     INCOME: 'Ingreso', EXPENSE: 'Gasto',
 }
 
+/** Mes anterior a un período YYYY-MM */
+export function previousMonth(period: string): string {
+    const [y, m] = period.split('-').map(Number)
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
+}
+
+/** Meses inclusive entre dos períodos YYYY-MM */
+export function monthsBetween(from: string, to: string): string[] {
+    const out: string[] = []
+    let [y, m] = from.split('-').map(Number)
+    for (let guard = 0; guard < 600; guard++) {
+        const period = `${y}-${String(m).padStart(2, '0')}`
+        out.push(period)
+        if (period === to) break
+        m += 1
+        if (m > 12) { m = 1; y += 1 }
+    }
+    return out
+}
+
 /** coef(origen → cierre) = índice de cierre / índice de origen */
 export function coefficientFor(
     indexes: Map<string, number>, origin: string, close: string
