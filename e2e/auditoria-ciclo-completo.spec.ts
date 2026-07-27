@@ -209,6 +209,62 @@ test.describe('Auditoría del ciclo contable completo', () => {
         await shot(page, '10-notas-y-anexos')
     })
 
+    test('5 bis · Fase 2I — cobertura de cuentas, RECPAM dual y bienes de uso', async () => {
+        await page.goto('/configuracion?seccion=inflacion')
+        await expect(page.getByTestId('matriz-cobertura-panel')).toBeVisible({ timeout: 30_000 })
+
+        // §2: el 100 % de las cuentas con actividad tiene tratamiento declarado
+        await expect(page.getByTestId('matriz-cobertura-pct')).toHaveText('100.00 %', { timeout: 30_000 })
+        await expect(page.getByTestId('matriz-pendientes')).toHaveCount(0)
+
+        // §7: las dos determinaciones del RECPAM concilian
+        await expect(page.getByTestId('recpam-secuencial')).toHaveText('-4.432.331,94')
+        await expect(page.getByTestId('recpam-analitico')).toHaveText('-4.432.331,92')
+        await expect(page.getByTestId('recpam-diferencia')).toHaveText('-0,02')
+        await shot(page, '17-matriz-cobertura-y-recpam')
+
+        // §9: el anexo de bienes de uso en moneda de cierre, corregido
+        await page.goto('/estados')
+        await expect(page.getByRole('button', { name: 'Exportar estados' })).toBeVisible({ timeout: 30_000 })
+        const select = page.getByTestId('inflation-set-select')
+        await select.selectOption((await select.locator('option').nth(1).getAttribute('value'))!)
+        await abrirSolapa(page, 'Notas y Anexos')
+        await abrirSolapa(page, 'Bienes de uso')
+        // Los controles segmentados son radiogroups accesibles (Fase 2H)
+        await page.getByTestId('ppe-expresion')
+            .getByRole('radio', { name: 'Moneda de cierre', exact: true }).click()
+        await page.waitForTimeout(600)
+
+        const anexo = await screenText(page)
+        expect(anexo).toContain('11.492.722,37')   // valor de origen reexpresado
+        expect(anexo).toContain('2.029.064,42')    // depreciación reexpresada
+        expect(anexo).toContain('9.463.657,95')    // valor residual corregido
+        expect(anexo).not.toContain('10.726.577,61')
+        expect(anexo).not.toContain('Sin clase asignada')
+        await shot(page, '18-bienes-de-uso-moneda-de-cierre')
+    })
+
+    test('5 ter · Fase 2I — el EFE clasifica las disposiciones y el pago diferido', async () => {
+        await page.goto('/estados')
+        await expect(page.getByRole('button', { name: 'Exportar estados' })).toBeVisible({ timeout: 30_000 })
+        await abrirSolapa(page, 'Flujo de Efectivo')
+
+        const efe = await screenText(page)
+        // DEF-A06: la ganancia por la venta ya no es un cobro operativo
+        expect(efe).not.toContain('Cobros por otros ingresos operativos')
+        // DEF-A07: el pago de la compra a crédito salió del operativo
+        expect(efe).toContain('$ 4.850.200,00')     // operativo
+        expect(efe).toContain('-$ 12.282.000,00')   // inversión
+        expect(efe).toContain('$ 29.168.200,00')    // variación neta, sin cambios
+        await shot(page, '19-efe-disposiciones-clasificadas')
+
+        // Los ajustes del método indirecto se declaran extracontables
+        await page.getByRole('radio', { name: 'Indirecto', exact: true }).click()
+        await page.waitForTimeout(600)
+        expect(await screenText(page)).toContain('No afecta el Libro Diario')
+        await shot(page, '20-efe-indirecto-extracontable')
+    })
+
     test('6 · CHECKPOINT A — estado completo antes de la refundición', async () => {
         await page.goto('/configuracion?seccion=ejercicios')
         const fila = page.locator('.cfg-content tbody tr').first()

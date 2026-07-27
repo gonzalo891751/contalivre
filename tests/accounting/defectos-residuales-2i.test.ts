@@ -105,7 +105,7 @@ describe('DEF-A22 · el redondeo a centavos se declara', () => {
 
 describe('DEF-A17 · el balance vacío no afirma que cuadra', () => {
     it('sin movimientos invita a cargar el primer asiento', () => {
-        const tb = computeTrialBalance([], [])
+        const tb = computeTrialBalance(new Map(), [])
         expect(getBalanceStatusMessage(tb)).toMatch(/Todavía no hay movimientos/)
         expect(getBalanceStatusMessage(tb)).not.toMatch(/cuadra perfectamente/)
     })

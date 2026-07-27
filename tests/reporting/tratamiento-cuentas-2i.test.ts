@@ -241,16 +241,24 @@ describe('Checkpoint A real — Purmamarca 2025', () => {
     })
 
     it('una cuenta sin clasificar bloquea la conciliación del RECPAM', () => {
+        // Se le quita la condición declarada al plazo fijo: el rubro Inversiones
+        // es mixto, así que sin declaración la cuenta no puede resolverse sola.
+        const sinDeclarar = withMetadata.map(a =>
+            a.code === '1.1.05.01' ? { ...a, monetaryClassification: undefined } : a) as Account[]
+
         const roto = buildAccountTreatmentMatrix({
-            accounts: accounts as Account[],   // sin la metadata de la Fase 2I
+            accounts: sinDeclarar,
             entries: entries.filter(e => e.date >= '2025-01-01' && e.date <= '2025-12-31'),
             openingBalances: new Map(), closePeriod: CLOSE, openingPeriod: OPENING, indexes,
         })
         const rec = reconcileRecpam({
-            matrix: roto, accounts: accounts as Account[], indexes,
+            matrix: roto, accounts: sinDeclarar, indexes,
             closePeriod: CLOSE, openingPeriod: OPENING, periods: PERIODS,
         })
+
         expect(roto.complete).toBe(false)
+        expect(roto.coverage.pending.map(p => p.code)).toEqual(['1.1.05.01'])
+        expect(roto.coverage.coveragePct).toBeLessThan(100)
         expect(rec.reconciled).toBe(false)
         expect(rec.blockers.some(b => b.includes('sin tratamiento declarado'))).toBe(true)
     })
