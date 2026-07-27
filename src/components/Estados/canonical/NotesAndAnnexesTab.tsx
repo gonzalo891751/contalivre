@@ -16,6 +16,8 @@ import { CostOfSalesBridgeView } from './CostOfSalesBridgeView'
 import { FixedAssetsAnnexView } from './FixedAssetsAnnexView'
 import { ForeignCurrencyView } from './ForeignCurrencyView'
 import { ManualNotesEditor } from './ManualNotesEditor'
+import EmptyState from '../../../ui/EmptyState'
+import { FixedAssetsReconciliationPanel } from './FixedAssetsReconciliationPanel'
 import { statementStyles } from './statementFormat'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 import type { StatementNote, NoteLine } from '../../../reporting/engine/buildNotes'
@@ -171,8 +173,15 @@ export function NotesAndAnnexesTab({ bundle, focusNote, onDataChanged }: NotesAn
     const fixedAssets = bundle.statements.fixedAssetsAnnex
     const foreignCurrency = bundle.statements.foreignCurrency
 
-    const available: Record<NotesSubTab, boolean> = {
-        NOTAS: true,
+    /**
+     * Fase 2H §H8: antes esto se usaba para DESHABILITAR la pestaña, así que un
+     * anexo sin datos quedaba gris y sin explicación y el usuario no podía
+     * llegar a leer por qué. Ahora todas las pestañas son navegables: lo que
+     * cambia es que se marcan "sin datos" y adentro muestran un estado vacío
+     * informativo. Ningún anexo aplicable se oculta.
+     */
+    const hasData: Record<NotesSubTab, boolean> = {
+        NOTAS: bundle.notes.length > 0,
         GASTOS: hasExpenses,
         CMV: costOfSales.mode !== 'NOT_APPLICABLE',
         BIENES_USO: fixedAssets.rows.length > 0,
@@ -193,11 +202,11 @@ export function NotesAndAnnexesTab({ bundle, focusNote, onDataChanged }: NotesAn
                         role="tab"
                         aria-selected={subtab === t.id}
                         className={`note-subtab${subtab === t.id ? ' active' : ''}`}
-                        disabled={!available[t.id]}
-                        title={!available[t.id] ? 'Sin datos aplicables en este ejercicio' : undefined}
                         onClick={() => setSubtab(t.id)}
                     >
                         {t.label}
+                        {/* El estado se comunica con texto, no sólo con color. */}
+                        {!hasData[t.id] && <span className="note-subtab-flag">sin datos</span>}
                     </button>
                 ))}
             </nav>
@@ -227,38 +236,93 @@ export function NotesAndAnnexesTab({ bundle, focusNote, onDataChanged }: NotesAn
                 </div>
             )}
 
-            {subtab === 'GASTOS' && (
-                <ExpensesByFunctionView
-                    matrix={expenses}
-                    showComparative={showComparative}
-                    onAccountClick={(label, accountIds) => setTarget({ label, accountIds })}
-                />
-            )}
+            {subtab === 'GASTOS' &&
+                (hasData.GASTOS ? (
+                    <ExpensesByFunctionView
+                        matrix={expenses}
+                        showComparative={showComparative}
+                        onAccountClick={(label, accountIds) => setTarget({ label, accountIds })}
+                    />
+                ) : (
+                    <EmptyState
+                        title="El anexo de gastos por función todavía no tiene información"
+                        reason="No hay cuentas de gasto con movimientos contabilizados en este ejercicio, así que no hay importes para distribuir entre administración, comercialización y producción."
+                        source="Saldos de las cuentas de gasto del Libro Diario, distribuidos según las reglas de asignación funcional."
+                        action={
+                            <span style={{ fontSize: '0.8rem', color: '#475569' }}>
+                                Registrá gastos desde Operaciones o directamente en el Libro Diario. Las reglas de
+                                distribución se configuran en Configuración → Plan de cuentas y mapeos.
+                            </span>
+                        }
+                    />
+                ))}
 
-            {subtab === 'CMV' && (
-                <CostOfSalesBridgeView
-                    bridge={costOfSales}
-                    showComparative={showComparative}
-                    onDrilldown={(label, accountIds) => setTarget({ label, accountIds })}
-                />
-            )}
+            {subtab === 'CMV' &&
+                (hasData.CMV ? (
+                    <CostOfSalesBridgeView
+                        bridge={costOfSales}
+                        showComparative={showComparative}
+                        onDrilldown={(label, accountIds) => setTarget({ label, accountIds })}
+                    />
+                ) : (
+                    <EmptyState
+                        title="El anexo de costo no es aplicable en este ejercicio"
+                        reason="No hay cuentas de bienes de cambio ni de costo con movimientos, de modo que no puede determinarse el costo de ventas ni el costo de producción."
+                        source="Existencias del ESP, compras y costo del Libro Diario, o los movimientos del módulo de inventario cuando está activo."
+                        action={
+                            <span style={{ fontSize: '0.8rem', color: '#475569' }}>
+                                Registrá compras y ventas desde Operaciones → Bienes de cambio e inventario.
+                            </span>
+                        }
+                    />
+                ))}
 
-            {subtab === 'BIENES_USO' && (
-                <FixedAssetsAnnexView
-                    annex={fixedAssets}
-                    restated={bundle.fixedAssetsRestated}
-                    showComparative={showComparative}
-                    onRowClick={(label, accountIds) => setTarget({ label, accountIds })}
-                />
-            )}
+            {subtab === 'BIENES_USO' &&
+                (hasData.BIENES_USO ? (
+                    <>
+                        <FixedAssetsAnnexView
+                            annex={fixedAssets}
+                            restated={bundle.fixedAssetsRestated}
+                            showComparative={showComparative}
+                            onRowClick={(label, accountIds) => setTarget({ label, accountIds })}
+                        />
+                        {/* Fase 2H §H7: cierre del circuito ficha → asiento → anexo. */}
+                        <FixedAssetsReconciliationPanel bundle={bundle} />
+                    </>
+                ) : (
+                    <EmptyState
+                        title="El anexo de bienes de uso todavía no tiene información"
+                        reason="Ninguna cuenta de bienes de uso registra saldo ni movimientos en este ejercicio, por lo que no hay altas, bajas ni depreciaciones que informar."
+                        source="Cuentas de bienes de uso y de depreciación acumulada del Libro Diario, alimentadas por el módulo de Bienes de uso y la planilla de amortizaciones."
+                        action={
+                            <span style={{ fontSize: '0.8rem', color: '#475569' }}>
+                                Cargá un bien desde Operaciones → Bienes de uso; el alta y su depreciación se
+                                contabilizan y aparecen acá automáticamente.
+                            </span>
+                        }
+                    />
+                ))}
 
-            {subtab === 'MONEDA_EXT' && (
-                <ForeignCurrencyView
-                    disclosure={foreignCurrency}
-                    showComparative={showComparative}
-                    onRowClick={(label, accountIds) => setTarget({ label, accountIds })}
-                />
-            )}
+            {subtab === 'MONEDA_EXT' &&
+                (hasData.MONEDA_EXT ? (
+                    <ForeignCurrencyView
+                        disclosure={foreignCurrency}
+                        showComparative={showComparative}
+                        onRowClick={(label, accountIds) => setTarget({ label, accountIds })}
+                    />
+                ) : (
+                    <EmptyState
+                        title="No hay partidas en moneda extranjera"
+                        reason="Ninguna cuenta del plan tiene saldo denominado en una moneda distinta del peso al cierre de este ejercicio, así que la información complementaria no corresponde."
+                        source="Cuentas con moneda distinta de ARS del Libro Diario, enriquecidas con las cotizaciones del módulo de Moneda extranjera."
+                        action={
+                            <span style={{ fontSize: '0.8rem', color: '#475569' }}>
+                                Si la entidad opera en divisas, registrá las tenencias desde Operaciones → Moneda
+                                extranjera.
+                            </span>
+                        }
+                    />
+                ))}
 
             {target && (
                 <LineageModal
@@ -277,10 +341,12 @@ export function NotesAndAnnexesTab({ bundle, focusNote, onDataChanged }: NotesAn
 
 const notesStyles = `
 .note-subtabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; padding: 4px; background: rgba(241,245,249,0.9); border: 1px solid #e2e8f0; border-radius: 12px; width: fit-content; max-width: 100%; }
-.note-subtab { padding: 7px 14px; font-size: 0.82rem; font-weight: 600; color: #64748b; background: transparent; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.note-subtab { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 0.82rem; font-weight: 600; color: #64748b; background: transparent; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .note-subtab.active { background: white; color: #3B82F6; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.note-subtab:disabled { opacity: 0.45; cursor: not-allowed; }
 .note-subtab:focus-visible { outline: 2px solid #3B82F6; outline-offset: 1px; }
+/* "sin datos" es una marca informativa, no un bloqueo: la pestaña sigue siendo
+   navegable y adentro explica por qué no hay información (Fase 2H §H8). */
+.note-subtab-flag { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #94a3b8; background: rgba(148,163,184,0.16); border-radius: 999px; padding: 1px 6px; }
 
 .note-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
 .note-card.is-focused { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }

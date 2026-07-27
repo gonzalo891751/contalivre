@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom'
 import { listExercises, getSystemMeta, setCurrentExercise } from '../../../accounting/application/contextService'
 import { reopenClosedExercise } from '../../../accounting/application/closingService'
 import type { AccountingExercise } from '../../../accounting/domain/types'
+import { CierreEjercicioPanel } from './CierreEjercicioPanel'
 
 const STATUS_CHIP: Record<string, { label: string; bg: string; color: string }> = {
     OPEN: { label: 'Abierto', bg: 'rgba(34,197,94,0.12)', color: '#15803d' },
@@ -25,6 +26,7 @@ export function EjerciciosPanel() {
     const [message, setMessage] = useState<string | null>(null)
     const [reopenTarget, setReopenTarget] = useState<string | null>(null)
     const [reopenReason, setReopenReason] = useState('')
+    const [closingTarget, setClosingTarget] = useState<string | null>(null)
 
     const reload = async () => {
         const [list, meta] = await Promise.all([listExercises(), getSystemMeta().catch(() => null)])
@@ -57,8 +59,9 @@ export function EjerciciosPanel() {
         <div>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12 }}>
                 Los ejercicios delimitan los libros y el contexto de reportes. El cierre formal
-                (refundición, transferencia y apertura del siguiente) se realiza desde la planilla
-                de Cierre. Reabrir un ejercicio revierte sus asientos automáticos de cierre.
+                (refundición, transferencia del resultado y apertura del siguiente) se hace acá,
+                sobre el ejercicio seleccionado. Reabrir un ejercicio revierte sus asientos
+                automáticos de cierre e invalida los estados publicados.
             </p>
 
             <div className="card" style={{ padding: 0, overflowX: 'auto', marginBottom: 12 }}>
@@ -91,6 +94,14 @@ export function EjerciciosPanel() {
                                                 Fijar como actual
                                             </button>
                                         )}
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() => setClosingTarget(closingTarget === ex.id ? null : ex.id)}
+                                            disabled={busy}
+                                            style={{ marginRight: 6 }}
+                                        >
+                                            {closingTarget === ex.id ? 'Ocultar cierre' : 'Cierre…'}
+                                        </button>
                                         {ex.status === 'CLOSED' && (
                                             <button className="btn btn-secondary btn-sm" onClick={() => { setReopenTarget(ex.id); setReopenReason('') }} disabled={busy}>
                                                 Reabrir…
@@ -106,6 +117,13 @@ export function EjerciciosPanel() {
                     </tbody>
                 </table>
             </div>
+
+            {closingTarget && exercises.some(e => e.id === closingTarget) && (
+                <CierreEjercicioPanel
+                    exercise={exercises.find(e => e.id === closingTarget)!}
+                    onChanged={reload}
+                />
+            )}
 
             {reopenTarget && (
                 <div className="card" style={{ padding: 16, marginBottom: 12, borderLeft: '4px solid #f59e0b' }}>
@@ -130,7 +148,7 @@ export function EjerciciosPanel() {
             )}
 
             <button className="btn btn-secondary btn-sm" onClick={() => navigate('/planillas/cierre-valuacion')}>
-                Ir a Cierre (AxI + Valuación)
+                Ir al papel de trabajo de AxI + Valuación
             </button>
 
             {message && <div className="card" style={{ padding: 12, marginTop: 12, fontSize: '0.85rem' }}>{message}</div>}

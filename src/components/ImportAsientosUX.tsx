@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { createEntry } from '../storage/entries'
+import { getEntriesByDateRange } from '../storage/entries'
+import { entryFingerprint, splitAlreadyImported } from '../accounting/application/importDedup'
 import { getPostableAccounts } from '../storage/accounts'
 import { readSpreadsheet } from '../lib/spreadsheet'
 import type { Account } from '../core/models'
@@ -57,6 +59,9 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
     const [validationStats, setValidationStats] = useState({ totalSeats: 0, totalLines: 0, warnings: 0 })
     const [importLoading, setImportLoading] = useState(false)
     const [isConfirming, setIsConfirming] = useState(false)
+    // Asientos del archivo que ya están contabilizados en el Diario
+    const [duplicados, setDuplicados] = useState<Set<string>>(new Set())
+    const [omitirDuplicados, setOmitirDuplicados] = useState(true)
 
     // Auto-open logic for non-embed mode or autoOpen prop
     useEffect(() => {
@@ -698,6 +703,26 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
 
     }, [step])
 
+    /**
+     * Antes de confirmar, se contrasta el archivo contra los libros: repetir una
+     * importación duplicaba el ejercicio completo sin aviso alguno.
+     */
+    useEffect(() => {
+        if (step !== 4 || processedEntries.length === 0) { setDuplicados(new Set()); return }
+        let cancelado = false
+        void (async () => {
+            const fechas = processedEntries.map(e => e.fecha).sort()
+            const existentes = (await getEntriesByDateRange(fechas[0], fechas[fechas.length - 1]))
+                .filter(e => e.status !== 'DRAFT')
+            const { repetidos } = splitAlreadyImported(
+                processedEntries.map(e => ({ date: e.fecha, memo: e.memo, lines: e.lines })),
+                existentes.map(e => ({ date: e.date, memo: e.memo, lines: e.lines }))
+            )
+            if (!cancelado) setDuplicados(new Set(repetidos.map(entryFingerprint)))
+        })()
+        return () => { cancelado = true }
+    }, [step, processedEntries])
+
     const canGoNext = useMemo(() => {
         if (step === 1) return !!file
         if (step === 2) return !!(mapping.fecha && mapping.debe && mapping.haber && (mapping.cuenta_codigo || mapping.cuenta_nombre))
@@ -736,9 +761,12 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
             await new Promise(r => setTimeout(r, 800))
 
             let count = 0
+            let omitidos = 0
             for (const e of processedEntries) {
                 if (Math.abs(e.debe - e.haber) > 0.01) continue
                 if (e.lines.length < 2) continue
+                const fp = entryFingerprint({ date: e.fecha, memo: e.memo, lines: e.lines })
+                if (omitirDuplicados && duplicados.has(fp)) { omitidos++; continue }
                 await createEntry({
                     date: e.fecha,
                     memo: e.memo,
@@ -746,7 +774,9 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
                 })
                 count++
             }
-            setToast(`✅ Se importaron ${count} asientos exitosamente.`)
+            setToast(omitidos > 0
+                ? `✅ Se importaron ${count} asientos. Se omitieron ${omitidos} que ya estaban en el Diario.`
+                : `✅ Se importaron ${count} asientos exitosamente.`)
             setTimeout(() => {
                 setToast(null)
                 closeModal()
@@ -868,7 +898,7 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
                             Descargar plantilla modelo
                         </button>
                         <span style={{ color: '#94a3b8' }}>•</span>
-                        <span>Tip: en producción acá va drag & drop real + parseo CSV/XLSX</span>
+                        <span>Una fila por línea del asiento; el número de asiento agrupa las líneas.</span>
                     </div>
                 </div>
             )
@@ -1087,8 +1117,36 @@ export default function ImportAsientosUX({ embed = true, buttonLabel = 'Importar
                         <strong>Líneas totales:</strong> {validationStats.totalLines}<br />
                         <strong>Advertencias:</strong> {validationStats.warnings > 0 ? `${validationStats.warnings} cuentas sin vincular (se ignorarán esas líneas)` : 'Ninguna'}
                     </div>
+
+                    {duplicados.size > 0 && (
+                        <div
+                            role="alert"
+                            data-testid="import-duplicados"
+                            style={{
+                                border: '1px solid rgba(234,179,8,0.5)', background: 'rgba(234,179,8,0.10)',
+                                borderRadius: 12, padding: '12px 14px', color: '#854d0e', fontSize: 13,
+                            }}
+                        >
+                            <strong>{duplicados.size} de los {validationStats.totalSeats} asientos ya están en el Libro Diario</strong>
+                            <div style={{ marginTop: 4 }}>
+                                Tienen la misma fecha, el mismo concepto y las mismas líneas que asientos ya contabilizados.
+                                Importarlos otra vez duplicaría esas operaciones en los libros.
+                            </div>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontWeight: 600, cursor: 'pointer' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={omitirDuplicados}
+                                    onChange={e => setOmitirDuplicados(e.target.checked)}
+                                    data-testid="import-omitir-duplicados"
+                                />
+                                Omitir los asientos repetidos (se importarán {validationStats.totalSeats - duplicados.size})
+                            </label>
+                        </div>
+                    )}
+
                     <div style={{ fontSize: 12, color: '#64748b' }}>
-                        Nota: esta confirmación es “UX first”. Después conectamos el import real (createEntry/updateEntry) y listo.
+                        Los asientos se contabilizan al confirmar: quedan en el Libro Diario y afectan mayores,
+                        balance y estados contables.
                     </div>
                 </div>
             </div>

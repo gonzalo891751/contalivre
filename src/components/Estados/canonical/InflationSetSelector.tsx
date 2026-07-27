@@ -47,7 +47,11 @@ export function InflationSetSelector({ selectedId, onSelect, applied }: Inflatio
             </label>
 
             {sets.length === 0 && (
-                <span className="infl-hint">No hay sets de índices cargados. Cargalos en Cierre (AxI) para habilitar la moneda de cierre.</span>
+                <span className="infl-hint">
+                    No hay sets de índices registrados. Registrá la serie en{' '}
+                    <a href="/configuracion?seccion=inflacion">Configuración → Inflación</a>{' '}
+                    para habilitar la moneda de cierre.
+                </span>
             )}
 
             {applied && chip && (

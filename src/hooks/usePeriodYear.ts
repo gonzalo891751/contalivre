@@ -4,7 +4,8 @@ import { db } from '../storage/db'
 import type { AccountingExercise } from '../accounting/domain/types'
 
 const LS_KEY = 'contalivre_period_year'
-const DEFAULT_YEAR = 2026
+/** Año por defecto: el corriente. Fijarlo a una constante lo dejaba obsoleto. */
+const DEFAULT_YEAR = new Date().getFullYear()
 
 interface PeriodState {
   year: number
@@ -22,6 +23,19 @@ function getDefaultDates(year: number) {
     start: `${year}-01-01`,
     end: `${year}-12-31`
   }
+}
+
+/**
+ * Año que identifica un ejercicio a partir de su fecha de inicio.
+ *
+ * Es la misma convención que usa el contexto contable persistido
+ * (`buildAnnualExercise`): el ejercicio se nombra por el año de su apertura.
+ * Se expone para que el selector de período no pueda quedar con una etiqueta
+ * de año distinta del rango que muestra.
+ */
+export function yearFromRange(start: string): number {
+  const parsed = Number(String(start).slice(0, 4))
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_YEAR
 }
 
 function readFromLS(): PeriodState {

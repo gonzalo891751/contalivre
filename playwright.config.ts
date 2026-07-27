@@ -39,7 +39,9 @@ export default defineConfig({
             // EFE (incluida la moneda de cierre) y exportaciones también en Firefox.
             name: 'firefox-desktop',
             use: { ...devices['Desktop Firefox'], viewport: { width: 1440, height: 900 } },
-            testMatch: /(full-flow|preparacion-efe|exports)\.spec\.ts/,
+            // Fase 2H (§H12): la aceptación de esta fase también corre en el
+            // segundo motor, no sólo en Chromium.
+            testMatch: /(full-flow|preparacion-efe|exports|fase2h)\.spec\.ts/,
         },
     ],
     webServer: {

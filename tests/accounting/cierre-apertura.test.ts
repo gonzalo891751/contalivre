@@ -61,6 +61,33 @@ describe('Fase 2B — vista previa de cierre', () => {
         expect(preview.blockers.some(b => b.includes('borrador'))).toBe(true)
         await expect(generateClosingDrafts(EX_2025())).rejects.toThrow(PostingError)
     })
+
+    /**
+     * Auditoría E2E (DEF-A05): los borradores del propio cierre no pueden
+     * bloquear el cierre. Antes, generar la refundición (paso 2) dejaba la vista
+     * previa con `canClose: false`, así que el paso 3 quedaba inalcanzable desde
+     * cualquier llamador que respetara la vista previa.
+     */
+    it('los borradores de la propia refundición no bloquean el cierre', async () => {
+        await generateClosingDrafts(EX_2025())
+
+        const preview = await previewClosing(EX_2025())
+        expect(preview.closingDraftCount).toBe(3)
+        expect(preview.draftCount).toBe(0)
+        expect(preview.blockers).toEqual([])
+        expect(preview.canClose).toBe(true)
+    })
+
+    it('un borrador ajeno sí bloquea aunque exista la refundición en borrador', async () => {
+        await generateClosingDrafts(EX_2025())
+        await createDraftEntry({ date: '2025-11-01', memo: 'pendiente', lines: simpleLines('caja', 'ventas', 10) })
+
+        const preview = await previewClosing(EX_2025())
+        expect(preview.draftCount).toBe(1)
+        expect(preview.closingDraftCount).toBe(3)
+        expect(preview.canClose).toBe(false)
+        expect(preview.blockers.some(b => b.includes('1 borrador(es) pendientes'))).toBe(true)
+    })
 })
 
 describe('Fase 2B — refundición y cierre', () => {

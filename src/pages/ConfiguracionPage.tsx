@@ -19,12 +19,14 @@ import { CompanyProfileModal, CompanyProfileCard } from '../components/CompanyPr
 import { MapeosPanel } from '../components/Configuracion/panels/MapeosPanel'
 import { EfePoliticasPanel } from '../components/Configuracion/panels/EfePoliticasPanel'
 import { EjerciciosPanel } from '../components/Configuracion/panels/EjerciciosPanel'
+import { IndicesOficialesPanel } from '../components/Configuracion/panels/IndicesOficialesPanel'
 import { BackupPanel } from '../components/Configuracion/panels/BackupPanel'
 import { VersionInfoPanel } from '../components/Configuracion/panels/VersionInfoPanel'
 import { CapabilitiesPanel } from '../components/Configuracion/panels/CapabilitiesPanel'
 import { DangerZonePanel } from '../components/Configuracion/panels/DangerZonePanel'
 import { AcceptanceFixturePanel } from '../components/Configuracion/panels/AcceptanceFixturePanel'
 import { ExpenseAllocationEditor } from '../components/Configuracion/panels/ExpenseAllocationEditor'
+import { SectorProfilesPanel } from '../components/Configuracion/panels/SectorProfilesPanel'
 
 /** El fixture de aceptación RC solo existe fuera de producción (Fase 2F §5) */
 const SHOW_RC_FIXTURE = import.meta.env.MODE !== 'production'
@@ -136,6 +138,7 @@ export default function ConfiguracionPage() {
                             <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                                 <button className="btn btn-secondary btn-sm" onClick={() => navigate('/cuentas')}>Abrir Plan de Cuentas</button>
                             </div>
+                            <SectorProfilesPanel />
                             <MapeosPanel />
                             <EfePoliticasPanel />
                             <ExpenseAllocationEditor />
@@ -144,9 +147,11 @@ export default function ConfiguracionPage() {
 
                     {active === 'inflacion' && (
                         <div>
+                            <IndicesOficialesPanel />
+                            <hr style={{ margin: '24px 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
                             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-                                El ajuste por inflación (AxI) y la valuación al cierre viven en la planilla de Cierre.
-                                Ahí cargás los índices y generás la reexpresión que alimenta los estados en moneda de cierre.
+                                El papel de trabajo del ajuste por inflación (AxI) y la valuación al cierre
+                                viven en la planilla de Cierre.
                             </p>
                             <button className="btn btn-secondary btn-sm" onClick={() => navigate('/planillas/cierre-valuacion')}>
                                 Ir a Cierre (AxI + Valuación)

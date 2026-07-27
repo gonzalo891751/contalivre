@@ -8,6 +8,7 @@
 
 import { useState } from 'react'
 import type { FixedAssetsAnnex, FixedAssetsAnnexRestated, FixedAssetsAnnexRow } from '../../../reporting/domain/types'
+import SegmentedControl from '../../../ui/SegmentedControl'
 
 const nf = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const money = (v: number | null | undefined) => (v == null ? '–' : v === 0 ? '–' : nf.format(v))
@@ -96,20 +97,26 @@ export function FixedAssetsAnnexView({ annex, restated, showComparative, onRowCl
             )}
 
             {/* Toggle de expresión monetaria (§12): solo con set de índices */}
-            <div className="ppe-toolbar" role="group" aria-label="Expresión monetaria">
-                <button type="button" className={`ppe-toggle${expression === 'NOMINAL' ? ' active' : ''}`} aria-pressed={expression === 'NOMINAL'} onClick={() => setExpression('NOMINAL')}>
-                    Moneda nominal
-                </button>
-                <button
-                    type="button"
-                    className={`ppe-toggle${expression === 'CLOSING' ? ' active' : ''}`}
-                    aria-pressed={expression === 'CLOSING'}
-                    disabled={!closingAvailable}
-                    title={!closingAvailable ? 'Elegí un set de índices en la barra superior para ver la moneda de cierre' : undefined}
-                    onClick={() => setExpression('CLOSING')}
-                >
-                    Moneda de cierre
-                </button>
+            {/* Fase 2H: mismo control segmentado que el resto de la aplicación. */}
+            <div style={{ marginBottom: 12 }}>
+                <SegmentedControl<'NOMINAL' | 'CLOSING'>
+                    label="Expresión monetaria"
+                    value={expression}
+                    onChange={setExpression}
+                    size="sm"
+                    testId="ppe-expresion"
+                    options={[
+                        { value: 'NOMINAL', label: 'Moneda nominal' },
+                        {
+                            value: 'CLOSING',
+                            label: 'Moneda de cierre',
+                            disabled: !closingAvailable,
+                            disabledReason: !closingAvailable
+                                ? 'Elegí un set de índices en la barra superior para ver la moneda de cierre'
+                                : undefined,
+                        },
+                    ]}
+                />
             </div>
 
             {expression === 'CLOSING' && restated && restated.blockers.length > 0 && (
@@ -179,10 +186,7 @@ export function FixedAssetsAnnexView({ annex, restated, showComparative, onRowCl
 }
 
 const styles = `
-.ppe-toolbar { display: inline-flex; gap: 3px; padding: 3px; background: rgba(241,245,249,0.9); border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 12px; }
-.ppe-toggle { padding: 6px 14px; font-size: 0.8rem; font-weight: 600; color: #64748b; background: transparent; border: none; border-radius: 7px; cursor: pointer; }
-.ppe-toggle.active { background: white; color: #047857; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.ppe-toggle:disabled { opacity: 0.45; cursor: not-allowed; }
+/* El toggle de expresión usa SegmentedControl (.cl-seg*, hoja global). */
 .ppe-table td.adj { color: #7c3aed; }
 .ppe-intro { font-size: 0.82rem; color: #64748b; margin: 0 0 12px; line-height: 1.5; max-width: 720px; }
 .ppe-empty { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; color: #64748b; font-size: 0.88rem; }

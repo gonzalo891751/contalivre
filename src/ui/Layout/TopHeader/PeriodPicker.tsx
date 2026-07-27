@@ -1,7 +1,7 @@
 import { useRef, useCallback, useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CalendarBlank, CaretDown, Warning } from '@phosphor-icons/react'
-import { usePeriodYear } from '../../../hooks/usePeriodYear'
+import { usePeriodYear, yearFromRange } from '../../../hooks/usePeriodYear'
 import { db } from '../../../storage/db'
 import { type DropdownId } from '../../../hooks/useDropdownManager'
 import DropdownMenu from './DropdownMenu'
@@ -59,7 +59,11 @@ export default function PeriodPicker({
 
   const handleApplyRange = () => {
     if (localStart > localEnd) return
-    setPeriod(year, localStart, localEnd)
+    // El año del ejercicio lo define SIEMPRE la fecha de inicio del rango.
+    // Conservar el año anterior dejaba el encabezado y los reportes apuntando
+    // a un ejercicio distinto del rango aplicado (ej: "Ejercicio 2026" con
+    // fechas 01/01/2025 – 31/12/2025).
+    setPeriod(yearFromRange(localStart), localStart, localEnd)
     onClose()
   }
 

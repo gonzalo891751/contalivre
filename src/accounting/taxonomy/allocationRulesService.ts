@@ -11,13 +11,17 @@ import { db, generateId } from '../../storage/db'
 import { appendAuditEvent } from '../audit/auditLog'
 import { LOCAL_ACTOR } from '../domain/types'
 import { ruleIsValid } from '../../reporting/engine/expensesByFunction'
-import type { Account, ExpenseAllocationRule, ResultFunction } from '../../core/models'
+import type { Account, AllocationBasis, ExpenseAllocationRule, ResultFunction } from '../../core/models'
 
 export interface AllocationRuleInput {
     accountId: string
     validFrom: string
     validTo?: string
-    allocations: { function: ResultFunction; percentage: number }[]
+    /** Base de distribución (Fase 2H §H5). Ausente = porcentaje manual. */
+    basis?: AllocationBasis
+    /** Nombre del inductor cuando la base es CUSTOM. */
+    basisLabel?: string
+    allocations: { function: ResultFunction; percentage: number; driverValue?: number }[]
     reason: string
     status: 'DRAFT' | 'ACTIVE'
     /** al versionar: regla ACTIVE que esta reemplaza */
@@ -73,17 +77,43 @@ export async function validateRuleInput(
     if (input.allocations.length === 0) {
         errors.push({ field: 'allocations', message: 'Definí al menos una función.' })
     }
+    // Con base por inductor el porcentaje se deriva de los valores cargados, así
+    // que la validación mira el inductor y no exige que el usuario cuadre a mano.
+    const basis = input.basis ?? 'MANUAL_PERCENTAGE'
+    const usesDriver = basis !== 'MANUAL_PERCENTAGE'
+
     const seen = new Set<string>()
     let sumBps = 0
+    let sumDriver = 0
     for (const a of input.allocations) {
         if (!VALID_FUNCTIONS.has(a.function)) errors.push({ field: 'allocations', message: `Función inválida: ${a.function}.` })
-        if (a.percentage <= 0) errors.push({ field: 'allocations', message: 'Los porcentajes deben ser positivos.' })
         if (seen.has(a.function)) errors.push({ field: 'allocations', message: `La función ${a.function} está repetida.` })
         seen.add(a.function)
-        sumBps += Math.round(a.percentage * 100)
+
+        if (usesDriver) {
+            const value = a.driverValue ?? 0
+            if (!Number.isFinite(value) || value < 0) {
+                errors.push({ field: 'allocations', message: 'El valor de la base no puede ser negativo.' })
+            }
+            sumDriver += value
+        } else {
+            if (a.percentage <= 0) errors.push({ field: 'allocations', message: 'Los porcentajes deben ser positivos.' })
+            sumBps += Math.round(a.percentage * 100)
+        }
     }
-    if (input.allocations.length > 0 && sumBps !== 10000) {
-        errors.push({ field: 'allocations', message: `Los porcentajes deben sumar exactamente 100 % (suman ${(sumBps / 100).toFixed(2)} %).` })
+
+    if (input.allocations.length > 0) {
+        if (usesDriver) {
+            if (sumDriver <= 0) {
+                errors.push({ field: 'allocations', message: 'Cargá el valor de la base para al menos una función (la suma debe ser mayor que cero).' })
+            }
+        } else if (sumBps !== 10000) {
+            errors.push({ field: 'allocations', message: `Los porcentajes deben sumar exactamente 100 % (suman ${(sumBps / 100).toFixed(2)} %).` })
+        }
+    }
+
+    if (basis === 'CUSTOM' && !input.basisLabel?.trim()) {
+        errors.push({ field: 'allocations', message: 'Poné un nombre al inductor de la base personalizada.' })
     }
 
     if (!input.reason?.trim()) errors.push({ field: 'reason', message: 'El motivo es obligatorio (queda auditado).' })
@@ -138,6 +168,8 @@ export async function createRule(input: AllocationRuleInput, actorId = LOCAL_ACT
         accountId: input.accountId,
         validFrom: input.validFrom,
         validTo: input.validTo,
+        basis: input.basis ?? 'MANUAL_PERCENTAGE',
+        basisLabel: input.basisLabel?.trim() || undefined,
         allocations: input.allocations,
         reason: input.reason.trim(),
         createdBy: actorId,
@@ -179,6 +211,8 @@ export async function updateDraftRule(
         ...rule,
         validFrom: input.validFrom,
         validTo: input.validTo,
+        basis: input.basis ?? 'MANUAL_PERCENTAGE',
+        basisLabel: input.basisLabel?.trim() || undefined,
         allocations: input.allocations,
         reason: input.reason.trim(),
         status: input.status,

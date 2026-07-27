@@ -22,19 +22,36 @@ import {
     validateRuleInput,
     type AllocationRuleInput,
 } from '../../../accounting/taxonomy/allocationRulesService'
-import { RESULT_FUNCTION_LABEL, deriveResultFunction } from '../../../reporting/engine/expensesByFunction'
-import type { Account, ExpenseAllocationRule, ResultFunction } from '../../../core/models'
+import { ALLOCATION_BASIS_LABEL, RESULT_FUNCTION_LABEL, deriveResultFunction } from '../../../reporting/engine/expensesByFunction'
+import type { Account, AllocationBasis, ExpenseAllocationRule, ResultFunction } from '../../../core/models'
 
 const nf = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const FUNCTIONS: ResultFunction[] = ['ADMINISTRATION', 'SELLING', 'PRODUCTION', 'FINANCIAL', 'OTHER']
 
-interface DraftAllocation { function: ResultFunction; percentage: string }
+interface DraftAllocation { function: ResultFunction; percentage: string; driverValue: string }
+
+const BASES: AllocationBasis[] = ['MANUAL_PERCENTAGE', 'EMPLOYEES', 'SURFACE', 'HOURS', 'UNITS_PRODUCED', 'CUSTOM']
+
+/** Ayuda concreta por base, para que la elección no sea a ciegas. */
+const BASIS_HINT: Record<AllocationBasis, string> = {
+    MANUAL_PERCENTAGE: 'Escribís vos los porcentajes. Deben sumar exactamente 100.',
+    EMPLOYEES: 'Cargá cuántos empleados tiene cada función; el porcentaje se calcula solo.',
+    SURFACE: 'Cargá los m² afectados a cada función (típico para alquileres y energía).',
+    HOURS: 'Cargá las horas aplicadas a cada función.',
+    UNITS_PRODUCED: 'Cargá las unidades producidas o despachadas por función.',
+    CUSTOM: 'Definí tu propio inductor y cargá su valor por función.',
+}
 
 const EMPTY_FORM = {
     validFrom: '',
     validTo: '',
     reason: '',
-    allocations: [{ function: 'ADMINISTRATION', percentage: '60' }, { function: 'SELLING', percentage: '40' }] as DraftAllocation[],
+    basis: 'MANUAL_PERCENTAGE' as AllocationBasis,
+    basisLabel: '',
+    allocations: [
+        { function: 'ADMINISTRATION', percentage: '60', driverValue: '' },
+        { function: 'SELLING', percentage: '40', driverValue: '' },
+    ] as DraftAllocation[],
 }
 
 export function ExpenseAllocationEditor() {
@@ -80,17 +97,45 @@ export function ExpenseAllocationEditor() {
         rules.filter(r => r.accountId === accountId).sort((a, b) => b.version - a.version),
     [rules, accountId])
 
-    const sumPct = useMemo(() =>
-        form.allocations.reduce((s, a) => s + (Math.round(Number(a.percentage || 0) * 100) || 0), 0) / 100,
-    [form.allocations])
+    const isDriver = form.basis !== 'MANUAL_PERCENTAGE'
+
+    /**
+     * Con base por inductor el porcentaje se DERIVA de los valores cargados, así
+     * que suma 100 por construcción. Con porcentaje manual se suma lo escrito.
+     */
+    const derived = useMemo(() => {
+        if (!isDriver) {
+            return form.allocations
+                .filter(a => a.percentage !== '')
+                .map(a => ({ function: a.function, percentage: Number(a.percentage) || 0, driverValue: undefined as number | undefined }))
+        }
+        const rows = form.allocations.filter(a => a.driverValue !== '')
+        const total = rows.reduce((s, a) => s + (Number(a.driverValue) || 0), 0)
+        if (total <= 0) return []
+        return rows.map(a => ({
+            function: a.function,
+            percentage: ((Number(a.driverValue) || 0) / total) * 100,
+            driverValue: Number(a.driverValue) || 0,
+        }))
+    }, [form.allocations, isDriver])
+
+    const sumPct = useMemo(
+        () => Math.round(derived.reduce((s, a) => s + a.percentage, 0) * 100) / 100,
+        [derived])
 
     const buildInput = (status: 'DRAFT' | 'ACTIVE'): AllocationRuleInput => ({
         accountId,
         validFrom: form.validFrom,
         validTo: form.validTo || undefined,
-        allocations: form.allocations
-            .filter(a => a.percentage !== '')
-            .map(a => ({ function: a.function, percentage: Number(a.percentage) })),
+        basis: form.basis,
+        basisLabel: form.basis === 'CUSTOM' ? form.basisLabel || undefined : undefined,
+        allocations: derived.map(a => ({
+            function: a.function,
+            // El porcentaje se persiste redondeado como caché legible; con base
+            // por inductor la fuente de verdad es driverValue.
+            percentage: Math.round(a.percentage * 100) / 100,
+            driverValue: a.driverValue,
+        })),
         reason: form.reason,
         status,
         supersedesId,
@@ -130,7 +175,13 @@ export function ExpenseAllocationEditor() {
             validFrom: mode === 'supersede' ? '' : rule.validFrom,
             validTo: rule.validTo ?? '',
             reason: mode === 'edit-draft' ? rule.reason : '',
-            allocations: rule.allocations.map(a => ({ function: a.function, percentage: String(a.percentage) })),
+            basis: rule.basis ?? 'MANUAL_PERCENTAGE',
+            basisLabel: rule.basisLabel ?? '',
+            allocations: rule.allocations.map(a => ({
+                function: a.function,
+                percentage: String(a.percentage),
+                driverValue: a.driverValue != null ? String(a.driverValue) : '',
+            })),
         })
         setEditingDraftId(mode === 'edit-draft' ? rule.id : null)
         setSupersedesId(mode === 'supersede' ? rule.id : undefined)
@@ -170,33 +221,88 @@ export function ExpenseAllocationEditor() {
 
                 {account && (
                     <>
+                        <label style={{ display: 'grid', gap: 4, fontSize: '0.82rem', fontWeight: 600 }}>
+                            Base de distribución
+                            <select
+                                value={form.basis}
+                                onChange={e => setForm(f => ({ ...f, basis: e.target.value as AllocationBasis }))}
+                                data-testid="alloc-basis"
+                            >
+                                {BASES.map(b => <option key={b} value={b}>{ALLOCATION_BASIS_LABEL[b]}</option>)}
+                            </select>
+                            <span style={{ fontWeight: 400, fontSize: '0.78rem', color: '#64748b' }}>{BASIS_HINT[form.basis]}</span>
+                        </label>
+
+                        {form.basis === 'CUSTOM' && (
+                            <label style={{ display: 'grid', gap: 4, fontSize: '0.82rem', fontWeight: 600 }}>
+                                Nombre del inductor
+                                <input
+                                    type="text"
+                                    placeholder="Ej.: kg despachados, cantidad de socios…"
+                                    value={form.basisLabel}
+                                    onChange={e => setForm(f => ({ ...f, basisLabel: e.target.value }))}
+                                    data-testid="alloc-basis-label"
+                                />
+                            </label>
+                        )}
+
                         <fieldset style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12 }}>
-                            <legend style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', padding: '0 6px' }}>FUNCIONES Y PORCENTAJES</legend>
-                            {form.allocations.map((a, i) => (
-                                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                                    <select value={a.function} onChange={e => setAlloc(i, { function: e.target.value as ResultFunction })}>
-                                        {FUNCTIONS.map(f => <option key={f} value={f}>{RESULT_FUNCTION_LABEL[f]}</option>)}
-                                    </select>
-                                    <input
-                                        type="number" min={0.01} max={100} step={0.01} value={a.percentage}
-                                        onChange={e => setAlloc(i, { percentage: e.target.value })}
-                                        style={{ width: 90 }} aria-label={`Porcentaje ${RESULT_FUNCTION_LABEL[a.function]}`}
-                                    />
-                                    <span style={{ fontSize: '0.8rem' }}>%</span>
-                                    {balance != null && a.percentage !== '' && (
-                                        <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
-                                            → $ {nf.format((balance * Number(a.percentage)) / 100)}
-                                        </span>
-                                    )}
-                                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, allocations: f.allocations.filter((_, j) => j !== i) }))} aria-label="Quitar función">✕</button>
-                                </div>
-                            ))}
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, allocations: [...f.allocations, { function: 'OTHER', percentage: '' }] }))}>
+                            <legend style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', padding: '0 6px' }}>
+                                {isDriver ? 'FUNCIONES Y VALOR DE LA BASE' : 'FUNCIONES Y PORCENTAJES'}
+                            </legend>
+                            {form.allocations.map((a, i) => {
+                                const row = derived.find(d => d.function === a.function)
+                                return (
+                                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                                        <select value={a.function} onChange={e => setAlloc(i, { function: e.target.value as ResultFunction })}>
+                                            {FUNCTIONS.map(f => <option key={f} value={f}>{RESULT_FUNCTION_LABEL[f]}</option>)}
+                                        </select>
+
+                                        {isDriver ? (
+                                            <>
+                                                <input
+                                                    type="number" min={0} step="any" value={a.driverValue}
+                                                    onChange={e => setAlloc(i, { driverValue: e.target.value })}
+                                                    style={{ width: 110 }}
+                                                    aria-label={`Valor de la base para ${RESULT_FUNCTION_LABEL[a.function]}`}
+                                                    data-testid={`alloc-driver-${a.function}`}
+                                                />
+                                                <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                                                    = {row ? row.percentage.toFixed(2) : '0,00'} %
+                                                </span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <input
+                                                    type="number" min={0.01} max={100} step={0.01} value={a.percentage}
+                                                    onChange={e => setAlloc(i, { percentage: e.target.value })}
+                                                    style={{ width: 90 }} aria-label={`Porcentaje ${RESULT_FUNCTION_LABEL[a.function]}`}
+                                                    data-testid={`alloc-pct-${a.function}`}
+                                                />
+                                                <span style={{ fontSize: '0.8rem' }}>%</span>
+                                            </>
+                                        )}
+
+                                        {balance != null && row && (
+                                            <span style={{ fontSize: '0.78rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                                                → $ {nf.format((balance * row.percentage) / 100)}
+                                            </span>
+                                        )}
+                                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, allocations: f.allocations.filter((_, j) => j !== i) }))} aria-label="Quitar función">✕</button>
+                                    </div>
+                                )
+                            })}
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, allocations: [...f.allocations, { function: 'OTHER', percentage: '', driverValue: '' }] }))}>
                                 + Agregar función
                             </button>
                             <div style={{ marginTop: 8, fontSize: '0.82rem', fontWeight: 700, color: sumPct === 100 ? '#047857' : '#b91c1c' }} data-testid="alloc-sum">
                                 Total: {nf.format(sumPct)} % {sumPct === 100 ? '✓' : '(debe ser exactamente 100 %)'}
                             </div>
+                            {isDriver && (
+                                <p style={{ margin: '6px 0 0', fontSize: '0.76rem', color: '#64748b' }}>
+                                    Con una base por inductor el porcentaje se calcula solo y siempre suma 100 %.
+                                </p>
+                            )}
                         </fieldset>
 
                         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -222,9 +328,11 @@ export function ExpenseAllocationEditor() {
                         {balance != null && sumPct === 100 && (
                             <div style={{ background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.25)', borderRadius: 10, padding: '10px 14px', fontSize: '0.82rem' }} data-testid="alloc-preview">
                                 <strong>Vista previa ({year}):</strong> gasto total $ {nf.format(balance)}
-                                {form.allocations.filter(a => a.percentage !== '').map(a => (
+                                {/* Se usa el porcentaje EFECTIVO (derivado del inductor cuando la
+                                    base no es manual), para que la vista previa no contradiga a la regla. */}
+                                {derived.map(a => (
                                     <div key={a.function} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                        {RESULT_FUNCTION_LABEL[a.function]} {a.percentage} %: $ {nf.format((balance * Number(a.percentage)) / 100)}
+                                        {RESULT_FUNCTION_LABEL[a.function]} {a.percentage.toFixed(2)} %: $ {nf.format((balance * a.percentage) / 100)}
                                     </div>
                                 ))}
                                 <div style={{ color: '#64748b', marginTop: 4 }}>Se modifica la exposición del anexo; el Diario no cambia.</div>

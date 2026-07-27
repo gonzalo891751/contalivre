@@ -7,7 +7,7 @@
  * Cada línea lleva linaje (cuentas y asientos que la forman).
  */
 
-import type { Account, ExpenseAllocationRule, JournalEntry, ManualDisclosure, ResultFunction } from '../../core/models'
+import type { Account, AllocationBasis, ExpenseAllocationRule, JournalEntry, ManualDisclosure, ResultFunction } from '../../core/models'
 
 export interface EngineContext {
     companyId: string
@@ -189,6 +189,22 @@ export interface ExpenseAccountRow {
     /** origen de la asignación: regla versionada, mapping explícito o derivación */
     source: 'RULE' | 'MAPPING' | 'DERIVED'
     ruleId?: string
+    /**
+     * Traza de la distribución (Fase 2H §H5). Por cada función: la base usada,
+     * el valor del inductor y el porcentaje resultante, para que el usuario vea
+     * de dónde sale cada importe y no sólo el número final.
+     */
+    basis?: AllocationBasis
+    /** Nombre del inductor cuando la base es CUSTOM. */
+    basisLabel?: string
+    allocationTrace?: {
+        function: ResultFunction
+        /** valor del inductor (empleados, m², horas, unidades) si aplica */
+        driverValue?: number
+        /** porcentaje efectivamente aplicado */
+        percentage: number
+        amount: number
+    }[]
 }
 
 export interface ExpensesByFunctionMatrix {
@@ -208,7 +224,49 @@ export interface ExpensesByFunctionMatrix {
 // Determinación del costo de ventas (Fase 2E, §10)
 // ─────────────────────────────────────────────────────────────
 
-export type CostOfSalesMode = 'COMMERCIAL' | 'SERVICES' | 'NOT_APPLICABLE'
+/**
+ * Alcance del anexo de costo (Fase 2E §10, ampliado en Fase 2H §H6).
+ *
+ * Precedencia de detección, siempre estructural (nunca por nombre de cuenta):
+ *   AGRICULTURAL > INDUSTRIAL > COMMERCIAL > SERVICES > NOT_APPLICABLE
+ */
+export type CostOfSalesMode =
+    | 'COMMERCIAL'
+    | 'INDUSTRIAL'
+    | 'AGRICULTURAL'
+    | 'SERVICES'
+    | 'NOT_APPLICABLE'
+
+/**
+ * Bloque de costo de producción (Fase 2H §H6).
+ *
+ * El subtotal "Costo de producción" es DERIVADO y conciliado, no una fila
+ * decorativa: sale de las cuentas mapeadas a producción (resultFunction
+ * PRODUCTION dentro de COGS) y se concilia con las existencias en proceso.
+ *
+ *   Materia prima consumida + MOD + CIP + depreciaciones productivas
+ *     = Costo de producción del período
+ *   + Producción en proceso inicial − Producción en proceso final
+ *     = Costo de productos terminados
+ *   + Productos terminados iniciales − Productos terminados finales
+ *     = Costo de productos vendidos
+ */
+export interface ProductionCostBlock {
+    directMaterials: CostOfSalesValue
+    directLabor: CostOfSalesValue
+    indirectCosts: CostOfSalesValue
+    productionDepreciation: CostOfSalesValue
+    /** subtotal derivado: suma de los componentes del período */
+    productionCost: CostOfSalesValue
+    workInProcessOpening: CostOfSalesValue
+    workInProcessClosing: CostOfSalesValue
+    /** costo de lo terminado en el período */
+    finishedGoodsCost: CostOfSalesValue
+    finishedGoodsOpening: CostOfSalesValue
+    finishedGoodsClosing: CostOfSalesValue
+    /** costo de los productos vendidos por la vía de producción */
+    costOfGoodsSold: CostOfSalesValue
+}
 
 export interface CostOfSalesValue {
     /** null cuando el estado no es CALCULATED (nunca cero como sustituto) */
@@ -241,6 +299,14 @@ export interface CostOfSalesBridge {
     costOfSales: CostOfSalesValue
     /** CMV según el ER (registro perpetuo); la igualdad se VERIFICA, no se fuerza */
     costOfSalesPerIncomeStatement: number
+    /**
+     * Apertura por etapas de producción (Fase 2H §H6). Presente sólo en los
+     * modos INDUSTRIAL y AGRICULTURAL, donde hay evidencia estructural de
+     * costos de producción. En comercio y servicios es undefined: no se finge.
+     */
+    production?: ProductionCostBlock
+    /** Explicación de por qué el anexo tomó este alcance. */
+    modeReason?: string
     validations: ValidationCheck[]
 }
 
@@ -333,7 +399,28 @@ export interface ForeignCurrencyRow {
      * diferencia se expone, no se oculta (Fase 2F §11).
      */
     reconciliationDifference?: number | null
+    /**
+     * Clasificación corriente / no corriente de la partida (Fase 2H §H8). Se
+     * toma del mapping explícito y, si falta, se deriva de la sección de la
+     * cuenta. Nunca se infiere por el nombre.
+     */
+    currentClassification: 'CURRENT' | 'NON_CURRENT' | 'NOT_APPLICABLE'
     statementLineId: string
+}
+
+/**
+ * Diferencias de cambio del ejercicio (Fase 2H §H8).
+ *
+ * Se identifican por MAPPING (`notesGroup` de la cuenta), no por su nombre. Sin
+ * cuentas mapeadas el estado es INSUFFICIENT_INFORMATION: se dice que no se
+ * puede informar, en lugar de mostrar un cero que parecería un dato.
+ */
+export interface ForeignCurrencyExchangeDifferences {
+    status: 'CALCULATED' | 'INSUFFICIENT_INFORMATION'
+    /** resultado neto del ejercicio (positivo = ganancia) */
+    total: number
+    accountIds: string[]
+    detail: string
 }
 
 export interface ForeignCurrencyDisclosure {
@@ -342,6 +429,14 @@ export interface ForeignCurrencyDisclosure {
     note: string
     /** true si el detalle operativo reconcilia con el Diario en todas las cuentas */
     reconciled: boolean
+    /** diferencias de cambio del ejercicio (Fase 2H §H8) */
+    exchangeDifferences: ForeignCurrencyExchangeDifferences
+    /** totales por naturaleza, para el cierre del cuadro (Fase 2H §H8) */
+    totals: {
+        assets: number
+        liabilities: number
+        net: number
+    }
 }
 
 /**

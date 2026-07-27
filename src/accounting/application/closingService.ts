@@ -108,7 +108,10 @@ export interface ClosingPreview {
     canClose: boolean
     blockers: string[]
     warnings: string[]
+    /** borradores ajenos al cierre: son los que lo bloquean */
     draftCount: number
+    /** borradores de la propia refundición, listos para contabilizarse */
+    closingDraftCount: number
     postedCount: number
     journalDebit: number
     journalCredit: number
@@ -134,8 +137,14 @@ export async function previewClosing(exerciseId: string): Promise<ClosingPreview
     const drafts = allInRange.filter(e => e.status === 'DRAFT')
     const posted = allInRange.filter(e => e.status !== 'DRAFT')
 
-    if (drafts.length > 0) {
-        blockers.push(`Hay ${drafts.length} borrador(es) pendientes en el ejercicio: contabilizalos o eliminalos antes de cerrar.`)
+    // Los borradores de la propia refundición NO bloquean: son el paso 2 del
+    // ciclo y existen justamente para poder revisarlos antes de contabilizar.
+    // Contarlos como pendientes dejaba el cierre trabado apenas se generaban.
+    const closingDrafts = drafts.filter(isClosingEntry)
+    const pendingDrafts = drafts.filter(e => !isClosingEntry(e))
+
+    if (pendingDrafts.length > 0) {
+        blockers.push(`Hay ${pendingDrafts.length} borrador(es) pendientes en el ejercicio: contabilizalos o eliminalos antes de cerrar.`)
     }
 
     // Integridad Diario
@@ -191,7 +200,8 @@ export async function previewClosing(exerciseId: string): Promise<ClosingPreview
             ? [...blockers, `El ejercicio ya está en estado ${exercise.status}.`]
             : blockers,
         warnings,
-        draftCount: drafts.length,
+        draftCount: pendingDrafts.length,
+        closingDraftCount: closingDrafts.length,
         postedCount: posted.length,
         journalDebit,
         journalCredit,

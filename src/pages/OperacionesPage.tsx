@@ -1,5 +1,32 @@
-import { useMemo, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+/**
+ * Portada de Operaciones — reescrita en la Fase 2H (§H9 y §H10).
+ *
+ * Qué se corrigió
+ * ---------------
+ * 1. Importes fantasma: la versión anterior mostraba "$ 320.000" y
+ *    "2 Vencimientos" ESCRITOS A MANO en el JSX de la tarjeta de Proveedores, y
+ *    guiones fijos en Clientes. Con una empresa sin asientos la pantalla exhibía
+ *    deudas y vencimientos inexistentes.
+ * 2. Contabilidad paralela: las tarjetas de Ventas/CMV recorrían `db.entries`
+ *    con aritmética propia y sin filtrar empresa ni estado del asiento, de modo
+ *    que un borrador o el ejercicio de otra empresa alteraban la portada.
+ *
+ * Cómo queda
+ * ----------
+ * Cada cifra proviene de `summarizeOperationsModules`, que agrupa el balance del
+ * ReportingBundle canónico (mismo motor que los estados contables) y hereda sus
+ * filtros: sólo asientos contabilizados, sólo la empresa del contexto, sólo el
+ * ejercicio seleccionado. Si el plan no tiene cuentas del rubro, el módulo se
+ * marca "Requiere configuración" en vez de mostrar un cero engañoso.
+ *
+ * La portada ya no intenta ser un tablero: se organiza por procesos, explica
+ * para qué sirve cada módulo y qué llega al Libro Diario. Las tarjetas de KPI y
+ * los botones globales "Registrar venta/compra" se retiraron (§12): duplicaban
+ * caminos que ya viven dentro de cada módulo.
+ */
+
+import { useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
     Package,
@@ -8,818 +35,321 @@ import {
     UsersThree,
     Bank,
     Receipt,
-    ArrowFatLinesUp,
-    ArrowFatLinesDown,
-    TrendUp,
     CaretRight,
-    Warning,
-    CheckCircle,
-    Info,
-    Clock,
     Armchair,
     Notebook,
+    IdentificationBadge,
+    ShoppingCart,
+    Info,
 } from '@phosphor-icons/react'
 import { db } from '../storage/db'
-import { calculateAllValuations } from '../core/inventario/costing'
-import { getFixedAssetsMetrics } from '../storage/fixedAssets'
-import { getInvestmentMetrics } from '../storage/inversiones'
-import { getPayrollMetrics, ensurePayrollSeeded } from '../storage/payroll'
 import { useReportingBundle } from '../hooks/useReportingBundle'
-import { cashAndEquivalents, hasCashAccounts } from '../reporting/selectors'
 import { usePeriodYear } from '../hooks/usePeriodYear'
-import { useTaxClosure } from '../hooks/useTaxClosure'
-import { useUpcomingTaxNotifications } from '../hooks/useTaxNotifications'
-import type { TaxRegime } from '../core/impuestos/types'
+import {
+    summarizeOperationsModules,
+    type OperationsModuleId,
+    type OperationsModuleSummary,
+} from '../reporting/operationsSelectors'
+import ModuleStatusBadge from '../ui/ModuleStatusBadge'
+
+/** Formato monetario canónico es-AR (idéntico al de los estados contables). */
+function money(value: number): string {
+    return value.toLocaleString('es-AR', {
+        style: 'currency',
+        currency: 'ARS',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })
+}
+
+interface ModuleCardSpec {
+    id: OperationsModuleId
+    title: string
+    /** Para qué sirve el módulo. */
+    purpose: string
+    /** Qué representa el importe que se muestra. */
+    metricLabel: string
+    /** Qué genera el módulo en el Libro Diario. */
+    journalHint: string
+    to: string
+    Icon: typeof Package
+    accent: string
+}
+
+interface ProcessGroup {
+    id: string
+    title: string
+    description: string
+    modules: ModuleCardSpec[]
+}
 
 /**
- * Hub de Operaciones
- *
- * Punto de entrada para gestión de activos, pasivos y operaciones comerciales.
- * Siguiendo el prototipo docs/prototypes/Operaciones.html
+ * Estructura reducida y por proceso (§12): la portada prioriza claridad, no
+ * cantidad de módulos. Cada entrada apunta a un módulo que YA existe.
  */
-export default function OperacionesPage() {
-    const navigate = useNavigate()
-    const { year: periodYear } = usePeriodYear()
-    const periodId = String(periodYear)
+const PROCESS_GROUPS: ProcessGroup[] = [
+    {
+        id: 'activos',
+        title: 'Activos y tenencias',
+        description: 'Lo que la entidad posee: existencias, bienes de uso, inversiones y moneda extranjera.',
+        modules: [
+            {
+                id: 'inventario',
+                title: 'Bienes de cambio e inventario',
+                purpose: 'Stock, compras, ventas, kardex y costo de las mercaderías.',
+                metricLabel: 'Existencias al cierre',
+                journalHint: 'Genera asientos de compra, venta y costo de ventas.',
+                to: '/operaciones/inventario',
+                Icon: Package,
+                accent: 'text-blue-600 bg-blue-50 border-blue-100',
+            },
+            {
+                id: 'bienes-uso',
+                title: 'Bienes de uso',
+                purpose: 'Altas, bajas, depreciaciones y ajuste por inflación de los activos fijos.',
+                metricLabel: 'Valor de origen al cierre',
+                journalHint: 'Genera asientos de alta, depreciación y baja o venta.',
+                to: '/operaciones/bienes-uso',
+                Icon: Armchair,
+                accent: 'text-amber-600 bg-amber-50 border-amber-100',
+            },
+            {
+                id: 'inversiones',
+                title: 'Inversiones',
+                purpose: 'Plazos fijos, fondos comunes, acciones y su medición.',
+                metricLabel: 'Inversiones al cierre',
+                journalHint: 'Genera asientos de constitución, renta y rescate.',
+                to: '/operaciones/inversiones',
+                Icon: ChartLineUp,
+                accent: 'text-emerald-600 bg-emerald-50 border-emerald-100',
+            },
+            {
+                id: 'moneda-extranjera',
+                title: 'Moneda extranjera',
+                purpose: 'Tenencias en USD/EUR, cotizaciones y diferencias de cambio.',
+                metricLabel: 'Posición neta en divisa',
+                journalHint: 'Genera asientos de compra/venta de divisas y diferencia de cambio.',
+                to: '/operaciones/moneda-extranjera',
+                Icon: CurrencyDollar,
+                accent: 'text-sky-600 bg-sky-50 border-sky-100',
+            },
+        ],
+    },
+    {
+        id: 'ventas',
+        title: 'Ventas, créditos y cobranzas',
+        description: 'El ciclo de ingresos: a quién se le vendió y qué falta cobrar.',
+        modules: [
+            {
+                id: 'clientes',
+                title: 'Clientes y créditos por ventas',
+                purpose: 'Cuenta corriente de clientes, cobranzas y previsión por incobrables.',
+                metricLabel: 'Saldo a cobrar',
+                journalHint: 'Genera asientos de venta a crédito y cobranza.',
+                to: '/operaciones/clientes',
+                Icon: UsersThree,
+                accent: 'text-emerald-600 bg-emerald-50 border-emerald-100',
+            },
+        ],
+    },
+    {
+        id: 'compras',
+        title: 'Compras, gastos y proveedores',
+        description: 'El ciclo de egresos: qué se compró, qué se gastó y qué falta pagar.',
+        modules: [
+            {
+                id: 'proveedores',
+                title: 'Proveedores y acreedores',
+                purpose: 'Cuenta corriente de proveedores y pagos.',
+                metricLabel: 'Saldo a pagar',
+                journalHint: 'Genera asientos de compra a crédito y pago.',
+                to: '/operaciones/proveedores',
+                Icon: ShoppingCart,
+                accent: 'text-amber-600 bg-amber-50 border-amber-100',
+            },
+            {
+                id: 'gastos',
+                title: 'Gastos y servicios',
+                purpose: 'Comprobantes de gastos, servicios y su imputación por función.',
+                metricLabel: 'Gastos del ejercicio',
+                journalHint: 'Genera asientos de devengamiento y pago de gastos.',
+                to: '/operaciones/gastos',
+                Icon: Receipt,
+                accent: 'text-violet-600 bg-violet-50 border-violet-100',
+            },
+        ],
+    },
+    {
+        id: 'personal',
+        title: 'Personal y obligaciones sociales',
+        description: 'Remuneraciones, cargas sociales y su cancelación.',
+        modules: [
+            {
+                id: 'deudas-sociales',
+                title: 'Sueldos y deudas sociales',
+                purpose: 'Liquidación de haberes, aportes, contribuciones y pagos.',
+                metricLabel: 'Deudas sociales al cierre',
+                journalHint: 'Genera asientos de devengamiento de sueldos y su pago.',
+                to: '/operaciones/deudas-sociales',
+                Icon: IdentificationBadge,
+                accent: 'text-blue-600 bg-blue-50 border-blue-100',
+            },
+        ],
+    },
+    {
+        id: 'financiamiento',
+        title: 'Financiamiento e impuestos',
+        description: 'Préstamos, intereses y la posición frente al fisco.',
+        modules: [
+            {
+                id: 'prestamos',
+                title: 'Préstamos',
+                purpose: 'Deudas financieras, sistema de amortización e intereses.',
+                metricLabel: 'Deuda financiera al cierre',
+                journalHint: 'Genera asientos de toma, cuota, interés y cancelación.',
+                to: '/operaciones/prestamos',
+                Icon: Bank,
+                accent: 'text-blue-600 bg-blue-50 border-blue-100',
+            },
+            {
+                id: 'impuestos',
+                title: 'Impuestos',
+                purpose: 'IVA, posición fiscal, vencimientos y determinación de saldos.',
+                metricLabel: 'Deudas fiscales al cierre',
+                journalHint: 'Genera asientos de determinación y pago de impuestos.',
+                to: '/operaciones/impuestos',
+                Icon: Notebook,
+                accent: 'text-rose-600 bg-rose-50 border-rose-100',
+            },
+        ],
+    },
+]
 
-    const products = useLiveQuery(async () => {
-        const all = await db.bienesProducts.toArray()
-        return all.filter(product => !product.periodId || product.periodId === periodId)
-    }, [periodId])
-    const movements = useLiveQuery(async () => {
-        const all = await db.bienesMovements.toArray()
-        return all.filter(movement => !movement.periodId || movement.periodId === periodId)
-    }, [periodId])
-    const settings = useLiveQuery(() => db.bienesSettings.get('bienes-settings'), [])
-    const entries = useLiveQuery(() => db.entries.toArray(), [])
-    const accounts = useLiveQuery(() => db.accounts.toArray(), [])
-    const { bundle: reportingBundle } = useReportingBundle(periodYear)
-
-    // Fixed Assets metrics
-    const fixedAssetsMetrics = useLiveQuery(
-        () => getFixedAssetsMetrics(periodId, periodYear),
-        [periodId, periodYear]
-    )
-
-    // Investments metrics
-    const investmentsMetrics = useLiveQuery(
-        () => getInvestmentMetrics(periodId),
-        [periodId]
-    )
-
-    // Payroll metrics — seed once, read-only query with fallback
-    useEffect(() => { void ensurePayrollSeeded() }, [])
-    const payrollMetrics = useLiveQuery(async () => {
-        try { return await getPayrollMetrics() } catch (e) { console.error('[payroll] getPayrollMetrics', e); return undefined }
-    }, [])
-
-    // Tax data for Fiscal/Impuestos card
-    const currentMonth = useMemo(() => {
-        const now = new Date()
-        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    }, [])
-
-    // Default to RI (Responsable Inscripto) for the card - user can change in Impuestos page
-    const taxRegime: TaxRegime = 'RI'
-    const { ivaTotals, isLoading: isTaxLoading } = useTaxClosure(currentMonth, taxRegime)
-    const { notifications, unreadCount } = useUpcomingTaxNotifications()
-
-    // Determine tax status based on notifications and closure status
-    const taxStatus = useMemo(() => {
-        if (isTaxLoading) return { label: 'Cargando...', isAlert: false }
-
-        // Check for overdue or pending notifications
-        const hasOverdue = notifications.some(n => {
-            const dueDate = new Date(n.dueDate)
-            const today = new Date()
-            today.setHours(0, 0, 0, 0)
-            dueDate.setHours(0, 0, 0, 0)
-            return dueDate < today && n.status !== 'PAID' && n.status !== 'SUBMITTED'
-        })
-
-        if (hasOverdue) return { label: 'Vencido', isAlert: true }
-
-        const hasPending = notifications.some(n => {
-            const dueDate = new Date(n.dueDate)
-            const today = new Date()
-            today.setHours(0, 0, 0, 0)
-            dueDate.setHours(0, 0, 0, 0)
-            const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-            return daysUntilDue <= 5 && daysUntilDue >= 0 && n.status !== 'PAID' && n.status !== 'SUBMITTED'
-        })
-
-        if (hasPending) return { label: `${unreadCount} Vencimientos`, isAlert: true }
-
-        return { label: 'Al dia', isAlert: false }
-    }, [notifications, unreadCount, isTaxLoading])
-
-    // Get IVA position for display
-    const taxPosition = useMemo(() => {
-        if (isTaxLoading || !ivaTotals) return null
-        return ivaTotals.saldo
-    }, [ivaTotals, isTaxLoading])
-
-    const period = useMemo(() => {
-        const now = new Date()
-        const monthIndex = now.getMonth()
-        const startDate = new Date(periodYear, monthIndex, 1)
-        const endDate = new Date(periodYear, monthIndex + 1, 0)
-        const prevMonthIndex = monthIndex - 1
-        const prevStartDate = prevMonthIndex >= 0
-            ? new Date(periodYear, prevMonthIndex, 1)
-            : new Date(periodYear - 1, 11, 1)
-        const prevEndDate = prevMonthIndex >= 0
-            ? new Date(periodYear, prevMonthIndex + 1, 0)
-            : new Date(periodYear - 1, 12, 0)
-        const toISO = (date: Date) => date.toISOString().split('T')[0]
-        return {
-            start: toISO(startDate),
-            end: toISO(endDate),
-            prevStart: toISO(prevStartDate),
-            prevEnd: toISO(prevEndDate),
-        }
-    }, [periodYear])
-
-    const inventoryMetrics = useMemo(() => {
-        if (!products || !movements) {
-            return {
-                hasData: false,
-                stockValue: 0,
-                totalUnits: 0,
-                lowStockAlerts: 0,
-            }
-        }
-        const costMethod = settings?.costMethod || 'PPP'
-        const valuations = calculateAllValuations(products, movements, costMethod)
-        const stockValue = valuations.reduce((sum, v) => sum + v.totalValue, 0)
-        const totalUnits = valuations.reduce((sum, v) => sum + v.currentStock, 0)
-        const lowStockAlerts = valuations.filter(v => v.hasAlert).length
-        const hasData = products.length > 0 || movements.length > 0
-        return { hasData, stockValue, totalUnits, lowStockAlerts }
-    }, [movements, products, settings])
-
-    const entryMetrics = useMemo(() => {
-        if (!entries || !accounts) {
-            return {
-                current: { sales: 0, cmv: 0, count: 0 },
-                prev: { sales: 0, cmv: 0, count: 0 },
-            }
-        }
-        const normalize = (value: string) => value
-            .toLowerCase()
-            .normalize('NFD')
-            .replace(/[̀-ͯ]/g, '')
-
-        const salesAccountIds = new Set<string>()
-        const cmvAccountIds = new Set<string>()
-        const cmvCodes = new Set(['4.3.01', '5.1.01'])
-
-        accounts.forEach(acc => {
-            if (acc.isHeader) return
-            const name = normalize(acc.name)
-            if (acc.statementGroup === 'SALES' || name.includes('venta')) {
-                salesAccountIds.add(acc.id)
-            }
-            if (cmvCodes.has(acc.code) || name.includes('cmv') || name.includes('costo mercader')) {
-                cmvAccountIds.add(acc.id)
-            }
-        })
-
-        const computeFromEntries = (start: string, end: string) => {
-            const scoped = entries.filter(entry => entry.date >= start && entry.date <= end && entry.sourceType === 'sale')
-            let sales = 0
-            let cmv = 0
-            let count = 0
-
-            scoped.forEach(entry => {
-                let hasSalesLine = false
-                let hasCmvLine = false
-                entry.lines.forEach(line => {
-                    if (salesAccountIds.has(line.accountId)) {
-                        sales += (line.credit || 0) - (line.debit || 0)
-                        hasSalesLine = true
-                    }
-                    if (cmvAccountIds.has(line.accountId)) {
-                        cmv += (line.debit || 0) - (line.credit || 0)
-                        hasCmvLine = true
-                    }
-                })
-
-                if (entry.metadata?.journalRole === 'sale' && !hasSalesLine) {
-                    const total = entry.lines.reduce((sum, line) => sum + (line.debit || 0), 0)
-                    sales += total
-                    hasSalesLine = true
-                }
-                if (entry.metadata?.journalRole === 'cogs' && !hasCmvLine) {
-                    const total = entry.lines.reduce((sum, line) => sum + (line.debit || 0), 0)
-                    cmv += total
-                    hasCmvLine = true
-                }
-
-                if (hasSalesLine || hasCmvLine) count += 1
-            })
-
-            return { sales, cmv, count }
-        }
-
-        return {
-            current: computeFromEntries(period.start, period.end),
-            prev: computeFromEntries(period.prevStart, period.prevEnd),
-        }
-    }, [accounts, entries, period])
-
-    const movementMetrics = useMemo(() => {
-        if (!movements) {
-            return {
-                current: { sales: 0, cmv: 0, count: 0 },
-                prev: { sales: 0, cmv: 0, count: 0 },
-            }
-        }
-        const computeFromMovements = (start: string, end: string) => {
-            const salesMovs = movements.filter(m => m.type === 'SALE' && m.date >= start && m.date <= end)
-            const sales = salesMovs.reduce((sum, m) => sum + m.subtotal, 0)
-            const cmv = salesMovs.reduce((sum, m) => sum + (m.costTotalAssigned || 0), 0)
-            return { sales, cmv, count: salesMovs.length }
-        }
-        return {
-            current: computeFromMovements(period.start, period.end),
-            prev: computeFromMovements(period.prevStart, period.prevEnd),
-        }
-    }, [movements, period])
-
-    const useMovements = movementMetrics.current.count > 0 || movementMetrics.prev.count > 0
-    const currentSales = useMovements ? movementMetrics.current.sales : entryMetrics.current.sales
-    const currentCmv = useMovements ? movementMetrics.current.cmv : entryMetrics.current.cmv
-    const prevSales = useMovements ? movementMetrics.prev.sales : entryMetrics.prev.sales
-    const prevCmv = useMovements ? movementMetrics.prev.cmv : entryMetrics.prev.cmv
-    const hasOperatingData = useMovements
-        ? movementMetrics.current.count > 0
-        : entryMetrics.current.count > 0
-    const grossMargin = currentSales > 0 ? ((currentSales - currentCmv) / currentSales) * 100 : null
-    const salesDelta = prevSales > 0 ? ((currentSales - prevSales) / prevSales) * 100 : null
-    const cmvDelta = prevCmv > 0 ? ((currentCmv - prevCmv) / prevCmv) * 100 : null
-    const rotation = inventoryMetrics.stockValue > 0 && currentSales > 0
-        ? currentSales / inventoryMetrics.stockValue
-        : null
-
-    // Disponibilidades desde el motor canónico (misma regla que los estados)
-    const cashAvailable = reportingBundle && accounts ? cashAndEquivalents(reportingBundle, accounts) : null
-    const hasCashData = !!reportingBundle && !!accounts && hasCashAccounts(accounts)
-
-    const formatCurrency = (value?: number | null) => {
-        if (value === null || value === undefined || Number.isNaN(value)) {
-            return '—'
-        }
-        if (value >= 1000000) {
-            return `$ ${(value / 1000000).toFixed(1)}M`
-        }
-        return `$ ${value.toLocaleString('es-AR')}`
-    }
-
-    const formatPercent = (value: number | null) => {
-        if (value === null || Number.isNaN(value)) return '—'
-        return `${value.toFixed(1)}%`
-    }
-
-    const handleNavigateToInventario = () => {
-        navigate('/operaciones/inventario')
-    }
+function ModuleCard({ spec, summary }: { spec: ModuleCardSpec; summary: OperationsModuleSummary }) {
+    const { Icon } = spec
+    const showAmount = summary.status !== 'NEEDS_MAPPING'
+    const movements = summary.entryIds.length
 
     return (
-        <div className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-8 scroll-smooth bg-slate-50">
-            {/* KPI Strip */}
-            <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Ventas del Mes */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-start mb-2">
-                        <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Ventas (Mes)</span>
-                        {salesDelta !== null && hasOperatingData && (
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex items-center gap-1 ${
-                                salesDelta >= 0
-                                    ? 'bg-emerald-50 text-emerald-600'
-                                    : 'bg-red-50 text-red-600'
-                            }`}>
-                                <TrendUp weight="bold" size={12} /> {salesDelta >= 0 ? '+' : ''}{salesDelta.toFixed(1)}%
-                            </span>
-                        )}
+        <Link
+            to={spec.to}
+            className="group flex flex-col bg-white rounded-xl border border-slate-200 p-5 shadow-sm transition-all hover:shadow-md hover:border-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+        >
+            <div className="flex items-start justify-between gap-3 mb-3">
+                <div className={`w-10 h-10 shrink-0 rounded-lg border flex items-center justify-center ${spec.accent}`}>
+                    <Icon weight="duotone" size={22} aria-hidden />
+                </div>
+                <ModuleStatusBadge status={summary.status} />
+            </div>
+
+            <h3 className="font-display font-semibold text-slate-900 leading-snug">{spec.title}</h3>
+            <p className="text-sm text-slate-500 mt-1">{spec.purpose}</p>
+
+            <div className="mt-4 pt-4 border-t border-slate-100">
+                {showAmount ? (
+                    <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-xs text-slate-500">{spec.metricLabel}</span>
+                        <span className="font-mono text-base font-bold text-slate-900 tabular-nums text-right">
+                            {money(summary.amount)}
+                        </span>
                     </div>
-                    <div className="font-mono text-2xl font-bold text-slate-900">
-                        {hasOperatingData ? formatCurrency(currentSales) : '—'}
-                    </div>
-                    {hasOperatingData ? (
-                        <div className="text-xs text-slate-400 mt-1">
-                            {prevSales > 0 ? `vs. ${formatCurrency(prevSales)} mes anterior` : 'Sin base previa'}
-                        </div>
-                    ) : (
-                        <div className="text-xs text-slate-400 mt-1">
-                            Registrá compras/ventas para ver métricas.
+                ) : (
+                    <p className="text-xs text-amber-700">
+                        No hay cuentas del plan mapeadas a este rubro, por eso no se informa un importe.
+                    </p>
+                )}
+
+                <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+                    {summary.status === 'WITH_MOVEMENTS'
+                        ? `${movements} asiento${movements === 1 ? '' : 's'} del ejercicio · ${spec.journalHint}`
+                        : spec.journalHint}
+                </p>
+            </div>
+
+            <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-blue-600 group-hover:text-blue-700">
+                Abrir módulo <CaretRight size={14} weight="bold" aria-hidden />
+            </span>
+        </Link>
+    )
+}
+
+export default function OperacionesPage() {
+    const { year: periodYear } = usePeriodYear()
+    const { bundle } = useReportingBundle(periodYear)
+    const accounts = useLiveQuery(() => db.accounts.toArray(), [])
+
+    const summaries = useMemo(() => {
+        if (!bundle || !accounts) return null
+        return summarizeOperationsModules(bundle, accounts)
+    }, [bundle, accounts])
+
+    const totalMovements = useMemo(() => {
+        if (!summaries) return 0
+        const ids = new Set<string>()
+        for (const summary of Object.values(summaries)) {
+            for (const id of summary.entryIds) ids.add(id)
+        }
+        return ids.size
+    }, [summaries])
+
+    return (
+        <div className="flex-1 overflow-y-auto p-4 lg:p-8 bg-slate-50">
+            <header className="mb-8">
+                <p className="text-xs font-semibold uppercase tracking-wider text-blue-600">Centro de trabajo</p>
+                <h1 className="font-display font-bold text-3xl text-slate-900 mt-1">Operaciones</h1>
+                <p className="text-slate-500 mt-2 max-w-3xl">
+                    Los módulos de Operaciones son interfaces especializadas para registrar hechos económicos. Todos
+                    escriben en el <Link to="/asientos" className="text-blue-600 font-medium hover:underline">Libro
+                    Diario</Link>, que sigue siendo la única fuente contable: los importes de esta pantalla se derivan
+                    del mismo motor que produce los estados contables del ejercicio {periodYear}.
+                </p>
+            </header>
+
+            {summaries === null ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">
+                    Cargando la información del ejercicio…
+                </div>
+            ) : (
+                <>
+                    {totalMovements === 0 && (
+                        <div
+                            className="mb-8 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4"
+                            role="status"
+                        >
+                            <Info weight="fill" size={20} className="text-blue-600 shrink-0 mt-0.5" aria-hidden />
+                            <div className="text-sm text-blue-900">
+                                <p className="font-semibold">Este ejercicio todavía no tiene asientos contabilizados.</p>
+                                <p className="mt-1 text-blue-800">
+                                    Por eso todos los módulos muestran {money(0)}. No hay datos de ejemplo ni saldos
+                                    precargados: los importes aparecerán a medida que registres operaciones desde cada
+                                    módulo o directamente en el Libro Diario.
+                                </p>
+                            </div>
                         </div>
                     )}
-                </div>
 
-                {/* CMV del Mes */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-start mb-2">
-                        <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">CMV (Mes)</span>
-                        {cmvDelta !== null && hasOperatingData && (
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex items-center gap-1 ${
-                                cmvDelta >= 0
-                                    ? 'bg-red-50 text-red-500'
-                                    : 'bg-emerald-50 text-emerald-600'
-                            }`}>
-                                <TrendUp weight="bold" size={12} /> {cmvDelta >= 0 ? '+' : ''}{cmvDelta.toFixed(1)}%
-                            </span>
-                        )}
-                    </div>
-                    <div className="font-mono text-2xl font-bold text-slate-900">
-                        {hasOperatingData ? formatCurrency(currentCmv) : '—'}
-                    </div>
-                    {hasOperatingData ? (
-                        <div className="text-xs text-slate-400 mt-1">
-                            {prevCmv > 0 ? `vs. ${formatCurrency(prevCmv)} mes anterior` : 'Sin base previa'}
-                        </div>
-                    ) : (
-                        <div className="text-xs text-slate-400 mt-1">
-                            Registrá compras/ventas para ver métricas.
-                        </div>
-                    )}
-                </div>
-
-                {/* Margen Bruto */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-start mb-2">
-                        <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Margen Bruto</span>
-                        <span className="text-slate-400 text-xs"><Info size={14} /></span>
-                    </div>
-                    <div className="font-mono text-2xl font-bold text-blue-600">
-                        {formatPercent(grossMargin)}
-                    </div>
-                    {hasOperatingData && grossMargin !== null ? (
-                        <div className="text-xs text-slate-400 mt-1">Calculado sobre ventas y CMV</div>
-                    ) : (
-                        <div className="text-xs text-slate-400 mt-1">
-                            Registrá compras/ventas para ver métricas.
-                        </div>
-                    )}
-                </div>
-
-                {/* Caja Disponible */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-start mb-2">
-                        <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Caja Disponible</span>
-                    </div>
-                    <div className="font-mono text-2xl font-bold text-slate-900">
-                        {hasCashData ? formatCurrency(cashAvailable as number) : 'Conectar Caja/Bancos'}
-                    </div>
-                    <div className="text-xs text-slate-400 mt-1">
-                        {hasCashData ? 'Basado en Libro Diario' : 'Integra caja y bancos para ver disponible.'}
-                    </div>
-                </div>
-            </section>
-
-            {/* Activos y Tenencias Header + Quick Actions */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b border-slate-200 pb-4">
-                <div>
-                    <h2 className="font-display font-semibold text-2xl text-slate-900">Activos y Tenencias</h2>
-                    <p className="text-slate-500 mt-1">Administra lo que tenes: stock, inversiones y disponibilidades.</p>
-                </div>
-                <div className="flex gap-3">
-                    <button
-                        onClick={handleNavigateToInventario}
-                        className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2"
-                    >
-                        <ArrowFatLinesUp className="text-emerald-500" size={16} weight="fill" /> Registrar Venta
-                    </button>
-                    <button
-                        onClick={handleNavigateToInventario}
-                        className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2"
-                    >
-                        <ArrowFatLinesDown className="text-blue-600" size={16} weight="fill" /> Registrar Compra
-                    </button>
-                </div>
-            </div>
-
-            {/* Activos Section */}
-            <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {/* PRIMARY CARD: Bienes de Cambio (Inventario) */}
-                <div
-                    className="col-span-1 md:col-span-2 xl:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-lg hover:border-blue-400 transition-all cursor-pointer relative overflow-hidden group"
-                    onClick={handleNavigateToInventario}
-                >
-                    {/* Background decoration */}
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
-
-                    <div className="p-6 md:p-8 flex flex-col h-full relative z-10">
-                        <div className="flex justify-between items-start mb-6">
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-2xl border border-blue-100">
-                                    <Package weight="duotone" size={28} />
+                    <div className="space-y-10">
+                        {PROCESS_GROUPS.map(group => (
+                            <section key={group.id} aria-labelledby={`grupo-${group.id}`}>
+                                <div className="border-b border-slate-200 pb-3 mb-5">
+                                    <h2
+                                        id={`grupo-${group.id}`}
+                                        className="font-display font-semibold text-xl text-slate-900"
+                                    >
+                                        {group.title}
+                                    </h2>
+                                    <p className="text-sm text-slate-500 mt-0.5">{group.description}</p>
                                 </div>
-                                <div>
-                                    <h3 className="font-display font-bold text-xl text-slate-900">Bienes de Cambio (Inventario)</h3>
-                                    <p className="text-sm text-slate-500">Controla tu stock, compras, ventas y kardex.</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                                    {group.modules.map(spec => (
+                                        <ModuleCard key={spec.id} spec={spec} summary={summaries[spec.id]} />
+                                    ))}
                                 </div>
-                            </div>
-                            {/* Status Badge */}
-                            <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center gap-1">
-                                <CheckCircle weight="fill" size={12} /> Activo
-                            </span>
-                        </div>
-
-                        {/* Internal KPIs */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-                            <div>
-                                <div className="text-xs text-slate-500 mb-1">Stock Valuado</div>
-                                <div className="font-mono font-semibold text-slate-900">
-                                    {inventoryMetrics.hasData ? formatCurrency(inventoryMetrics.stockValue) : '—'}
-                                </div>
-                            </div>
-                            <div>
-                                <div className="text-xs text-slate-500 mb-1">Unidades</div>
-                                <div className="font-mono font-semibold text-slate-900">
-                                    {inventoryMetrics.hasData ? inventoryMetrics.totalUnits.toLocaleString() : '—'}
-                                </div>
-                            </div>
-                            <div>
-                                <div className="text-xs text-slate-500 mb-1">CMV Periodo</div>
-                                <div className="font-mono font-semibold text-slate-900">
-                                    {hasOperatingData ? formatCurrency(currentCmv) : '—'}
-                                </div>
-                            </div>
-                            <div>
-                                <div className="text-xs text-slate-500 mb-1">Rotacion</div>
-                                <div className="font-mono font-semibold text-slate-900">
-                                    {rotation !== null ? `${rotation.toFixed(2)}x` : '—'}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-6">
-                            <div className="flex -space-x-2">
-                                {inventoryMetrics.lowStockAlerts > 0 && (
-                                    <div className="text-xs text-slate-500 italic flex items-center gap-1">
-                                        <Warning className="text-amber-500" weight="fill" size={14} />
-                                        Tenes {inventoryMetrics.lowStockAlerts} items bajo stock minimo.
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Primary Action */}
-                            <button
-                                className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-500 hover:to-emerald-400 text-white rounded-xl font-semibold shadow-lg shadow-blue-500/30 transition-all transform hover:-translate-y-0.5 focus:ring-4 focus:ring-blue-300/50"
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleNavigateToInventario()
-                                }}
-                            >
-                                Gestionar Inventario <CaretRight weight="bold" size={16} />
-                            </button>
-                        </div>
+                            </section>
+                        ))}
                     </div>
-                </div>
-
-                {/* Moneda Extranjera */}
-                <div
-                    className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col hover:shadow-md hover:border-blue-400 transition-all cursor-pointer group"
-                    onClick={() => navigate('/operaciones/moneda-extranjera')}
-                >
-                    <div className="flex justify-between items-start mb-4">
-                        <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl group-hover:bg-blue-100 transition-colors">
-                            <CurrencyDollar weight="duotone" size={24} />
-                        </div>
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-600 border border-emerald-100">Activo</span>
-                    </div>
-                    <h3 className="font-display font-semibold text-lg text-slate-900 mb-1">Moneda Extranjera</h3>
-                    <p className="text-sm text-slate-500 mb-4">Gestion de cajas en USD/EUR y diferencias de cambio automaticas.</p>
-                    <div className="mt-auto pt-4 border-t border-slate-50">
-                        <button className="text-sm font-medium text-blue-600 flex items-center gap-2 group-hover:text-blue-700">
-                            Ver cotizaciones <CaretRight size={14} weight="bold" />
-                        </button>
-                    </div>
-                </div>
-
-                {/* Bienes de Uso */}
-                <div
-                    className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col hover:shadow-md hover:border-blue-400 transition-all cursor-pointer group"
-                    onClick={() => navigate('/operaciones/bienes-uso')}
-                >
-                    <div className="flex justify-between items-start mb-4">
-                        <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-xl group-hover:bg-amber-100 transition-colors">
-                            <Armchair weight="duotone" size={24} />
-                        </div>
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-600 border border-emerald-100">Activo</span>
-                    </div>
-                    <h3 className="font-display font-semibold text-lg text-slate-900 mb-1">Bienes de Uso</h3>
-                    <p className="text-sm text-slate-500 mb-4">Activos fijos, amortizaciones y ajuste por inflacion (RT6).</p>
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                        <div>
-                            <div className="text-xs text-slate-500">Bienes Activos</div>
-                            <div className="font-mono font-semibold text-slate-900">
-                                {fixedAssetsMetrics?.hasData ? fixedAssetsMetrics.count : '0'}
-                            </div>
-                        </div>
-                        <div>
-                            <div className="text-xs text-slate-500">Valor Neto</div>
-                            <div className="font-mono font-semibold text-slate-900">
-                                {fixedAssetsMetrics?.hasData ? formatCurrency(fixedAssetsMetrics.totalNBV) : '—'}
-                            </div>
-                        </div>
-                    </div>
-                    <div className="mt-auto pt-4 border-t border-slate-50">
-                        <button className="text-sm font-medium text-blue-600 flex items-center gap-2 group-hover:text-blue-700">
-                            Gestionar <CaretRight size={14} weight="bold" />
-                        </button>
-                    </div>
-                </div>
-
-                {/* Inversiones */}
-                <div
-                    className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col hover:shadow-md hover:border-blue-400 transition-all cursor-pointer group"
-                    onClick={() => navigate('/operaciones/inversiones')}
-                >
-                    <div className="flex justify-between items-start mb-4">
-                        <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl group-hover:bg-emerald-100 transition-colors">
-                            <ChartLineUp weight="duotone" size={24} />
-                        </div>
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-emerald-50 text-emerald-600 border border-emerald-100">Activo</span>
-                    </div>
-                    <h3 className="font-display font-semibold text-lg text-slate-900 mb-1">Inversiones</h3>
-                    <p className="text-sm text-slate-500 mb-4">Plazos fijos, Fondos Comunes, Acciones y VPP.</p>
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                        <div>
-                            <div className="text-xs text-slate-500">Valor Total</div>
-                            <div className="font-mono font-semibold text-slate-900">
-                                {investmentsMetrics?.hasData ? formatCurrency(investmentsMetrics.totalValue) : '—'}
-                            </div>
-                        </div>
-                        <div>
-                            <div className="text-xs text-slate-500">Resultado</div>
-                            <div className={`font-mono font-semibold ${investmentsMetrics?.totalGainLoss && investmentsMetrics.totalGainLoss >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                {investmentsMetrics?.hasData ? (investmentsMetrics.totalGainLoss >= 0 ? '+' : '') + formatCurrency(investmentsMetrics.totalGainLoss) : '—'}
-                            </div>
-                        </div>
-                    </div>
-                    <div className="mt-auto pt-4 border-t border-slate-50">
-                        {investmentsMetrics?.pendingAlerts && investmentsMetrics.pendingAlerts > 0 ? (
-                            <div className="text-xs text-amber-600 flex items-center gap-1 mb-2">
-                                <Warning weight="fill" size={14} />
-                                {investmentsMetrics.pendingAlerts} alerta(s) pendiente(s)
-                            </div>
-                        ) : null}
-                        <button className="text-sm font-medium text-blue-600 flex items-center gap-2 group-hover:text-blue-700">
-                            Gestionar <CaretRight size={14} weight="bold" />
-                        </button>
-                    </div>
-                </div>
-            </section>
-
-            {/* Creditos Comerciales Section */}
-            <div className="mt-8">
-                <h2 className="font-display font-semibold text-2xl text-slate-900 mb-1">Creditos Comerciales</h2>
-                <p className="text-slate-500 mb-6">Controla lo que te deben tus clientes.</p>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Clientes / Deudores */}
-                    <div
-                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-emerald-400 transition-all group cursor-pointer"
-                        onClick={() => navigate('/operaciones/clientes')}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/clientes')}
-                        aria-label="Ir a modulo de Clientes"
-                    >
-                        <div className="flex justify-between items-start mb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl group-hover:bg-emerald-100 transition-colors">
-                                    <UsersThree weight="duotone" size={24} />
-                                </div>
-                                <span className="font-semibold text-slate-900">Clientes</span>
-                            </div>
-                            <span className="bg-emerald-50 text-emerald-600 text-xs px-2 py-1 rounded-full font-bold border border-emerald-100">
-                                Activo
-                            </span>
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <div>
-                                <div className="text-xs text-slate-500">Saldo a cobrar</div>
-                                <div className="font-mono text-lg font-bold text-slate-900">—</div>
-                            </div>
-                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-all">
-                                <CaretRight weight="bold" size={16} />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Pasivos Section */}
-            <div className="mt-8">
-                <h2 className="font-display font-semibold text-2xl text-slate-900 mb-1">Pasivos y Deudas</h2>
-                <p className="text-slate-500 mb-6">Mantene tus obligaciones al dia para evitar intereses.</p>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Proveedores */}
-                    <div
-                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-amber-400 transition-all group cursor-pointer"
-                        onClick={() => navigate('/operaciones/proveedores')}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/proveedores')}
-                        aria-label="Ir a modulo de Proveedores"
-                    >
-                        <div className="flex justify-between items-start mb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-xl group-hover:bg-amber-100 transition-colors">
-                                    <UsersThree weight="duotone" size={24} />
-                                </div>
-                                <span className="font-semibold text-slate-900">Proveedores</span>
-                            </div>
-                            <span className="bg-amber-50 text-amber-600 text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 border border-amber-100">
-                                <Warning weight="fill" size={10} /> 2 Vencimientos
-                            </span>
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <div>
-                                <div className="text-xs text-slate-500">Saldo a pagar</div>
-                                <div className="font-mono text-lg font-bold text-slate-900">$ 320.000</div>
-                            </div>
-                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-amber-500 group-hover:text-white transition-all">
-                                <CaretRight weight="bold" size={16} />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Prestamos */}
-                    <div
-                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-blue-400 transition-all group cursor-pointer"
-                        onClick={() => navigate('/operaciones/prestamos')}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/prestamos')}
-                        aria-label="Ir a modulo de Prestamos"
-                    >
-                        <div className="flex justify-between items-start mb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl group-hover:bg-blue-100 transition-colors">
-                                    <Bank weight="duotone" size={24} />
-                                </div>
-                                <span className="font-semibold text-slate-900">Prestamos</span>
-                            </div>
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-blue-50 text-blue-600 border border-blue-100">Pasivo</span>
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <div>
-                                <div className="text-xs text-slate-500">Deudas financieras</div>
-                                <div className="font-mono text-lg font-bold text-slate-900">Gestionar</div>
-                            </div>
-                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                <CaretRight weight="bold" size={16} />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Impuestos */}
-                    <div
-                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-blue-400 transition-all group cursor-pointer"
-                        onClick={() => navigate('/operaciones/impuestos')}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/impuestos')}
-                        aria-label="Ir a modulo de Impuestos"
-                    >
-                        <div className="flex justify-between items-start mb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl group-hover:bg-blue-100 transition-colors">
-                                    <Receipt weight="duotone" size={24} />
-                                </div>
-                                <span className="font-semibold text-slate-900">Fiscal / Impuestos</span>
-                            </div>
-                            {taxStatus.isAlert ? (
-                                <span className="bg-amber-50 text-amber-600 text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 border border-amber-100">
-                                    <Clock weight="fill" size={10} /> {taxStatus.label}
-                                </span>
-                            ) : (
-                                <span className="bg-emerald-50 text-emerald-600 text-xs px-2 py-1 rounded-full font-bold border border-emerald-100">
-                                    {taxStatus.label}
-                                </span>
-                            )}
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <div>
-                                <div className="text-xs text-slate-500">
-                                    {taxRegime === 'RI' ? 'Posicion IVA (Est.)' : 'Monotributo (Est.)'}
-                                </div>
-                                <div className="font-mono text-lg font-bold text-slate-900">
-                                    {isTaxLoading ? (
-                                        <span className="text-slate-400">Cargando...</span>
-                                    ) : taxPosition !== null ? (
-                                        formatCurrency(Math.abs(taxPosition))
-                                    ) : (
-                                        '$ 0'
-                                    )}
-                                </div>
-                                {taxPosition !== null && taxPosition !== 0 && !isTaxLoading && (
-                                    <div className="text-xs text-slate-400 mt-0.5">
-                                        {taxPosition >= 0 ? 'A pagar' : 'A favor'}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                <CaretRight weight="bold" size={16} />
-                            </div>
-                        </div>
-                    </div>
-                    {/* Gastos y Servicios */}
-                    <div
-                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-teal-400 transition-all group cursor-pointer"
-                        onClick={() => navigate('/operaciones/gastos')}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/gastos')}
-                        aria-label="Ir a modulo de Gastos y Servicios"
-                    >
-                        <div className="flex justify-between items-start mb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center text-xl group-hover:bg-teal-100 transition-colors">
-                                    <Notebook weight="duotone" size={24} />
-                                </div>
-                                <span className="font-semibold text-slate-900">Gastos y Servicios</span>
-                            </div>
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-teal-50 text-teal-600 border border-teal-100">Pasivo</span>
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <div>
-                                <div className="text-xs text-slate-500">Comprobantes no inventariables</div>
-                                <div className="font-mono text-lg font-bold text-slate-900">Gestionar</div>
-                            </div>
-                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-teal-500 group-hover:text-white transition-all">
-                                <CaretRight weight="bold" size={16} />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Deudas Sociales / Sueldos */}
-                    <div
-                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-violet-400 transition-all group cursor-pointer"
-                        onClick={() => navigate('/operaciones/deudas-sociales')}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => e.key === 'Enter' && navigate('/operaciones/deudas-sociales')}
-                        aria-label="Ir a modulo de Deudas Sociales / Sueldos"
-                    >
-                        <div className="flex justify-between items-start mb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center text-xl group-hover:bg-violet-100 transition-colors">
-                                    <UsersThree weight="duotone" size={24} />
-                                </div>
-                                <span className="font-semibold text-slate-900">Deudas Sociales</span>
-                            </div>
-                            {payrollMetrics?.dueSeverity === 'overdue' ? (
-                                <span className="bg-red-50 text-red-600 text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 border border-red-100">
-                                    <Warning weight="fill" size={10} /> {payrollMetrics.nextDueLabel}
-                                </span>
-                            ) : payrollMetrics?.dueSeverity === 'upcoming' ? (
-                                <span className="bg-amber-50 text-amber-600 text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 border border-amber-100">
-                                    <Clock weight="fill" size={10} /> {payrollMetrics.nextDueLabel}
-                                </span>
-                            ) : payrollMetrics?.hasData ? (
-                                <span className="bg-emerald-50 text-emerald-600 text-xs px-2 py-1 rounded-full font-bold border border-emerald-100">
-                                    Al dia
-                                </span>
-                            ) : (
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-violet-50 text-violet-600 border border-violet-100">Pasivo</span>
-                            )}
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 mb-3">
-                            <div>
-                                <div className="text-xs text-slate-500">Neto a pagar</div>
-                                <div className="font-mono font-semibold text-slate-900">
-                                    {payrollMetrics?.hasData ? formatCurrency(payrollMetrics.netPending) : '—'}
-                                </div>
-                            </div>
-                            <div>
-                                <div className="text-xs text-slate-500">Cargas sociales</div>
-                                <div className="font-mono font-semibold text-slate-900">
-                                    {payrollMetrics?.hasData ? formatCurrency(payrollMetrics.cargasSocialesAPagar) : '—'}
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <div>
-                                <div className="text-xs text-slate-500">{payrollMetrics?.totalEmployees || 0} empleado(s)</div>
-                            </div>
-                            <div className="w-8 h-8 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-violet-500 group-hover:text-white transition-all">
-                                <CaretRight weight="bold" size={16} />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Footer Note */}
-            <div className="pt-8 pb-4 text-center">
-                <p className="text-xs text-slate-400">ContaLivre v2.0</p>
-            </div>
+                </>
+            )}
         </div>
     )
 }
