@@ -90,15 +90,45 @@ describe('Fase 2B — motor único: golden comercial 2025', () => {
         expect(byLabel.get('Pagos de gastos de administración y comercialización')).toBe(-10000)
     })
 
+    /**
+     * Fase 2I (DEF-A07): la apertura de la conciliación cambió, el total NO.
+     *
+     * Antes, la compra del rodado a crédito entraba dos veces al bloque
+     * operativo y se anulaba a sí misma: +120.000 como "variación de pasivos
+     * operativos" y −120.000 dentro de los ajustes por partidas devengadas.
+     * Una deuda por la compra de un bien de uso no es capital de trabajo
+     * operativo, así que la operación ahora queda íntegramente fuera del bloque
+     * y se revela como transacción sin movimiento de efectivo.
+     *
+     * Los dos importes que son invariantes contables —el operativo total y la
+     * variación neta— siguen siendo exactamente los mismos.
+     */
     it('EFE indirecto = directo (verificado, no forzado)', () => {
         const ind = bundle.cashFlowIndirect!
         expect(ind.operating.amount).toBe(-120000)
+        expect(ind.operating.amount).toBe(bundle.cashFlowDirect!.operating.amount)
         expect(ind.netChange.amount).toBe(1180000)
         const children = new Map(ind.operating.children!.map(c => [c.id, c.amount]))
         expect(children.get('efe:ind:resultado')).toBe(48000)
         expect(children.get('efe:ind:wc-activos')).toBe(-270000)
-        expect(children.get('efe:ind:wc-pasivos')).toBe(210000)
-        expect(children.get('efe:ind:ajustes')).toBe(-108000) // −PPE crédito 120.000 + deprec 12.000
+        // 210.000 antes de 2I: ya no incluye los 120.000 de la compra a crédito
+        expect(children.get('efe:ind:wc-pasivos')).toBe(90000)
+        // −108.000 antes de 2I: ya sólo contiene la depreciación
+        expect(children.get('efe:ind:ajustes')).toBe(12000)
+        // La suma de la apertura reconstruye el total
+        expect(48000 - 270000 + 90000 + 12000).toBe(-120000)
+    })
+
+    it('los ajustes de la conciliación se declaran extracontables', () => {
+        const children = bundle.cashFlowIndirect!.operating.children!
+        const ajustes = children.filter(c => c.id !== 'efe:ind:resultado')
+        expect(ajustes.length).toBeGreaterThan(0)
+        for (const c of ajustes) {
+            expect(c.worksheetOnly, `${c.id} debería declararse extracontable`).toBe(true)
+            expect(c.worksheetReason).toBeTruthy()
+        }
+        // El resultado del ejercicio no es un ajuste: viene del ER
+        expect(children.find(c => c.id === 'efe:ind:resultado')!.worksheetOnly).toBeUndefined()
     })
 
     it('la compra de PPE a crédito se revela como transacción no monetaria', () => {

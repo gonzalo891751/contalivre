@@ -81,6 +81,17 @@ export interface ReportLine {
     accountIds: string[]
     noteRef?: string
     children?: ReportLine[]
+    /**
+     * Ajuste EXTRACONTABLE de preparación (Fase 2I §3): la línea concilia dos
+     * estados o reclasifica una cifra, pero NO se corresponde con un asiento y
+     * no afecta el Libro Diario. La interfaz lo declara explícitamente para que
+     * nadie confunda un papel de trabajo con una registración.
+     */
+    worksheetOnly?: boolean
+    /** Por qué existe el ajuste, en una frase */
+    worksheetReason?: string
+    /** Asientos que lo originan, para poder navegar hasta el Diario */
+    sourceEntryIds?: string[]
 }
 
 export interface BalanceSheet2B {

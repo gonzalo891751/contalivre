@@ -90,11 +90,19 @@ function FlowRow({ line, detail, hint, onLineage, depth = 0 }: {
                         ? <ChevronRight size={13} strokeWidth={2.5} className={`efe-row-caret${open ? ' is-open' : ''}`} aria-hidden />
                         : <span className="efe-row-spacer" aria-hidden />}
                     {line.label}
+                    {/* Fase 2I §3: un ajuste de conciliación no es una registración */}
+                    {line.worksheetOnly && (
+                        <span className="efe-row-worksheet" title={line.worksheetReason}>
+                            No afecta el Libro Diario
+                        </span>
+                    )}
                 </span>
                 <span className={`efe-row-amount${line.amount < 0 ? ' is-neg' : ''}`}>{money(line.amount)}</span>
             </div>
-            {hint && detail === 'DETAIL' && (
-                <p className="efe-row-hint" style={{ marginLeft: 12 + depth * 18 + 20 }}>{hint}</p>
+            {(hint || line.worksheetReason) && detail === 'DETAIL' && (
+                <p className="efe-row-hint" style={{ marginLeft: 12 + depth * 18 + 20 }}>
+                    {hint ?? line.worksheetReason}
+                </p>
             )}
             {open && children.map(c => (
                 <FlowRow key={c.id} line={c} detail={detail} onLineage={onLineage} depth={depth + 1} />
@@ -433,6 +441,11 @@ const efeStyles = `
 .efe-row-amount { font-variant-numeric: tabular-nums; font-weight: 600; color: #0f172a; white-space: nowrap; }
 .efe-row-amount.is-neg { color: #dc2626; }
 .efe-row-hint { font-size: 0.72rem; color: #94a3b8; margin: 0 12px 6px; line-height: 1.4; }
+.efe-row-worksheet {
+    margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+    font-size: 0.62rem; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap;
+    color: #7c3aed; background: rgba(139, 92, 246, 0.12); border: 1px solid rgba(139, 92, 246, 0.28);
+}
 
 /* Móvil (EFE-014): la cabecera de actividad se apila en vez de recortarse */
 @media (max-width: 430px) {

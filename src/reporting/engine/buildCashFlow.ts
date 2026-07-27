@@ -106,13 +106,21 @@ export function detectDisposalFold(
 ): 'INVESTING' | 'FINANCING' | null {
     let hasResult = false, hasInv = false, hasFin = false, hasWc = false, hasUncl = false
     for (const l of lines) {
-        const bucket = flowBucket(byId.get(l.accountId))
+        const account = byId.get(l.accountId)
+        const bucket = flowBucket(account)
         if (bucket === 'CASH') continue
         const contribution = toCents(l.credit || 0) - toCents(l.debit || 0)
         if (contribution === 0) continue
         switch (bucket) {
             case 'RESULT': hasResult = true; break
-            case 'WC_ASSET': case 'WC_LIAB': hasWc = true; break
+            // El impuesto que grava la propia disposición (IVA débito o crédito
+            // fiscal) no convierte la operación en una de capital de trabajo:
+            // en la Argentina una venta gravada de un bien de uso SIEMPRE trae
+            // esa línea, y contarla como capital de trabajo desactivaba el
+            // plegado justo en el caso que la regla busca resolver (DEF-A06).
+            case 'WC_ASSET': case 'WC_LIAB':
+                if (!isDisposalTaxAccount(account)) hasWc = true
+                break
             case 'INVESTING': hasInv = true; break
             case 'FINANCING': hasFin = true; break
             case 'UNCLASSIFIED': hasUncl = true; break
@@ -121,6 +129,57 @@ export function detectDisposalFold(
     if (!hasResult || hasWc || hasUncl) return null
     if (hasInv && !hasFin) return 'INVESTING'
     if (hasFin && !hasInv) return 'FINANCING'
+    return null
+}
+
+/** Impuestos que acompañan a una operación de capital (IVA de la disposición) */
+export function isDisposalTaxAccount(account: Account | undefined): boolean {
+    return account?.statementGroup === 'TAX_LIABILITIES' || account?.statementGroup === 'TAX_CREDITS'
+}
+
+/**
+ * Adquisición de un activo no operativo con pago diferido (Fase 2I §4, DEF-A07).
+ *
+ * Un asiento SIN efectivo que incorpora un bien de uso, un intangible o una
+ * inversión contra una deuda. El activo entra al patrimonio pero todavía no hubo
+ * flujo: se revela como transacción sin movimiento de efectivo y se recuerda qué
+ * parte de esa deuda nació de una operación de inversión, para que su pago
+ * posterior se clasifique ahí y no como un pago operativo cualquiera.
+ *
+ * @returns la actividad y las cuentas de deuda con el importe originado
+ */
+export function detectDeferredAcquisition(
+    lines: { accountId: string; debit?: number; credit?: number }[],
+    byId: Map<string, Account>,
+): { activity: 'INVESTING' | 'FINANCING'; liabilities: Map<string, number> } | null {
+    let hasInv = false, hasFin = false, hasResult = false, hasOtherWc = false
+    const liabilities = new Map<string, number>()
+
+    for (const l of lines) {
+        const account = byId.get(l.accountId)
+        const bucket = flowBucket(account)
+        const netDC = toCents(l.debit || 0) - toCents(l.credit || 0)
+        if (netDC === 0) continue
+        switch (bucket) {
+            case 'CASH': return null                    // hubo flujo: no es diferida
+            case 'RESULT': hasResult = true; break
+            case 'INVESTING': if (netDC > 0) hasInv = true; else return null; break
+            case 'FINANCING': if (netDC > 0) hasFin = true; else return null; break
+            case 'WC_LIAB':
+                if (netDC < 0) liabilities.set(l.accountId, (liabilities.get(l.accountId) ?? 0) - netDC)
+                else hasOtherWc = true
+                break
+            case 'WC_ASSET':
+                // sólo se tolera el crédito fiscal de la propia compra
+                if (!isDisposalTaxAccount(account)) hasOtherWc = true
+                break
+            default: return null
+        }
+    }
+
+    if (hasResult || hasOtherWc || liabilities.size === 0) return null
+    if (hasInv && !hasFin) return { activity: 'INVESTING', liabilities }
+    if (hasFin && !hasInv) return { activity: 'FINANCING', liabilities }
     return null
 }
 
@@ -207,11 +266,19 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle, 
     // Asientos de flujo: sin borradores, sin refundición/transferencia, sin
     // apertura y sin modificaciones de ejercicios anteriores (AREA): estas
     // últimas modifican el efectivo INICIAL (§11), no son flujos del período.
+    // El orden cronológico importa: una deuda por la compra de un bien de uso se
+    // origina antes de pagarse, y su pago se clasifica según ese origen (§4).
     const flowEntries = input.entries.filter(e =>
         e.status !== 'DRAFT'
         && !isStructuralClosingEntry(e)
         && !(e.sourceModule === 'closing' && e.sourceType === 'apertura')
         && e.equityMovementType !== 'PRIOR_PERIOD_ADJUSTMENT')
+        .slice()
+        // Comparación binaria, no `localeCompare`: las fechas son ISO y los ids
+        // ASCII, así que el orden es el mismo y evita la colación de ICU, que
+        // sobre cien mil asientos cuesta segundos.
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1
+            : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
     // ── Resolución de disposiciones a crédito/parciales/mixtas (§4) ──
     // Un override transaccional (target ENTRY/OPERATION → INVESTING/FINANCING)
@@ -300,6 +367,14 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle, 
     let disposalResultCents = 0
     const disposalResultIds = new Set<string>()
 
+    /**
+     * Deuda pendiente originada en la compra de activos no operativos (§4,
+     * DEF-A07). Su cancelación es un flujo de inversión (o financiación), no un
+     * pago operativo: el origen económico de la deuda manda sobre la cuenta en
+     * la que quedó registrada.
+     */
+    const pendingAcquisitionDebt = new Map<string, { activity: 'INVESTING' | 'FINANCING'; cents: number; entryIds: string[] }>()
+
     for (const entry of flowEntries) {
         // Disposición resuelta por override (§4.6): el asiento se pliega a la
         // actividad indicada (inversión/financiación); sus líneas NO son capital
@@ -315,27 +390,25 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle, 
         const touchesCash = cashCents !== 0 ||
             entry.lines.some(l => isCashAccount(byId.get(l.accountId)))
 
-        // Acumular Δ capital de trabajo (todas las operaciones de flujo salvo
-        // disposiciones resueltas: sus créditos/PPE no son capital de trabajo).
-        if (!ovDisp) for (const l of entry.lines) {
-            const account = byId.get(l.accountId)
-            const bucket = flowBucket(account)
-            const netDC = toCents(l.debit || 0) - toCents(l.credit || 0)
-            if (bucket === 'WC_ASSET') {
-                wcAssetDeltaCents += netDC
-                wcAssetIds.add(l.accountId)
-                wcAssetByAccount.set(l.accountId, (wcAssetByAccount.get(l.accountId) ?? 0) + netDC)
-            }
-            if (bucket === 'WC_LIAB') {
-                wcLiabDeltaCents += netDC
-                wcLiabIds.add(l.accountId)
-                wcLiabByAccount.set(l.accountId, (wcLiabByAccount.get(l.accountId) ?? 0) + netDC)
-            }
-        }
+        const detectedFold = touchesCash && cashCents !== 0 && !ovDisp
+            ? detectDisposalFold(entry.lines, byId)
+            : null
+
+        const deferredAcquisition = !touchesCash && !ovDisp
+            ? detectDeferredAcquisition(entry.lines, byId)
+            : null
+
+        /**
+         * Importes que NO integran el capital de trabajo operativo de este
+         * asiento: la porción de un pago que cancela deuda de inversión. Se
+         * llena durante la clasificación del efectivo y se descuenta después,
+         * para que el método indirecto siga igualando al directo.
+         */
+        const wcExclusions = new Map<string, number>()
 
         if (touchesCash && cashCents !== 0) {
             totals.cashDelta += cashCents
-            const fold = ovDisp ? ovDisp.activity : detectDisposalFold(entry.lines, byId)
+            const fold = ovDisp ? ovDisp.activity : detectedFold
             if (fold) {
                 // Disposición de activo/pasivo NO operativo con resultado: el flujo
                 // BRUTO (todo el efectivo del asiento) pertenece a la actividad; el
@@ -377,6 +450,32 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle, 
                         case 'RESULT':
                         case 'WC_ASSET':
                         case 'WC_LIAB': {
+                            // Cancelación de una deuda nacida de la compra de un
+                            // activo no operativo: el egreso es de inversión
+                            // (DEF-A07). Sólo se reclasifica hasta el importe que
+                            // esa deuda originó; el resto sigue siendo operativo.
+                            const pending = bucket === 'WC_LIAB' ? pendingAcquisitionDebt.get(l.accountId) : undefined
+                            if (pending && contribution < 0) {
+                                const applied = Math.min(-contribution, pending.cents)
+                                if (applied > 0) {
+                                    const target = pending.activity === 'INVESTING' ? totals.investing : totals.financing
+                                    target.cents -= applied
+                                    target.accountIds.add(l.accountId)
+                                    target.byAccount.set(l.accountId, (target.byAccount.get(l.accountId) ?? 0) - applied)
+                                    pending.cents -= applied
+                                    wcExclusions.set(l.accountId, (wcExclusions.get(l.accountId) ?? 0) + applied)
+                                    if (pending.cents === 0) pendingAcquisitionDebt.delete(l.accountId)
+                                    // El excedente, si lo hay, sigue el camino operativo
+                                    const rest = contribution + applied
+                                    if (rest === 0) break
+                                    const subRest = directOperatingSubcategory(account!)
+                                    const sr = totals.operating.get(subRest) ?? { cents: 0, accountIds: new Set<string>() }
+                                    sr.cents += rest
+                                    sr.accountIds.add(l.accountId)
+                                    totals.operating.set(subRest, sr)
+                                    break
+                                }
+                            }
                             const sub = directOperatingSubcategory(account!)
                             const s = totals.operating.get(sub) ?? { cents: 0, accountIds: new Set<string>() }
                             s.cents += contribution
@@ -421,6 +520,42 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle, 
                     accountIds: entry.lines.map(l => l.accountId),
                 })
             }
+        } else if (deferredAcquisition) {
+            // Compra de un activo no operativo con pago diferido (§4, DEF-A07):
+            // no hay flujo hoy. Se revela como transacción sin movimiento de
+            // efectivo y se recuerda el origen de la deuda para clasificar su
+            // pago posterior en la actividad correcta. El asiento queda FUERA
+            // del capital de trabajo operativo y de X: en el método indirecto
+            // no debe aparecer como una variación de proveedores.
+            let acquiredCents = 0
+            for (const l of entry.lines) {
+                const bucket = flowBucket(byId.get(l.accountId))
+                const netDC = toCents(l.debit || 0) - toCents(l.credit || 0)
+                if (bucket === 'INVESTING' || bucket === 'FINANCING') acquiredCents += netDC
+            }
+            for (const [accountId, cents] of deferredAcquisition.liabilities) {
+                const prev = pendingAcquisitionDebt.get(accountId)
+                if (prev && prev.activity === deferredAcquisition.activity) {
+                    prev.cents += cents
+                    prev.entryIds.push(entry.id)
+                } else {
+                    pendingAcquisitionDebt.set(accountId, {
+                        activity: deferredAcquisition.activity, cents, entryIds: [entry.id],
+                    })
+                }
+            }
+            nonMonetaryDisclosures.push({
+                id: `efe:no-monetaria:${entry.id}`,
+                label: `${entry.date} — ${entry.memo}`,
+                level: 2,
+                amount: fromCents(Math.abs(acquiredCents)),
+                accountIds: entry.lines.map(l => l.accountId),
+                worksheetOnly: true,
+                worksheetReason: deferredAcquisition.activity === 'INVESTING'
+                    ? 'Adquisición con pago diferido: se revela porque no hubo flujo. Su cancelación posterior se clasifica en actividades de inversión.'
+                    : 'Operación de financiación sin movimiento de efectivo: se revela porque no hubo flujo.',
+                sourceEntryIds: [entry.id],
+            })
         } else if (!touchesCash) {
             // Asiento sin efectivo: aporta a X del indirecto y, si toca
             // inversión/financiación, se revela como transacción no monetaria
@@ -442,7 +577,33 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle, 
                     level: 2,
                     amount: fromCents(Math.abs(invFin)),
                     accountIds: entry.lines.map(l => l.accountId),
+                    worksheetOnly: true,
+                    worksheetReason: 'Transacción devengada sin movimiento de efectivo: se revela pero no integra ninguna actividad.',
+                    sourceEntryIds: [entry.id],
                 })
+            }
+        }
+
+        // Δ capital de trabajo, al final de la iteración para poder descontar lo
+        // que se reclasificó como flujo de inversión. Se excluyen por completo
+        // las disposiciones plegadas y las adquisiciones con pago diferido: su
+        // efectivo (o su ausencia) ya quedó imputado fuera del operativo.
+        if (!ovDisp && !detectedFold && !deferredAcquisition) for (const l of entry.lines) {
+            const account = byId.get(l.accountId)
+            const bucket = flowBucket(account)
+            let netDC = toCents(l.debit || 0) - toCents(l.credit || 0)
+            const excluded = wcExclusions.get(l.accountId)
+            if (excluded) { netDC -= excluded; wcExclusions.delete(l.accountId) }
+            if (netDC === 0) continue
+            if (bucket === 'WC_ASSET') {
+                wcAssetDeltaCents += netDC
+                wcAssetIds.add(l.accountId)
+                wcAssetByAccount.set(l.accountId, (wcAssetByAccount.get(l.accountId) ?? 0) + netDC)
+            }
+            if (bucket === 'WC_LIAB') {
+                wcLiabDeltaCents += netDC
+                wcLiabIds.add(l.accountId)
+                wcLiabByAccount.set(l.accountId, (wcLiabByAccount.get(l.accountId) ?? 0) + netDC)
             }
         }
     }
@@ -515,22 +676,35 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle, 
     // inversión/financiación (EFE-001): el efectivo bruto ya está en esa actividad.
     const operatingIndirectCents = resultCents - wcAssetDeltaCents - wcLiabDeltaCents + adjustmentsCents - disposalResultCents + totals.unclassified.cents
 
+    // Papel de trabajo del método indirecto (§3): salvo el resultado del
+    // ejercicio, que sale del ER, cada línea es un ajuste de CONCILIACIÓN. No
+    // se corresponde con ningún asiento y no toca el Libro Diario.
     const indirectChildren: ReportLine[] = [
-        { id: 'efe:ind:resultado', label: 'Resultado del ejercicio', level: 2, amount: fromCents(resultCents), accountIds: bundle.incomeStatement.netIncome.accountIds },
+        {
+            id: 'efe:ind:resultado', label: 'Resultado del ejercicio', level: 2,
+            amount: fromCents(resultCents), accountIds: bundle.incomeStatement.netIncome.accountIds,
+            worksheetReason: 'Punto de partida de la conciliación: es el resultado del Estado de Resultados.',
+        },
         {
             id: 'efe:ind:ajustes', label: 'Partidas devengadas sin efecto en el efectivo (depreciaciones, altas no monetarias, etc.)',
             level: 2, amount: fromCents(adjustmentsCents), accountIds: Array.from(adjustmentsByAccount.keys()),
             children: accountDetail('efe:ind:ajuste', adjustmentsByAccount),
+            worksheetOnly: true,
+            worksheetReason: 'Se suman al resultado porque lo disminuyeron sin salida de efectivo. No genera asiento.',
         },
         {
             id: 'efe:ind:wc-activos', label: 'Variación de créditos, inventarios y otros activos operativos',
             level: 2, amount: fromCents(-wcAssetDeltaCents), accountIds: Array.from(wcAssetIds),
             children: accountDetail('efe:ind:wca', wcAssetByAccount, -1),
+            worksheetOnly: true,
+            worksheetReason: 'Diferencia entre lo devengado y lo cobrado: un aumento de créditos resta efectivo. No genera asiento.',
         },
         {
             id: 'efe:ind:wc-pasivos', label: 'Variación de proveedores y otros pasivos operativos',
             level: 2, amount: fromCents(-wcLiabDeltaCents), accountIds: Array.from(wcLiabIds),
             children: accountDetail('efe:ind:wcl', wcLiabByAccount, -1),
+            worksheetOnly: true,
+            worksheetReason: 'Diferencia entre lo devengado y lo pagado: un aumento de deudas conserva efectivo. No genera asiento.',
         },
     ]
     if (disposalResultCents !== 0) {
@@ -538,6 +712,8 @@ export function buildCashFlows(input: ReportingInput, bundle: StatementsBundle, 
             id: 'efe:ind:result-no-operativo',
             label: 'Resultados de venta de activos reclasificados a inversión o financiación',
             level: 2, amount: fromCents(-disposalResultCents), accountIds: Array.from(disposalResultIds),
+            worksheetOnly: true,
+            worksheetReason: 'El cobro íntegro de la disposición ya está en su actividad; el resultado se elimina del operativo para no contarlo dos veces. No genera asiento.',
         })
     }
     if (totals.unclassified.cents !== 0) {
