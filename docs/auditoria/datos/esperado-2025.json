@@ -1,0 +1,433 @@
+{
+  "empresa": "Purmamarca Comercial S.A. — Auditoría E2E",
+  "ejercicio": {
+    "id": "2025",
+    "desde": "2025-01-01",
+    "hasta": "2025-12-31"
+  },
+  "asientos": 95,
+  "lineas": 300,
+  "totalDebe": 460158600,
+  "totalHaber": 460158600,
+  "activo": 69327300,
+  "pasivo": 26463800,
+  "capital": 30000000,
+  "resultado": 12863500,
+  "patrimonioNeto": 42863500,
+  "ingresos": 87880000,
+  "gastos": 75016500,
+  "efectivoInicial": 0,
+  "efectivoFinal": 29168200,
+  "efeDirecto": {
+    "OPERATIVA": 6950200,
+    "INVERSION": -14382000,
+    "FINANCIACION": 36600000,
+    "INTERNO": 0,
+    "SIN_EFECTIVO": 0
+  },
+  "variacionEfectivo": 29168200,
+  "liquidacionesIVA": [
+    {
+      "n": 1,
+      "desde": "2025-01-01",
+      "hasta": "2025-03-31",
+      "fecha": "2025-03-31",
+      "pago": "2025-04-18",
+      "df": 2772000,
+      "cf": 8080800,
+      "posicion": -5308800
+    },
+    {
+      "n": 2,
+      "desde": "2025-04-01",
+      "hasta": "2025-06-30",
+      "fecha": "2025-06-30",
+      "pago": "2025-07-18",
+      "df": 4914000,
+      "cf": 3360000,
+      "posicion": -3754800
+    },
+    {
+      "n": 3,
+      "desde": "2025-07-01",
+      "hasta": "2025-09-30",
+      "fecha": "2025-09-30",
+      "pago": "2025-10-17",
+      "df": 6174000,
+      "cf": 835800,
+      "posicion": 1583400
+    },
+    {
+      "n": 4,
+      "desde": "2025-10-01",
+      "hasta": "2025-12-31",
+      "fecha": "2025-12-31",
+      "pago": null,
+      "df": 5126100,
+      "cf": 3387300,
+      "posicion": 1738800
+    }
+  ],
+  "impuestoALasGanancias": 6926500,
+  "resultadoAntesDeImpuesto": 19790000,
+  "saldos": [
+    {
+      "code": "1.1.01.02",
+      "name": "Banco c/c ARS",
+      "debe": 147506000,
+      "haber": 118516800,
+      "saldo": 28989200
+    },
+    {
+      "code": "1.1.01.06",
+      "name": "Fondo fijo",
+      "debe": 445200,
+      "haber": 266200,
+      "saldo": 179000
+    },
+    {
+      "code": "1.1.02.01",
+      "name": "Deudores por ventas",
+      "debe": 59290000,
+      "haber": 47350900,
+      "saldo": 11939100
+    },
+    {
+      "code": "1.1.03.01",
+      "name": "IVA Crédito Fiscal",
+      "debe": 15915900,
+      "haber": 15915900,
+      "saldo": 0
+    },
+    {
+      "code": "1.1.03.06",
+      "name": "IVA a favor",
+      "debe": 9063600,
+      "haber": 9063600,
+      "saldo": 0
+    },
+    {
+      "code": "1.1.03.22",
+      "name": "Seguros pagados por adelantado",
+      "debe": 1200000,
+      "haber": 600000,
+      "saldo": 600000
+    },
+    {
+      "code": "1.1.04.01",
+      "name": "Mercaderías",
+      "debe": 53500000,
+      "haber": 37400000,
+      "saldo": 16100000
+    },
+    {
+      "code": "1.1.05.01",
+      "name": "Plazos fijos a cobrar",
+      "debe": 9120000,
+      "haber": 5000000,
+      "saldo": 4120000
+    },
+    {
+      "code": "1.2.01.03",
+      "name": "Muebles y útiles",
+      "debe": 6000000,
+      "haber": 0,
+      "saldo": 6000000
+    },
+    {
+      "code": "1.2.01.04",
+      "name": "Rodados",
+      "debe": 4000000,
+      "haber": 4000000,
+      "saldo": 0
+    },
+    {
+      "code": "1.2.01.05",
+      "name": "Equipos de computación",
+      "debe": 3000000,
+      "haber": 0,
+      "saldo": 3000000
+    },
+    {
+      "code": "1.2.01.93",
+      "name": "Amort. acum. Muebles y útiles",
+      "debe": 0,
+      "haber": 600000,
+      "saldo": -600000
+    },
+    {
+      "code": "1.2.01.94",
+      "name": "Amort. acum. Rodados",
+      "debe": 600000,
+      "haber": 600000,
+      "saldo": 0
+    },
+    {
+      "code": "1.2.01.95",
+      "name": "Amort. acum. Equipos comp.",
+      "debe": 0,
+      "haber": 1000000,
+      "saldo": -1000000
+    },
+    {
+      "code": "2.1.01.01",
+      "name": "Proveedores",
+      "debe": 28452000,
+      "haber": 34364000,
+      "saldo": -5912000
+    },
+    {
+      "code": "2.1.02.01",
+      "name": "Sueldos a pagar",
+      "debe": 10956000,
+      "haber": 11952000,
+      "saldo": -996000
+    },
+    {
+      "code": "2.1.02.02",
+      "name": "Cargas sociales a pagar",
+      "debe": 3300000,
+      "haber": 3600000,
+      "saldo": -300000
+    },
+    {
+      "code": "2.1.02.03",
+      "name": "Retenciones so/ sueldos a depositar",
+      "debe": 2244000,
+      "haber": 2448000,
+      "saldo": -204000
+    },
+    {
+      "code": "2.1.03.01",
+      "name": "IVA Débito Fiscal",
+      "debe": 19446000,
+      "haber": 19446000,
+      "saldo": 0
+    },
+    {
+      "code": "2.1.03.02",
+      "name": "Impuestos a pagar",
+      "debe": 0,
+      "haber": 6926500,
+      "saldo": -6926500
+    },
+    {
+      "code": "2.1.03.04",
+      "name": "IVA a pagar",
+      "debe": 1583400,
+      "haber": 3322200,
+      "saldo": -1738800
+    },
+    {
+      "code": "2.1.06.01",
+      "name": "Acreedores varios",
+      "debe": 3630000,
+      "haber": 3630000,
+      "saldo": 0
+    },
+    {
+      "code": "2.1.06.02",
+      "name": "Alquileres a pagar",
+      "debe": 0,
+      "haber": 605000,
+      "saldo": -605000
+    },
+    {
+      "code": "2.1.06.03",
+      "name": "Gastos a pagar",
+      "debe": 0,
+      "haber": 781500,
+      "saldo": -781500
+    },
+    {
+      "code": "2.2.01.01",
+      "name": "Préstamos bancarios",
+      "debe": 3000000,
+      "haber": 12000000,
+      "saldo": -9000000
+    },
+    {
+      "code": "3.1.01",
+      "name": "Capital social",
+      "debe": 0,
+      "haber": 30000000,
+      "saldo": -30000000
+    },
+    {
+      "code": "4.1.01",
+      "name": "Ventas",
+      "debe": 0,
+      "haber": 88800000,
+      "saldo": -88800000
+    },
+    {
+      "code": "4.2.02",
+      "name": "Bonificaciones cedidas",
+      "debe": 290000,
+      "haber": 0,
+      "saldo": 290000
+    },
+    {
+      "code": "4.3.01",
+      "name": "Costo mercaderías vendidas",
+      "debe": 36200000,
+      "haber": 700000,
+      "saldo": 35500000
+    },
+    {
+      "code": "4.4.01",
+      "name": "Publicidad",
+      "debe": 900000,
+      "haber": 0,
+      "saldo": 900000
+    },
+    {
+      "code": "4.5.01",
+      "name": "Sueldos y jornales",
+      "debe": 14400000,
+      "haber": 0,
+      "saldo": 14400000
+    },
+    {
+      "code": "4.5.02",
+      "name": "Cargas sociales",
+      "debe": 3600000,
+      "haber": 0,
+      "saldo": 3600000
+    },
+    {
+      "code": "4.5.03",
+      "name": "Alquileres perdidos",
+      "debe": 6000000,
+      "haber": 0,
+      "saldo": 6000000
+    },
+    {
+      "code": "4.5.04",
+      "name": "Seguros",
+      "debe": 600000,
+      "haber": 0,
+      "saldo": 600000
+    },
+    {
+      "code": "4.5.05",
+      "name": "Servicios públicos",
+      "debe": 1350000,
+      "haber": 0,
+      "saldo": 1350000
+    },
+    {
+      "code": "4.5.06",
+      "name": "Gastos de oficina",
+      "debe": 220000,
+      "haber": 0,
+      "saldo": 220000
+    },
+    {
+      "code": "4.5.11",
+      "name": "Amortizaciones bienes de uso",
+      "debe": 2200000,
+      "haber": 0,
+      "saldo": 2200000
+    },
+    {
+      "code": "4.6.01",
+      "name": "Intereses ganados",
+      "debe": 0,
+      "haber": 870000,
+      "saldo": -870000
+    },
+    {
+      "code": "4.6.02",
+      "name": "Intereses perdidos",
+      "debe": 3000000,
+      "haber": 0,
+      "saldo": 3000000
+    },
+    {
+      "code": "4.6.04",
+      "name": "Comisiones y gastos bancarios",
+      "debe": 320000,
+      "haber": 0,
+      "saldo": 320000
+    },
+    {
+      "code": "4.7.04",
+      "name": "Resultado venta bienes de uso",
+      "debe": 0,
+      "haber": 400000,
+      "saldo": -400000
+    },
+    {
+      "code": "4.8.06",
+      "name": "Devoluciones sobre ventas",
+      "debe": 1900000,
+      "haber": 0,
+      "saldo": 1900000
+    },
+    {
+      "code": "4.9.01",
+      "name": "Impuesto a las ganancias",
+      "debe": 6926500,
+      "haber": 0,
+      "saldo": 6926500
+    }
+  ],
+  "indices": {
+    "fuente": "INDEC — IPC Nacional Nivel General, base diciembre 2016 = 100",
+    "valores": [
+      [
+        "2024-12",
+        7694.0075
+      ],
+      [
+        "2025-01",
+        7864.1257
+      ],
+      [
+        "2025-02",
+        8052.9927
+      ],
+      [
+        "2025-03",
+        8353.3158
+      ],
+      [
+        "2025-04",
+        8585.6078
+      ],
+      [
+        "2025-05",
+        8714.4871
+      ],
+      [
+        "2025-06",
+        8855.5681
+      ],
+      [
+        "2025-07",
+        9023.973
+      ],
+      [
+        "2025-08",
+        9193.2441
+      ],
+      [
+        "2025-09",
+        9384.0922
+      ],
+      [
+        "2025-10",
+        9603.8623
+      ],
+      [
+        "2025-11",
+        9841.3581
+      ],
+      [
+        "2025-12",
+        10121.3715
+      ]
+    ]
+  }
+}
