@@ -82,6 +82,8 @@ describe('Fase 2A — backup/restore', () => {
         expect(preview.valid).toBe(true)
         expect(preview.entriesCount).toBe(2)
         expect(preview.accountsCount).toBeGreaterThan(0)
-        expect(preview.companies).toContain('Empresa ContaLivre')
+        // El escenario de prueba identifica la entidad emisora, como exige el
+        // núcleo de controles del cierre desde la Fase 2J.
+        expect(preview.companies).toContain('Entidad de Prueba S.A.')
     })
 })

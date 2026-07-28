@@ -15,7 +15,9 @@ import { migrateToV19 } from '../accounting/migration/migrateV19'
 import { migrateToV20 } from '../accounting/migration/migrateV20'
 import { migrateToV21 } from '../accounting/migration/migrateV21'
 import { migrateToV22 } from '../accounting/migration/migrateV22'
+import { migrateToV23 } from '../accounting/migration/migrateV23'
 import type { CashFlowPolicy } from '../reporting/policy/cashFlowPolicy'
+import type { ClosingMeasurement } from '../reporting/measurement/measurementTypes'
 import type {
     InventoryProduct,
     InventoryMovement,
@@ -135,6 +137,8 @@ class ContableDatabase extends Dexie {
     manualDisclosures!: EntityTable<ManualDisclosure, 'id'>
     // ── Fase 2G: política del Estado de Flujo de Efectivo versionada ──
     cashFlowPolicies!: EntityTable<CashFlowPolicy, 'id'>
+    // ── Fase 2J: mediciones a valores corrientes al cierre ──
+    closingMeasurements!: EntityTable<ClosingMeasurement, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -594,6 +598,13 @@ class ContableDatabase extends Dexie {
         this.version(22).stores({
             cashFlowPolicies: 'id, companyId, exerciseId, status',
         }).upgrade(migrateToV22)
+
+        // Version 23 (Fase 2J §7): mediciones a valores corrientes al cierre.
+        // Cada medición guarda su criterio, su fuente y su evidencia, y queda
+        // vinculada al asiento que reconoce el resultado por tenencia.
+        this.version(23).stores({
+            closingMeasurements: 'id, companyId, exerciseId, accountId, status',
+        }).upgrade(migrateToV23)
     }
 }
 
