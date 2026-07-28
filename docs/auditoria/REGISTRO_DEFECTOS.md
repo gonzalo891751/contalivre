@@ -1,5 +1,21 @@
 # Registro de defectos — Auditoría E2E del ciclo contable
 
+> **Actualizado tras la Fase 2I** (rama `fix/fase-2i-axi-medicion-cierre-exportables`).
+> El detalle de cada corrección está en
+> [`docs/IMPLEMENTACION_FASE_2I_AXI_MEDICION_CIERRE_EXPORTABLES.md`](../IMPLEMENTACION_FASE_2I_AXI_MEDICION_CIERRE_EXPORTABLES.md).
+>
+> | Estado | Defectos |
+> |---|---|
+> | Corregidos en la auditoría E2E | A01, A02, A03, A04, A05, A08, A19 |
+> | Corregidos en la Fase 2I | A06, A07, A09, A10, A11, A14, A15, A16, A17, A20, A21, A22 |
+> | Abiertos | A12, A13 (mitigado), A18 |
+>
+> **19 de 22 cerrados.** DEF-A06 se revisó semánticamente antes de tocarlo y se
+> confirmó que **no era un falso positivo**: en el método directo la ganancia se
+> imputaba a las actividades operativas como un cobro real, y en el indirecto no
+> se eliminaba. La evidencia y el razonamiento están en §10 del informe de la
+> Fase 2I.
+
 Severidades:
 
 - **Crítico**: puede producir estados contables incorrectos, pérdida de datos o un cierre inválido.
@@ -205,7 +221,7 @@ sólo bloquean los ajenos. El panel refleja el estado y ofrece regenerarlos.
 |---|---|
 | **Severidad** | Alto |
 | **Módulo** | Motor de reporting — EFE |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `f9296c5` · confirmado que NO era un falso positivo |
 
 **Pasos para reproducir**
 
@@ -248,7 +264,7 @@ distorsiona todos los indicadores de flujo de fondos.
 |---|---|
 | **Severidad** | Medio |
 | **Módulo** | Motor de reporting — EFE |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `f9296c5` |
 
 **Pasos para reproducir**
 
@@ -315,7 +331,7 @@ aplicación real: reimportar los mismos 95 asientos ahora deja el Diario en 95.
 |---|---|
 | **Severidad** | Alto |
 | **Módulo** | `reporting/engine/fixedAssetsInflation.ts` |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `d2340d7` |
 
 **Pasos para reproducir**
 
@@ -354,7 +370,7 @@ sólo desde el Diario.
 |---|---|
 | **Severidad** | Alto |
 | **Módulo** | `reporting/engine/fixedAssetsInflation.ts` |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `d2340d7` |
 
 **Resultado obtenido.** La columna *Ajuste dep.* del anexo en moneda de cierre da **cero**: la
 amortización acumulada reexpresada ($ 1.600.000) es idéntica a la nominal.
@@ -381,7 +397,7 @@ reforma estructural que DEF-A09: el anexo en moneda homogénea necesita la ficha
 |---|---|
 | **Severidad** | Alto |
 | **Módulo** | Ficha de empresa / metadatos de reporting |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `b27bf55` |
 
 **Pasos para reproducir**
 
@@ -427,7 +443,7 @@ bloquear fechas fuera del ejercicio.
 |---|---|
 | **Severidad** | Alto |
 | **Módulo** | Planillas → Cierre: AxI + Valuación |
-| **Estado** | Documentado |
+| **Estado** | Mitigado en la Fase 2I — el motor usa el clasificador correcto; la planilla conserva su heurística |
 
 **Resultado obtenido.** El clasificador automático propone:
 
@@ -453,7 +469,7 @@ estados formales"*.
 |---|---|
 | **Severidad** | Medio |
 | **Módulo** | Plan de cuentas / anexo de bienes de uso |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `78cee1a` |
 
 **Resultado obtenido.** El anexo expone una única fila **"Sin clase asignada"** con la advertencia
 *"Hay cuentas de bienes de uso sin clase asignada"*. Una instalación nueva no puede producir el anexo
@@ -470,7 +486,7 @@ Rodados, Muebles y útiles, Equipos de computación, Maquinarias, Instalaciones)
 |---|---|
 | **Severidad** | Bajo |
 | **Módulo** | Importador del Libro Diario |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `b27bf55` |
 
 **Resultado obtenido.** Con un archivo que trae las columnas `cuenta_codigo` y `cuenta_nombre`, el paso
 de mapeo asigna `cuenta_codigo` a **ambos** campos. Hay que corregirlo a mano. No produce cifras
@@ -485,7 +501,7 @@ resuelto cuando no lo está.
 |---|---|
 | **Severidad** | Medio |
 | **Módulo** | Planillas → Índices |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `b27bf55` · era de presentación |
 
 **Resultado obtenido.** La serie oficial `7694.0075` se muestra e importa como `7694.01`. Los índices
 FACPCE / INDEC se publican con cuatro decimales y los coeficientes de reexpresión se calculan sobre
@@ -501,7 +517,7 @@ esa serie.
 |---|---|
 | **Severidad** | Bajo |
 | **Módulo** | Balance de Sumas y Saldos |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `b27bf55` |
 
 **Resultado obtenido.** Sin ningún asiento cargado, la pantalla muestra *"✓ El balance cuadra
 perfectamente. Los totales de Debe y Haber coinciden"* junto a *"No hay movimientos para mostrar"*.
@@ -550,7 +566,7 @@ confirmar.
 |---|---|
 | **Severidad** | Bajo |
 | **Módulo** | Selector de período |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `b27bf55` |
 
 **Resultado obtenido.** El desplegable lista *2026* y *2025 Abierto*. Sólo 2025 existe como ejercicio;
 2026 aparece porque el hook agrega siempre el año corriente. Los dos se ven igual salvo por la etiqueta
@@ -569,7 +585,7 @@ aplicación del rango, que es justamente donde estaba DEF-A03.
 |---|---|
 | **Severidad** | Alto |
 | **Módulo** | Contexto contable (`ensureExerciseForDate`) |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `b27bf55` |
 
 **Pasos para reproducir**
 
@@ -605,7 +621,7 @@ para que crear uno sea siempre un acto deliberado.
 |---|---|
 | **Severidad** | Bajo |
 | **Módulo** | Contabilización (`normalizeLines`) |
-| **Estado** | Documentado |
+| **Estado** | Corregido en la Fase 2I — `b27bf55` |
 
 **Pasos para reproducir**
 

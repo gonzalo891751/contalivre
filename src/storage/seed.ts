@@ -23,6 +23,58 @@ interface SeedAccount {
 }
 
 /**
+ * Metadata contable que el plan base no traía y que el ciclo de cierre necesita
+ * (Fase 2I §6 y §9). Se declara acá, junto al plan, para que una instalación
+ * nueva quede completa y para que `repairInflationMetadata` pueda llevar una
+ * base existente al mismo estado sin tocar ningún saldo.
+ *
+ * - `monetary`: condición monetaria cuando el rubro no alcanza para derivarla.
+ *   Los prepagos se cancelan con un servicio, no con dinero: son NO monetarios
+ *   aunque estén expuestos en Otros créditos. Las inversiones son un rubro
+ *   mixto: cada instrumento exige una decisión explícita.
+ * - `annexGroup`: clase del anexo de bienes de uso, que la exposición formal
+ *   exige abrir y que antes quedaba toda bajo "Sin clase asignada".
+ * - `equity`: componente del PN, para separar el capital nominal de su ajuste.
+ */
+const ACCOUNT_METADATA: Record<string, {
+    monetary?: 'MONETARY' | 'NON_MONETARY'
+    annexGroup?: string
+    equity?: 'CAPITAL' | 'CAPITAL_ADJUSTMENT'
+    tags?: string[]
+}> = {
+    // ── Prepagos: no monetarios ──────────────────────────────
+    '1.1.03.21': { monetary: 'NON_MONETARY' },
+    '1.1.03.22': { monetary: 'NON_MONETARY' },
+    '1.1.03.23': { monetary: 'NON_MONETARY' },
+    // ── Inversiones: decisión explícita por instrumento ──────
+    '1.1.05.01': { monetary: 'MONETARY' },                                    // plazo fijo en pesos
+    '1.1.05.02': { monetary: 'NON_MONETARY', tags: ['medicion:valor-corriente'] }, // FCI: valor de cuotaparte
+    '1.1.05.03': { monetary: 'MONETARY' },                                    // plazo fijo en moneda extranjera
+    '1.2.03.01': { monetary: 'NON_MONETARY' },                                // participaciones permanentes
+    // ── Clases del anexo de bienes de uso ────────────────────
+    '1.2.01.01': { annexGroup: 'Inmuebles' },
+    '1.2.01.02': { annexGroup: 'Instalaciones' },
+    '1.2.01.03': { annexGroup: 'Muebles y útiles' },
+    '1.2.01.04': { annexGroup: 'Rodados' },
+    '1.2.01.05': { annexGroup: 'Equipos de computación' },
+    '1.2.01.06': { annexGroup: 'Terrenos' },
+    '1.2.01.07': { annexGroup: 'Obras en construcción' },
+    '1.2.01.08': { annexGroup: 'Maquinarias' },
+    '1.2.01.09': { annexGroup: 'Otros bienes de uso' },
+    '1.2.01.91': { annexGroup: 'Inmuebles' },
+    '1.2.01.92': { annexGroup: 'Instalaciones' },
+    '1.2.01.93': { annexGroup: 'Muebles y útiles' },
+    '1.2.01.94': { annexGroup: 'Rodados' },
+    '1.2.01.95': { annexGroup: 'Equipos de computación' },
+    '1.2.01.96': { annexGroup: 'Terrenos' },
+    '1.2.01.98': { annexGroup: 'Maquinarias' },
+    '1.2.01.99': { annexGroup: 'Otros bienes de uso' },
+    // ── Capital: nominal legal separado de su ajuste ─────────
+    '3.1.01': { equity: 'CAPITAL' },
+    '3.1.02': { equity: 'CAPITAL_ADJUSTMENT', tags: ['capital:ajuste'] },
+}
+
+/**
  * Plan de cuentas Argentina típico - estructura jerárquica
  * Solo cuentas base/madre + algunas generales.
  * El usuario crea subcuentas específicas.
@@ -325,6 +377,7 @@ function seedToAccount(seed: SeedAccount, codeToId: Map<string, string>): Accoun
 
     // Determinar normalSide por defecto según kind
     const defaultNormalSide = ['ASSET', 'EXPENSE'].includes(seed.kind) ? 'DEBIT' : 'CREDIT'
+    const meta = ACCOUNT_METADATA[seed.code]
 
     return {
         id,
@@ -340,7 +393,46 @@ function seedToAccount(seed: SeedAccount, codeToId: Map<string, string>): Accoun
         isContra: seed.isContra || false,
         isHeader: seed.isHeader || false,
         allowOppositeBalance: seed.allowOppositeBalance || false,
+        ...(meta?.monetary ? { monetaryClassification: meta.monetary } : {}),
+        ...(meta?.annexGroup ? { annexGroup: meta.annexGroup } : {}),
+        ...(meta?.equity ? { equityComponent: meta.equity } : {}),
+        ...(meta?.tags ? { tags: meta.tags } : {}),
     }
+}
+
+/**
+ * Completa la metadata contable de un plan de cuentas ya existente (Fase 2I).
+ *
+ * Idempotente y conservadora: sólo escribe el campo que falta y NUNCA pisa una
+ * decisión del usuario. No toca saldos ni asientos.
+ *
+ * @returns cuántas cuentas se completaron
+ */
+export async function repairInflationMetadata(): Promise<number> {
+    const accounts = await db.accounts.toArray()
+    let repaired = 0
+
+    for (const account of accounts) {
+        const meta = ACCOUNT_METADATA[account.code]
+        if (!meta) continue
+        const patch: Partial<Account> = {}
+
+        if (meta.monetary && !account.monetaryClassification) patch.monetaryClassification = meta.monetary
+        if (meta.annexGroup && !account.annexGroup) patch.annexGroup = meta.annexGroup
+        if (meta.equity && !account.equityComponent) patch.equityComponent = meta.equity
+        if (meta.tags) {
+            const current = account.tags ?? []
+            const missing = meta.tags.filter(t => !current.includes(t))
+            if (missing.length > 0) patch.tags = [...current, ...missing]
+        }
+
+        if (Object.keys(patch).length > 0) {
+            await db.accounts.update(account.id, patch)
+            repaired += 1
+        }
+    }
+
+    return repaired
 }
 
 /**

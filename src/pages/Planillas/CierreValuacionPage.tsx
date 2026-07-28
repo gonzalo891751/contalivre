@@ -1000,8 +1000,11 @@ export default function CierreValuacionPage() {
                                                         </span>
                                                     )}
                                                 </td>
+                                                {/* Cuatro decimales: las series oficiales se publican
+                                                    así y mostrarlas con dos hacía dudar de la
+                                                    precisión de lo almacenado (DEF-A16). */}
                                                 <td className="text-right font-mono">
-                                                    {formatNumber(idx.value, 2)}
+                                                    {formatNumber(idx.value, 4)}
                                                 </td>
                                                 <td className="text-right font-mono text-muted">
                                                     {coef > 0 ? formatCoef(coef) : '-'}

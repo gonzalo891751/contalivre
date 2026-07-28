@@ -4,8 +4,8 @@ Generado por `scripts/auditoria/conciliar-checkpoints.mjs` a partir de los dos
 respaldos que produce el recorrido E2E. Cada cifra sale del respaldo, no de una
 transcripción manual.
 
-- Checkpoint A: `docs/auditoria/checkpoints/checkpoint-a-pre-cierre.json` (2026-07-27T08:38:59.160Z)
-- Checkpoint B: `docs/auditoria/checkpoints/checkpoint-b-cierre-y-apertura.json` (2026-07-27T08:39:07.689Z)
+- Checkpoint A: `docs/auditoria/checkpoints/checkpoint-a-pre-cierre.json` (2026-07-27T22:32:56.131Z)
+- Checkpoint B: `docs/auditoria/checkpoints/checkpoint-b-cierre-y-apertura.json` (2026-07-27T22:33:04.332Z)
 
 ## Resumen de los dos estados
 
@@ -42,7 +42,25 @@ el método directo con el indirecto, pero clasifica distinto la venta de bienes
 de uso y el pago diferido de una compra de bienes de uso: ver el registro de
 defectos (DEF-A06 y DEF-A07).
 
+## Moneda de cierre (Fase 2I)
+
+| Concepto | Importe |
+|---|---:|
+| Resultado de las cuentas de resultado reexpresadas | 15.796.861,58 |
+| RECPAM (analítico) | -4.432.331,92 |
+| RECPAM (secuencial) | -4.432.331,94 |
+| **Resultado del ejercicio en moneda de cierre** | **11.364.529,66** |
+| Resultado del ejercicio en moneda nominal | 12.863.500,00 |
+| Patrimonio neto final reexpresado | 49.975.451,77 |
+| Aportes reexpresados | 38.610.922,13 |
+
 ## Controles
+
+Los controles A, B y C son los del recorrido nominal de la auditoría E2E; los D
+son los que agregó la Fase 2I sobre la expresión en moneda de cierre. Son un
+plano distinto de las 24 invariantes contables del informe: cada invariante se
+verifica en la aplicación, y estos controles la reverifican sobre los respaldos
+con aritmética independiente.
 
 | ID | Control | Esperado | Obtenido | Estado |
 |---|---|---:|---:|:--:|
@@ -82,7 +100,16 @@ defectos (DEF-A06 y DEF-A07).
 | C10 | El ejercicio 2026 no arrastra gastos | 0,00 | 0,00 | ✅ |
 | C11 | El Diario 2025 sólo creció por la refundición (la apertura de 2026 no lo toca) | 638.108.600,00 | 638.108.600,00 | ✅ |
 | C12 | El ejercicio 2025 sigue siendo consultable después de abrir 2026 | ejercicio 2025 presente con sus 95 asientos + cierre | 98 asientos en 2025 | ✅ |
+| D1 | Todas las cuentas con movimiento tienen tratamiento declarado | 0 sin tratamiento | 0 | ✅ |
+| D2 | Ninguna partida monetaria fue reexpresada | 0 reexpresadas | 0 | ✅ |
+| D3 | RECPAM secuencial = RECPAM analítico (tolerancia $1) | 0,00 | 0,00 | ✅ |
+| D4 | El RECPAM es una pérdida, coherente con posición monetaria activa | pérdida | -4.432.331,92 | ✅ |
+| D5 | Resultado en moneda de cierre = resultado reexpresado + RECPAM | 11.364.529,66 | 11.364.529,66 | ✅ |
+| D6 | La serie de índices conserva los decimales de la fuente | 7694,0075 y 10121,3715 | 7694.0075 y 10121.3715 | ✅ |
+| D7 | El set de índices es oficial y con proveniencia | OFFICIAL con hash | OFFICIAL | ✅ |
+| D8 | Las cuentas de bienes de uso tienen clase de anexo asignada | todas con clase | Muebles y útiles / Rodados / Equipos de computación | ✅ |
+| D9 | La identidad de la empresa llega a la entidad contable | Purmamarca… | Purmamarca Comercial S.A. — Auditoría E2E | ✅ |
 
-**36 de 36 controles aprobados.**
+**45 de 45 controles aprobados.**
 
 No hay diferencias sin explicar.

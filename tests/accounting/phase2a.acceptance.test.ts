@@ -148,7 +148,11 @@ describe('GATE Fase 2A — aceptación end-to-end', () => {
     })
 
     it('9. 2025 y 2026 quedan separados', async () => {
-        await postNewEntry({ date: '2026-02-01', memo: 'gate 2026', lines: simpleLines('caja', 'ventas', 999) })
+        // Abrir el ejercicio 2026 es un acto deliberado desde la Fase 2I
+        await postNewEntry({
+            date: '2026-02-01', memo: 'gate 2026', lines: simpleLines('caja', 'ventas', 999),
+            allowExerciseProvisioning: true,
+        })
         const ctx2025 = await resolveContextForYear(2025)
         const ctx2026 = await resolveContextForYear(2026)
         const e2025 = await getEntriesForContext(ctx2025)

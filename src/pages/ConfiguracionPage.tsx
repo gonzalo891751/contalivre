@@ -20,6 +20,7 @@ import { MapeosPanel } from '../components/Configuracion/panels/MapeosPanel'
 import { EfePoliticasPanel } from '../components/Configuracion/panels/EfePoliticasPanel'
 import { EjerciciosPanel } from '../components/Configuracion/panels/EjerciciosPanel'
 import { IndicesOficialesPanel } from '../components/Configuracion/panels/IndicesOficialesPanel'
+import { MatrizCoberturaPanel } from '../components/Configuracion/panels/MatrizCoberturaPanel'
 import { BackupPanel } from '../components/Configuracion/panels/BackupPanel'
 import { VersionInfoPanel } from '../components/Configuracion/panels/VersionInfoPanel'
 import { CapabilitiesPanel } from '../components/Configuracion/panels/CapabilitiesPanel'
@@ -148,6 +149,11 @@ export default function ConfiguracionPage() {
                     {active === 'inflacion' && (
                         <div>
                             <IndicesOficialesPanel />
+                            <hr style={{ margin: '24px 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
+                            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 10px' }}>
+                                Tratamiento de las cuentas y RECPAM
+                            </h3>
+                            <MatrizCoberturaPanel />
                             <hr style={{ margin: '24px 0', border: 0, borderTop: '1px solid #e2e8f0' }} />
                             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: 12 }}>
                                 El papel de trabajo del ajuste por inflación (AxI) y la valuación al cierre

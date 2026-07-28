@@ -235,6 +235,33 @@ nominal arrastrada.
 
 ---
 
+## Estado tras la Fase 2I
+
+Lo que este documento proponía y ya está implementado:
+
+- **Etapa 8** — la serie de índices se registra con proveniencia completa, sin
+  redondeo y sin interpolar los meses faltantes; la anticuación por partida en
+  bienes de uso quedó resuelta por lotes de origen.
+- **Etapa 9** — la clasificación monetaria es una propiedad mapeada y revisable
+  de la cuenta, no una heurística, y el RECPAM se determina por dos caminos
+  independientes que deben conciliar. La posición monetaria y el RECPAM ya no
+  comparten rótulo.
+- Toda cuenta con saldo o movimiento pasa por una matriz de tratamiento con
+  cobertura medible, en Configuración → Inflación.
+
+Lo que sigue pendiente, por orden de valor:
+
+1. **Etapa 6** — que la compuerta de cierre comparta núcleo con la de
+   publicación, e incorpore la cobertura de cuentas y la conciliación del RECPAM
+   entre sus bloqueos.
+2. **Etapa 7** — la captura de mediciones a valores corrientes con fuente,
+   evidencia y resultado por tenencia.
+3. **Etapa 11** — la exportación formal en PDF y planilla desde el mismo
+   snapshot que alimenta la pantalla.
+4. **El tablero del ciclo** descripto abajo.
+
+---
+
 ## Lo que falta para que se sienta un sistema y no una colección de pantallas
 
 1. **Un tablero del ejercicio.** Una sola pantalla que muestre en qué etapa está

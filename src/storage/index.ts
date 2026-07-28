@@ -12,6 +12,7 @@ export {
     repairDefaultFxAccounts,
     repairTaxAccounts,
     repairEquityAccounts,
+    repairInflationMetadata,
 } from './seed'
 
 // Accounts CRUD

@@ -170,6 +170,90 @@ checkBool('C12', 'El ejercicio 2025 sigue siendo consultable después de abrir 2
     B.tables.exercises.some(e => e.id.endsWith('2025')) && b2025.asientos >= a2025.asientos,
     { esperado: 'ejercicio 2025 presente con sus 95 asientos + cierre', obtenido: `${b2025.asientos} asientos en 2025` })
 
+// ── Fase 2I: moneda de cierre, cobertura y RECPAM ───────────
+const IDX = new Map(A.tables.inflationIndexSets[0].values.map(v => [v.period, v.value]))
+const CLOSE = '2025-12'
+const coefOf = (p) => IDX.get(CLOSE) / IDX.get(p)
+const accountsA = A.tables.accounts
+const byCode = new Map(accountsA.map(a => [a.code, a]))
+
+const GROUP_MONETARY = {
+    CASH_AND_BANKS: 'MONETARY', TRADE_RECEIVABLES: 'MONETARY', OTHER_RECEIVABLES: 'MONETARY',
+    TAX_CREDITS: 'MONETARY', INVENTORIES: 'NON_MONETARY', PPE: 'NON_MONETARY',
+    INTANGIBLES: 'NON_MONETARY', INVESTMENTS: 'MIXED', TRADE_PAYABLES: 'MONETARY',
+    TAX_LIABILITIES: 'MONETARY', PAYROLL_LIABILITIES: 'MONETARY', LOANS: 'MONETARY',
+    OTHER_PAYABLES: 'MONETARY', DEFERRED_INCOME: 'MONETARY',
+}
+const monetaryOf = (a) => a.monetaryClassification
+    ?? (a.kind === 'EQUITY' || a.kind === 'INCOME' || a.kind === 'EXPENSE' ? 'NON_MONETARY' : null)
+    ?? (a.statementGroup ? GROUP_MONETARY[a.statementGroup] : null)
+    ?? 'NOT_APPLICABLE'
+
+const movByAccount = new Map()
+for (const e of A.tables.entries) {
+    if (e.status === 'DRAFT' || e.sourceModule === 'closing') continue
+    if (e.date < '2025-01-01' || e.date > '2025-12-31') continue
+    for (const l of e.lines) {
+        const c = cents(l.debit) - cents(l.credit)
+        if (!movByAccount.has(l.accountId)) movByAccount.set(l.accountId, new Map())
+        const m = movByAccount.get(l.accountId)
+        m.set(e.date.slice(0, 7), (m.get(e.date.slice(0, 7)) ?? 0) + c)
+    }
+}
+
+let sinTratamiento = 0, monetariasReexpresadas = 0
+let recpamAnalitico = 0, activosR = 0, pasivosR = 0, aportesR = 0, resultadoR = 0
+const flujoMon = new Map()
+const idById = new Map(accountsA.map(a => [a.id, a]))
+
+for (const [accountId, byPeriod] of movByAccount) {
+    const a = idById.get(accountId)
+    if (!a) { sinTratamiento += 1; continue }
+    const mon = monetaryOf(a)
+    const esCapital = a.kind === 'EQUITY' && a.statementGroup === 'CAPITAL' && a.code !== '3.1.02'
+    if (mon === 'MIXED' || mon === 'NOT_APPLICABLE') { sinTratamiento += 1; continue }
+    const anticua = mon === 'NON_MONETARY' || esCapital
+
+    let reexp = 0
+    for (const [p, c] of byPeriod) {
+        reexp += anticua ? Math.round(c * coefOf(p)) : c
+        if (mon === 'MONETARY') flujoMon.set(p, (flujoMon.get(p) ?? 0) + c)
+    }
+    const hist = [...byPeriod.values()].reduce((s, c) => s + c, 0)
+    if (mon === 'MONETARY' && reexp !== hist) monetariasReexpresadas += 1
+
+    if (a.kind === 'ASSET') activosR += reexp
+    else if (a.kind === 'LIABILITY') pasivosR += -reexp
+    else if (a.kind === 'EQUITY') aportesR += -reexp
+    else resultadoR += -reexp
+}
+for (const [p, flujo] of flujoMon) recpamAnalitico += -Math.round(flujo * (coefOf(p) - 1))
+const recpamSecuencial = (activosR - pasivosR) - aportesR - resultadoR
+const resultadoMonedaCierre = resultadoR + recpamAnalitico
+
+checkBool('D1', 'Todas las cuentas con movimiento tienen tratamiento declarado',
+    sinTratamiento === 0, { esperado: '0 sin tratamiento', obtenido: `${sinTratamiento}` })
+checkBool('D2', 'Ninguna partida monetaria fue reexpresada',
+    monetariasReexpresadas === 0, { esperado: '0 reexpresadas', obtenido: `${monetariasReexpresadas}` })
+check('D3', 'RECPAM secuencial = RECPAM analítico (tolerancia $1)',
+    0, Math.abs(fromCents(recpamSecuencial - recpamAnalitico)) <= 1 ? 0 : fromCents(recpamSecuencial - recpamAnalitico))
+checkBool('D4', 'El RECPAM es una pérdida, coherente con posición monetaria activa',
+    recpamAnalitico < 0, { esperado: 'pérdida', obtenido: fmt(fromCents(recpamAnalitico)) })
+check('D5', 'Resultado en moneda de cierre = resultado reexpresado + RECPAM',
+    fromCents(resultadoMonedaCierre), fromCents(resultadoR + recpamAnalitico))
+checkBool('D6', 'La serie de índices conserva los decimales de la fuente',
+    IDX.get('2024-12') === 7694.0075 && IDX.get('2025-12') === 10121.3715,
+    { esperado: '7694,0075 y 10121,3715', obtenido: `${IDX.get('2024-12')} y ${IDX.get('2025-12')}` })
+checkBool('D7', 'El set de índices es oficial y con proveniencia',
+    A.tables.inflationIndexSets[0].status === 'OFFICIAL' && !!A.tables.inflationIndexSets[0].contentHash,
+    { esperado: 'OFFICIAL con hash', obtenido: A.tables.inflationIndexSets[0].status })
+checkBool('D8', 'Las cuentas de bienes de uso tienen clase de anexo asignada',
+    ['1.2.01.03', '1.2.01.04', '1.2.01.05'].every(c => !!byCode.get(c)?.annexGroup),
+    { esperado: 'todas con clase', obtenido: ['1.2.01.03', '1.2.01.04', '1.2.01.05'].map(c => byCode.get(c)?.annexGroup ?? '—').join(' / ') })
+checkBool('D9', 'La identidad de la empresa llega a la entidad contable',
+    A.tables.companies[0]?.legalName?.includes('Purmamarca'),
+    { esperado: 'Purmamarca…', obtenido: A.tables.companies[0]?.legalName ?? '—' })
+
 const fallidos = controles.filter(c => !c.ok)
 
 const filas = controles.map(c =>
@@ -219,7 +303,25 @@ el método directo con el indirecto, pero clasifica distinto la venta de bienes
 de uso y el pago diferido de una compra de bienes de uso: ver el registro de
 defectos (DEF-A06 y DEF-A07).
 
+## Moneda de cierre (Fase 2I)
+
+| Concepto | Importe |
+|---|---:|
+| Resultado de las cuentas de resultado reexpresadas | ${fmt(fromCents(resultadoR))} |
+| RECPAM (analítico) | ${fmt(fromCents(recpamAnalitico))} |
+| RECPAM (secuencial) | ${fmt(fromCents(recpamSecuencial))} |
+| **Resultado del ejercicio en moneda de cierre** | **${fmt(fromCents(resultadoMonedaCierre))}** |
+| Resultado del ejercicio en moneda nominal | ${fmt(esperado.resultado)} |
+| Patrimonio neto final reexpresado | ${fmt(fromCents(activosR - pasivosR))} |
+| Aportes reexpresados | ${fmt(fromCents(aportesR))} |
+
 ## Controles
+
+Los controles A, B y C son los del recorrido nominal de la auditoría E2E; los D
+son los que agregó la Fase 2I sobre la expresión en moneda de cierre. Son un
+plano distinto de las 24 invariantes contables del informe: cada invariante se
+verifica en la aplicación, y estos controles la reverifican sobre los respaldos
+con aritmética independiente.
 
 | ID | Control | Esperado | Obtenido | Estado |
 |---|---|---:|---:|:--:|

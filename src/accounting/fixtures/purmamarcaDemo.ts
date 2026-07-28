@@ -148,6 +148,9 @@ export async function loadPurmamarcaDemo(): Promise<PurmamarcaLoadResult> {
         const res = await postOperation({
             date: e.date, memo: e.memo, lines: e.lines,
             sourceModule: PURMAMARCA_MODULE, sourceType: e.type, sourceId,
+            // El caso abre dos ejercicios a propósito (apertura 2021 y el 2022):
+            // es una carga de escenario, no una fecha mal tipeada.
+            allowExerciseProvisioning: true,
         })
         if (!res.idempotentHit) idempotent = false
     }
