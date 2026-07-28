@@ -9,6 +9,7 @@ import {
     BookBookmark,
     Scales,
     ChartLineUp,
+    ClipboardText,
     Table,
     Package,
     CaretRight,
@@ -73,6 +74,9 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 { path: '/asientos', label: 'Libro Diario', icon: Notebook },
                 { path: '/mayor', label: 'Libro Mayor', icon: BookBookmark },
                 { path: '/balance', label: 'Balance de SyS', icon: Scales },
+                // Fase 2J: el pre-cierre es la última gran etapa antes de que
+                // los estados queden definitivos, y va inmediatamente antes.
+                { path: '/pre-cierre', label: 'Pre-cierre y medición', icon: ClipboardText },
                 { path: '/estados', label: 'Estados contables', icon: ChartLineUp },
             ]
         },
@@ -86,7 +90,6 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                     children: [
                         { path: '/planillas/conciliaciones', label: 'Conciliaciones' },
                         { path: '/planillas/amortizaciones', label: 'Amortizaciones' },
-                        { path: '/planillas/cierre-valuacion', label: 'Cierre: AxI + Valuación' },
                     ]
                 },
                 { path: '/configuracion', label: 'Configuración', icon: Gear },

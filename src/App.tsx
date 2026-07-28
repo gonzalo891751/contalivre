@@ -29,7 +29,7 @@ const ClientesDeudoresPage = lazy(() => import('./pages/Operaciones/ClientesDeud
 const DeudasSocialesPage = lazy(() => import('./pages/Operaciones/DeudasSocialesPage'))
 const GastosServiciosPage = lazy(() => import('./pages/Operaciones/GastosServiciosPage'))
 const ConciliacionesPage = lazy(() => import('./pages/Planillas/Conciliaciones/ConciliacionesPage'))
-const CierreValuacionPage = lazy(() => import('./pages/Planillas/CierreValuacionPage'))
+const PreCierrePage = lazy(() => import('./pages/PreCierrePage'))
 
 function MainLayoutRoute() {
     return (
@@ -69,6 +69,8 @@ function App() {
                 <Route path="/asientos" element={<Asientos />} />
                 <Route path="/mayor" element={<Mayor />} />
                 <Route path="/balance" element={<Balance />} />
+                {/* Fase 2J: el pre-cierre deja de estar escondido dentro de planillas */}
+                <Route path="/pre-cierre" element={<PreCierrePage />} />
                 <Route path="/estados" element={<Estados />} />
                 <Route path="/configuracion" element={<ConfiguracionPage />} />
                 {/* Rutas consolidadas en Configuración (Fase 2D) */}
@@ -81,7 +83,14 @@ function App() {
                     <Route path="inventario" element={<Navigate to="/operaciones/inventario" replace />} />
                     <Route path="conciliaciones" element={<ConciliacionesPage />} />
                     <Route path="amortizaciones" element={<AmortizacionesPage />} />
-                    <Route path="cierre-valuacion" element={<CierreValuacionPage />} />
+                    {/*
+                      * La planilla "Cierre: AxI + Valuación" se retira (DEF-A12, DEF-A13):
+                      * mantenía una clasificación monetaria propia, un registro de índices
+                      * propio y una fecha de cierre desvinculada del ejercicio, es decir una
+                      * SEGUNDA fuente de verdad que podía contradecir al motor. El ajuste
+                      * por inflación vive ahora en el pre-cierre, sobre el motor canónico.
+                      */}
+                    <Route path="cierre-valuacion" element={<Navigate to="/pre-cierre?etapa=AXI" replace />} />
                 </Route>
             </Route>
             <Route path="/clean" element={<CleanLayoutRoute />}>
