@@ -67,7 +67,11 @@ async function abrirSolapa(page: Page, nombre: string): Promise<void> {
 }
 
 async function esperarBalance(page: Page): Promise<string> {
-    await page.goto('/balance')
+    // El panel de cierre dispara la lectura del núcleo de controles, que puede
+    // seguir en vuelo cuando se navega: se deja asentar antes de pedir el
+    // balance para no chocar dos navegaciones.
+    await page.waitForLoadState('domcontentloaded')
+    await page.goto('/balance', { waitUntil: 'commit' })
     await expect(page.getByText('El balance cuadra perfectamente')).toBeVisible({ timeout: 30_000 })
     return screenText(page)
 }
@@ -386,6 +390,11 @@ test.describe('Auditoría del ciclo contable completo', () => {
     })
 
     test('10 · el ejercicio cerrado queda protegido y sigue consultable', async () => {
+        // Se sale del panel de cierre antes de nada: su lectura del núcleo de
+        // controles queda en vuelo y chocaría con la próxima navegación.
+        await page.goto('/asientos')
+        await page.waitForLoadState('networkidle')
+
         const rechazo = await page.evaluate(async () => {
             const { postNewEntry } = await import('/src/accounting/application/journalService.ts')
             const { db } = await import('/src/storage/db.ts')

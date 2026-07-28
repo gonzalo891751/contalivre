@@ -8,13 +8,17 @@
 > |---|---|
 > | Corregidos en la auditoría E2E | A01, A02, A03, A04, A05, A08, A19 |
 > | Corregidos en la Fase 2I | A06, A07, A09, A10, A11, A14, A15, A16, A17, A20, A21, A22 |
-> | Abiertos | A12, A13 (mitigado), A18 |
+> | Corregidos en la Fase 2J | A12, A13 |
+> | Abiertos | A18 |
 >
-> **19 de 22 cerrados.** DEF-A06 se revisó semánticamente antes de tocarlo y se
-> confirmó que **no era un falso positivo**: en el método directo la ganancia se
-> imputaba a las actividades operativas como un cobro real, y en el indirecto no
-> se eliminaba. La evidencia y el razonamiento están en §10 del informe de la
-> Fase 2I.
+> **21 de 22 cerrados.** La Fase 2J retiró la planilla de AxI antigua, que era
+> la segunda fuente de verdad detrás de A12 y A13:
+> [`docs/IMPLEMENTACION_FASE_2J_PRECIERRE_MEDICION_EXPORTACION.md`](../IMPLEMENTACION_FASE_2J_PRECIERRE_MEDICION_EXPORTACION.md).
+>
+> DEF-A06 se revisó semánticamente antes de tocarlo y se confirmó que **no era
+> un falso positivo**: en el método directo la ganancia se imputaba a las
+> actividades operativas como un cobro real, y en el indirecto no se eliminaba.
+> La evidencia y el razonamiento están en §10 del informe de la Fase 2I.
 
 Severidades:
 
@@ -426,7 +430,7 @@ identidad de los snapshots ya publicados, por lo que conviene hacerlo con una mi
 |---|---|
 | **Severidad** | Medio |
 | **Módulo** | Planillas → Cierre: AxI + Valuación |
-| **Estado** | Documentado |
+| **Estado** | Cerrado en la Fase 2J — la planilla de AxI se retiró de la navegación |
 
 **Resultado obtenido.** Con el ejercicio 2025 seleccionado, la planilla abre con *"Periodo 2026"*,
 fecha de cierre 27/7/2026 (la fecha del día) y el aviso *"Falta índice 2026-07"*, mientras toma los
@@ -443,7 +447,7 @@ bloquear fechas fuera del ejercicio.
 |---|---|
 | **Severidad** | Alto |
 | **Módulo** | Planillas → Cierre: AxI + Valuación |
-| **Estado** | Mitigado en la Fase 2I — el motor usa el clasificador correcto; la planilla conserva su heurística |
+| **Estado** | Cerrado en la Fase 2J — la clasificación proviene sólo del motor canónico |
 
 **Resultado obtenido.** El clasificador automático propone:
 
