@@ -24,6 +24,7 @@ import { migrateToV19 } from '../../src/accounting/migration/migrateV19'
 import { migrateToV20 } from '../../src/accounting/migration/migrateV20'
 import { migrateToV21 } from '../../src/accounting/migration/migrateV21'
 import { migrateToV22 } from '../../src/accounting/migration/migrateV22'
+import { migrateToV23 } from '../../src/accounting/migration/migrateV23'
 
 const DBN = 'ChainMigrationTestDb'
 
@@ -64,6 +65,7 @@ function defineChainDb(): Dexie {
     d.version(20).stores({ expenseAllocationRules: 'id, accountId, validFrom' }).upgrade(migrateToV20)
     d.version(21).stores({ manualDisclosures: 'id, companyId, exerciseId, noteType, status' }).upgrade(migrateToV21)
     d.version(22).stores({ cashFlowPolicies: 'id, companyId, exerciseId, status' }).upgrade(migrateToV22)
+    d.version(23).stores({ closingMeasurements: 'id, companyId, exerciseId, accountId, status' }).upgrade(migrateToV23)
     return d
 }
 
@@ -91,10 +93,10 @@ describe('Fase 2F — cadena de migraciones v16 → v21', () => {
         expect(policies[0].companyId).toBe('company-default')
         expect(policies[0].requiresReview).toBe(true)
         expect(policies[0].cashClassifications.some((c: { accountId: string }) => c.accountId === 'caja')).toBe(true)
-        // metadata de sistema en v22
+        // metadata de sistema en la última versión de la cadena (v23 desde 2J)
         const meta = await chain.table('systemMeta').get('system')
-        expect(meta.schemaVersion).toBe(22)
-        expect(meta.lastMigrationId).toBe('v22-cashflow-policies')
+        expect(meta.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
+        expect(meta.lastMigrationId).toBe('v23-closing-measurements')
 
         chain.close()
     })

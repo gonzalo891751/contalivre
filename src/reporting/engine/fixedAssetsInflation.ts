@@ -142,9 +142,30 @@ export function reexpressFixedAssetsAnnex(
         }
     }
 
+    // ── Fichas individuales, cuando existen (Fase 2J §8) ─────
+    // Con ficha, la depreciación de cada bien se reexpresa por el coeficiente
+    // de SU mes de alta. El coeficiente medio de la clase sólo es exacto cuando
+    // todos los bienes comparten mes de alta y política; con vidas útiles
+    // distintas, la depreciación no es proporcional al costo y el promedio se
+    // aparta. Sin fichas se conserva el promedio y se ADVIERTE.
+    const fichasByClass = new Map<string, Array<{ period: string; grossCents: number; depCents: number }>>()
+    for (const ficha of input.fixedAssetFichas ?? []) {
+        // Los bienes dados de baja no integran el anexo al cierre
+        if (ficha.status === 'sold' || ficha.disposalDate) continue
+        const account = byId.get(ficha.accountId)
+        if (!account) continue
+        const cls = classOf(ficha.accountId)
+        const period = (ficha.placedInServiceDate ?? ficha.acquisitionDate).slice(0, 7)
+        const grossCents = toCents(ficha.originalValue)
+        const list = fichasByClass.get(cls) ?? []
+        list.push({ period, grossCents, depCents: toCents(accumulatedDepreciationOf(ficha, input.context.periodEnd)) })
+        fichasByClass.set(cls, list)
+    }
+
     // ── Reexpresión por clase ────────────────────────────────
     const nominalByClass = new Map(annex.rows.map(r => [r.assetClass, r]))
     const rows: FixedAssetsRestatedRow[] = []
+    const approximated: string[] = []
     let totGrossN = 0, totGrossR = 0, totDepN = 0, totDepR = 0
 
     for (const [cls, acc] of classes) {
@@ -158,15 +179,22 @@ export function reexpressFixedAssetsAnnex(
             grossRestatedCents += Math.round(lot.cents * coef(lot.period))
         }
 
-        /**
-         * La depreciación acumulada sigue al activo que regulariza: se reexpresa
-         * con el coeficiente medio de los bienes vivos de la clase. Cuando la
-         * depreciación es proporcional al costo —que es el caso de la línea
-         * recta, el método del plan base— esto equivale a calcularla sobre el
-         * valor de origen reexpresado.
-         */
-        const ratio = grossNominalCents !== 0 ? grossRestatedCents / grossNominalCents : 1
-        const depRestatedCents = Math.round(depNominalCents * ratio)
+        const fichas = fichasByClass.get(cls)
+        const fichasCubrenLaClase = fichas != null
+            && fichas.length > 0
+            && Math.abs(fichas.reduce((s, f) => s + f.grossCents, 0) - grossNominalCents) <= 100
+
+        let depRestatedCents: number
+        if (fichasCubrenLaClase) {
+            // Bien por bien: cada depreciación por el coeficiente de su alta
+            depRestatedCents = fichas!.reduce((s, f) => s + Math.round(f.depCents * coef(f.period)), 0)
+        } else {
+            const ratio = grossNominalCents !== 0 ? grossRestatedCents / grossNominalCents : 1
+            depRestatedCents = Math.round(depNominalCents * ratio)
+            // Con un solo período de origen el promedio ES el coeficiente exacto
+            const periodosDistintos = new Set(acc.lots.map(l => l.period)).size
+            if (periodosDistintos > 1 && depNominalCents !== 0) approximated.push(cls)
+        }
 
         if (grossNominalCents === 0 && depNominalCents === 0 && grossRestatedCents === 0) continue
 
@@ -183,7 +211,43 @@ export function reexpressFixedAssetsAnnex(
         blockers.push(`Faltan índices para reexpresar bienes de uso de: ${Array.from(missing).sort().join(', ')}. Sin índice no se reexpresa.`)
     }
 
-    return { rows, totals, closePeriod, blockers }
+    const warnings: string[] = []
+    if (approximated.length > 0) {
+        warnings.push(
+            `La depreciación acumulada de ${Array.from(new Set(approximated)).join(', ')} se reexpresó con el ` +
+            `coeficiente medio de la clase, porque hay bienes incorporados en meses distintos y no existe ficha ` +
+            `individual que los separe. Es exacto si comparten política de depreciación; si tienen vidas útiles ` +
+            `distintas, cargá las fichas en Bienes de uso para que cada bien se reexprese por su propia fecha de alta.`
+        )
+    }
+
+    return { rows, totals, closePeriod, blockers, warnings }
+}
+
+/**
+ * Depreciación acumulada de un bien a una fecha, según su propia política.
+ *
+ * Línea recta sobre el valor amortizable (costo menos valor residual), con el
+ * año de alta completo, que es la convención del módulo de Bienes de uso.
+ */
+function accumulatedDepreciationOf(
+    ficha: import('../../core/fixedAssets/types').FixedAsset,
+    closingDate: string,
+): number {
+    const base = ficha.originalValue * (1 - (ficha.residualValuePct ?? 0) / 100)
+    const lifeMonths = ficha.lifeMonths ?? (ficha.lifeYears ?? 0) * 12
+    if (lifeMonths <= 0 || base <= 0) return 0
+
+    const start = ficha.placedInServiceDate ?? ficha.acquisitionDate
+    const months = monthsElapsed(start, closingDate)
+    const used = Math.max(0, Math.min(months, lifeMonths))
+    return (base / lifeMonths) * used
+}
+
+function monthsElapsed(from: string, to: string): number {
+    const [fy, fm] = from.split('-').map(Number)
+    const [ty, tm] = to.split('-').map(Number)
+    return (ty - fy) * 12 + (tm - fm) + 1
 }
 
 function makeRow(

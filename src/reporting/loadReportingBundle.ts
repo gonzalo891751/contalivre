@@ -37,6 +37,13 @@ import { buildCashFlowPreparation, buildCashFlowPreparationRestated, type CashFl
 import { getActivePolicy } from './policy/policyRepository'
 import { reexpressFixedAssetsAnnex } from './engine/fixedAssetsInflation'
 import { getIndexSet, indexSetToMap } from '../accounting/inflation/indexRegistry'
+import {
+    buildAccountTreatmentMatrix, monthsBetween, previousMonth,
+    type AccountTreatmentMatrix,
+} from './inflation/accountTreatment'
+import { reconcileRecpam, type RecpamReconciliation } from './inflation/recpam'
+import { buildClosingReadiness, type ClosingReadiness } from './closing/closingReadiness'
+import { listPendingMeasurements } from './measurement/measurementService'
 import type { MetricCatalogEntry, HorizontalAnalysisRow, VerticalAnalysisRow } from './metrics/types'
 import type { CashFlowStatement2B, FixedAssetsAnnexRestated, StatementsBundle } from './domain/types'
 import type { IndexSetStatus } from '../accounting/inflation/types'
@@ -124,6 +131,21 @@ export interface ReportingBundle {
      * matriz no cambia en silencio según un selector.
      */
     preparationRestated: CashFlowPreparationModel | null
+    /**
+     * Matriz universal de tratamiento de cuentas (Fase 2I §6). null cuando no
+     * se eligió una serie de índices: sin coeficientes no hay anticuación que
+     * declarar.
+     */
+    treatmentMatrix: AccountTreatmentMatrix | null
+    /** Conciliación dual del RECPAM (Fase 2I §7). null sin serie de índices. */
+    recpam: RecpamReconciliation | null
+    /**
+     * Núcleo ÚNICO de controles del ejercicio (Fase 2J §9). Es la MISMA fuente
+     * que consultan el tablero de pre-cierre, la publicación, la exportación y
+     * el cierre: un ejercicio no puede cerrarse por una puerta que no mira lo
+     * que la otra bloquea.
+     */
+    readiness: ClosingReadiness
     metadata: ReportMetadata
 }
 
@@ -230,13 +252,91 @@ export async function loadReportingBundle(
             .filter(e => e.status === 'DRAFT').count(),
     ])
 
+    // ── Matriz de tratamiento y RECPAM (Fase 2I §6-§7) ───────
+    // Se calculan acá, junto con el resto del juego, para que la pantalla, la
+    // exportación y el cierre lean exactamente las mismas cifras.
+    let treatmentMatrix: AccountTreatmentMatrix | null = null
+    let recpam: RecpamReconciliation | null = null
+    if (options.inflationIndexSetId) {
+        const set = await getIndexSet(options.inflationIndexSetId)
+        if (set) {
+            const indexes = indexSetToMap(set)
+            const closePeriod = input.context.periodEnd.slice(0, 7)
+            const startPeriod = input.context.periodStart.slice(0, 7)
+            const openingPeriod = previousMonth(startPeriod)
+            treatmentMatrix = buildAccountTreatmentMatrix({
+                accounts: input.accounts,
+                entries: input.entries,
+                openingBalances: input.openingBalances,
+                closePeriod, openingPeriod, indexes,
+            })
+            recpam = reconcileRecpam({
+                matrix: treatmentMatrix, accounts: input.accounts, indexes,
+                closePeriod, openingPeriod, periods: monthsBetween(startPeriod, closePeriod),
+            })
+        }
+    }
+
+    // ── Mediciones al cierre pendientes (Fase 2J §7) ─────────
+    const closingBalances = new Map(statements.trialBalance.rows.map(r => [r.accountId, r.closing]))
+    const pendingMeasurements = await listPendingMeasurements(
+        input.context.exerciseId, input.accounts, closingBalances,
+    ).catch(() => [])
+    const requiresMeasurement = input.accounts.filter(a =>
+        (a.tags ?? []).includes('medicion:valor-corriente') && (closingBalances.get(a.id) ?? 0) !== 0)
+
+    // ── Asientos fuera del ejercicio activo ──────────────────
+    const entriesOutsideExercise = await db.entries
+        .filter(e => e.status !== 'DRAFT'
+            && (e.date < input.context.periodStart || e.date > input.context.periodEnd))
+        .count()
+        .catch(() => 0)
+
+    // ── Núcleo único de controles (Fase 2J §9) ───────────────
+    const readiness = buildClosingReadiness({
+        company: company ? { legalName: company.legalName, taxId: company.taxId } : null,
+        exercise: exercise
+            ? { name: exercise.name, status: exercise.status, startDate: exercise.startDate, endDate: exercise.endDate }
+            : null,
+        inflationSet: inflationSet ? { name: inflationSet.name, missingPeriods: inflationSet.missingPeriods } : null,
+        coverage: treatmentMatrix ? treatmentMatrix.coverage : null,
+        recpam: recpam
+            ? { reconciled: recpam.reconciled, difference: recpam.difference, toleranceCents: recpam.toleranceCents, blockers: recpam.blockers }
+            : null,
+        statementChecks: statements.validation.checks.map(c => ({
+            id: c.id, label: c.label, passed: c.passed,
+            expected: c.expected, actual: typeof c.actual === 'number' ? c.actual : undefined,
+            difference: c.difference, detail: c.detail,
+        })),
+        fixedAssetsRestatedBlockers: fixedAssetsRestated?.blockers ?? [],
+        measurements: requiresMeasurement.length > 0
+            ? {
+                required: requiresMeasurement.length,
+                done: requiresMeasurement.length - pendingMeasurements.length,
+                pending: pendingMeasurements.map(p => ({ rubro: `${p.accountCode} ${p.accountName}`, reason: p.reason })),
+            }
+            : null,
+        draftCount: hasDrafts,
+        entriesOutsideExercise,
+        staleSnapshot: false,
+    })
+
     // Puerta de publicación unificada (§5.3): considera controles nominales y
-    // reexpresados, y la cobertura del set de índices. Un blocker en cualquier
-    // expresión solicitada impide el estado VALIDATED.
+    // reexpresados, la cobertura del set de índices y —desde la Fase 2J— los
+    // bloqueos del núcleo único (cobertura de cuentas, RECPAM y mediciones).
     const publicationGate = buildPublicationGate({
         validation: statements.validation,
         restated: cashFlowRestated,
         inflationSet: inflationSet ? { name: inflationSet.name, missingPeriods: inflationSet.missingPeriods } : null,
+        extra: readiness.publishBlockers
+            // los controles del motor ya viajan por `validation`
+            .filter(b => !b.id.startsWith('motor:'))
+            .map(b => ({
+                id: `readiness:${b.id}`,
+                scope: 'MAPPING' as const,
+                message: b.detail ? `${b.label} — ${b.detail}` : b.label,
+                action: b.action,
+            })),
     })
     const status: ReportStatus = !publicationGate.canPublish ? 'BLOCKED' : hasDrafts > 0 ? 'DRAFT' : 'VALIDATED'
 
@@ -271,5 +371,9 @@ export async function loadReportingBundle(
         status,
     }
 
-    return { statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis, publicationGate, preparation, preparationRestated, metadata }
+    return {
+        statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis,
+        publicationGate, preparation, preparationRestated,
+        treatmentMatrix, recpam, readiness, metadata,
+    }
 }

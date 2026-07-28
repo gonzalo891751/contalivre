@@ -198,6 +198,18 @@ export async function loadRcAcceptanceDataset(): Promise<RcLoadResult> {
     await db.accounts.bulkPut(RC_ACCOUNTS)
     await db.expenseAllocationRules.put(RC_ALLOCATION_RULE)
 
+    // Identidad de la entidad emisora (Fase 2J §9): el cierre exige que la
+    // empresa esté identificada, y este dataset cierra el ejercicio anterior.
+    const { getDefaultCompany } = await import('../application/contextService')
+    const company = await getDefaultCompany()
+    if (!company.taxId || company.legalName === 'Empresa ContaLivre') {
+        await db.companies.update(company.id, {
+            legalName: 'RC Aceptación S.A. — dataset de prueba',
+            taxId: '30-00000000-0',
+            updatedAt: new Date().toISOString(),
+        })
+    }
+
     let idempotent = true
     const post = async (e: FxEntry, i: number, year: number) => {
         const res = await postOperation({

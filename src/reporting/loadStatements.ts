@@ -20,13 +20,16 @@ import type { ReportingInput, StatementsBundle } from './domain/types'
 export async function loadReportingInput(year: number): Promise<ReportingInput> {
     const ctx = await resolveContextForYear(year)
     const exercise = await getExercise(exerciseIdForYear(year))
-    const [entries, openingBalances, accounts, allocationRules, allDisclosures, foreignCurrencyDetails] = await Promise.all([
+    const [entries, openingBalances, accounts, allocationRules, allDisclosures, foreignCurrencyDetails, fixedAssetFichas] = await Promise.all([
         getEntriesForContext(ctx),
         getOpeningBalances(ctx),
         db.accounts.toArray(),
         db.expenseAllocationRules.toArray(),
         db.manualDisclosures.where('exerciseId').equals(ctx.exerciseId).toArray(),
         loadForeignCurrencyDetails(ctx.periodEnd),
+        // Fichas de bienes de uso (Fase 2J §8): permiten reexpresar la
+        // depreciación bien por bien en vez de con el promedio de la clase.
+        db.fixedAssets.toArray().catch(() => []),
     ])
     // vigentes = las que ninguna otra reemplaza
     const superseded = new Set(allDisclosures.map(d => d.supersedesId).filter(Boolean))
@@ -45,6 +48,7 @@ export async function loadReportingInput(year: number): Promise<ReportingInput> 
         allocationRules,
         manualDisclosures,
         foreignCurrencyDetails,
+        fixedAssetFichas,
     }
 }
 

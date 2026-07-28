@@ -18,6 +18,20 @@ import { resetJournalRangeForScenario } from './scenarioReset'
 import { postClosing, generateOpeningEntry } from '../application/closingService'
 import { exerciseIdForYear } from '../migration/migrateV17'
 
+/** Completa la identidad de la empresa demo si todavía no fue configurada */
+async function ensureScenarioCompany(): Promise<void> {
+    const { getDefaultCompany } = await import('../application/contextService')
+    const company = await getDefaultCompany()
+    if (company.legalName && company.legalName !== 'Empresa ContaLivre' && company.taxId) return
+    await db.companies.update(company.id, {
+        legalName: company.legalName && company.legalName !== 'Empresa ContaLivre'
+            ? company.legalName
+            : 'Entidad de práctica S.A.',
+        taxId: company.taxId ?? '30-00000000-0',
+        updatedAt: new Date().toISOString(),
+    })
+}
+
 export interface ScenarioStep {
     order: number
     title: string
@@ -70,6 +84,11 @@ export async function runScenario(def: ScenarioDef): Promise<{ year: number; pos
 
     // Reset del ejercicio demo (borra solo asientos de escenario de ese año)
     await resetScenario(def)
+
+    // Identidad de la entidad emisora: desde la Fase 2J el cierre exige que la
+    // empresa esté identificada. Un escenario que cierra su ejercicio necesita
+    // una entidad, igual que un usuario. Sólo se completa si está en blanco.
+    await ensureScenarioCompany()
 
     let posted = 0
     for (const step of def.steps) {
