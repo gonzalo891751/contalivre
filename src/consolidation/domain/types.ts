@@ -20,7 +20,7 @@
  */
 
 import type { Account } from '../../core/models'
-import type { StatementsBundle, ValidationCheck } from '../../reporting/domain/types'
+import type { NormalizedTrialBalance, StatementsBundle, ValidationCheck } from '../../reporting/domain/types'
 
 // ─────────────────────────────────────────────────────────────
 // 1. Grupo económico y perímetro
@@ -168,7 +168,15 @@ export type ConsolidatedLineId =
     | 'ANC_LLAVE_NEGOCIO'
     // Resultados
     | 'ER_VENTAS' | 'ER_COSTO_VENTAS' | 'ER_GASTOS_ADMINISTRACION'
-    | 'ER_GASTOS_COMERCIALIZACION' | 'ER_RESULTADOS_FINANCIEROS'
+    | 'ER_GASTOS_COMERCIALIZACION'
+    /**
+     * Ingresos y gastos financieros se exponen SEPARADOS en la hoja de
+     * consolidación aunque el ER individual los presente netos: si se mezclaran,
+     * eliminar los intereses internos —ingreso de una entidad y gasto de la
+     * otra por el mismo importe— sería invisible, y el invariante "los ingresos
+     * y gastos intragrupo quedan en cero" no podría verificarse.
+     */
+    | 'ER_INGRESOS_FINANCIEROS' | 'ER_GASTOS_FINANCIEROS'
     | 'ER_RESULTADO_INVERSIONES_PERMANENTES' | 'ER_OTROS_RESULTADOS'
     | 'ER_IMPUESTO_GANANCIAS'
     /** resultado del ejercicio atribuible a la PNC */
@@ -572,6 +580,19 @@ export interface ConsolidationEntityInput {
     votingRights?: number
     /** juego individual canónico producido por src/reporting */
     statements: StatementsBundle
+    /**
+     * Balance de comprobación de la entidad ANTES de la refundición del
+     * resultado, construido con el mismo `buildNormalizedTrialBalance` del motor
+     * individual excluyendo el asiento estructural de cierre.
+     *
+     * Es la base correcta para consolidar: expone el patrimonio neto sin el
+     * resultado del ejercicio y las cuentas de resultado con su movimiento del
+     * período, de modo que TODA la hoja de trabajo vive en un único espacio
+     * Debe−Haber cuya suma es exactamente cero. Así, cada eliminación es un
+     * asiento balanceado en ese mismo espacio y el control de la ecuación
+     * patrimonial es aritmética, no una comparación entre dos modelos.
+     */
+    trialBalance: NormalizedTrialBalance
     /** plan de cuentas aplicable a la entidad */
     accounts: Account[]
     /** cierre del ejercicio individual */

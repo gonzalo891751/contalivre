@@ -53,7 +53,8 @@ export const CONSOLIDATED_LINES: ConsolidatedLineSpec[] = [
     { id: 'ER_COSTO_VENTAS', label: 'Costo de las mercaderías vendidas', section: 'RESULT', sortOrder: 620, naturalSign: 1 },
     { id: 'ER_GASTOS_ADMINISTRACION', label: 'Gastos de administración', section: 'RESULT', sortOrder: 630, naturalSign: 1 },
     { id: 'ER_GASTOS_COMERCIALIZACION', label: 'Gastos de comercialización', section: 'RESULT', sortOrder: 640, naturalSign: 1 },
-    { id: 'ER_RESULTADOS_FINANCIEROS', label: 'Resultados financieros y por tenencia', section: 'RESULT', sortOrder: 650, naturalSign: -1 },
+    { id: 'ER_INGRESOS_FINANCIEROS', label: 'Ingresos financieros y por tenencia', section: 'RESULT', sortOrder: 650, naturalSign: -1 },
+    { id: 'ER_GASTOS_FINANCIEROS', label: 'Gastos financieros y por tenencia', section: 'RESULT', sortOrder: 655, naturalSign: 1 },
     { id: 'ER_RESULTADO_INVERSIONES_PERMANENTES', label: 'Resultado de inversiones permanentes', section: 'RESULT', sortOrder: 660, naturalSign: -1 },
     { id: 'ER_OTROS_RESULTADOS', label: 'Otros ingresos y egresos', section: 'RESULT', sortOrder: 670, naturalSign: -1 },
     { id: 'ER_IMPUESTO_GANANCIAS', label: 'Impuesto a las ganancias', section: 'RESULT', sortOrder: 680, naturalSign: 1 },
@@ -171,8 +172,8 @@ export function deriveConsolidatedLine(account: Account): {
         case 'COGS': return { lineId: 'ER_COSTO_VENTAS', confidence: 'HIGH', rationale: 'Costo de ventas según su grupo de exposición' }
         case 'ADMIN_EXPENSES': return { lineId: 'ER_GASTOS_ADMINISTRACION', confidence: 'HIGH', rationale: 'Gasto de administración según su grupo de exposición' }
         case 'SELLING_EXPENSES': return { lineId: 'ER_GASTOS_COMERCIALIZACION', confidence: 'HIGH', rationale: 'Gasto de comercialización según su grupo de exposición' }
-        case 'FINANCIAL_INCOME':
-        case 'FINANCIAL_EXPENSES': return { lineId: 'ER_RESULTADOS_FINANCIEROS', confidence: 'HIGH', rationale: 'Resultado financiero según su grupo de exposición' }
+        case 'FINANCIAL_INCOME': return { lineId: 'ER_INGRESOS_FINANCIEROS', confidence: 'HIGH', rationale: 'Ingreso financiero según su grupo de exposición' }
+        case 'FINANCIAL_EXPENSES': return { lineId: 'ER_GASTOS_FINANCIEROS', confidence: 'HIGH', rationale: 'Gasto financiero según su grupo de exposición' }
         case 'INCOME_TAX': return { lineId: 'ER_IMPUESTO_GANANCIAS', confidence: 'HIGH', rationale: 'Impuesto a las ganancias según su grupo de exposición' }
         case 'OTHER_OPERATING_INCOME':
         case 'OTHER_INCOME':
