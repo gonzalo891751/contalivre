@@ -15,6 +15,17 @@ import { migrateToV19 } from '../accounting/migration/migrateV19'
 import { migrateToV20 } from '../accounting/migration/migrateV20'
 import { migrateToV21 } from '../accounting/migration/migrateV21'
 import { migrateToV22 } from '../accounting/migration/migrateV22'
+import { migrateToV23 } from '../accounting/migration/migrateV23'
+import type {
+    ConsolidationAccountMapping,
+    ConsolidationExercise,
+    ConsolidationMemberLink,
+    EconomicGroup,
+    GroupMember,
+    IntragroupOperation,
+    ManualConsolidationAdjustment,
+    ReciprocalBalance,
+} from '../consolidation/domain/types'
 import type { CashFlowPolicy } from '../reporting/policy/cashFlowPolicy'
 import type {
     InventoryProduct,
@@ -135,6 +146,15 @@ class ContableDatabase extends Dexie {
     manualDisclosures!: EntityTable<ManualDisclosure, 'id'>
     // ── Fase 2G: política del Estado de Flujo de Efectivo versionada ──
     cashFlowPolicies!: EntityTable<CashFlowPolicy, 'id'>
+    // ── Fase 2K: consolidación de estados contables (papeles de trabajo) ──
+    economicGroups!: EntityTable<EconomicGroup, 'id'>
+    groupMembers!: EntityTable<GroupMember, 'id'>
+    consolidationExercises!: EntityTable<ConsolidationExercise, 'id'>
+    consolidationMemberLinks!: EntityTable<ConsolidationMemberLink, 'id'>
+    consolidationMappings!: EntityTable<ConsolidationAccountMapping, 'id'>
+    reciprocalBalances!: EntityTable<ReciprocalBalance, 'id'>
+    intragroupOperations!: EntityTable<IntragroupOperation, 'id'>
+    consolidationAdjustments!: EntityTable<ManualConsolidationAdjustment, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -594,6 +614,20 @@ class ContableDatabase extends Dexie {
         this.version(22).stores({
             cashFlowPolicies: 'id, companyId, exerciseId, status',
         }).upgrade(migrateToV22)
+
+        // Version 23 (Fase 2K): consolidación de estados contables. Tablas de
+        // papeles de trabajo del grupo económico. Estrictamente aditiva: no
+        // toca cuentas, asientos, ejercicios ni importes existentes.
+        this.version(23).stores({
+            economicGroups: 'id, parentCompanyId, active',
+            groupMembers: 'id, groupId, companyId, relation, method, [groupId+companyId]',
+            consolidationExercises: 'id, groupId, reportingDate, status, [groupId+reportingDate]',
+            consolidationMemberLinks: 'id, consolidationId, memberId, companyId, [consolidationId+companyId]',
+            consolidationMappings: 'id, groupId, companyId, accountId, intragroupCategory, [groupId+companyId+accountId]',
+            reciprocalBalances: 'id, consolidationId, creditorCompanyId, debtorCompanyId, kind, status',
+            intragroupOperations: 'id, consolidationId, sellerCompanyId, buyerCompanyId, type',
+            consolidationAdjustments: 'id, consolidationId, category, status',
+        }).upgrade(migrateToV23)
     }
 }
 
