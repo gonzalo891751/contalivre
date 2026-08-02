@@ -45,17 +45,34 @@ function randomId(prefix: string): string {
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
+/**
+ * Identidad del ejercicio por empresa (Fase 2K §5).
+ *
+ * Hasta la Fase 2I el id era `exercise-company-default-<año>` porque sólo
+ * existía una empresa. La consolidación necesita que dos entidades del mismo
+ * grupo tengan ejercicios distintos para el MISMO año, así que el id se
+ * parametriza por empresa. La empresa por defecto conserva LITERALMENTE su id
+ * histórico: los ejercicios, snapshots y datasets ya creados siguen resolviendo.
+ */
+export function exerciseIdFor(companyId: string, year: number): string {
+    return `exercise-${companyId}-${year}`
+}
+
+export function periodIdFor(companyId: string, year: number): string {
+    return `period-${companyId}-${year}`
+}
+
 export function exerciseIdForYear(year: number): string {
-    return `exercise-${DEFAULT_COMPANY_ID}-${year}`
+    return exerciseIdFor(DEFAULT_COMPANY_ID, year)
 }
 
 export function periodIdForYear(year: number): string {
-    return `period-${DEFAULT_COMPANY_ID}-${year}`
+    return periodIdFor(DEFAULT_COMPANY_ID, year)
 }
 
 export function buildAnnualExercise(companyId: string, year: number): AccountingExercise {
     return {
-        id: exerciseIdForYear(year),
+        id: exerciseIdFor(companyId, year),
         companyId,
         name: `Ejercicio ${year}`,
         startDate: `${year}-01-01`,
@@ -67,8 +84,8 @@ export function buildAnnualExercise(companyId: string, year: number): Accounting
 
 export function buildAnnualPeriod(companyId: string, year: number): AccountingPeriod {
     return {
-        id: periodIdForYear(year),
-        exerciseId: exerciseIdForYear(year),
+        id: periodIdFor(companyId, year),
+        exerciseId: exerciseIdFor(companyId, year),
         companyId,
         name: `Ejercicio ${year}`,
         startDate: `${year}-01-01`,

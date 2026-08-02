@@ -25,6 +25,7 @@ import {
     SYSTEM_META_ID,
     buildAnnualExercise,
     buildAnnualPeriod,
+    exerciseIdFor,
     exerciseIdForYear,
 } from '../migration/migrateV17'
 import { APP_VERSION, CURRENT_SCHEMA_VERSION as SCHEMA_VERSION } from '../migration/versions'
@@ -49,6 +50,54 @@ export async function getDefaultCompany(): Promise<Company> {
         currency: 'ARS',
         jurisdiction: 'AR',
         accountingFramework: 'RT 54 (texto ordenado por RT 59)',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        active: true,
+    }
+    await db.companies.put(company)
+    return company
+}
+
+export async function listCompanies(): Promise<Company[]> {
+    await getDefaultCompany()
+    const all = await db.companies.toArray()
+    return all.sort((a, b) =>
+        (a.id === DEFAULT_COMPANY_ID ? -1 : b.id === DEFAULT_COMPANY_ID ? 1 : 0) ||
+        a.legalName.localeCompare(b.legalName))
+}
+
+export async function getCompany(id: string): Promise<Company | undefined> {
+    return db.companies.get(id)
+}
+
+/**
+ * Alta de una entidad adicional (Fase 2K §5): las controladas de un grupo
+ * económico son empresas de pleno derecho, con su propio Diario, sus propios
+ * ejercicios y sus propios estados producidos por el MISMO motor canónico.
+ * No se crean "paquetes de reporte" simulados.
+ */
+export async function createCompany(input: {
+    id?: string
+    legalName: string
+    tradeName?: string
+    taxId?: string
+    currency?: string
+    jurisdiction?: string
+    accountingFramework?: string
+}): Promise<Company> {
+    const legalName = input.legalName.trim()
+    if (!legalName) throw new Error('La denominación de la entidad es obligatoria')
+    const id = input.id ?? generateId()
+    if (await db.companies.get(id)) throw new Error(`Ya existe una entidad con el id ${id}`)
+    const timestamp = nowISO()
+    const company: Company = {
+        id,
+        legalName,
+        tradeName: input.tradeName,
+        taxId: input.taxId,
+        currency: input.currency ?? 'ARS',
+        jurisdiction: input.jurisdiction ?? 'AR',
+        accountingFramework: input.accountingFramework ?? 'RT 54 (texto ordenado por RT 59)',
         createdAt: timestamp,
         updatedAt: timestamp,
         active: true,
@@ -120,6 +169,20 @@ export async function createExercise(
         companyId: input.companyId,
         actorId: input.actorId,
     })
+}
+
+/**
+ * Ejercicio de una empresa para un año calendario (Fase 2K §5). Resuelve por
+ * id determinístico y, si no existe, por rango de fechas: los ejercicios
+ * creados antes de la parametrización por empresa conservan su id histórico.
+ */
+export async function getExerciseForCompanyYear(
+    companyId: string,
+    year: number
+): Promise<AccountingExercise | undefined> {
+    const byId = await db.exercises.get(exerciseIdFor(companyId, year))
+    if (byId) return byId
+    return getExerciseForDate(`${year}-12-31`, companyId)
 }
 
 export async function closeExercise(exerciseId: string, actorId = LOCAL_ACTOR): Promise<void> {
@@ -251,4 +314,4 @@ export async function setCurrentExercise(exerciseId: string): Promise<void> {
     })
 }
 
-export { DEFAULT_COMPANY_ID, exerciseIdForYear }
+export { DEFAULT_COMPANY_ID, exerciseIdFor, exerciseIdForYear }

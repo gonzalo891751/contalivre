@@ -14,6 +14,7 @@
 import { db } from '../storage/db'
 import { getExercise } from '../accounting/application/contextService'
 import { getSystemMeta } from '../accounting/application/contextService'
+import { DEFAULT_COMPANY_ID } from '../accounting/migration/migrateV17'
 import {
     APP_VERSION,
     ACCOUNTING_ENGINE_VERSION,
@@ -130,6 +131,11 @@ export interface ReportingBundle {
 export interface LoadReportingBundleOptions {
     withComparative?: boolean
     /**
+     * Entidad del grupo cuyo juego se carga (Fase 2K §5). Omitirlo conserva el
+     * comportamiento histórico: la empresa por defecto de la instalación.
+     */
+    companyId?: string
+    /**
      * set de índices para las expresiones en moneda de cierre (Fase 2F §13):
      * el MISMO set alimenta EFE, bienes de uso y demás. Se identifica por id
      * para garantizar que todo el juego use una única serie.
@@ -150,11 +156,11 @@ export async function loadReportingBundle(
     year: number,
     options: LoadReportingBundleOptions = {}
 ): Promise<ReportingBundle> {
-    const input = await loadReportingInput(year)
+    const input = await loadReportingInput(year, { companyId: options.companyId })
 
     let prevInput: Awaited<ReturnType<typeof loadReportingInput>> | null = null
     if (options.withComparative) {
-        const candidate = await loadReportingInput(year - 1)
+        const candidate = await loadReportingInput(year - 1, { companyId: options.companyId })
         if (candidate.entries.length > 0 || candidate.openingBalances.size > 0) {
             prevInput = candidate
             input.comparative = buildStatements(candidate)
@@ -223,11 +229,12 @@ export async function loadReportingBundle(
 
     // ── Metadatos ────────────────────────────────────────────
     const [company, exercise, meta, hasDrafts] = await Promise.all([
-        db.companies.toCollection().first(),
+        db.companies.get(input.context.companyId),
         getExercise(input.context.exerciseId),
         getSystemMeta().catch(() => null),
         db.entries.where('date').between(input.context.periodStart, input.context.periodEnd, true, true)
-            .filter(e => e.status === 'DRAFT').count(),
+            .filter(e => e.status === 'DRAFT' && (e.companyId ?? DEFAULT_COMPANY_ID) === input.context.companyId)
+            .count(),
     ])
 
     // Puerta de publicación unificada (§5.3): considera controles nominales y
