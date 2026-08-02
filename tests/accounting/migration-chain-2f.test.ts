@@ -1,10 +1,14 @@
 /**
- * Fase 2F (§15) — Cadena de migraciones v16 → v21 y ciclo backup/restore/reset.
+ * Fase 2F (§15), extendida en la Fase 2K — cadena de migraciones v16 → v23 y
+ * ciclo backup/restore/reset.
  *
  * Abre una base v16 legacy con la definición REAL de la app (todas las
- * upgrades v17→v21 encadenadas) y verifica que la data sobrevive, el schema
- * queda en v21 y las tablas nuevas (expenseAllocationRules, manualDisclosures)
- * existen. Luego prueba backup → reset → restore con datos del schema actual.
+ * upgrades v17→v23 encadenadas) y verifica que la data sobrevive, que el schema
+ * queda en la versión vigente y que las tablas nuevas existen. Cada fase que
+ * eleva el esquema EXTIENDE esta cadena en lugar de reescribirla: así se prueba
+ * que una instalación antigua sigue migrando hasta hoy sin perder nada.
+ *
+ * Luego prueba backup → reset → restore con datos del schema actual.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -24,6 +28,7 @@ import { migrateToV19 } from '../../src/accounting/migration/migrateV19'
 import { migrateToV20 } from '../../src/accounting/migration/migrateV20'
 import { migrateToV21 } from '../../src/accounting/migration/migrateV21'
 import { migrateToV22 } from '../../src/accounting/migration/migrateV22'
+import { migrateToV23 } from '../../src/accounting/migration/migrateV23'
 
 const DBN = 'ChainMigrationTestDb'
 
@@ -43,7 +48,7 @@ async function seedV16(): Promise<void> {
     legacy.close()
 }
 
-/** Definición encadenada v16→v21 (réplica de las upgrades reales) */
+/** Definición encadenada v16→v23 (réplica de las upgrades reales) */
 function defineChainDb(): Dexie {
     const d = new Dexie(DBN)
     d.version(16).stores({
@@ -64,14 +69,24 @@ function defineChainDb(): Dexie {
     d.version(20).stores({ expenseAllocationRules: 'id, accountId, validFrom' }).upgrade(migrateToV20)
     d.version(21).stores({ manualDisclosures: 'id, companyId, exerciseId, noteType, status' }).upgrade(migrateToV21)
     d.version(22).stores({ cashFlowPolicies: 'id, companyId, exerciseId, status' }).upgrade(migrateToV22)
+    d.version(23).stores({
+        economicGroups: 'id, parentCompanyId, active',
+        groupMembers: 'id, groupId, companyId, relation, method, [groupId+companyId]',
+        consolidationExercises: 'id, groupId, reportingDate, status, [groupId+reportingDate]',
+        consolidationMemberLinks: 'id, consolidationId, memberId, companyId, [consolidationId+companyId]',
+        consolidationMappings: 'id, groupId, companyId, accountId, intragroupCategory, [groupId+companyId+accountId]',
+        reciprocalBalances: 'id, consolidationId, creditorCompanyId, debtorCompanyId, kind, status',
+        intragroupOperations: 'id, consolidationId, sellerCompanyId, buyerCompanyId, type',
+        consolidationAdjustments: 'id, consolidationId, category, status',
+    }).upgrade(migrateToV23)
     return d
 }
 
-describe('Fase 2F — cadena de migraciones v16 → v21', () => {
+describe('Fase 2F/2K — cadena de migraciones v16 → v23', () => {
     beforeEach(async () => { await Dexie.delete(DBN); await seedV16() })
     afterEach(async () => { await Dexie.delete(DBN) })
 
-    it('la data v16 sobrevive y el schema queda en v21 con las tablas nuevas', async () => {
+    it('la data v16 sobrevive y el schema queda en la version vigente con las tablas nuevas', async () => {
         const chain = defineChainDb()
         await chain.open()
 
@@ -83,6 +98,15 @@ describe('Fase 2F — cadena de migraciones v16 → v21', () => {
         expect((await chain.table('entries').get('leg-1')).status).toBe('POSTED')
         // tablas nuevas existen y son usables
         expect(chain.tables.map(t => t.name)).toEqual(expect.arrayContaining(['expenseAllocationRules', 'manualDisclosures', 'reportSnapshots', 'inflationIndexSets', 'cashFlowPolicies']))
+        // v23 (Fase 2K): tablas de consolidación, estrictamente aditivas
+        expect(chain.tables.map(t => t.name)).toEqual(expect.arrayContaining([
+            'economicGroups', 'groupMembers', 'consolidationExercises', 'consolidationMemberLinks',
+            'consolidationMappings', 'reciprocalBalances', 'intragroupOperations', 'consolidationAdjustments',
+        ]))
+        // la migración a v23 NO crea ningún grupo: un grupo económico es una
+        // decisión del usuario, no algo que el sistema deba suponer
+        expect(await chain.table('economicGroups').count()).toBe(0)
+        expect(await chain.table('groupMembers').count()).toBe(0)
         await chain.table('manualDisclosures').add({ id: 'm1', companyId: 'c', exerciseId: 'e', noteType: 'contingencias', title: 't', content: 'x', status: 'DRAFT', version: 1, createdAt: 'now', createdBy: 'a', updatedAt: 'now', updatedBy: 'a' })
         expect(await chain.table('manualDisclosures').count()).toBe(1)
         // v22: política EFE heredada creada de forma determinista para la empresa
@@ -91,10 +115,11 @@ describe('Fase 2F — cadena de migraciones v16 → v21', () => {
         expect(policies[0].companyId).toBe('company-default')
         expect(policies[0].requiresReview).toBe(true)
         expect(policies[0].cashClassifications.some((c: { accountId: string }) => c.accountId === 'caja')).toBe(true)
-        // metadata de sistema en v22
+        // metadata de sistema en la última versión de la cadena
         const meta = await chain.table('systemMeta').get('system')
-        expect(meta.schemaVersion).toBe(22)
-        expect(meta.lastMigrationId).toBe('v22-cashflow-policies')
+        expect(meta.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
+        expect(meta.schemaVersion).toBe(23)
+        expect(meta.lastMigrationId).toBe('v23-fase2k-consolidacion')
 
         chain.close()
     })

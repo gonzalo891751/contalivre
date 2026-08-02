@@ -58,7 +58,10 @@ export const CONSOLIDATED_LINES: ConsolidatedLineSpec[] = [
     { id: 'ER_RESULTADO_INVERSIONES_PERMANENTES', label: 'Resultado de inversiones permanentes', section: 'RESULT', sortOrder: 660, naturalSign: -1 },
     { id: 'ER_OTROS_RESULTADOS', label: 'Otros ingresos y egresos', section: 'RESULT', sortOrder: 670, naturalSign: -1 },
     { id: 'ER_IMPUESTO_GANANCIAS', label: 'Impuesto a las ganancias', section: 'RESULT', sortOrder: 680, naturalSign: 1 },
-    { id: 'ER_RESULTADO_PNC', label: 'Resultado atribuible a la participación no controladora', section: 'RESULT', sortOrder: 690, naturalSign: -1 },
+    // Se expone con signo DEUDOR: detrae del resultado atribuible a los
+    // propietarios de la controladora, igual que un cargo. Con signo acreedor
+    // el importe saldría invertido en el Estado de Resultados consolidado.
+    { id: 'ER_RESULTADO_PNC', label: 'Resultado atribuible a la participación no controladora', section: 'RESULT', sortOrder: 690, naturalSign: 1 },
     // ── Salvaguarda ──
     { id: 'SIN_CLASIFICAR', label: '⚠ Cuentas sin clasificación consolidada', section: 'ASSET_CURRENT', sortOrder: 999, naturalSign: 1 },
 ]

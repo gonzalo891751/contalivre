@@ -350,9 +350,27 @@ export interface IntragroupOperation {
     deferredTaxRate?: number
     /** para transferencias de bienes de uso: depreciación del período sobre el mayor valor */
     depreciationOnUnrealized?: number
+    /**
+     * Movimiento de efectivo que la operación produjo ENTRE las dos entidades
+     * (Fase 2K §14). El grupo no puede generar flujos de efectivo consigo mismo:
+     * lo que una entidad pagó es lo que la otra cobró, así que ambos lados se
+     * eliminan del EFE consolidado y el efectivo total del grupo no cambia.
+     *
+     * Ausente = la operación no movió efectivo en el período (quedó a crédito).
+     */
+    cashFlow?: {
+        /** importe efectivamente cobrado/pagado entre las entidades */
+        amount: number
+        /** actividad en la que el PAGADOR expuso la salida */
+        payerActivity: CashFlowActivity
+        /** actividad en la que el COBRADOR expuso la entrada */
+        receiverActivity: CashFlowActivity
+    }
     createdAt: string
     updatedAt: string
 }
+
+export type CashFlowActivity = 'OPERATING' | 'INVESTING' | 'FINANCING'
 
 // ─────────────────────────────────────────────────────────────
 // 6. Ajustes manuales de consolidación
