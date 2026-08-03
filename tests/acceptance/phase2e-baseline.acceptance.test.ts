@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { resetDb, seedTestAccounts, simpleLines } from '../accounting/helpers'
+import { documentNominalTestClosing, resetDb, seedTestAccounts, simpleLines } from '../accounting/helpers'
 import {
     createDraftEntry,
     postDraft,
@@ -55,6 +55,7 @@ describe('GATE 2E — invariantes contables previos', () => {
     beforeAll(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing(Y)
     })
 
     it('borradores fuera de libros; POSTED inmutable; único escritor valida', async () => {

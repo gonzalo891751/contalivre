@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { resetDb, seedTestAccounts, simpleLines } from './helpers'
+import { documentNominalTestClosing, resetDb, seedTestAccounts, simpleLines } from './helpers'
 import { postNewEntry } from '../../src/accounting/application/journalService'
 import { postClosing, generateOpeningEntry, reopenClosedExercise } from '../../src/accounting/application/closingService'
 import { exerciseIdForYear } from '../../src/accounting/application/contextService'
@@ -17,6 +17,7 @@ describe('Fase 2C — snapshots de reportes', () => {
     beforeEach(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await postNewEntry({ date: '2025-01-10', memo: 'aporte', lines: simpleLines('caja', 'capital', 1000) })
         await postNewEntry({ date: '2025-06-01', memo: 'venta', lines: simpleLines('caja', 'ventas', 500) })
     })
@@ -68,6 +69,7 @@ describe('Fase 2C — anexo de evolución de bienes de uso', () => {
     beforeEach(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
     })
 
     it('la nota de bienes de uso expone la regularizadora en negativo y reconcilia con el ANC', async () => {

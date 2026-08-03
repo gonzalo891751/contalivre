@@ -21,6 +21,11 @@ import {
     type ClosingMeasurement, type MeasurementCriterion, type PendingMeasurement,
 } from '../../reporting/measurement/measurementTypes'
 import type { Account } from '../../core/models'
+import { allowedMeasurementCriteria, calculateRecoverability } from '../../reporting/measurement/measurementPolicy'
+import { savePolicyDecision } from '../../reporting/closing/closingWorkPaperService'
+import { generateId } from '../../storage/db'
+import { LOCAL_ACTOR } from '../../accounting/domain/types'
+import type { MeasurementDestination } from '../../reporting/closing/closingWorkPaperTypes'
 
 const money = (n: number) =>
     new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -123,6 +128,40 @@ export function MedicionesPanel(props: MedicionesPanelProps) {
                         setBusy(true); setMessage(null)
                         try {
                             const account = accounts.find(a => a.id === editing.accountId)!
+                            const now = new Date().toISOString()
+                            const policyDecision = {
+                                id: generateId(),
+                                accountId: account.id,
+                                rubro: editing.rubro,
+                                accountKind: account.kind,
+                                normalSide: account.normalSide,
+                                destination: values.destination,
+                                criterion: values.criterion,
+                                entityCategory: 'PEQUENA' as const,
+                                marketAvailable: values.marketAvailable,
+                                reliableDataAvailable: values.reliableDataAvailable,
+                                material: true,
+                                rationale: values.policyRationale,
+                                normativeSource: 'RT 54, texto ordenado por RT 59 — política por rubro y recuperabilidad.',
+                                source: values.source,
+                                effectiveAt: props.closingDate,
+                                selectedBy: LOCAL_ACTOR,
+                                selectedAt: now,
+                            }
+                            await savePolicyDecision(props.companyId, props.exerciseId, policyDecision)
+                            const recoverability = values.recoverabilityRequired && values.recoverableAmount !== undefined
+                                ? calculateRecoverability({
+                                    required: true,
+                                    level: 'ACTIVO_INDIVIDUAL',
+                                    basis: 'VNR',
+                                    accountingAmount: values.closingAmount,
+                                    netRealizableValue: values.recoverableAmount,
+                                    evidence: values.recoverabilityEvidence || values.evidence || values.source,
+                                })
+                                : undefined
+                            const finalAmount = recoverability
+                                ? values.closingAmount - recoverability.impairmentLoss + recoverability.reversal
+                                : values.closingAmount
                             const saved = await saveMeasurement({
                                 companyId: props.companyId,
                                 exerciseId: props.exerciseId,
@@ -130,9 +169,14 @@ export function MedicionesPanel(props: MedicionesPanelProps) {
                                 rubro: editing.rubro,
                                 account,
                                 criterion: values.criterion,
+                                entityCategory: 'PEQUENA',
+                                destination: values.destination,
+                                marketAvailable: values.marketAvailable,
+                                reliableDataAvailable: values.reliableDataAvailable,
+                                policyDecision,
                                 previousAmount: values.previousAmount,
-                                previousIsRestated: false,
-                                closingAmount: values.closingAmount,
+                                previousIsRestated: values.previousIsRestated,
+                                closingAmount: finalAmount,
                                 unitValue: values.unitValue,
                                 quantity: values.quantity,
                                 source: values.source,
@@ -142,6 +186,7 @@ export function MedicionesPanel(props: MedicionesPanelProps) {
                                 method: values.method,
                                 assumptions: values.assumptions,
                                 recoverableAmount: values.recoverableAmount,
+                                recoverability,
                                 holdingResultAccountId: values.holdingAccountId,
                                 responsible: values.responsible,
                                 notes: values.notes,
@@ -206,7 +251,12 @@ export function MedicionesPanel(props: MedicionesPanelProps) {
 interface FormValues {
     criterion: MeasurementCriterion
     previousAmount: number
+    previousIsRestated: boolean
     closingAmount: number
+    destination: MeasurementDestination
+    marketAvailable: boolean
+    reliableDataAvailable: boolean
+    policyRationale: string
     quantity?: number
     unitValue?: number
     source: string
@@ -216,12 +266,14 @@ interface FormValues {
     method?: string
     assumptions?: string
     recoverableAmount?: number
+    recoverabilityRequired: boolean
+    recoverabilityEvidence?: string
     holdingAccountId?: string
     responsible?: string
     notes?: string
 }
 
-function FormularioMedicion({ pending, closingDate, previousAmount, holdingAccounts, busy, onCancel, onSave }: {
+function FormularioMedicion({ pending, closingDate, previousAmount, holdingAccounts, accounts, busy, onCancel, onSave }: {
     pending: PendingMeasurement
     closingDate: string
     previousAmount: number
@@ -231,14 +283,36 @@ function FormularioMedicion({ pending, closingDate, previousAmount, holdingAccou
     onCancel: () => void
     onSave: (v: FormValues) => void | Promise<void>
 }) {
+    const account = accounts.find(candidate => candidate.id === pending.accountId)!
+    const defaultDestination: MeasurementDestination = pending.rubro === 'BIENES_DE_CAMBIO'
+        ? 'VENTA' : pending.rubro === 'CREDITOS_Y_DEUDAS' ? 'COBRO_PAGO'
+            : pending.rubro === 'BIENES_DE_USO_REVALUADOS' ? 'USO' : 'NEGOCIACION'
     const [v, setV] = useState<FormValues>({
-        criterion: 'VALOR_NETO_REALIZACION',
+        criterion: 'COSTO_REPOSICION',
         previousAmount,
+        previousIsRestated: false,
         closingAmount: previousAmount,
+        destination: defaultDestination,
+        marketAvailable: true,
+        reliableDataAvailable: true,
+        policyRationale: '',
         source: '',
+        recoverabilityRequired: false,
         holdingAccountId: holdingAccounts[0]?.id,
     })
-    const diferencia = v.closingAmount - v.previousAmount
+    const criteria = useMemo(() => allowedMeasurementCriteria({
+        entityCategory: 'PEQUENA', rubro: pending.rubro, account,
+        destination: v.destination, marketAvailable: v.marketAvailable,
+        reliableDataAvailable: v.reliableDataAvailable,
+    }), [pending.rubro, account, v.destination, v.marketAvailable, v.reliableDataAvailable])
+    useEffect(() => {
+        if (criteria.length > 0 && !criteria.some(rule => rule.criterion === v.criterion)) {
+            setV(current => ({ ...current, criterion: criteria[0].criterion }))
+        }
+    }, [criteria, v.criterion])
+    const finalAmount = v.recoverabilityRequired && v.recoverableAmount !== undefined
+        ? Math.min(v.closingAmount, v.recoverableAmount) : v.closingAmount
+    const diferencia = finalAmount - v.previousAmount
 
     return (
         <div className="card" style={{ padding: 16, marginBottom: 14, borderLeft: '4px solid #2563eb' }} data-testid="medicion-formulario">
@@ -253,9 +327,16 @@ function FormularioMedicion({ pending, closingDate, previousAmount, holdingAccou
                 <Campo label="Criterio de medición">
                     <select value={v.criterion} onChange={e => setV({ ...v, criterion: e.target.value as MeasurementCriterion })}
                         style={input} data-testid="medicion-criterio">
-                        {(Object.keys(CRITERION_LABEL) as MeasurementCriterion[]).map(k => (
-                            <option key={k} value={k}>{CRITERION_LABEL[k]}</option>
+                        {criteria.map(rule => (
+                            <option key={rule.criterion} value={rule.criterion}>{CRITERION_LABEL[rule.criterion]}</option>
                         ))}
+                    </select>
+                </Campo>
+                <Campo label="Destino de la partida">
+                    <select value={v.destination} onChange={e => setV({ ...v, destination: e.target.value as MeasurementDestination })} style={input}>
+                        <option value="USO">Uso</option><option value="VENTA">Venta</option>
+                        <option value="NEGOCIACION">Negociación</option><option value="COBRO_PAGO">Cobro o pago</option>
+                        <option value="INVERSION">Inversión</option><option value="NO_DEFINIDO">A definir</option>
                     </select>
                 </Campo>
                 <Campo label="Medición anterior (importe contable)">
@@ -271,6 +352,16 @@ function FormularioMedicion({ pending, closingDate, previousAmount, holdingAccou
                     <input type="number" step="0.01" value={v.recoverableAmount ?? ''}
                         onChange={e => setV({ ...v, recoverableAmount: e.target.value === '' ? undefined : Number(e.target.value) })}
                         style={input} />
+                </Campo>
+                <Campo label="Base anterior">
+                    <label style={{ display: 'flex', gap: 7, alignItems: 'center', minHeight: 38, fontSize: '0.78rem' }}>
+                        <input type="checkbox" checked={v.previousIsRestated} onChange={e => setV({ ...v, previousIsRestated: e.target.checked })} />
+                        Ya estaba expresada en moneda de cierre
+                    </label>
+                </Campo>
+                <Campo label="Datos para la política">
+                    <label style={{ display: 'flex', gap: 7, alignItems: 'center', fontSize: '0.76rem' }}><input type="checkbox" checked={v.marketAvailable} onChange={e => setV({ ...v, marketAvailable: e.target.checked })} />Mercado disponible</label>
+                    <label style={{ display: 'flex', gap: 7, alignItems: 'center', fontSize: '0.76rem' }}><input type="checkbox" checked={v.reliableDataAvailable} onChange={e => setV({ ...v, reliableDataAvailable: e.target.checked })} />Datos fiables</label>
                 </Campo>
                 <Campo label="Cantidad (opcional)">
                     <input type="number" step="0.0001" value={v.quantity ?? ''}
@@ -304,6 +395,22 @@ function FormularioMedicion({ pending, closingDate, previousAmount, holdingAccou
                 </Campo>
             </div>
 
+            <Campo label="Fundamento de la política seleccionada">
+                <textarea rows={2} value={v.policyRationale} onChange={e => setV({ ...v, policyRationale: e.target.value })}
+                    style={{ ...input, resize: 'vertical' }} placeholder="Por qué este criterio corresponde a este rubro, destino y evidencia…" />
+            </Campo>
+
+            <label style={{ display: 'flex', gap: 7, alignItems: 'center', marginTop: 10, fontSize: '0.8rem', fontWeight: 600 }}>
+                <input type="checkbox" checked={v.recoverabilityRequired} onChange={e => setV({ ...v, recoverabilityRequired: e.target.checked })} />
+                Corresponde evaluar recuperabilidad
+            </label>
+            {v.recoverabilityRequired && (
+                <Campo label="Evidencia de recuperabilidad">
+                    <input value={v.recoverabilityEvidence ?? ''} onChange={e => setV({ ...v, recoverabilityEvidence: e.target.value })}
+                        style={input} placeholder="Indicadores, cálculo y documento de respaldo…" />
+                </Campo>
+            )}
+
             <Campo label="Método y supuestos (opcional)">
                 <textarea rows={2} value={v.assumptions ?? ''} onChange={e => setV({ ...v, assumptions: e.target.value })}
                     style={{ ...input, resize: 'vertical' }} />
@@ -312,7 +419,7 @@ function FormularioMedicion({ pending, closingDate, previousAmount, holdingAccou
             <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', margin: '12px 0' }}>
                 <Recorrido label="Medición anterior" value={money(v.previousAmount)} />
                 <span style={{ color: '#cbd5e1' }}>→</span>
-                <Recorrido label="Medición al cierre" value={money(v.closingAmount)} />
+                <Recorrido label="Medición al cierre" value={money(finalAmount)} />
                 <span style={{ color: '#cbd5e1' }}>→</span>
                 <Recorrido label="Diferencia" value={money(diferencia)}
                     accent={diferencia === 0 ? '#64748b' : diferencia > 0 ? '#15803d' : '#b91c1c'} />
@@ -322,7 +429,8 @@ function FormularioMedicion({ pending, closingDate, previousAmount, holdingAccou
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-primary btn-sm" disabled={busy || !v.source.trim()}
+                <button className="btn btn-primary btn-sm" disabled={busy || !v.source.trim() || !v.policyRationale.trim()
+                    || (v.recoverabilityRequired && (v.recoverableAmount === undefined || !v.recoverabilityEvidence?.trim()))}
                     onClick={() => void onSave(v)} data-testid="medicion-guardar">
                     Guardar como propuesta
                 </button>

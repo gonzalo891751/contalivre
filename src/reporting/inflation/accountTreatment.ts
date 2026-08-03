@@ -19,6 +19,7 @@ import { toCents } from '../../accounting/domain/money'
 import { deriveMonetaryClassification, isPostableAccount } from '../../accounting/taxonomy/taxonomy'
 import { isStructuralClosingEntry } from '../../utils/resultsStatement'
 import type { Account, JournalEntry } from '../../core/models'
+import type { ClosingMeasurement } from '../measurement/measurementTypes'
 
 const fromCents = (c: number) => c / 100
 
@@ -82,6 +83,17 @@ export interface AccountTreatmentRow {
     observations: string[]
     /** Linaje: asientos que formaron el saldo */
     entryIds: string[]
+    /** Secuencia base nominal -> base reexpresada -> medición de cierre. */
+    measurementSequence?: {
+        measurementId: string
+        journalEntryId: string
+        previousHistoricAmount: number
+        previousRestatedAmount: number
+        closingAmount: number
+        inflationAdjustment: number
+        measurementAdjustment: number
+        originPeriods: OriginPeriodRow[]
+    }
 }
 
 export interface CoverageReport {
@@ -120,6 +132,8 @@ export interface TreatmentInput {
     /** período YYYY-MM anterior al inicio del ejercicio (origen de la apertura) */
     openingPeriod: string
     indexes: Map<string, number>
+    /** Mediciones contabilizadas que se aplican después de reexpresar la base. */
+    closingMeasurements?: ClosingMeasurement[]
 }
 
 const NATURALEZA: Record<Account['kind'], string> = {
@@ -189,6 +203,7 @@ export function buildAccountTreatmentMatrix(input: TreatmentInput): AccountTreat
     // ── Movimientos por cuenta y por período de origen ───────
     const movementsByAccount = new Map<string, Map<string, number>>()   // accountId → period → cents
     const entriesByAccount = new Map<string, Set<string>>()
+    const movementDetailsByAccount = new Map<string, Array<{ period: string; cents: number; entryId?: string }>>()
     const balanceCents = new Map<string, number>()
 
     const addMovement = (accountId: string, period: string, cents: number, entryId?: string) => {
@@ -196,6 +211,9 @@ export function buildAccountTreatmentMatrix(input: TreatmentInput): AccountTreat
         let byPeriod = movementsByAccount.get(accountId)
         if (!byPeriod) { byPeriod = new Map(); movementsByAccount.set(accountId, byPeriod) }
         byPeriod.set(period, (byPeriod.get(period) ?? 0) + cents)
+        const details = movementDetailsByAccount.get(accountId) ?? []
+        details.push({ period, cents, entryId })
+        movementDetailsByAccount.set(accountId, details)
         balanceCents.set(accountId, (balanceCents.get(accountId) ?? 0) + cents)
         if (entryId) {
             let ids = entriesByAccount.get(accountId)
@@ -219,6 +237,16 @@ export function buildAccountTreatmentMatrix(input: TreatmentInput): AccountTreat
             addMovement(l.accountId, period, toCents(l.debit || 0) - toCents(l.credit || 0), entry.id)
         }
     }
+
+    const measurementsByAccount = new Map<string, ClosingMeasurement>()
+    for (const measurement of input.closingMeasurements ?? []) {
+        if (measurement.status !== 'CONTABILIZADA' || !measurement.journalEntryId) continue
+        const current = measurementsByAccount.get(measurement.accountId)
+        if (!current || current.updatedAt < measurement.updatedAt) {
+            measurementsByAccount.set(measurement.accountId, measurement)
+        }
+    }
+    const resultRestatementAdjustments = new Map<string, number>()
 
     const missingPeriods = new Set<string>()
     const rows: AccountTreatmentRow[] = []
@@ -327,7 +355,91 @@ export function buildAccountTreatmentMatrix(input: TreatmentInput): AccountTreat
         }
 
         const historicAmount = balance
-        const restatedAmount = needsRestating ? fromCents(restatedCents) : balance
+        let restatedAmount = needsRestating ? fromCents(restatedCents) : balance
+        let measurementSequence: AccountTreatmentRow['measurementSequence']
+        const measurement = measurementsByAccount.get(accountId)
+
+        if (measurement?.journalEntryId) {
+            const details = movementDetailsByAccount.get(accountId) ?? []
+            const beforeMeasurement = details.filter(detail => detail.entryId !== measurement.journalEntryId)
+            const measurementMovementCents = details
+                .filter(detail => detail.entryId === measurement.journalEntryId)
+                .reduce((total, detail) => total + detail.cents, 0)
+            const beforeByPeriod = new Map<string, number>()
+            for (const detail of beforeMeasurement) {
+                beforeByPeriod.set(detail.period, (beforeByPeriod.get(detail.period) ?? 0) + detail.cents)
+            }
+
+            const sequenceOrigins: OriginPeriodRow[] = []
+            let beforeHistoricCents = 0
+            let beforeRestatedCents = 0
+            for (const [period, cents] of Array.from(beforeByPeriod.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+                beforeHistoricCents += cents
+                const coefficient = measurement.previousIsRestated ? 1 : coefficientFor(indexes, period, closePeriod)
+                if (coefficient === null) {
+                    missingPeriods.add(period)
+                    status = 'BLOQUEADO'
+                    observations.push(`Falta el índice de ${period} para reexpresar la base previa a la medición ${measurement.id}.`)
+                }
+                const restated = Math.round(cents * (coefficient ?? 1))
+                beforeRestatedCents += restated
+                sequenceOrigins.push({
+                    period,
+                    historicAmount: fromCents(cents),
+                    coefficient,
+                    restatedAmount: fromCents(restated),
+                })
+            }
+
+            const naturalSign = (measurement.normalSide ?? account.normalSide) === 'CREDIT' ? -1 : 1
+            const declaredPreviousCents = naturalSign * toCents(measurement.previousAmount)
+            if (measurement.previousIsRestated) beforeRestatedCents = declaredPreviousCents
+            const closingCents = naturalSign * toCents(measurement.closingAmount)
+
+            if (Math.abs(beforeHistoricCents - declaredPreviousCents) > 1 && !measurement.previousIsRestated) {
+                status = status === 'BLOQUEADO' ? status : 'ADVERTENCIA'
+                observations.push(
+                    `La base nominal declarada en ${measurement.id} (${fromCents(declaredPreviousCents).toFixed(2)}) ` +
+                    `no coincide con los movimientos previos (${fromCents(beforeHistoricCents).toFixed(2)}).`,
+                )
+            }
+            if (Math.abs(toCents(balance) - closingCents) > 1) {
+                status = 'BLOQUEADO'
+                observations.push(
+                    `La medición ${measurement.id} quedó contabilizada, pero el saldo del libro ` +
+                    `(${balance.toFixed(2)}) no coincide con su valor de cierre (${fromCents(closingCents).toFixed(2)}).`,
+                )
+            }
+
+            const economicMeasurementCents = closingCents - beforeRestatedCents
+            if (measurement.holdingResultAccountId && byId.has(measurement.holdingResultAccountId)) {
+                const resultDeltaCents = measurementMovementCents - economicMeasurementCents
+                resultRestatementAdjustments.set(
+                    measurement.holdingResultAccountId,
+                    (resultRestatementAdjustments.get(measurement.holdingResultAccountId) ?? 0) + resultDeltaCents,
+                )
+            } else {
+                status = 'BLOQUEADO'
+                observations.push(`La medición ${measurement.id} no identifica la cuenta de resultado de contrapartida.`)
+            }
+
+            restatedAmount = fromCents(closingCents)
+            measurementSequence = {
+                measurementId: measurement.id,
+                journalEntryId: measurement.journalEntryId,
+                previousHistoricAmount: fromCents(beforeHistoricCents),
+                previousRestatedAmount: fromCents(beforeRestatedCents),
+                closingAmount: fromCents(closingCents),
+                inflationAdjustment: fromCents(beforeRestatedCents - beforeHistoricCents),
+                measurementAdjustment: fromCents(economicMeasurementCents),
+                originPeriods: sequenceOrigins,
+            }
+            observations.push(
+                `Secuencia aplicada: base ${fromCents(beforeHistoricCents).toFixed(2)} -> ` +
+                `reexpresada ${fromCents(beforeRestatedCents).toFixed(2)} -> ` +
+                `medición ${fromCents(closingCents).toFixed(2)}.`,
+            )
+        }
 
         rows.push({
             accountId, code: account.code, name: account.name,
@@ -344,7 +456,21 @@ export function buildAccountTreatmentMatrix(input: TreatmentInput): AccountTreat
             status,
             observations,
             entryIds,
+            measurementSequence,
         })
+    }
+
+    for (const [resultAccountId, adjustmentCents] of resultRestatementAdjustments) {
+        const resultRow = rows.find(row => row.accountId === resultAccountId)
+        if (!resultRow) {
+            continue
+        }
+        resultRow.restatedAmount = fromCents(toCents(resultRow.restatedAmount) + adjustmentCents)
+        resultRow.adjustment = fromCents(toCents(resultRow.restatedAmount) - toCents(resultRow.historicAmount))
+        resultRow.presentationAmount = resultRow.restatedAmount
+        resultRow.observations.push(
+            `Resultado recalculado contra la base reexpresada de las mediciones: ajuste ${fromCents(adjustmentCents).toFixed(2)}.`,
+        )
     }
 
     rows.sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0))

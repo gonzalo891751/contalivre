@@ -13,25 +13,55 @@
 
 /** Criterio de medición aplicado, según la RT 54 (t.o. RT 59) */
 export type MeasurementCriterion =
+    /** costo histórico sin actualización de la medición */
+    | 'COSTO_HISTORICO'
+    /** costo de adquisición */
+    | 'COSTO_ADQUISICION'
+    /** costo de producción */
+    | 'COSTO_PRODUCCION'
+    /** costo de construcción */
+    | 'COSTO_CONSTRUCCION'
     /** valor neto de realización: precio de venta menos costos de venta */
     | 'VALOR_NETO_REALIZACION'
     /** costo de reposición del bien en el mercado en el que la entidad compra */
     | 'COSTO_REPOSICION'
+    /** costo de reproducir el activo */
+    | 'COSTO_REPRODUCCION'
+    /** costo de reconstruir el activo */
+    | 'COSTO_RECONSTRUCCION'
     /** valor razonable observable en un mercado activo */
     | 'VALOR_RAZONABLE'
     /** valor de cotización de un instrumento financiero */
     | 'VALOR_COTIZACION'
     /** valor descontado de flujos futuros */
     | 'VALOR_DESCONTADO'
+    /** costo amortizado por tasa efectiva */
+    | 'COSTO_AMORTIZADO'
+    /** modelo de costo para bienes de uso o propiedades de inversión */
+    | 'MODELO_COSTO'
+    /** modelo de revaluación */
+    | 'MODELO_REVALUACION'
+    /** conversión al tipo de cambio aplicable al cierre */
+    | 'TIPO_CAMBIO_CIERRE'
     /** comparación con el valor recuperable (deterioro) */
     | 'VALOR_RECUPERABLE'
 
 export const CRITERION_LABEL: Record<MeasurementCriterion, string> = {
+    COSTO_HISTORICO: 'Costo histórico',
+    COSTO_ADQUISICION: 'Costo de adquisición',
+    COSTO_PRODUCCION: 'Costo de producción',
+    COSTO_CONSTRUCCION: 'Costo de construcción',
     VALOR_NETO_REALIZACION: 'Valor neto de realización',
     COSTO_REPOSICION: 'Costo de reposición',
+    COSTO_REPRODUCCION: 'Costo de reproducción',
+    COSTO_RECONSTRUCCION: 'Costo de reconstrucción',
     VALOR_RAZONABLE: 'Valor razonable',
     VALOR_COTIZACION: 'Valor de cotización',
     VALOR_DESCONTADO: 'Valor descontado de flujos futuros',
+    COSTO_AMORTIZADO: 'Costo amortizado',
+    MODELO_COSTO: 'Modelo de costo',
+    MODELO_REVALUACION: 'Modelo de revaluación',
+    TIPO_CAMBIO_CIERRE: 'Tipo de cambio de cierre',
     VALOR_RECUPERABLE: 'Comparación con el valor recuperable',
 }
 
@@ -65,6 +95,27 @@ export type MeasurementStatus =
     /** se revirtió el asiento; la medición queda como antecedente */
     | 'REVERTIDA'
 
+export type RecoverabilityLevel = 'ACTIVO_INDIVIDUAL' | 'ACTIVIDAD_GENERADORA_EFECTIVO' | 'UNIDAD_MENOR'
+export type RecoverableBasis = 'VNR' | 'VALOR_USO' | 'VALOR_RAZONABLE_MENOS_COSTOS' | 'MAYOR_VNR_VALOR_USO'
+
+export interface RecoverabilityAssessment {
+    required: boolean
+    level: RecoverabilityLevel
+    basis: RecoverableBasis
+    accountingAmount: number
+    netRealizableValue?: number
+    valueInUse?: number
+    fairValueLessCosts?: number
+    recoverableAmount: number
+    impairmentLoss: number
+    reversal: number
+    /** límite del reverso: valor contable que existiría sin deterioro previo */
+    reversalCap?: number
+    indicators: string[]
+    evidence: string
+    conclusion: string
+}
+
 export interface ClosingMeasurement {
     id: string
     companyId: string
@@ -76,6 +127,8 @@ export interface ClosingMeasurement {
     accountId: string
     accountCode: string
     accountName: string
+    accountKind?: import('../../core/models').AccountKind
+    normalSide?: import('../../core/models').NormalSide
     /** partida o lote dentro de la cuenta, cuando corresponda */
     item?: string
     quantity?: number
@@ -101,6 +154,12 @@ export interface ClosingMeasurement {
 
     /** comparación contra el valor recuperable, cuando corresponde */
     recoverableAmount?: number
+    recoverability?: RecoverabilityAssessment
+
+    /** decisión de política que fundamenta esta aplicación */
+    policyDecisionId?: string
+    policyRationale?: string
+    policySource?: string
 
     /** closingAmount − previousAmount */
     difference: number

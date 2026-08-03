@@ -78,7 +78,7 @@ describe('lo que bloquea el cierre', () => {
         expect(r.canClose).toBe(false)
         expect(r.canPublish).toBe(false)
         const check = r.blockers.find(b => b.id === 'recpam-conciliado')!
-        expect(check.stage).toBe('RECPAM')
+        expect(check.stage).toBe('UNIDAD_MEDIDA_INFLACION')
         expect(check.difference).toBe(15000)
         expect(check.tolerance).toBe(1)
         expect(check.action).toBeTruthy()
@@ -115,6 +115,9 @@ describe('lo que bloquea el cierre', () => {
         const r = con({ draftCount: 3 })
         expect(r.canClose).toBe(false)
         expect(r.blockers.find(b => b.id === 'sin-borradores')?.actual).toBe(3)
+        const final = r.stages.find(stage => stage.stage === 'CONCILIACION_EMISION')!
+        expect(final.status).toBe('BLOQUEADA')
+        expect(final.dependencyBlockers).toContain('CORTE_DEVENGAMIENTOS')
     })
 
     it('la falta de identidad de la empresa', () => {
@@ -133,14 +136,14 @@ describe('lo que bloquea el cierre', () => {
         })
         expect(r.canClose).toBe(false)
         const check = r.blockers.find(b => b.id === 'motor:cmv-puente')!
-        expect(check.stage).toBe('INVENTARIO')
-        expect(r.stages.find(s => s.stage === 'INVENTARIO')!.status).toBe('BLOQUEADA')
+        expect(check.stage).toBe('INVENTARIO_CMV')
+        expect(r.stages.find(s => s.stage === 'INVENTARIO_CMV')!.status).toBe('BLOQUEADA')
     })
 
     it('la reexpresión incompleta del anexo de bienes de uso', () => {
         const r = con({ fixedAssetsRestatedBlockers: ['Faltan índices para 2025-03'] })
         expect(r.canClose).toBe(false)
-        expect(r.stages.find(s => s.stage === 'BIENES_USO')!.status).toBe('BLOQUEADA')
+        expect(r.stages.find(s => s.stage === 'BIENES_USO_DEPRECIACIONES')!.status).toBe('BLOQUEADA')
     })
 })
 
@@ -149,7 +152,7 @@ describe('lo que sólo advierte', () => {
         const r = con({ entriesOutsideExercise: 4 })
         expect(r.canClose).toBe(true)
         expect(r.warnings.some(w => w.id === 'sin-asientos-fuera')).toBe(true)
-        expect(r.stages.find(s => s.stage === 'AJUSTES')!.status).toBe('COMPLETA_CON_ADVERTENCIAS')
+        expect(r.stages.find(s => s.stage === 'CORTE_DEVENGAMIENTOS')!.status).toBe('CON_ADVERTENCIAS')
     })
 })
 
@@ -171,19 +174,24 @@ describe('publicar y cerrar son puertas distintas', () => {
     })
 })
 
-describe('sin serie de índices el ejercicio se emite en moneda nominal', () => {
-    const r = con({ inflationSet: null, coverage: null, recpam: null })
+describe('la unidad de medida exige una conclusión documentada', () => {
+    const pending = con({ inflationSet: null, coverage: null, recpam: null, inflationPolicy: { applicability: 'PENDIENTE' } })
 
-    it('las etapas de ajuste por inflación y RECPAM no aplican, con motivo', () => {
-        const axi = r.stages.find(s => s.stage === 'AXI')!
-        const recpam = r.stages.find(s => s.stage === 'RECPAM')!
-        expect(axi.status).toBe('NO_APLICABLE')
-        expect(axi.reason).toContain('moneda nominal')
-        expect(recpam.status).toBe('NO_APLICABLE')
-        expect(recpam.reason).toContain('serie de índices')
+    it('la ausencia de una serie no equivale a no aplicable', () => {
+        const stage = pending.stages.find(s => s.stage === 'UNIDAD_MEDIDA_INFLACION')!
+        expect(stage.status).toBe('BLOQUEADA')
+        expect(pending.blockers.some(check => check.id === 'inflacion-aplicabilidad')).toBe(true)
+        expect(pending.canClose).toBe(false)
     })
 
-    it('y aun así se puede cerrar si el resto está en orden', () => {
+    it('no aplicable sólo se acepta con motivo verificable', () => {
+        const r = con({
+            inflationSet: null, coverage: null, recpam: null,
+            inflationPolicy: { applicability: 'NO_APLICABLE', rationale: 'Contexto estable verificado con indicadores del período.' },
+        })
+        const stage = r.stages.find(s => s.stage === 'UNIDAD_MEDIDA_INFLACION')!
+        expect(stage.status).toBe('NO_APLICABLE')
+        expect(stage.reason).toContain('Contexto estable')
         expect(r.canClose).toBe(true)
     })
 })

@@ -22,6 +22,7 @@ import { db } from '../../storage/db'
 import { postOperation, voidOperationEntry } from '../application/journalService'
 import { postClosing, generateOpeningEntry } from '../application/closingService'
 import { exerciseIdForYear } from '../application/contextService'
+import { getClosingWorkPaper, saveInflationPolicy } from '../../reporting/closing/closingWorkPaperService'
 import { saveIndexSet } from '../inflation/indexRegistry'
 import type { Account, ExpenseAllocationRule } from '../../core/models'
 
@@ -228,12 +229,28 @@ export async function loadRcAcceptanceDataset(): Promise<RcLoadResult> {
         e.sourceModule === 'closing' && e.sourceType === 'apertura' && e.status !== 'DRAFT')
     let closedPrior = false
     if (!alreadyClosed) {
+        await saveInflationPolicy(company.id, priorExerciseId, {
+            applicability: 'NO_APLICABLE',
+            rationale: 'Comparativo didáctico RC preparado en moneda nominal antes de su apertura.',
+        })
         await postClosing(priorExerciseId)
         await generateOpeningEntry(priorExerciseId)
         closedPrior = true
     }
 
     for (let i = 0; i < RC_ENTRIES_CURRENT.length; i++) await post(RC_ENTRIES_CURRENT[i], i, RC_CURRENT_YEAR)
+
+    // El ejercicio corriente de este fixture se presenta deliberadamente en
+    // moneda nominal. Desde v25 esa conclusión no puede inferirse por ausencia
+    // de una serie: queda documentada como decisión explícita e idempotente.
+    const currentExerciseId = exerciseIdForYear(RC_CURRENT_YEAR)
+    const currentPaper = await getClosingWorkPaper(company.id, currentExerciseId)
+    if (!currentPaper || currentPaper.inflation.applicability === 'PENDIENTE') {
+        await saveInflationPolicy(company.id, currentExerciseId, {
+            applicability: 'NO_APLICABLE',
+            rationale: 'Ejercicio didáctico RC preparado y validado en moneda nominal.',
+        })
+    }
 
     // Set de índices de EJEMPLO para probar la moneda de cierre (§13). Cubre
     // todos los meses 2024-2025; identificado como ejemplo, no oficial.

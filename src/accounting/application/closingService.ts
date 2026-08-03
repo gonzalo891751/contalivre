@@ -109,17 +109,20 @@ async function loadReadinessForExercise(
     exercise: AccountingExercise
 ): Promise<import('../../reporting/closing/closingReadiness').ClosingReadiness | null> {
     try {
-        const [{ loadReportingBundle }, { listIndexSets }] = await Promise.all([
+        const [{ loadReportingBundle }, { getClosingWorkPaper }] = await Promise.all([
             import('../../reporting/loadReportingBundle'),
-            import('../inflation/indexRegistry'),
+            import('../../reporting/closing/closingWorkPaperService'),
         ])
-        // Se evalúa con la serie registrada más reciente: es la que el usuario
-        // usaría para publicar. Sin ninguna serie, las etapas de ajuste por
-        // inflación y RECPAM no aplican y el cierre corre en moneda nominal.
-        const sets = await listIndexSets().catch(() => [])
+        // La unidad de medida es una decisión documentada del ejercicio. La
+        // mera ausencia de índices no autoriza a emitir en moneda nominal y la
+        // mera existencia de una serie no autoriza a elegirla en silencio.
+        const paper = await getClosingWorkPaper(exercise.companyId, exercise.id).catch(() => null)
         const year = Number(exercise.startDate.slice(0, 4))
         const bundle = await loadReportingBundle(year, {
-            inflationIndexSetId: sets[0]?.id,
+            companyId: exercise.companyId,
+            inflationIndexSetId: paper?.inflation.applicability === 'APLICABLE'
+                ? paper.inflation.indexSetId
+                : undefined,
         })
         return bundle.readiness
     } catch {

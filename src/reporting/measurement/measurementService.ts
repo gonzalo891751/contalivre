@@ -25,6 +25,8 @@ import {
     CRITERION_LABEL, RUBRO_LABEL,
     type ClosingMeasurement, type MeasurableRubro, type PendingMeasurement,
 } from './measurementTypes'
+import { assertCriterionAllowed, type MeasurementPolicyContext } from './measurementPolicy'
+import type { ClosingPolicyDecision, MeasurementDestination } from '../closing/closingWorkPaperTypes'
 
 export const MEASUREMENT_MODULE = 'closing-measurement'
 
@@ -127,6 +129,11 @@ export interface SaveMeasurementInput {
     item?: string
     quantity?: number
     criterion: ClosingMeasurement['criterion']
+    entityCategory?: MeasurementPolicyContext['entityCategory']
+    destination?: MeasurementDestination
+    marketAvailable?: boolean
+    reliableDataAvailable?: boolean
+    policyDecision?: ClosingPolicyDecision
     previousAmount: number
     previousIsRestated: boolean
     unitValue?: number
@@ -138,6 +145,7 @@ export interface SaveMeasurementInput {
     method?: string
     assumptions?: string
     recoverableAmount?: number
+    recoverability?: ClosingMeasurement['recoverability']
     holdingResultAccountId?: string
     responsible?: string
     notes?: string
@@ -150,6 +158,21 @@ export interface SaveMeasurementInput {
 export async function saveMeasurement(input: SaveMeasurementInput): Promise<ClosingMeasurement> {
     if (!input.source.trim()) {
         throw new Error('La medición necesita declarar su fuente: un importe sin origen no se puede defender.')
+    }
+    const actualRubro = measurableRubroOf(input.account)
+    if (actualRubro !== input.rubro) {
+        throw new Error('El rubro de la medición no coincide con la clasificación estructural de la cuenta.')
+    }
+    assertCriterionAllowed({
+        entityCategory: input.entityCategory ?? input.policyDecision?.entityCategory ?? 'PEQUENA',
+        rubro: input.rubro,
+        account: input.account,
+        destination: input.destination ?? input.policyDecision?.destination ?? 'NO_DEFINIDO',
+        marketAvailable: input.marketAvailable ?? input.policyDecision?.marketAvailable ?? true,
+        reliableDataAvailable: input.reliableDataAvailable ?? input.policyDecision?.reliableDataAvailable ?? true,
+    }, input.criterion)
+    if (input.recoverability?.required && !input.recoverability.evidence.trim()) {
+        throw new Error('La evaluación de recuperabilidad necesita evidencia.')
     }
     const now = new Date().toISOString()
     const existing = (await listMeasurements(input.exerciseId))
@@ -166,6 +189,8 @@ export async function saveMeasurement(input: SaveMeasurementInput): Promise<Clos
         accountId: input.account.id,
         accountCode: input.account.code,
         accountName: input.account.name,
+        accountKind: input.account.kind,
+        normalSide: input.account.normalSide,
         item: input.item,
         quantity: input.quantity,
         criterion: input.criterion,
@@ -180,6 +205,10 @@ export async function saveMeasurement(input: SaveMeasurementInput): Promise<Clos
         method: input.method?.trim() || undefined,
         assumptions: input.assumptions?.trim() || undefined,
         recoverableAmount: input.recoverableAmount,
+        recoverability: input.recoverability,
+        policyDecisionId: input.policyDecision?.id,
+        policyRationale: input.policyDecision?.rationale,
+        policySource: input.policyDecision?.normativeSource,
         difference,
         holdingResultAccountId: input.holdingResultAccountId,
         status: existing?.status === 'CONTABILIZADA' ? 'CONTABILIZADA' : 'PROPUESTA',
@@ -204,6 +233,7 @@ export interface MeasurementEntryPreview {
     lines: Array<{ accountId: string; accountCode: string; accountName: string; debit: number; credit: number }>
     /** true cuando el ajuste es una ganancia por tenencia */
     isGain: boolean
+    effect: 'GANANCIA_TENENCIA' | 'PERDIDA_TENENCIA' | 'DETERIORO' | 'REVERSO_DETERIORO'
 }
 
 /**
@@ -221,22 +251,38 @@ export function previewMeasurementEntry(
     if (diff === 0) return null
 
     const amount = Math.abs(measurement.difference)
-    const isGain = diff > 0
+    const normalSide = measurement.normalSide ?? 'DEBIT'
+    const increasesNaturalBalance = diff > 0
+    const isAssetLike = normalSide === 'DEBIT'
+    const isGain = isAssetLike ? increasesNaturalBalance : !increasesNaturalBalance
     const criterio = CRITERION_LABEL[measurement.criterion]
+
+    const itemLine = {
+        accountId: measurement.accountId,
+        accountCode: measurement.accountCode,
+        accountName: measurement.accountName,
+        debit: increasesNaturalBalance === (normalSide === 'DEBIT') ? amount : 0,
+        credit: increasesNaturalBalance === (normalSide === 'CREDIT') ? amount : 0,
+    }
+    const resultLine = {
+        accountId: holdingAccount.id,
+        accountCode: holdingAccount.code,
+        accountName: holdingAccount.name,
+        debit: itemLine.credit,
+        credit: itemLine.debit,
+    }
+    const effect = measurement.recoverability?.impairmentLoss
+        ? 'DETERIORO'
+        : measurement.recoverability?.reversal
+            ? 'REVERSO_DETERIORO'
+            : isGain ? 'GANANCIA_TENENCIA' : 'PERDIDA_TENENCIA'
 
     return {
         date: measurement.measuredAt,
         memo: `Medición al cierre de ${measurement.accountName} — ${criterio}`,
         isGain,
-        lines: isGain
-            ? [
-                { accountId: measurement.accountId, accountCode: measurement.accountCode, accountName: measurement.accountName, debit: amount, credit: 0 },
-                { accountId: holdingAccount.id, accountCode: holdingAccount.code, accountName: holdingAccount.name, debit: 0, credit: amount },
-            ]
-            : [
-                { accountId: holdingAccount.id, accountCode: holdingAccount.code, accountName: holdingAccount.name, debit: amount, credit: 0 },
-                { accountId: measurement.accountId, accountCode: measurement.accountCode, accountName: measurement.accountName, debit: 0, credit: amount },
-            ],
+        effect,
+        lines: itemLine.debit > 0 ? [itemLine, resultLine] : [resultLine, itemLine],
     }
 }
 
@@ -257,6 +303,9 @@ export async function postMeasurement(
 
     const holding = await db.accounts.get(holdingAccountId)
     if (!holding) throw new Error('La cuenta de resultado por tenencia no existe')
+    if (!['INCOME', 'EXPENSE'].includes(holding.kind)) {
+        throw new Error('El resultado de la medición debe imputarse a una cuenta de resultados.')
+    }
 
     const preview = previewMeasurementEntry(measurement, holding)
     if (!preview) {
@@ -284,6 +333,8 @@ export async function postMeasurement(
             fuente: measurement.source,
             medicionAnterior: measurement.previousAmount,
             medicionAlCierre: measurement.closingAmount,
+            politica: measurement.policyDecisionId,
+            efecto: preview.effect,
         },
     })
 

@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest'
-import { resetDb, seedTestAccounts, simpleLines } from './helpers'
+import { documentNominalTestClosing, resetDb, seedTestAccounts, simpleLines } from './helpers'
 import { postNewEntry } from '../../src/accounting/application/journalService'
 import { postClosing, generateOpeningEntry } from '../../src/accounting/application/closingService'
 import { exerciseIdForYear } from '../../src/accounting/application/contextService'
@@ -39,6 +39,7 @@ describe('Fase 2B — motor único: golden comercial 2025', () => {
     beforeAll(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await seedGoldenYear2025()
         bundle = await loadStatementsForYear(2025)
     })
@@ -161,6 +162,7 @@ describe('Fase 2B — motor único: multiejercicio con cierre y apertura (§18.4
     beforeAll(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await seedGoldenYear2025()
         await postClosing(exerciseIdForYear(2025))
         await generateOpeningEntry(exerciseIdForYear(2025))
@@ -195,6 +197,7 @@ describe('Fase 2B — validación bloquea publicación', () => {
     it('cuenta inexistente con saldo: expuesta y no publicable', async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await postNewEntry({ date: '2025-03-01', memo: 'ok', lines: simpleLines('caja', 'capital', 100) })
         // Asiento legacy corrupto solo insertable vía repositorio
         await insertEntryRecord({
@@ -215,6 +218,7 @@ describe('Fase 2B — validación bloquea publicación', () => {
     it('flujo de efectivo sin categoría: check EFE en rojo', async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         const { makeAccount } = await import('./helpers')
         await db_addAccount(makeAccount({ id: 'sin-categoria', code: '1.1.99', name: 'Activo sin mapping', kind: 'ASSET', statementGroup: null }))
         await postNewEntry({ date: '2025-03-01', memo: 'aporte', lines: simpleLines('caja', 'capital', 1000) })

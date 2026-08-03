@@ -44,7 +44,12 @@ import {
 } from './inflation/accountTreatment'
 import { reconcileRecpam, type RecpamReconciliation } from './inflation/recpam'
 import { buildClosingReadiness, type ClosingReadiness } from './closing/closingReadiness'
-import { listPendingMeasurements } from './measurement/measurementService'
+import { listMeasurements, listPendingMeasurements } from './measurement/measurementService'
+import { getClosingWorkPaper } from './closing/closingWorkPaperService'
+import type { ClosingWorkPaper } from './closing/closingWorkPaperTypes'
+import { buildInflationWorkPaper, type InflationWorkPaper } from './inflation/inflationWorkPaper'
+import { buildClosingImpact, type ClosingImpact } from './closing/closingImpact'
+import type { ClosingMeasurement } from './measurement/measurementTypes'
 import type { MetricCatalogEntry, HorizontalAnalysisRow, VerticalAnalysisRow } from './metrics/types'
 import type { CashFlowStatement2B, FixedAssetsAnnexRestated, StatementsBundle } from './domain/types'
 import type { IndexSetStatus } from '../accounting/inflation/types'
@@ -147,6 +152,12 @@ export interface ReportingBundle {
      * que la otra bloquea.
      */
     readiness: ClosingReadiness
+    /** Decisiones persistidas del proceso guiado; nunca es fuente de libros. */
+    closingWorkPaper: ClosingWorkPaper | null
+    /** Papel de trabajo derivado, con fórmulas, orígenes y guardia de doble ajuste. */
+    inflationWorkPaper: InflationWorkPaper
+    closingMeasurements: ClosingMeasurement[]
+    closingImpact: ClosingImpact
     metadata: ReportMetadata
 }
 
@@ -179,6 +190,11 @@ export async function loadReportingBundle(
     options: LoadReportingBundleOptions = {}
 ): Promise<ReportingBundle> {
     const input = await loadReportingInput(year, { companyId: options.companyId })
+    const closingWorkPaper = await getClosingWorkPaper(input.context.companyId, input.context.exerciseId).catch(() => null)
+    const selectedInflationIndexSetId = options.inflationIndexSetId
+        ?? (closingWorkPaper?.inflation.applicability === 'APLICABLE'
+            ? closingWorkPaper.inflation.indexSetId
+            : undefined)
 
     let prevInput: Awaited<ReturnType<typeof loadReportingInput>> | null = null
     if (options.withComparative) {
@@ -215,10 +231,12 @@ export async function loadReportingBundle(
     let fixedAssetsRestated: FixedAssetsAnnexRestated | null = null
     let inflationSet: AppliedInflationSet | null = null
     let preparationRestated: CashFlowPreparationModel | null = null
-    if (options.inflationIndexSetId) {
-        const set = await getIndexSet(options.inflationIndexSetId)
+    let appliedIndexes = new Map<string, number>()
+    if (selectedInflationIndexSetId) {
+        const set = await getIndexSet(selectedInflationIndexSetId)
         if (set) {
             const indexes = indexSetToMap(set) // lanza si el hash no coincide
+            appliedIndexes = indexes
             cashFlowRestated = reexpressCashFlow(input, statements, indexes)
             preparationRestated = buildCashFlowPreparationRestated(
                 input, statements, cashFlows, cashFlowRestated,
@@ -228,8 +246,8 @@ export async function loadReportingBundle(
             const periods = set.values.map(v => v.period).sort()
             const closePeriod = input.context.periodEnd.slice(0, 7)
             const startPeriod = input.context.periodStart.slice(0, 7)
-            const missing: string[] = []
-            for (const p of [startPeriod, closePeriod]) if (!indexes.has(p)) missing.push(p)
+            const requiredPeriods = [previousMonth(startPeriod), ...monthsBetween(startPeriod, closePeriod)]
+            const missing = requiredPeriods.filter(period => !indexes.has(period))
             inflationSet = {
                 id: set.id, name: set.name, status: set.status, source: set.source,
                 importedAt: set.importedAt, contentHash: set.contentHash,
@@ -262,10 +280,11 @@ export async function loadReportingBundle(
     // ── Matriz de tratamiento y RECPAM (Fase 2I §6-§7) ───────
     // Se calculan acá, junto con el resto del juego, para que la pantalla, la
     // exportación y el cierre lean exactamente las mismas cifras.
+    const closingMeasurements = await listMeasurements(input.context.exerciseId).catch(() => [])
     let treatmentMatrix: AccountTreatmentMatrix | null = null
     let recpam: RecpamReconciliation | null = null
-    if (options.inflationIndexSetId) {
-        const set = await getIndexSet(options.inflationIndexSetId)
+    if (selectedInflationIndexSetId) {
+        const set = await getIndexSet(selectedInflationIndexSetId)
         if (set) {
             const indexes = indexSetToMap(set)
             const closePeriod = input.context.periodEnd.slice(0, 7)
@@ -276,6 +295,7 @@ export async function loadReportingBundle(
                 entries: input.entries,
                 openingBalances: input.openingBalances,
                 closePeriod, openingPeriod, indexes,
+                closingMeasurements,
             })
             recpam = reconcileRecpam({
                 matrix: treatmentMatrix, accounts: input.accounts, indexes,
@@ -326,7 +346,28 @@ export async function loadReportingBundle(
         draftCount: hasDrafts,
         entriesOutsideExercise,
         staleSnapshot: false,
+        inflationPolicy: closingWorkPaper?.inflation ?? { applicability: 'PENDIENTE' },
+        stageReviews: closingWorkPaper?.stageReviews ?? [],
     })
+
+    const startPeriod = input.context.periodStart.slice(0, 7)
+    const closePeriod = input.context.periodEnd.slice(0, 7)
+    const inflationWorkPaper = buildInflationWorkPaper({
+        matrix: treatmentMatrix,
+        indexes: appliedIndexes,
+        startPeriod,
+        closingPeriod: closePeriod,
+        openingPeriod: previousMonth(startPeriod),
+        workPaper: closingWorkPaper,
+        measurements: closingMeasurements,
+        recpam,
+    })
+    const closingImpact = buildClosingImpact(
+        statements,
+        input.accounts,
+        closingWorkPaper,
+        recpam?.analytic.amount ?? 0,
+    )
 
     // Puerta de publicación unificada (§5.3): considera controles nominales y
     // reexpresados, la cobertura del set de índices y —desde la Fase 2J— los
@@ -381,6 +422,7 @@ export async function loadReportingBundle(
     return {
         statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis,
         publicationGate, preparation, preparationRestated,
-        treatmentMatrix, recpam, readiness, metadata,
+        treatmentMatrix, recpam, readiness, closingWorkPaper, inflationWorkPaper,
+        closingMeasurements, closingImpact, metadata,
     }
 }

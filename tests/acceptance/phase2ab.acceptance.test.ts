@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { resetDb, seedTestAccounts, simpleLines } from '../accounting/helpers'
+import { documentNominalTestClosing, resetDb, seedTestAccounts, simpleLines } from '../accounting/helpers'
 import {
     createDraftEntry,
     deleteDraftEntry,
@@ -43,6 +43,7 @@ describe('GATE 2A+2B — flujo integrado', () => {
     beforeAll(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing(Y)
     })
 
     let manualPosted: JournalEntry

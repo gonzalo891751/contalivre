@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { resetDb, seedTestAccounts, simpleLines } from './helpers'
+import { documentNominalTestClosing, resetDb, seedTestAccounts, simpleLines } from './helpers'
 import {
     generateClosingDrafts,
     generateOpeningEntry,
@@ -42,6 +42,7 @@ describe('Fase 2B — vista previa de cierre', () => {
     beforeEach(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await seedYear2025()
     })
 
@@ -94,6 +95,7 @@ describe('Fase 2B — refundición y cierre', () => {
     beforeEach(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await seedYear2025()
     })
 
@@ -145,6 +147,7 @@ describe('Fase 2B — apertura del ejercicio siguiente (§18.4)', () => {
     beforeEach(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await seedYear2025()
         await postClosing(EX_2025())
     })
@@ -195,6 +198,7 @@ describe('Fase 2B — apertura del ejercicio siguiente (§18.4)', () => {
     it('exige refundición previa', async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await seedYear2025()
         await ensureExerciseForDate('2025-06-01')
         await expect(generateOpeningEntry(EX_2025())).rejects.toThrow(/refundición/)
@@ -205,6 +209,7 @@ describe('Fase 2B — reapertura controlada', () => {
     beforeEach(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await seedYear2025()
         await postClosing(EX_2025())
         await generateOpeningEntry(EX_2025())

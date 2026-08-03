@@ -1,61 +1,36 @@
 /**
- * Núcleo ÚNICO de controles del ejercicio — Fase 2J (§9).
+ * Núcleo único y guiado de controles del ejercicio — Fase 2L.
  *
- * Un solo lugar decide si el ejercicio está en condiciones, y todos los
- * consumidores leen de acá: el tablero de pre-cierre, la publicación de los
- * estados, la exportación formal, la refundición y el cierre. Antes cada uno
- * tenía su propia idea del estado del ejercicio: la compuerta de publicación
- * corría 19 controles pero el cierre no los consultaba, así que un ejercicio con
- * el RECPAM sin conciliar o con cuentas sin clasificar podía cerrarse igual.
- *
- * Cada control declara a qué ETAPA del ciclo pertenece, qué se esperaba, qué se
- * obtuvo, la diferencia y su tolerancia cuando aplica, y —sobre todo— **qué hay
- * que hacer para resolverlo y dónde**. Nada de "no publicable" a secas.
- *
- * Función pura: la arma un cargador y la consumen la interfaz y los servicios.
+ * Ocho etapas, una terminología y una compuerta para pantalla, emisión y
+ * cierre. Cada hallazgo dice qué ocurre, por qué importa, cómo se resuelve y
+ * dónde actuar. La función es pura: no escribe asientos ni decisiones.
  */
 
-export type ReadinessStage =
-    | 'RESUMEN'
-    | 'COBERTURA'
-    | 'AJUSTES'
-    | 'INVENTARIO'
-    | 'BIENES_USO'
-    | 'MEDICIONES'
-    | 'AXI'
-    | 'RECPAM'
-    | 'CONTROLES'
-    | 'ESTADOS'
-    | 'CIERRE'
+import type { ClosingStageReview, GuidedClosingStage, GuidedStageStatus, InflationClosingPolicy } from './closingWorkPaperTypes'
 
-export type StageStatus =
-    | 'NO_INICIADA'
-    | 'EN_PROCESO'
-    | 'COMPLETA'
-    | 'COMPLETA_CON_ADVERTENCIAS'
-    | 'BLOQUEADA'
-    | 'NO_APLICABLE'
-
-/** Severidad del control: qué impide */
+export type ReadinessStage = GuidedClosingStage
+export type StageStatus = GuidedStageStatus
 export type CheckSeverity = 'BLOQUEA' | 'ADVIERTE' | 'INFORMA'
 
 export interface ReadinessCheck {
     id: string
     stage: ReadinessStage
-    /** qué se está controlando, en lenguaje contable */
+    /** Resultado directo del control; nunca una afirmación positiva invertida. */
     label: string
+    successLabel?: string
     passed: boolean
     severity: CheckSeverity
-    /** valor esperado y obtenido, cuando el control es numérico */
     expected?: number
     actual?: number
     difference?: number
     tolerance?: number
-    /** por qué falla */
+    /** Qué se encontró. */
     detail?: string
-    /** qué hacer para resolverlo */
+    /** Por qué importa contablemente. */
+    why?: string
+    /** Cómo resolverlo. */
     action?: string
-    /** a dónde ir a resolverlo */
+    actionLabel?: string
     link?: string
 }
 
@@ -63,103 +38,138 @@ export interface StageReport {
     stage: ReadinessStage
     label: string
     description: string
+    objective: string
+    keyQuestions: string[]
+    dependencies: ReadinessStage[]
+    dependencyBlockers: ReadinessStage[]
     status: StageStatus
-    /** motivo, obligatorio cuando el estado es NO_APLICABLE */
     reason?: string
     checks: ReadinessCheck[]
     blockingCount: number
     warningCount: number
+    canContinue: boolean
+    nextAction: string
 }
 
 export interface ClosingReadiness {
-    /** todos los controles, en orden de etapa */
     checks: ReadinessCheck[]
     stages: StageReport[]
-    /** controles que bloquean, en cualquier etapa */
     blockers: ReadinessCheck[]
-    /**
-     * Subconjunto que impide EMITIR estados. No incluye los controles de la
-     * etapa de cierre: un ejercicio ya cerrado no está "listo para cerrarse" y
-     * sin embargo es justamente cuando corresponde publicar sus estados
-     * definitivos.
-     */
     publishBlockers: ReadinessCheck[]
     warnings: ReadinessCheck[]
-    /** los estados pueden emitirse y exportarse como definitivos */
     canPublish: boolean
-    /** el ejercicio puede refundirse y cerrarse */
     canClose: boolean
-    /** avance real: etapas completas sobre etapas aplicables */
     completedStages: number
     applicableStages: number
+    nextStage: ReadinessStage | null
+    nextAction: string
     checkedAt: string
 }
 
-export const STAGE_META: Record<ReadinessStage, { label: string; description: string }> = {
-    RESUMEN: {
-        label: 'Resumen del ejercicio',
-        description: 'Identidad de la empresa, ejercicio, moneda y unidad de medida.',
+export const STAGE_META: Record<ReadinessStage, {
+    label: string
+    description: string
+    objective: string
+    keyQuestions: string[]
+}> = {
+    IDENTIDAD_EJERCICIO: {
+        label: '1 · Identidad y ejercicio',
+        description: 'Entidad emisora, CUIT, período, estado, moneda y marco de preparación.',
+        objective: 'Asegurar que el cierre pertenece a la entidad y al ejercicio correctos.',
+        keyQuestions: ['¿La entidad está identificada?', '¿El período de cierre es el deliberado?', '¿Qué marco y unidad de medida se aplican?'],
     },
-    COBERTURA: {
-        label: 'Cobertura de cuentas',
-        description: 'Toda cuenta con saldo o movimiento tiene un tratamiento declarado para el cierre.',
+    INTEGRIDAD_COBERTURA: {
+        label: '2 · Integridad y cobertura',
+        description: 'Diario, saldos, mapeos y tratamiento de todas las cuentas con actividad.',
+        objective: 'Demostrar que ninguna partida queda fuera del proceso de cierre.',
+        keyQuestions: ['¿El Diario balancea?', '¿Cada cuenta existe y está mapeada?', '¿La cobertura alcanza el 100 %?'],
     },
-    AJUSTES: {
-        label: 'Ajustes y devengamientos',
-        description: 'No quedan borradores pendientes ni asientos fuera del ejercicio.',
+    CORTE_DEVENGAMIENTOS: {
+        label: '3 · Corte y devengamientos',
+        description: 'Borradores, período de imputación, corte, devengamientos y hechos posteriores.',
+        objective: 'Completar el reconocimiento del período sin trasladar hechos a otro ejercicio.',
+        keyQuestions: ['¿Quedan borradores?', '¿Hay partidas fuera de período?', '¿Faltan devengamientos o ajustes de corte?'],
     },
-    INVENTARIO: {
-        label: 'Inventario y costo de ventas',
-        description: 'El puente existencia inicial + compras − existencia final concilia con el Estado de Resultados.',
+    INVENTARIO_CMV: {
+        label: '4 · Inventario y costo de ventas',
+        description: 'Existencias, cantidades, fechas de origen, medición y puente del costo de ventas.',
+        objective: 'Conciliar existencias y costo de ventas con libros y estados.',
+        keyQuestions: ['¿La existencia final está respaldada?', '¿El puente EI + compras − EF concilia?', '¿Las capas conservan su moneda de origen?'],
     },
-    BIENES_USO: {
-        label: 'Bienes de uso',
-        description: 'El anexo concilia con el rubro del Estado de Situación Patrimonial, en moneda nominal y de cierre.',
+    BIENES_USO_DEPRECIACIONES: {
+        label: '5 · Bienes de uso y depreciaciones',
+        description: 'Altas, bajas, vidas útiles, depreciación, medición y anexo.',
+        objective: 'Conciliar el valor residual y reconocer la depreciación completa del período.',
+        keyQuestions: ['¿Altas y bajas tienen fecha?', '¿La depreciación está completa?', '¿El anexo concilia con el ESP?'],
     },
-    MEDICIONES: {
-        label: 'Mediciones a valores corrientes',
-        description: 'Las partidas que exigen medición al cierre fueron medidas y su resultado por tenencia, reconocido.',
+    MEDICION_RECUPERABILIDAD: {
+        label: '6 · Medición y recuperabilidad',
+        description: 'Política válida por rubro, valor de cierre, evidencia, deterioro y reversos.',
+        objective: 'Aplicar el criterio correcto sin confundir medición, reexpresión, revaluación o deterioro.',
+        keyQuestions: ['¿El criterio es válido para el rubro?', '¿La fuente es fiable y de fecha de cierre?', '¿Corresponde evaluar recuperabilidad?'],
     },
-    AXI: {
-        label: 'Ajuste por inflación',
-        description: 'La serie de índices cubre todo el ejercicio y cada partida tiene su anticuación.',
+    UNIDAD_MEDIDA_INFLACION: {
+        label: '7 · Unidad de medida e inflación',
+        description: 'Aplicabilidad, índices, clasificación, anticuación, coeficientes y RECPAM.',
+        objective: 'Expresar el juego completo en moneda de cierre sin doble ajuste y reconciliar el RECPAM.',
+        keyQuestions: ['¿El contexto exige ajustar?', '¿Está completa la serie?', '¿Cada origen y coeficiente es trazable?', '¿El RECPAM concilia por dos vías?'],
     },
-    RECPAM: {
-        label: 'RECPAM',
-        description: 'Las dos determinaciones —secuencial y analítica— concilian dentro de la tolerancia.',
-    },
-    CONTROLES: {
-        label: 'Controles finales',
-        description: 'Partida doble, ecuación patrimonial, EEPN, EFE y anexos.',
-    },
-    ESTADOS: {
-        label: 'Estados contables',
-        description: 'Los estados están actualizados y en condiciones de publicarse.',
-    },
-    CIERRE: {
-        label: 'Preparación del cierre',
-        description: 'El ejercicio está abierto, sin bloqueos, y listo para la refundición.',
+    CONCILIACION_EMISION: {
+        label: '8 · Conciliación y emisión',
+        description: 'ESP, ER, EEPN, EFE, comparativos, impuestos, pendientes y cierre formal.',
+        objective: 'Confirmar que el juego completo es coherente, publicable y cerrable.',
+        keyQuestions: ['¿Los estados concilian entre sí?', '¿El EFE explica la variación?', '¿Quedan bloqueos o evidencia pendiente?'],
     },
 }
 
-const STAGE_ORDER: ReadinessStage[] = [
-    'RESUMEN', 'COBERTURA', 'AJUSTES', 'INVENTARIO', 'BIENES_USO',
-    'MEDICIONES', 'AXI', 'RECPAM', 'CONTROLES', 'ESTADOS', 'CIERRE',
+export const STAGE_ORDER: ReadinessStage[] = [
+    'IDENTIDAD_EJERCICIO',
+    'INTEGRIDAD_COBERTURA',
+    'CORTE_DEVENGAMIENTOS',
+    'INVENTARIO_CMV',
+    'BIENES_USO_DEPRECIACIONES',
+    'MEDICION_RECUPERABILIDAD',
+    'UNIDAD_MEDIDA_INFLACION',
+    'CONCILIACION_EMISION',
 ]
 
-/** Etapas cuyos bloqueos impiden emitir estados definitivos */
-const PUBLISH_STAGES = new Set<ReadinessStage>([
-    'COBERTURA', 'AJUSTES', 'INVENTARIO', 'BIENES_USO', 'MEDICIONES',
-    'AXI', 'RECPAM', 'CONTROLES', 'ESTADOS',
-])
+const CHECK_STAGE: Record<string, ReadinessStage> = {
+    'journal-balance': 'INTEGRIDAD_COBERTURA',
+    'opening-balance': 'INTEGRIDAD_COBERTURA',
+    'ledger-journal': 'INTEGRIDAD_COBERTURA',
+    'unknown-accounts': 'INTEGRIDAD_COBERTURA',
+    'unmapped-results': 'INTEGRIDAD_COBERTURA',
+    'cmv-puente': 'INVENTARIO_CMV',
+    'ppe-anexo': 'BIENES_USO_DEPRECIACIONES',
+    equation: 'CONCILIACION_EMISION',
+    'er-eepn': 'CONCILIACION_EMISION',
+    'er-pretax': 'CONCILIACION_EMISION',
+    'eepn-esp': 'CONCILIACION_EMISION',
+    'eepn-matrix-closing': 'CONCILIACION_EMISION',
+    'eepn-matrix-internal': 'CONCILIACION_EMISION',
+    'gastos-funcion': 'CONCILIACION_EMISION',
+    'efe-variacion': 'CONCILIACION_EMISION',
+    'efe-esp': 'CONCILIACION_EMISION',
+    'efe-metodos': 'CONCILIACION_EMISION',
+    'efe-clasificacion': 'CONCILIACION_EMISION',
+    'efe-disposicion': 'CONCILIACION_EMISION',
+}
+
+const CHECK_ACTION: Record<string, { action: string; link?: string }> = {
+    'cmv-puente': { action: 'Revisá movimientos y componentes del costo hasta conciliar EI + compras − EF.', link: '/estados' },
+    'ppe-anexo': { action: 'Revisá altas, bajas y depreciaciones contra el rubro del ESP.', link: '/operaciones/bienes-uso' },
+    'efe-clasificacion': { action: 'Asigná categoría de flujo a cada cuenta pendiente.', link: '/configuracion?seccion=plan-cuentas' },
+    'efe-disposicion': { action: 'Documentá las disposiciones no monetarias o mixtas con un override auditable.', link: '/configuracion?seccion=plan-cuentas' },
+    'unmapped-results': { action: 'Asigná grupo de exposición a las cuentas de resultado con saldo.', link: '/configuracion?seccion=plan-cuentas' },
+    'unknown-accounts': { action: 'Regularizá movimientos imputados a cuentas inexistentes.', link: '/asientos' },
+}
 
 export interface ReadinessInput {
-    /** identidad y contexto */
     company: { legalName?: string; taxId?: string } | null
     exercise: { name: string; status: string; startDate: string; endDate: string } | null
-    /** expresión solicitada: si no hay set de índices, las etapas AxI y RECPAM no aplican */
     inflationSet: { name: string; missingPeriods: string[] } | null
-    /** cobertura de la matriz de tratamiento (null si no se pudo construir) */
+    inflationPolicy?: InflationClosingPolicy
+    stageReviews?: ClosingStageReview[]
     coverage: {
         accountsWithActivity: number
         accountsResolved: number
@@ -168,342 +178,274 @@ export interface ReadinessInput {
         pending: Array<{ code: string; name: string; reason: string }>
         missingPeriods: string[]
     } | null
-    /** conciliación del RECPAM (null si no aplica) */
     recpam: { reconciled: boolean; difference: number; toleranceCents: number; blockers: string[] } | null
-    /** controles del motor de estados */
     statementChecks: Array<{ id: string; label: string; passed: boolean; expected?: number; actual?: number; difference?: number; detail?: string }>
-    /** bloqueos de la reexpresión de bienes de uso */
     fixedAssetsRestatedBlockers: string[]
-    /** mediciones al cierre pendientes */
     measurements: { required: number; done: number; pending: Array<{ rubro: string; reason: string }> } | null
-    /** borradores dentro del ejercicio */
     draftCount: number
-    /** asientos con fecha fuera del rango del ejercicio activo */
     entriesOutsideExercise: number
-    /** el juego de estados guardado quedó desactualizado respecto del Diario */
     staleSnapshot: boolean
-}
-
-/** A qué etapa pertenece cada control del motor de estados */
-const CHECK_STAGE: Record<string, ReadinessStage> = {
-    'journal-balance': 'CONTROLES',
-    'opening-balance': 'CONTROLES',
-    'ledger-journal': 'CONTROLES',
-    equation: 'CONTROLES',
-    'er-eepn': 'CONTROLES',
-    'er-pretax': 'CONTROLES',
-    'eepn-esp': 'CONTROLES',
-    'unknown-accounts': 'COBERTURA',
-    'unmapped-results': 'COBERTURA',
-    'eepn-matrix-closing': 'CONTROLES',
-    'eepn-matrix-internal': 'CONTROLES',
-    'gastos-funcion': 'CONTROLES',
-    'cmv-puente': 'INVENTARIO',
-    'ppe-anexo': 'BIENES_USO',
-    'efe-variacion': 'CONTROLES',
-    'efe-esp': 'CONTROLES',
-    'efe-metodos': 'CONTROLES',
-    'efe-clasificacion': 'CONTROLES',
-    'efe-disposicion': 'CONTROLES',
-}
-
-const CHECK_ACTION: Record<string, { action: string; link?: string }> = {
-    'cmv-puente': {
-        action: 'Revisá los movimientos de bienes de cambio: alguna salida no tiene su componente de costo declarado.',
-        link: '/estados',
-    },
-    'ppe-anexo': {
-        action: 'Conciliá el anexo de bienes de uso con el rubro del Estado de Situación Patrimonial.',
-        link: '/operaciones/bienes-uso',
-    },
-    'efe-clasificacion': {
-        action: 'Asigná categoría de flujo de efectivo a las cuentas que aparecen sin clasificar.',
-        link: '/configuracion?seccion=plan-cuentas',
-    },
-    'efe-disposicion': {
-        action: 'Resolvé las disposiciones a crédito o mixtas con un override auditable.',
-        link: '/configuracion?seccion=plan-cuentas',
-    },
-    'unmapped-results': {
-        action: 'Asigná grupo de exposición a las cuentas de resultado con saldo.',
-        link: '/configuracion?seccion=plan-cuentas',
-    },
-    'unknown-accounts': {
-        action: 'Regularizá los movimientos imputados a cuentas inexistentes.',
-        link: '/asientos',
-    },
 }
 
 export function buildClosingReadiness(input: ReadinessInput): ClosingReadiness {
     const checks: ReadinessCheck[] = []
-    const add = (c: ReadinessCheck) => checks.push(c)
+    const add = (check: ReadinessCheck) => checks.push(check)
+    const inflationPolicy = input.inflationPolicy
+        ?? { applicability: input.inflationSet ? 'APLICABLE' as const : 'PENDIENTE' as const }
 
-    // ── RESUMEN · identidad ──────────────────────────────────
-    const nombre = input.company?.legalName?.trim() ?? ''
-    const identidadOk = nombre !== '' && nombre !== 'Empresa ContaLivre' && !!input.company?.taxId
+    const name = input.company?.legalName?.trim() ?? ''
+    const identityOk = name !== '' && name !== 'Empresa ContaLivre' && !!input.company?.taxId?.trim()
     add({
-        id: 'identidad-empresa',
-        stage: 'RESUMEN',
-        label: 'La empresa tiene denominación y CUIT cargados',
-        passed: identidadOk,
-        severity: 'BLOQUEA',
-        detail: identidadOk ? undefined : 'Los estados contables saldrían sin identificar a la entidad emisora.',
-        action: 'Completá la ficha de la empresa.',
+        id: 'identidad-empresa', stage: 'IDENTIDAD_EJERCICIO', passed: identityOk, severity: 'BLOQUEA',
+        label: identityOk ? 'Identidad legal completa' : 'Falta completar la denominación legal o el CUIT',
+        successLabel: 'Identidad legal completa',
+        detail: identityOk ? undefined : 'La ficha no identifica completamente a la entidad emisora.',
+        why: 'Los estados deben identificar inequívocamente a la entidad que informa.',
+        action: 'Completá denominación y CUIT en la ficha de empresa.', actionLabel: 'Completar empresa',
         link: '/configuracion?seccion=empresa',
     })
+    const exerciseOk = input.exercise !== null
     add({
-        id: 'ejercicio-definido',
-        stage: 'RESUMEN',
-        label: 'Hay un ejercicio definido para el período',
-        passed: input.exercise !== null,
-        severity: 'BLOQUEA',
-        action: 'Creá el ejercicio en Configuración → Ejercicios.',
+        id: 'ejercicio-definido', stage: 'IDENTIDAD_EJERCICIO', passed: exerciseOk, severity: 'BLOQUEA',
+        label: exerciseOk ? 'Ejercicio contable definido' : 'Falta definir el ejercicio contable',
+        successLabel: 'Ejercicio contable definido',
+        detail: exerciseOk ? undefined : 'No hay un período formal contra el cual preparar el cierre.',
+        why: 'Las fechas delimitan corte, devengamiento, medición y comparativos.',
+        action: 'Creá o seleccioná el ejercicio correcto.', actionLabel: 'Definir ejercicio',
         link: '/configuracion?seccion=ejercicios',
     })
 
-    // ── COBERTURA ────────────────────────────────────────────
     if (input.coverage) {
+        const covered = input.coverage.pending.length === 0
         add({
-            id: 'cobertura-cuentas',
-            stage: 'COBERTURA',
-            label: 'Todas las cuentas con saldo o movimiento tienen tratamiento declarado',
-            passed: input.coverage.pending.length === 0,
-            severity: 'BLOQUEA',
-            expected: input.coverage.accountsWithActivity,
-            actual: input.coverage.accountsResolved,
-            detail: input.coverage.pending.length > 0
-                ? `Sin tratamiento: ${input.coverage.pending.map(p => `${p.code} ${p.name}`).join(', ')}.`
-                : undefined,
-            action: 'Declarará la condición monetaria de esas cuentas en el plan de cuentas.',
+            id: 'cobertura-cuentas', stage: 'INTEGRIDAD_COBERTURA', passed: covered, severity: 'BLOQUEA',
+            label: covered ? 'Todas las cuentas tienen tratamiento declarado' : 'Hay cuentas con actividad sin tratamiento de cierre',
+            successLabel: 'Todas las cuentas tienen tratamiento declarado',
+            expected: input.coverage.accountsWithActivity, actual: input.coverage.accountsResolved,
+            detail: covered ? undefined : `Pendientes: ${input.coverage.pending.map(p => `${p.code} ${p.name}`).join(', ')}.`,
+            why: 'Una cuenta omitida puede distorsionar medición, reexpresión, RECPAM o exposición.',
+            action: 'Declarar condición monetaria y mapeo estructural de cada pendiente.', actionLabel: 'Resolver cobertura',
             link: '/configuracion?seccion=plan-cuentas',
         })
+        const fullBalance = input.coverage.balanceCoveragePct >= 100
         add({
-            id: 'cobertura-saldo',
-            stage: 'COBERTURA',
-            label: 'La cobertura por saldo alcanza el 100 %',
-            passed: input.coverage.balanceCoveragePct >= 100,
-            severity: 'ADVIERTE',
-            actual: input.coverage.balanceCoveragePct,
-            expected: 100,
+            id: 'cobertura-saldo', stage: 'INTEGRIDAD_COBERTURA', passed: fullBalance, severity: 'ADVIERTE',
+            label: fullBalance ? 'Cobertura por saldo del 100 %' : 'La cobertura por saldo es menor al 100 %',
+            actual: input.coverage.balanceCoveragePct, expected: 100,
+            detail: fullBalance ? undefined : `Cobertura por saldo: ${input.coverage.balanceCoveragePct.toFixed(2)} %.`,
+            why: 'La cobertura por cantidad puede ocultar una partida material no resuelta.',
+            action: 'Priorizar las cuentas pendientes de mayor saldo.', actionLabel: 'Ver cuentas',
         })
     }
 
-    // ── AJUSTES ──────────────────────────────────────────────
+    const noDrafts = input.draftCount === 0
     add({
-        id: 'sin-borradores',
-        stage: 'AJUSTES',
-        label: 'No quedan borradores pendientes en el ejercicio',
-        passed: input.draftCount === 0,
-        severity: 'BLOQUEA',
-        actual: input.draftCount,
-        expected: 0,
-        detail: input.draftCount > 0 ? `Hay ${input.draftCount} borrador(es) sin contabilizar.` : undefined,
-        action: 'Contabilizalos o eliminalos desde el Libro Diario.',
-        link: '/asientos',
+        id: 'sin-borradores', stage: 'CORTE_DEVENGAMIENTOS', passed: noDrafts, severity: 'BLOQUEA',
+        label: noDrafts ? 'No quedan borradores del ejercicio' : 'Hay borradores sin contabilizar',
+        successLabel: 'No quedan borradores del ejercicio', actual: input.draftCount, expected: 0,
+        detail: noDrafts ? undefined : `Hay ${input.draftCount} borrador(es) sin contabilizar.`,
+        why: 'Un borrador puede contener un devengamiento necesario o un asiento que todavía no integra los libros.',
+        action: 'Contabilizá o eliminá deliberadamente cada borrador.', actionLabel: 'Revisar Diario', link: '/asientos',
     })
+    const noOutside = input.entriesOutsideExercise === 0
     add({
-        id: 'sin-asientos-fuera',
-        stage: 'AJUSTES',
-        label: 'No hay asientos fuera del rango del ejercicio',
-        passed: input.entriesOutsideExercise === 0,
-        severity: 'ADVIERTE',
-        actual: input.entriesOutsideExercise,
-        expected: 0,
-        detail: input.entriesOutsideExercise > 0
-            ? `Hay ${input.entriesOutsideExercise} asiento(s) en otros ejercicios; verificá que sea deliberado.`
-            : undefined,
-        link: '/asientos',
+        id: 'sin-asientos-fuera', stage: 'CORTE_DEVENGAMIENTOS', passed: noOutside, severity: 'ADVIERTE',
+        label: noOutside ? 'No se detectaron imputaciones fuera del período' : 'Hay asientos en otros ejercicios para revisar',
+        actual: input.entriesOutsideExercise, expected: 0,
+        detail: noOutside ? undefined : `Se detectaron ${input.entriesOutsideExercise} asiento(s) fuera del rango activo.`,
+        why: 'Pueden ser legítimos, pero deben revisarse para evitar errores de corte.',
+        action: 'Verificá fecha, ejercicio y motivo de cada asiento.', actionLabel: 'Revisar fechas', link: '/asientos',
     })
 
-    // ── Controles del motor, repartidos por etapa ────────────
-    for (const c of input.statementChecks) {
-        const stage = CHECK_STAGE[c.id] ?? 'CONTROLES'
-        const extra = CHECK_ACTION[c.id]
+    for (const control of input.statementChecks) {
+        const stage = CHECK_STAGE[control.id] ?? 'CONCILIACION_EMISION'
+        const extra = CHECK_ACTION[control.id]
         add({
-            id: `motor:${c.id}`,
-            stage,
-            label: c.label,
-            passed: c.passed,
-            severity: 'BLOQUEA',
-            expected: c.expected,
-            actual: c.actual,
-            difference: c.difference,
-            detail: c.detail,
-            action: extra?.action,
-            link: extra?.link,
+            id: `motor:${control.id}`, stage, passed: control.passed, severity: 'BLOQUEA',
+            label: control.passed ? control.label : `No concilia: ${control.label}`,
+            successLabel: control.label,
+            expected: control.expected, actual: control.actual, difference: control.difference,
+            detail: control.passed ? undefined : control.detail ?? 'El control automático no alcanzó el resultado esperado.',
+            why: 'Una diferencia en este control rompe la coherencia interna del juego de estados.',
+            action: extra?.action ?? 'Abrí el detalle del control, seguí las cuentas origen y corregí la causa.',
+            actionLabel: 'Resolver diferencia', link: extra?.link,
         })
     }
 
-    // ── MEDICIONES ───────────────────────────────────────────
     if (input.measurements) {
+        const measured = input.measurements.pending.length === 0
         add({
-            id: 'mediciones-pendientes',
-            stage: 'MEDICIONES',
-            label: 'Las partidas que requieren medición al cierre fueron medidas',
-            passed: input.measurements.pending.length === 0,
-            severity: 'BLOQUEA',
-            expected: input.measurements.required,
-            actual: input.measurements.done,
-            detail: input.measurements.pending.length > 0
-                ? `Falta medir: ${input.measurements.pending.map(p => p.rubro).join(', ')}.`
-                : undefined,
-            action: 'Registrá la medición al cierre y contabilizá su resultado por tenencia.',
-            link: '/pre-cierre?etapa=MEDICIONES',
+            id: 'mediciones-pendientes', stage: 'MEDICION_RECUPERABILIDAD', passed: measured, severity: 'BLOQUEA',
+            label: measured ? 'Todas las mediciones requeridas están contabilizadas' : 'Hay partidas sin medición de cierre',
+            expected: input.measurements.required, actual: input.measurements.done,
+            detail: measured ? undefined : `Falta medir: ${input.measurements.pending.map(p => p.rubro).join(', ')}.`,
+            why: 'La política declarada exige una medición de cierre respaldada antes de emitir.',
+            action: 'Elegí un criterio válido, documentá la fuente y revisá el asiento completo antes de contabilizar.',
+            actionLabel: 'Completar mediciones', link: '/pre-cierre?etapa=MEDICION_RECUPERABILIDAD',
         })
     }
 
-    // ── AXI ──────────────────────────────────────────────────
-    if (input.inflationSet) {
+    if (inflationPolicy.applicability === 'PENDIENTE') {
         add({
-            id: 'indices-completos',
-            stage: 'AXI',
-            label: 'La serie de índices cubre todo el ejercicio',
-            passed: input.inflationSet.missingPeriods.length === 0,
-            severity: 'BLOQUEA',
-            detail: input.inflationSet.missingPeriods.length > 0
-                ? `Faltan los índices de ${input.inflationSet.missingPeriods.join(', ')}.`
-                : undefined,
-            action: 'Completá la serie con la fuente oficial; los meses faltantes jamás se interpolan.',
+            id: 'inflacion-aplicabilidad', stage: 'UNIDAD_MEDIDA_INFLACION', passed: false, severity: 'BLOQUEA',
+            label: 'Falta concluir si corresponde ajustar por inflación',
+            detail: 'No hay una decisión documentada sobre la unidad de medida del ejercicio.',
+            why: 'La ausencia de una serie no demuestra que el contexto sea nominal.',
+            action: 'Evaluá el contexto, documentá la conclusión y, si aplica, elegí la serie oficial.',
+            actionLabel: 'Definir aplicabilidad', link: '/pre-cierre?etapa=UNIDAD_MEDIDA_INFLACION',
+        })
+    } else if (inflationPolicy.applicability === 'APLICABLE') {
+        const hasSeries = input.inflationSet !== null
+        add({
+            id: 'serie-seleccionada', stage: 'UNIDAD_MEDIDA_INFLACION', passed: hasSeries, severity: 'BLOQUEA',
+            label: hasSeries ? 'Serie de índices seleccionada' : 'Falta seleccionar la serie de índices',
+            detail: hasSeries ? undefined : 'El ajuste aplica, pero no hay una serie versionada asociada al ejercicio.',
+            why: 'Los coeficientes deben salir de una única serie identificable y reproducible.',
+            action: 'Seleccioná una serie completa y verificá su fuente.', actionLabel: 'Elegir serie',
             link: '/configuracion?seccion=inflacion',
         })
+        if (input.inflationSet) {
+            const complete = input.inflationSet.missingPeriods.length === 0
+            add({
+                id: 'indices-completos', stage: 'UNIDAD_MEDIDA_INFLACION', passed: complete, severity: 'BLOQUEA',
+                label: complete ? 'Serie completa desde apertura hasta cierre' : 'La serie tiene períodos faltantes',
+                detail: complete ? undefined : `Faltan índices de ${input.inflationSet.missingPeriods.join(', ')}.`,
+                why: 'Sin índice de origen no existe un coeficiente verificable; no se interpola.',
+                action: 'Completá la serie con la fuente declarada.', actionLabel: 'Completar índices',
+                link: '/configuracion?seccion=inflacion',
+            })
+        }
+        if (input.coverage?.missingPeriods.length) {
+            add({
+                id: 'indices-anticuacion', stage: 'UNIDAD_MEDIDA_INFLACION', passed: false, severity: 'BLOQUEA',
+                label: 'Hay partidas cuyo período de origen no tiene índice',
+                detail: `Períodos sin índice: ${input.coverage.missingPeriods.join(', ')}.`,
+                why: 'Esas partidas no pueden expresarse en moneda de cierre sin inventar un coeficiente.',
+                action: 'Completá la serie o corregí el origen con evidencia.', actionLabel: 'Resolver orígenes',
+                link: '/configuracion?seccion=inflacion',
+            })
+        }
+        if (input.recpam) {
+            add({
+                id: 'recpam-conciliado', stage: 'UNIDAD_MEDIDA_INFLACION', passed: input.recpam.reconciled, severity: 'BLOQUEA',
+                label: input.recpam.reconciled ? 'RECPAM secuencial y analítico conciliados' : 'El RECPAM no concilia por sus dos determinaciones',
+                difference: input.recpam.difference, tolerance: input.recpam.toleranceCents / 100,
+                detail: input.recpam.reconciled ? undefined : input.recpam.blockers[0],
+                why: 'El RECPAM no puede utilizarse como cifra de cierre mecánica para forzar la ecuación.',
+                action: 'Revisá clasificación monetaria, orígenes y reexpresión del PN y resultados.',
+                actionLabel: 'Abrir conciliación', link: '/pre-cierre?etapa=UNIDAD_MEDIDA_INFLACION',
+            })
+        }
     }
-    if (input.coverage && input.coverage.missingPeriods.length > 0) {
+
+    for (const [index, message] of input.fixedAssetsRestatedBlockers.entries()) {
         add({
-            id: 'indices-anticuacion',
-            stage: 'AXI',
-            label: 'Cada período de origen tiene su índice',
-            passed: false,
-            severity: 'BLOQUEA',
-            detail: `Sin índice para ${input.coverage.missingPeriods.join(', ')}: esas partidas no se pueden reexpresar.`,
-            action: 'Completá la serie de índices.',
-            link: '/configuracion?seccion=inflacion',
-        })
-    }
-    for (const [i, message] of input.fixedAssetsRestatedBlockers.entries()) {
-        add({
-            id: `bienes-uso-reexpresion:${i}`,
-            stage: 'BIENES_USO',
-            label: 'La reexpresión del anexo de bienes de uso está completa',
-            passed: false,
-            severity: 'BLOQUEA',
-            detail: message,
-            action: 'Completá la serie de índices para los períodos de alta de los bienes.',
-            link: '/configuracion?seccion=inflacion',
+            id: `bienes-uso-reexpresion:${index}`, stage: 'BIENES_USO_DEPRECIACIONES', passed: false, severity: 'BLOQUEA',
+            label: 'La reexpresión del anexo de bienes de uso está incompleta', detail: message,
+            why: 'El valor residual del anexo debe conciliar con el ESP en la misma unidad de medida.',
+            action: 'Completá índices y fechas de alta de los bienes.', actionLabel: 'Revisar bienes de uso',
+            link: '/operaciones/bienes-uso',
         })
     }
 
-    // ── RECPAM ───────────────────────────────────────────────
-    if (input.recpam) {
-        add({
-            id: 'recpam-conciliado',
-            stage: 'RECPAM',
-            label: 'El RECPAM secuencial concilia con el analítico',
-            passed: input.recpam.reconciled,
-            severity: 'BLOQUEA',
-            difference: input.recpam.difference,
-            tolerance: input.recpam.toleranceCents / 100,
-            detail: input.recpam.blockers[0],
-            action: 'Revisá la anticuación de las partidas no monetarias y la clasificación monetaria.',
-            link: '/pre-cierre?etapa=RECPAM',
-        })
-    }
-
-    // ── ESTADOS ──────────────────────────────────────────────
+    const currentStatements = !input.staleSnapshot
     add({
-        id: 'estados-actualizados',
-        stage: 'ESTADOS',
-        label: 'El juego de estados guardado refleja el Libro Diario actual',
-        passed: !input.staleSnapshot,
-        severity: 'BLOQUEA',
-        detail: input.staleSnapshot
-            ? 'Se contabilizaron asientos después de guardar la versión validada.'
-            : undefined,
-        action: 'Volvé a guardar la versión validada de los estados.',
-        link: '/estados',
+        id: 'estados-actualizados', stage: 'CONCILIACION_EMISION', passed: currentStatements, severity: 'BLOQUEA',
+        label: currentStatements ? 'Los estados reflejan el Diario actual' : 'La versión guardada de los estados está desactualizada',
+        detail: currentStatements ? undefined : 'Se contabilizaron asientos después de guardar la versión validada.',
+        why: 'La emisión debe corresponder al mismo corte de libros que se revisó.',
+        action: 'Regenerá y guardá una versión validada.', actionLabel: 'Actualizar estados', link: '/estados',
     })
-
-    // ── CIERRE ───────────────────────────────────────────────
+    const open = input.exercise?.status === 'OPEN'
     add({
-        id: 'ejercicio-abierto',
-        stage: 'CIERRE',
-        label: 'El ejercicio está abierto',
-        passed: input.exercise?.status === 'OPEN',
-        severity: 'BLOQUEA',
-        detail: input.exercise && input.exercise.status !== 'OPEN'
-            ? `El ejercicio está ${input.exercise.status === 'CLOSED' ? 'cerrado' : 'en proceso de cierre'}.`
-            : undefined,
-        action: 'Reabrí el ejercicio con un motivo si necesitás rehacer el cierre.',
+        id: 'ejercicio-abierto', stage: 'CONCILIACION_EMISION', passed: open, severity: 'BLOQUEA',
+        label: open ? 'Ejercicio abierto y disponible para el cierre' : 'El ejercicio no está abierto para un nuevo cierre',
+        detail: input.exercise && !open ? `Estado actual: ${input.exercise.status}.` : undefined,
+        why: 'Un ejercicio cerrado no debe refundirse nuevamente sin una reapertura controlada.',
+        action: 'Reabrí con motivo si necesitás rehacer el cierre.', actionLabel: 'Gestionar ejercicio',
         link: '/configuracion?seccion=ejercicios',
     })
 
-    // ── Armado de etapas ─────────────────────────────────────
-    const stages: StageReport[] = STAGE_ORDER.map(stage => {
-        const own = checks.filter(c => c.stage === stage)
-        const blocking = own.filter(c => !c.passed && c.severity === 'BLOQUEA')
-        const warning = own.filter(c => !c.passed && c.severity === 'ADVIERTE')
-
+    const reviews = new Map((input.stageReviews ?? []).map(review => [review.stage, review]))
+    const reports: StageReport[] = []
+    for (let index = 0; index < STAGE_ORDER.length; index++) {
+        const stage = STAGE_ORDER[index]
+        const own = checks.filter(check => check.stage === stage)
+        const blocking = own.filter(check => !check.passed && check.severity === 'BLOQUEA')
+        const warning = own.filter(check => !check.passed && check.severity === 'ADVIERTE')
+        const dependencies = STAGE_ORDER.slice(0, index)
+        const dependencyBlockers = dependencies.filter(dependency =>
+            reports.find(report => report.stage === dependency)?.checks
+                .some(check => !check.passed && check.severity === 'BLOQUEA'))
+        const review = reviews.get(stage)
+        const naturalNotApplicable = verifiedNotApplicable(stage, input, inflationPolicy)
         let status: StageStatus
         let reason: string | undefined
-
-        if (own.length === 0) {
-            status = 'NO_APLICABLE'
-            reason = notApplicableReason(stage, input)
-        } else if (blocking.length > 0) {
+        if (blocking.length > 0 || dependencyBlockers.length > 0) {
             status = 'BLOQUEADA'
-        } else if (warning.length > 0) {
-            status = 'COMPLETA_CON_ADVERTENCIAS'
-        } else {
-            status = 'COMPLETA'
-        }
+        } else if (review?.status === 'NO_APLICABLE') {
+            status = 'NO_APLICABLE'
+            reason = review.notApplicableReason
+        } else if (naturalNotApplicable) {
+            status = 'NO_APLICABLE'
+            reason = naturalNotApplicable
+        } else if (warning.length > 0) status = 'CON_ADVERTENCIAS'
+        else if (review?.status === 'EN_REVISION') status = 'EN_REVISION'
+        else if (review?.status === 'PENDIENTE') status = 'PENDIENTE'
+        else status = 'COMPLETA'
 
-        return {
+        const nextIssue = [...blocking, ...warning][0]
+        reports.push({
             stage,
-            label: STAGE_META[stage].label,
-            description: STAGE_META[stage].description,
-            status, reason,
+            ...STAGE_META[stage],
+            dependencies,
+            dependencyBlockers,
+            status,
+            reason,
             checks: own,
-            blockingCount: blocking.length,
+            blockingCount: blocking.length + dependencyBlockers.length,
             warningCount: warning.length,
-        }
-    })
+            canContinue: blocking.length === 0 && dependencyBlockers.length === 0,
+            nextAction: nextIssue?.action ?? (dependencyBlockers.length > 0
+                ? `Resolvé primero ${STAGE_META[dependencyBlockers[0]].label.toLowerCase()}.`
+                : status === 'NO_APLICABLE' ? `Confirmado: ${reason}`
+                : 'Revisá la evidencia de la etapa y continuá con la siguiente.'),
+        })
+    }
 
-    const blockers = checks.filter(c => !c.passed && c.severity === 'BLOQUEA')
-    const warnings = checks.filter(c => !c.passed && c.severity === 'ADVIERTE')
-
-    const publishBlockers = blockers.filter(b => PUBLISH_STAGES.has(b.stage) || b.stage === 'RESUMEN')
-    const canPublish = publishBlockers.length === 0
-    const canClose = blockers.length === 0
-
-    const applicable = stages.filter(s => s.status !== 'NO_APLICABLE')
-    const completed = applicable.filter(s => s.status === 'COMPLETA' || s.status === 'COMPLETA_CON_ADVERTENCIAS')
+    const blockers = checks.filter(check => !check.passed && check.severity === 'BLOQUEA')
+    const warnings = checks.filter(check => !check.passed && check.severity === 'ADVIERTE')
+    const publishBlockers = blockers.filter(check => check.id !== 'ejercicio-abierto')
+    const applicable = reports.filter(stage => stage.status !== 'NO_APLICABLE')
+    const completed = applicable.filter(stage => stage.status === 'COMPLETA' || stage.status === 'CON_ADVERTENCIAS')
+    const next = reports.find(stage => stage.status !== 'COMPLETA' && stage.status !== 'NO_APLICABLE') ?? null
 
     return {
-        checks, stages, blockers, publishBlockers, warnings,
-        canPublish, canClose,
+        checks,
+        stages: reports,
+        blockers,
+        publishBlockers,
+        warnings,
+        canPublish: publishBlockers.length === 0,
+        canClose: blockers.length === 0,
         completedStages: completed.length,
         applicableStages: applicable.length,
+        nextStage: next?.stage ?? null,
+        nextAction: next?.nextAction ?? 'El pre-cierre no tiene bloqueos. Revisá el resumen final antes de emitir o cerrar.',
         checkedAt: new Date().toISOString(),
     }
 }
 
-/** Por qué una etapa no aplica. Nunca se marca NO_APLICABLE sin decirlo. */
-function notApplicableReason(stage: ReadinessStage, input: ReadinessInput): string {
-    switch (stage) {
-        case 'AXI':
-            return input.inflationSet
-                ? 'La serie cubre el ejercicio y no hay períodos de origen sin índice.'
-                : 'No se eligió una serie de índices: los estados se emiten en moneda nominal.'
-        case 'RECPAM':
-            return 'La determinación del RECPAM requiere una serie de índices seleccionada.'
-        case 'MEDICIONES':
-            return 'Ninguna partida del ejercicio exige medición a valores corrientes al cierre.'
-        case 'COBERTURA':
-            return 'No se pudo construir la matriz de tratamiento: falta la serie de índices.'
-        case 'BIENES_USO':
-            return 'El ejercicio no tiene bienes de uso.'
-        case 'INVENTARIO':
-            return 'El ejercicio no tiene bienes de cambio ni costo de ventas.'
-        default:
-            return 'Sin controles aplicables en esta etapa.'
+function verifiedNotApplicable(
+    stage: ReadinessStage,
+    input: ReadinessInput,
+    inflationPolicy: InflationClosingPolicy,
+): string | undefined {
+    if (stage === 'UNIDAD_MEDIDA_INFLACION' && inflationPolicy.applicability === 'NO_APLICABLE') {
+        return inflationPolicy.rationale?.trim() || undefined
     }
+    if (stage === 'MEDICION_RECUPERABILIDAD' && input.measurements === null) {
+        return 'No existen saldos en cuentas cuya política estructural exija medición de cierre.'
+    }
+    return undefined
 }

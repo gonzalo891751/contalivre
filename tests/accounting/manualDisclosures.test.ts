@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { resetDb, seedTestAccounts, simpleLines } from './helpers'
+import { documentNominalTestClosing, resetDb, seedTestAccounts, simpleLines } from './helpers'
 import {
     getCurrentDisclosures,
     getHistory,
@@ -25,6 +25,7 @@ describe('Fase 2F — notas manuales', () => {
     beforeEach(async () => {
         await resetDb()
         await seedTestAccounts()
+        await documentNominalTestClosing()
         await postNewEntry({ date: '2025-01-05', memo: 'aporte', lines: simpleLines('caja', 'capital', 1000) })
     })
 

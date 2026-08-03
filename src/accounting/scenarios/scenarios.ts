@@ -17,6 +17,7 @@ import { createDraftEntry, postDraft } from '../application/journalService'
 import { resetJournalRangeForScenario } from './scenarioReset'
 import { postClosing, generateOpeningEntry } from '../application/closingService'
 import { exerciseIdForYear } from '../migration/migrateV17'
+import { saveInflationPolicy } from '../../reporting/closing/closingWorkPaperService'
 
 /** Completa la identidad de la empresa demo si todavía no fue configurada */
 async function ensureScenarioCompany(): Promise<void> {
@@ -107,6 +108,10 @@ export async function runScenario(def: ScenarioDef): Promise<{ year: number; pos
 
     if (def.closeAtEnd) {
         const exId = exerciseIdForYear(def.year)
+        await saveInflationPolicy('company-default', exId, {
+            applicability: 'NO_APLICABLE',
+            rationale: 'Escenario educativo determinista preparado en moneda nominal.',
+        })
         await postClosing(exId)
         await generateOpeningEntry(exId).catch(() => { /* opcional */ })
     }

@@ -76,6 +76,21 @@ export async function seedTestCompany(): Promise<void> {
     })
 }
 
+/**
+ * Decisión explícita para casos históricos que prueban cierre nominal. No se
+ * instala por defecto: las pruebas de Fase 2L deben poder verificar que la
+ * ausencia de decisión bloquea.
+ */
+export async function documentNominalTestClosing(year = 2025, companyId = 'company-default'): Promise<void> {
+    const { exerciseIdFor } = await import('../../src/accounting/application/contextService')
+    const { saveInflationPolicy } = await import('../../src/reporting/closing/closingWorkPaperService')
+    await saveInflationPolicy(companyId, exerciseIdFor(companyId, year), {
+        applicability: 'NO_APLICABLE',
+        rationale: 'Caso histórico de prueba en moneda nominal; decisión explícita del fixture.',
+        contextAssessment: 'Escenario determinista sin ajuste por inflación.',
+    })
+}
+
 /** Línea simple Debe/Haber */
 export function line(accountId: string, debit: number, credit: number) {
     return { accountId, debit, credit }

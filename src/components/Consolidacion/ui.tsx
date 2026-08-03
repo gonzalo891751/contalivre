@@ -117,13 +117,20 @@ export function Callout({ icon: Icon, children }: { icon?: PhosphorIcon; childre
  * tener diez ayudas en la página no cuesta nada mientras están cerradas.
  */
 export function HelpAccordion({
-    topic, open, onToggle,
+    topic, question, answer, normative, open, onToggle,
 }: {
-    topic: keyof typeof HELP_TOPICS
+    topic?: keyof typeof HELP_TOPICS
+    question?: string
+    answer?: string
+    normative?: string
     open: boolean
     onToggle: () => void
 }) {
-    const help = HELP_TOPICS[topic]
+    const help = topic ? HELP_TOPICS[topic] : {
+        question: question ?? '¿Qué se controla en esta etapa?',
+        answer: answer ?? '',
+        normative,
+    }
     const panelId = useId()
     return (
         <div className={`cons-help ${open ? 'cons-help-open' : ''}`}>

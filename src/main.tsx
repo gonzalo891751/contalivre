@@ -6,6 +6,7 @@ import './styles/index.css'
 // Sistema visual del módulo de Consolidación (Fase 2K.1), separado del
 // index.css general para poder evolucionarlo sin tocar el resto.
 import './styles/consolidacion.css'
+import './styles/precierre.css'
 
 createRoot(document.getElementById('root')!).render(
     <StrictMode>
