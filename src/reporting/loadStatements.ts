@@ -32,17 +32,21 @@ export async function loadReportingInput(
 ): Promise<ReportingInput> {
     const ctx = await resolveContextForYear(year, { companyId: options.companyId })
     const exercise = await getExercise(ctx.exerciseId)
-    const [entries, openingBalances, accounts, allocationRules, allDisclosures, foreignCurrencyDetails] = await Promise.all([
+    // Los módulos operativos (moneda extranjera, fichas de bienes de uso) todavía
+    // no llevan dimensión de empresa. Para la empresa por defecto se cargan tal
+    // como siempre; para otra entidad del grupo se informa SIN ese detalle en
+    // lugar de atribuirle posiciones y fichas que no son suyas.
+    const isDefaultCompany = ctx.companyId === DEFAULT_COMPANY_ID
+    const [entries, openingBalances, accounts, allocationRules, allDisclosures, foreignCurrencyDetails, fixedAssetFichas] = await Promise.all([
         getEntriesForContext(ctx),
         getOpeningBalances(ctx),
         db.accounts.toArray(),
         db.expenseAllocationRules.toArray(),
         db.manualDisclosures.where('exerciseId').equals(ctx.exerciseId).toArray(),
-        // El módulo operativo de moneda extranjera todavía no lleva dimensión de
-        // empresa (Fase 2K, limitación declarada): su detalle sólo enriquece la
-        // nota de la empresa por defecto. Para el resto se informa sin detalle
-        // operativo en lugar de atribuirle posiciones que no son suyas.
-        ctx.companyId === DEFAULT_COMPANY_ID ? loadForeignCurrencyDetails(ctx.periodEnd) : Promise.resolve([]),
+        isDefaultCompany ? loadForeignCurrencyDetails(ctx.periodEnd) : Promise.resolve([]),
+        // Fichas de bienes de uso (Fase 2J §8): permiten reexpresar la
+        // depreciación bien por bien en vez de con el promedio de la clase.
+        isDefaultCompany ? db.fixedAssets.toArray().catch(() => []) : Promise.resolve([]),
     ])
     // vigentes = las que ninguna otra reemplaza
     const superseded = new Set(allDisclosures.map(d => d.supersedesId).filter(Boolean))
@@ -61,6 +65,7 @@ export async function loadReportingInput(
         allocationRules,
         manualDisclosures,
         foreignCurrencyDetails,
+        fixedAssetFichas,
     }
 }
 

@@ -56,6 +56,24 @@ export const TEST_ACCOUNTS: Account[] = [
 
 export async function seedTestAccounts(): Promise<void> {
     await db.accounts.bulkAdd(TEST_ACCOUNTS)
+    await seedTestCompany()
+}
+
+/**
+ * Identidad de la entidad emisora.
+ *
+ * Desde la Fase 2J el núcleo único de controles exige que la empresa esté
+ * identificada para cerrar el ejercicio: unos estados contables sin
+ * denominación ni CUIT no pueden emitirse. Los escenarios de prueba cierran
+ * ejercicios, así que necesitan una entidad real igual que un usuario.
+ */
+export async function seedTestCompany(): Promise<void> {
+    const { getDefaultCompany } = await import('../../src/accounting/application/contextService')
+    const company = await getDefaultCompany()
+    await db.companies.update(company.id, {
+        legalName: 'Entidad de Prueba S.A.',
+        taxId: '30-00000000-0',
+    })
 }
 
 /** Línea simple Debe/Haber */

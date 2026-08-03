@@ -235,6 +235,27 @@ nominal arrastrada.
 
 ---
 
+## Estado tras la Fase 2J
+
+- **Etapa 6 · Pre-cierre** — implementada como página propia en la navegación
+  principal, con las once etapas y su estado calculado con hechos. La compuerta
+  de cierre y la de publicación comparten por fin el mismo núcleo de controles.
+- **Etapa 7 · Mediciones a valores corrientes** — implementada: detección de lo
+  que exige medición según la política declarada, carga con fuente y evidencia,
+  asiento propuesto revisable y reversible, y bloqueo del cierre si falta medir.
+- **El ajuste por inflación dejó de estar duplicado**: la planilla antigua se
+  retiró y sólo queda el motor canónico (DEF-A12 y DEF-A13 cerrados).
+
+Sigue pendiente, en este orden:
+
+1. **Etapa 11 · Exportación formal** en PDF y planilla desde el snapshot
+   canónico. Es lo único que separa el circuito de la emisión.
+2. **Etapa 13 · Continuidad entre ejercicios** ejercida sobre datos reales
+   encadenados (2025 → 2026), con comparativos en moneda de cierre.
+3. DEF-A18.
+
+---
+
 ## Estado tras la Fase 2I
 
 Lo que este documento proponía y ya está implementado:

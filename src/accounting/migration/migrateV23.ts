@@ -1,26 +1,14 @@
 /**
- * Migración a schema v23 — Fase 2K §5/§27.
+ * Migración a schema v23 — Fase 2J §7.
  *
- * v23 agrega las tablas del módulo de consolidación de estados contables:
+ * v23 agrega la tabla `closingMeasurements`: mediciones a valores corrientes al
+ * cierre, con su criterio, su fuente, su evidencia y el asiento que reconoce el
+ * resultado por tenencia.
  *
- *   economicGroups             grupo económico y su controladora
- *   groupMembers               perímetro: relación, método, participación, control
- *   consolidationExercises     ejercicio de consolidación del grupo
- *   consolidationMemberLinks   qué ejercicio individual alimenta cada entidad
- *   consolidationMappings      mapeo cuenta → línea consolidada y categoría intragrupo
- *   reciprocalBalances         conciliación de saldos recíprocos
- *   intragroupOperations       operaciones internas y resultados no trascendidos
- *   consolidationAdjustments   ajustes manuales de consolidación
- *
- * La migración es ESTRICTAMENTE ADITIVA e idempotente:
- *  - no crea, modifica ni elimina cuentas, asientos, ejercicios ni períodos;
- *  - no altera ningún importe existente (el caso Purmamarca queda intacto);
- *  - no crea grupos por defecto: un grupo económico es una decisión del
- *    usuario, no algo que el sistema deba suponer.
- *
- * Todo lo que el módulo escribe es papel de trabajo del grupo. Ninguna de estas
- * tablas es fuente de asientos: el invariante extracontable de la Fase 2K se
- * sostiene también en el esquema.
+ * Es una migración puramente aditiva: no toca cuentas, asientos, ejercicios ni
+ * ninguna cifra existente. No crea mediciones por su cuenta — medir es un acto
+ * del usuario, con su fuente y su fundamento, y una medición inventada sería
+ * peor que ninguna.
  */
 
 import type { Transaction } from 'dexie'
@@ -29,18 +17,7 @@ import { MIGRATION_ACTOR } from '../domain/types'
 import { CURRENT_SCHEMA_VERSION, APP_VERSION } from './versions'
 import { SYSTEM_META_ID } from './migrateV17'
 
-export const MIGRATION_V23_ID = 'v23-fase2k-consolidacion'
-
-export const CONSOLIDATION_TABLES = [
-    'economicGroups',
-    'groupMembers',
-    'consolidationExercises',
-    'consolidationMemberLinks',
-    'consolidationMappings',
-    'reciprocalBalances',
-    'intragroupOperations',
-    'consolidationAdjustments',
-] as const
+export const MIGRATION_V23_ID = 'v23-closing-measurements'
 
 export async function migrateToV23(tx: Transaction): Promise<void> {
     const timestamp = new Date().toISOString()
@@ -63,9 +40,6 @@ export async function migrateToV23(tx: Transaction): Promise<void> {
         entityId: MIGRATION_V23_ID,
         actorId: MIGRATION_ACTOR,
         timestamp,
-        metadata: {
-            addedTables: [...CONSOLIDATION_TABLES],
-            note: 'Tablas de consolidación: papeles de trabajo del grupo, jamás fuente de asientos',
-        },
+        metadata: { addedTable: 'closingMeasurements' },
     })
 }

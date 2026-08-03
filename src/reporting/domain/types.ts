@@ -30,6 +30,14 @@ export interface ReportingInput {
     manualDisclosures?: ManualDisclosure[]
     /** Detalle operativo de posiciones en moneda extranjera (Fase 2F §11) */
     foreignCurrencyDetails?: ForeignCurrencyDetail[]
+    /**
+     * Fichas individuales de bienes de uso (Fase 2J §8). Cuando existen, el
+     * anexo en moneda de cierre se reconstruye bien por bien —cada uno con su
+     * fecha de alta, su costo y su vida útil— en vez de aplicar un coeficiente
+     * medio a la clase, que sólo es exacto si todos los bienes de la clase
+     * comparten mes de alta y política de depreciación.
+     */
+    fixedAssetFichas?: import('../../core/fixedAssets/types').FixedAsset[]
     /** Bundle comparativo (ejercicio anterior, derivado con el mismo motor) */
     comparative?: StatementsBundle | null
 }
@@ -377,6 +385,12 @@ export interface FixedAssetsAnnexRestated {
     closePeriod: string
     /** faltan índices ⇒ no se reexpresa (no se estima con coeficiente 1) */
     blockers: string[]
+    /**
+     * Aproximaciones declaradas (Fase 2J §8): clases cuya depreciación
+     * acumulada se reexpresó con el coeficiente medio porque no hay ficha
+     * individual que separe bienes incorporados en meses distintos.
+     */
+    warnings?: string[]
 }
 
 // ─────────────────────────────────────────────────────────────

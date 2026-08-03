@@ -1,12 +1,18 @@
 /**
- * Fase 2F (§15), extendida en la Fase 2K — cadena de migraciones v16 → v23 y
- * ciclo backup/restore/reset.
+ * Fase 2F (§15), extendida en las Fases 2J y 2K — cadena de migraciones
+ * v16 → v24 y ciclo backup/restore/reset.
  *
- * Abre una base v16 legacy con la definición REAL de la app (todas las
- * upgrades v17→v23 encadenadas) y verifica que la data sobrevive, que el schema
- * queda en la versión vigente y que las tablas nuevas existen. Cada fase que
- * eleva el esquema EXTIENDE esta cadena en lugar de reescribirla: así se prueba
- * que una instalación antigua sigue migrando hasta hoy sin perder nada.
+ * Cada fase que eleva el esquema EXTIENDE esta cadena en lugar de reescribirla:
+ * así se prueba que una instalación antigua sigue migrando hasta hoy sin perder
+ * nada. Hoy la cadena cubre cuatro puntos de partida reales:
+ *
+ *   v16 legacy → v24   una instalación vieja atraviesa TODAS las migraciones
+ *   v22        → v24   corre v23 (Fase 2J) y v24 (Fase 2K), en ese orden
+ *   v23        → v24   corre ÚNICAMENTE v24: la v23 ya se ejecutó y no se repite
+ *   v24        → v24   reabrir no vuelve a migrar (idempotencia)
+ *
+ * Además verifica que las estructuras de AMBAS fases convivan: la tabla
+ * `closingMeasurements` de la 2J y las ocho tablas de consolidación de la 2K.
  *
  * Luego prueba backup → reset → restore con datos del schema actual.
  */
@@ -29,6 +35,7 @@ import { migrateToV20 } from '../../src/accounting/migration/migrateV20'
 import { migrateToV21 } from '../../src/accounting/migration/migrateV21'
 import { migrateToV22 } from '../../src/accounting/migration/migrateV22'
 import { migrateToV23 } from '../../src/accounting/migration/migrateV23'
+import { migrateToV24 } from '../../src/accounting/migration/migrateV24'
 
 const DBN = 'ChainMigrationTestDb'
 
@@ -48,8 +55,12 @@ async function seedV16(): Promise<void> {
     legacy.close()
 }
 
-/** Definición encadenada v16→v23 (réplica de las upgrades reales) */
-function defineChainDb(): Dexie {
+/**
+ * Definición encadenada v16→v24 (réplica exacta de las upgrades reales de
+ * src/storage/db.ts). `upTo` permite detener la definición en una versión
+ * intermedia para simular una instalación que quedó en ese punto.
+ */
+function defineChainDb(upTo = 24): Dexie {
     const d = new Dexie(DBN)
     d.version(16).stores({
         accounts: 'id, &code, name, kind, parentId, level, statementGroup',
@@ -69,20 +80,50 @@ function defineChainDb(): Dexie {
     d.version(20).stores({ expenseAllocationRules: 'id, accountId, validFrom' }).upgrade(migrateToV20)
     d.version(21).stores({ manualDisclosures: 'id, companyId, exerciseId, noteType, status' }).upgrade(migrateToV21)
     d.version(22).stores({ cashFlowPolicies: 'id, companyId, exerciseId, status' }).upgrade(migrateToV22)
-    d.version(23).stores({
-        economicGroups: 'id, parentCompanyId, active',
-        groupMembers: 'id, groupId, companyId, relation, method, [groupId+companyId]',
-        consolidationExercises: 'id, groupId, reportingDate, status, [groupId+reportingDate]',
-        consolidationMemberLinks: 'id, consolidationId, memberId, companyId, [consolidationId+companyId]',
-        consolidationMappings: 'id, groupId, companyId, accountId, intragroupCategory, [groupId+companyId+accountId]',
-        reciprocalBalances: 'id, consolidationId, creditorCompanyId, debtorCompanyId, kind, status',
-        intragroupOperations: 'id, consolidationId, sellerCompanyId, buyerCompanyId, type',
-        consolidationAdjustments: 'id, consolidationId, category, status',
-    }).upgrade(migrateToV23)
+    // v23 (Fase 2J): mediciones a valores corrientes al cierre
+    if (upTo >= 23) {
+        d.version(23).stores({
+            closingMeasurements: 'id, companyId, exerciseId, accountId, status',
+        }).upgrade(migrateToV23)
+    }
+    // v24 (Fase 2K): papeles de trabajo de consolidacion
+    if (upTo >= 24) {
+        d.version(24).stores({
+            economicGroups: 'id, parentCompanyId, active',
+            groupMembers: 'id, groupId, companyId, relation, method, [groupId+companyId]',
+            consolidationExercises: 'id, groupId, reportingDate, status, [groupId+reportingDate]',
+            consolidationMemberLinks: 'id, consolidationId, memberId, companyId, [consolidationId+companyId]',
+            consolidationMappings: 'id, groupId, companyId, accountId, intragroupCategory, [groupId+companyId+accountId]',
+            reciprocalBalances: 'id, consolidationId, creditorCompanyId, debtorCompanyId, kind, status',
+            intragroupOperations: 'id, consolidationId, sellerCompanyId, buyerCompanyId, type',
+            consolidationAdjustments: 'id, consolidationId, category, status',
+        }).upgrade(migrateToV24)
+    }
     return d
 }
 
-describe('Fase 2F/2K — cadena de migraciones v16 → v23', () => {
+const CONSOLIDATION_TABLE_NAMES = [
+    'economicGroups', 'groupMembers', 'consolidationExercises', 'consolidationMemberLinks',
+    'consolidationMappings', 'reciprocalBalances', 'intragroupOperations', 'consolidationAdjustments',
+]
+
+/** Migraciones registradas en el audit log, en orden de ejecucion */
+async function migrationsRun(chain: Dexie): Promise<string[]> {
+    const rows = await chain.table('auditLog').toArray()
+    return rows
+        .filter((r: { eventType: string }) => r.eventType === 'MIGRATION_EXECUTED')
+        .sort((a: { timestamp: string }, b: { timestamp: string }) => a.timestamp.localeCompare(b.timestamp))
+        .map((r: { entityId: string }) => r.entityId)
+}
+
+/** Deja la base migrada hasta `version` y la cierra */
+async function bringUpTo(version: number): Promise<void> {
+    const partial = defineChainDb(version)
+    await partial.open()
+    partial.close()
+}
+
+describe('Fase 2F/2J/2K — cadena de migraciones v16 → v24', () => {
     beforeEach(async () => { await Dexie.delete(DBN); await seedV16() })
     afterEach(async () => { await Dexie.delete(DBN) })
 
@@ -98,13 +139,14 @@ describe('Fase 2F/2K — cadena de migraciones v16 → v23', () => {
         expect((await chain.table('entries').get('leg-1')).status).toBe('POSTED')
         // tablas nuevas existen y son usables
         expect(chain.tables.map(t => t.name)).toEqual(expect.arrayContaining(['expenseAllocationRules', 'manualDisclosures', 'reportSnapshots', 'inflationIndexSets', 'cashFlowPolicies']))
-        // v23 (Fase 2K): tablas de consolidación, estrictamente aditivas
-        expect(chain.tables.map(t => t.name)).toEqual(expect.arrayContaining([
-            'economicGroups', 'groupMembers', 'consolidationExercises', 'consolidationMemberLinks',
-            'consolidationMappings', 'reciprocalBalances', 'intragroupOperations', 'consolidationAdjustments',
-        ]))
-        // la migración a v23 NO crea ningún grupo: un grupo económico es una
-        // decisión del usuario, no algo que el sistema deba suponer
+        // v23 (Fase 2J): mediciones a valores corrientes al cierre
+        expect(chain.tables.map(t => t.name)).toEqual(expect.arrayContaining(['closingMeasurements']))
+        // la migracion v23 no inventa mediciones
+        expect(await chain.table('closingMeasurements').count()).toBe(0)
+        // v24 (Fase 2K): tablas de consolidacion, estrictamente aditivas
+        expect(chain.tables.map(t => t.name)).toEqual(expect.arrayContaining(CONSOLIDATION_TABLE_NAMES))
+        // la migracion a v24 NO crea ningun grupo: un grupo economico es una
+        // decision del usuario, no algo que el sistema deba suponer
         expect(await chain.table('economicGroups').count()).toBe(0)
         expect(await chain.table('groupMembers').count()).toBe(0)
         await chain.table('manualDisclosures').add({ id: 'm1', companyId: 'c', exerciseId: 'e', noteType: 'contingencias', title: 't', content: 'x', status: 'DRAFT', version: 1, createdAt: 'now', createdBy: 'a', updatedAt: 'now', updatedBy: 'a' })
@@ -115,13 +157,99 @@ describe('Fase 2F/2K — cadena de migraciones v16 → v23', () => {
         expect(policies[0].companyId).toBe('company-default')
         expect(policies[0].requiresReview).toBe(true)
         expect(policies[0].cashClassifications.some((c: { accountId: string }) => c.accountId === 'caja')).toBe(true)
-        // metadata de sistema en la última versión de la cadena
+        // metadata de sistema en la ultima version de la cadena
         const meta = await chain.table('systemMeta').get('system')
         expect(meta.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
-        expect(meta.schemaVersion).toBe(23)
-        expect(meta.lastMigrationId).toBe('v23-fase2k-consolidacion')
+        expect(meta.schemaVersion).toBe(24)
+        expect(meta.lastMigrationId).toBe('v24-fase2k-consolidacion')
+
+        // Las DOS migraciones nuevas corrieron, y en orden: 2J antes que 2K
+        const run = await migrationsRun(chain)
+        expect(run).toContain('v23-closing-measurements')
+        expect(run).toContain('v24-fase2k-consolidacion')
+        expect(run.indexOf('v23-closing-measurements'))
+            .toBeLessThan(run.indexOf('v24-fase2k-consolidacion'))
 
         chain.close()
+    })
+
+    it('una base v22 llega a v24 corriendo v23 y v24 en ese orden', async () => {
+        await bringUpTo(22)
+
+        const chain = defineChainDb()
+        await chain.open()
+        const run = await migrationsRun(chain)
+        expect(run.filter(id => id === 'v23-closing-measurements')).toHaveLength(1)
+        expect(run.filter(id => id === 'v24-fase2k-consolidacion')).toHaveLength(1)
+        expect(run.indexOf('v23-closing-measurements'))
+            .toBeLessThan(run.indexOf('v24-fase2k-consolidacion'))
+
+        const meta = await chain.table('systemMeta').get('system')
+        expect(meta.schemaVersion).toBe(24)
+        // la data legacy sobrevivio a las dos migraciones
+        expect(await chain.table('entries').get('leg-1')).toBeDefined()
+        expect((await chain.table('accounts').get('caja')).name).toBe('Caja')
+        chain.close()
+    })
+
+    it('una base YA en v23 ejecuta UNICAMENTE v24 y no repite la v23', async () => {
+        await bringUpTo(23)
+
+        // Dato propio de la Fase 2J: debe sobrevivir a la migracion v24
+        const at23 = defineChainDb(23)
+        await at23.open()
+        await at23.table('closingMeasurements').add({
+            id: 'med-1', companyId: 'company-default', exerciseId: 'ex-2025',
+            accountId: 'caja', status: 'DRAFT',
+        })
+        const runBefore = await migrationsRun(at23)
+        expect(runBefore.filter(id => id === 'v23-closing-measurements')).toHaveLength(1)
+        expect(runBefore).not.toContain('v24-fase2k-consolidacion')
+        at23.close()
+
+        const chain = defineChainDb()
+        await chain.open()
+        const run = await migrationsRun(chain)
+        // la v23 NO se repite: sigue habiendo exactamente una ejecucion
+        expect(run.filter(id => id === 'v23-closing-measurements')).toHaveLength(1)
+        expect(run.filter(id => id === 'v24-fase2k-consolidacion')).toHaveLength(1)
+
+        const meta = await chain.table('systemMeta').get('system')
+        expect(meta.schemaVersion).toBe(24)
+        expect(meta.lastMigrationId).toBe('v24-fase2k-consolidacion')
+
+        // la medicion de la Fase 2J sigue ahi: la v24 no recreo ni toco su tabla
+        expect(await chain.table('closingMeasurements').count()).toBe(1)
+        expect((await chain.table('closingMeasurements').get('med-1')).accountId).toBe('caja')
+        // y las tablas de consolidacion existen y estan vacias
+        expect(chain.tables.map(t => t.name)).toEqual(expect.arrayContaining(CONSOLIDATION_TABLE_NAMES))
+        expect(await chain.table('economicGroups').count()).toBe(0)
+        chain.close()
+    })
+
+    it('reabrir una base ya en v24 no vuelve a migrar (idempotencia)', async () => {
+        await bringUpTo(24)
+
+        const first = defineChainDb()
+        await first.open()
+        const runFirst = await migrationsRun(first)
+        await first.table('economicGroups').add({
+            id: 'g-1', name: 'Grupo de prueba', parentCompanyId: 'company-default',
+            presentationCurrency: 'ARS', measurementUnit: 'Moneda de cierre',
+            createdAt: 'now', updatedAt: 'now', active: true,
+        })
+        first.close()
+
+        const second = defineChainDb()
+        await second.open()
+        const runSecond = await migrationsRun(second)
+        // ninguna migracion volvio a ejecutarse
+        expect(runSecond).toEqual(runFirst)
+        expect(runSecond.filter(id => id === 'v24-fase2k-consolidacion')).toHaveLength(1)
+        // y el dato escrito por el usuario sigue intacto
+        expect(await second.table('economicGroups').count()).toBe(1)
+        expect((await second.table('economicGroups').get('g-1')).name).toBe('Grupo de prueba')
+        second.close()
     })
 })
 

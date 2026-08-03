@@ -123,6 +123,14 @@ export function FixedAssetsAnnexView({ annex, restated, showComparative, onRowCl
                 <div role="alert" className="ppe-warning">⚠ {restated.blockers.join(' · ')}</div>
             )}
 
+            {/* Aproximaciones declaradas (Fase 2J §8): una cifra aproximada se
+                informa como tal, no se presenta como exacta. */}
+            {expression === 'CLOSING' && restated && (restated.warnings?.length ?? 0) > 0 && (
+                <div role="status" className="ppe-warning" data-testid="ppe-aproximacion">
+                    {restated.warnings!.join(' · ')}
+                </div>
+            )}
+
             {expression === 'NOMINAL' || !restated ? (
                 <div className="ppe-scroll" role="region" aria-label="Anexo de bienes de uso (nominal)" tabIndex={0}>
                     <table className="ppe-table">

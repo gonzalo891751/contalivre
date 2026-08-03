@@ -98,6 +98,35 @@ export async function resolveResultAccounts(): Promise<{
     return { resultAccount, retainedAccount, errors }
 }
 
+/**
+ * Controles del ejercicio, leídos del MISMO núcleo que usa la publicación.
+ *
+ * Se importa de forma diferida porque el motor de reporting vive aguas abajo
+ * del dominio contable; si falla, el cierre no se cae: se informa y siguen
+ * vigentes los controles propios de este servicio.
+ */
+async function loadReadinessForExercise(
+    exercise: AccountingExercise
+): Promise<import('../../reporting/closing/closingReadiness').ClosingReadiness | null> {
+    try {
+        const [{ loadReportingBundle }, { listIndexSets }] = await Promise.all([
+            import('../../reporting/loadReportingBundle'),
+            import('../inflation/indexRegistry'),
+        ])
+        // Se evalúa con la serie registrada más reciente: es la que el usuario
+        // usaría para publicar. Sin ninguna serie, las etapas de ajuste por
+        // inflación y RECPAM no aplican y el cierre corre en moneda nominal.
+        const sets = await listIndexSets().catch(() => [])
+        const year = Number(exercise.startDate.slice(0, 4))
+        const bundle = await loadReportingBundle(year, {
+            inflationIndexSetId: sets[0]?.id,
+        })
+        return bundle.readiness
+    } catch {
+        return null
+    }
+}
+
 // ─────────────────────────────────────────────────────────────
 // 7.1 Vista previa de cierre
 // ─────────────────────────────────────────────────────────────
@@ -173,6 +202,26 @@ export async function previewClosing(exerciseId: string): Promise<ClosingPreview
 
     const { errors: accountErrors } = await resolveResultAccounts()
     blockers.push(...accountErrors)
+
+    // ── Núcleo único de controles (Fase 2J §9) ───────────────
+    // El cierre consulta EXACTAMENTE los mismos controles que gobiernan la
+    // publicación de los estados. Antes la compuerta de publicación corría sus
+    // controles y el cierre no los miraba, así que un ejercicio con el RECPAM
+    // sin conciliar o con cuentas sin clasificar podía cerrarse igual.
+    const readiness = await loadReadinessForExercise(exercise)
+    if (readiness) {
+        for (const blocker of readiness.blockers) {
+            // Los controles de integridad del Diario ya están arriba
+            if (blocker.id === 'sin-borradores' || blocker.id === 'ejercicio-abierto') continue
+            // El `label` describe lo que DEBERÍA cumplirse; leerlo como motivo
+            // de rechazo suena a contradicción. Manda el detalle si existe.
+            const motivo = blocker.detail ?? `No se cumple: ${blocker.label}.`
+            blockers.push(blocker.action ? `${motivo} ${blocker.action}` : motivo)
+        }
+        for (const warning of readiness.warnings) {
+            warnings.push(warning.detail ? `${warning.label}: ${warning.detail}` : warning.label)
+        }
+    }
 
     const incomeAccounts: ClosingPreview['incomeAccounts'] = []
     const expenseAccounts: ClosingPreview['expenseAccounts'] = []

@@ -44,7 +44,6 @@ const navItems: NavItem[] = [
     { path: '/mayor', label: 'Libro Mayor', icon: BookBookmark },
     { path: '/balance', label: 'Balance de SyS', icon: Scales },
     { path: '/estados', label: 'Estados contables', icon: ChartLineUp },
-    { path: '/consolidacion', label: 'Consolidación', icon: TreeStructure },
     {
         path: '/planillas',
         label: 'Planillas',
