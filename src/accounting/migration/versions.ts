@@ -12,14 +12,14 @@
 
 import pkg from '../../../package.json'
 
-export const CURRENT_SCHEMA_VERSION = 24
+export const CURRENT_SCHEMA_VERSION = 25
 
 export const APP_VERSION: string =
     (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env?.VITE_APP_VERSION)
     || pkg.version
 
 /** Versión del motor contable (servicio + reporting engine) */
-export const ACCOUNTING_ENGINE_VERSION = '2G.0'
+export const ACCOUNTING_ENGINE_VERSION = '2L.0'
 
 /** Marco normativo declarado (ver capacidades y notas) */
 export const NORMATIVE_BASELINE = 'RT 54 (texto ordenado por RT 59) — alcance educativo comercial/servicios'

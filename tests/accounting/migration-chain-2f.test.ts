@@ -1,6 +1,6 @@
 /**
- * Fase 2F (§15), extendida en las Fases 2J y 2K — cadena de migraciones
- * v16 → v24 y ciclo backup/restore/reset.
+ * Fase 2F (§15), extendida en las Fases 2J, 2K y 2L — cadena de migraciones
+ * v16 → v25 y ciclo backup/restore/reset.
  *
  * Cada fase que eleva el esquema EXTIENDE esta cadena en lugar de reescribirla:
  * así se prueba que una instalación antigua sigue migrando hasta hoy sin perder
@@ -36,6 +36,8 @@ import { migrateToV21 } from '../../src/accounting/migration/migrateV21'
 import { migrateToV22 } from '../../src/accounting/migration/migrateV22'
 import { migrateToV23 } from '../../src/accounting/migration/migrateV23'
 import { migrateToV24 } from '../../src/accounting/migration/migrateV24'
+import { migrateToV25 } from '../../src/accounting/migration/migrateV25'
+import { saveInflationPolicy } from '../../src/reporting/closing/closingWorkPaperService'
 
 const DBN = 'ChainMigrationTestDb'
 
@@ -60,7 +62,7 @@ async function seedV16(): Promise<void> {
  * src/storage/db.ts). `upTo` permite detener la definición en una versión
  * intermedia para simular una instalación que quedó en ese punto.
  */
-function defineChainDb(upTo = 24): Dexie {
+function defineChainDb(upTo = 25): Dexie {
     const d = new Dexie(DBN)
     d.version(16).stores({
         accounts: 'id, &code, name, kind, parentId, level, statementGroup',
@@ -99,6 +101,11 @@ function defineChainDb(upTo = 24): Dexie {
             consolidationAdjustments: 'id, consolidationId, category, status',
         }).upgrade(migrateToV24)
     }
+    if (upTo >= 25) {
+        d.version(25).stores({
+            closingWorkPapers: 'id, companyId, exerciseId, status, [companyId+exerciseId]',
+        }).upgrade(migrateToV25)
+    }
     return d
 }
 
@@ -123,7 +130,7 @@ async function bringUpTo(version: number): Promise<void> {
     partial.close()
 }
 
-describe('Fase 2F/2J/2K — cadena de migraciones v16 → v24', () => {
+describe('Fase 2F/2J/2K/2L — cadena de migraciones v16 → v25', () => {
     beforeEach(async () => { await Dexie.delete(DBN); await seedV16() })
     afterEach(async () => { await Dexie.delete(DBN) })
 
@@ -149,6 +156,8 @@ describe('Fase 2F/2J/2K — cadena de migraciones v16 → v24', () => {
         // decision del usuario, no algo que el sistema deba suponer
         expect(await chain.table('economicGroups').count()).toBe(0)
         expect(await chain.table('groupMembers').count()).toBe(0)
+        expect(chain.tables.map(t => t.name)).toContain('closingWorkPapers')
+        expect(await chain.table('closingWorkPapers').count()).toBe(0)
         await chain.table('manualDisclosures').add({ id: 'm1', companyId: 'c', exerciseId: 'e', noteType: 'contingencias', title: 't', content: 'x', status: 'DRAFT', version: 1, createdAt: 'now', createdBy: 'a', updatedAt: 'now', updatedBy: 'a' })
         expect(await chain.table('manualDisclosures').count()).toBe(1)
         // v22: política EFE heredada creada de forma determinista para la empresa
@@ -160,20 +169,23 @@ describe('Fase 2F/2J/2K — cadena de migraciones v16 → v24', () => {
         // metadata de sistema en la ultima version de la cadena
         const meta = await chain.table('systemMeta').get('system')
         expect(meta.schemaVersion).toBe(CURRENT_SCHEMA_VERSION)
-        expect(meta.schemaVersion).toBe(24)
-        expect(meta.lastMigrationId).toBe('v24-fase2k-consolidacion')
+        expect(meta.schemaVersion).toBe(25)
+        expect(meta.lastMigrationId).toBe('v25-fase2l-pre-cierre-guiado')
 
         // Las DOS migraciones nuevas corrieron, y en orden: 2J antes que 2K
         const run = await migrationsRun(chain)
         expect(run).toContain('v23-closing-measurements')
         expect(run).toContain('v24-fase2k-consolidacion')
+        expect(run).toContain('v25-fase2l-pre-cierre-guiado')
         expect(run.indexOf('v23-closing-measurements'))
             .toBeLessThan(run.indexOf('v24-fase2k-consolidacion'))
+        expect(run.indexOf('v24-fase2k-consolidacion'))
+            .toBeLessThan(run.indexOf('v25-fase2l-pre-cierre-guiado'))
 
         chain.close()
     })
 
-    it('una base v22 llega a v24 corriendo v23 y v24 en ese orden', async () => {
+    it('una base v22 llega a v25 corriendo v23, v24 y v25 en ese orden', async () => {
         await bringUpTo(22)
 
         const chain = defineChainDb()
@@ -181,18 +193,19 @@ describe('Fase 2F/2J/2K — cadena de migraciones v16 → v24', () => {
         const run = await migrationsRun(chain)
         expect(run.filter(id => id === 'v23-closing-measurements')).toHaveLength(1)
         expect(run.filter(id => id === 'v24-fase2k-consolidacion')).toHaveLength(1)
+        expect(run.filter(id => id === 'v25-fase2l-pre-cierre-guiado')).toHaveLength(1)
         expect(run.indexOf('v23-closing-measurements'))
             .toBeLessThan(run.indexOf('v24-fase2k-consolidacion'))
 
         const meta = await chain.table('systemMeta').get('system')
-        expect(meta.schemaVersion).toBe(24)
+        expect(meta.schemaVersion).toBe(25)
         // la data legacy sobrevivio a las dos migraciones
         expect(await chain.table('entries').get('leg-1')).toBeDefined()
         expect((await chain.table('accounts').get('caja')).name).toBe('Caja')
         chain.close()
     })
 
-    it('una base YA en v23 ejecuta UNICAMENTE v24 y no repite la v23', async () => {
+    it('una base YA en v23 ejecuta v24 y v25 sin repetir la v23', async () => {
         await bringUpTo(23)
 
         // Dato propio de la Fase 2J: debe sobrevivir a la migracion v24
@@ -213,10 +226,11 @@ describe('Fase 2F/2J/2K — cadena de migraciones v16 → v24', () => {
         // la v23 NO se repite: sigue habiendo exactamente una ejecucion
         expect(run.filter(id => id === 'v23-closing-measurements')).toHaveLength(1)
         expect(run.filter(id => id === 'v24-fase2k-consolidacion')).toHaveLength(1)
+        expect(run.filter(id => id === 'v25-fase2l-pre-cierre-guiado')).toHaveLength(1)
 
         const meta = await chain.table('systemMeta').get('system')
-        expect(meta.schemaVersion).toBe(24)
-        expect(meta.lastMigrationId).toBe('v24-fase2k-consolidacion')
+        expect(meta.schemaVersion).toBe(25)
+        expect(meta.lastMigrationId).toBe('v25-fase2l-pre-cierre-guiado')
 
         // la medicion de la Fase 2J sigue ahi: la v24 no recreo ni toco su tabla
         expect(await chain.table('closingMeasurements').count()).toBe(1)
@@ -227,12 +241,13 @@ describe('Fase 2F/2J/2K — cadena de migraciones v16 → v24', () => {
         chain.close()
     })
 
-    it('reabrir una base ya en v24 no vuelve a migrar (idempotencia)', async () => {
+    it('una base v24 ejecuta v25 una vez y una reapertura no vuelve a migrar', async () => {
         await bringUpTo(24)
 
         const first = defineChainDb()
         await first.open()
         const runFirst = await migrationsRun(first)
+        expect(runFirst.filter(id => id === 'v25-fase2l-pre-cierre-guiado')).toHaveLength(1)
         await first.table('economicGroups').add({
             id: 'g-1', name: 'Grupo de prueba', parentCompanyId: 'company-default',
             presentationCurrency: 'ARS', measurementUnit: 'Moneda de cierre',
@@ -246,6 +261,7 @@ describe('Fase 2F/2J/2K — cadena de migraciones v16 → v24', () => {
         // ninguna migracion volvio a ejecutarse
         expect(runSecond).toEqual(runFirst)
         expect(runSecond.filter(id => id === 'v24-fase2k-consolidacion')).toHaveLength(1)
+        expect(runSecond.filter(id => id === 'v25-fase2l-pre-cierre-guiado')).toHaveLength(1)
         // y el dato escrito por el usuario sigue intacto
         expect(await second.table('economicGroups').count()).toBe(1)
         expect((await second.table('economicGroups').get('g-1')).name).toBe('Grupo de prueba')
@@ -301,6 +317,20 @@ describe('Fase 2F — backup / reset / restore en el schema actual', () => {
         expect(await db.cashFlowPolicies.count()).toBe(0)
         await restoreBackup(backup)
         expect(await db.cashFlowPolicies.count()).toBe(1)
+    })
+
+    it('el backup y restore conservan el papel de trabajo del pre-cierre v25', async () => {
+        await saveInflationPolicy('company-default', 'ex-2025', {
+            applicability: 'NO_APLICABLE', rationale: 'Contexto estable documentado para la prueba.',
+        })
+        const backup = await exportBackup()
+        expect(backup.tables.closingWorkPapers).toHaveLength(1)
+        await resetApplication()
+        expect(await db.closingWorkPapers.count()).toBe(0)
+        await restoreBackup(backup)
+        expect(await db.closingWorkPapers.count()).toBe(1)
+        expect((await db.closingWorkPapers.toCollection().first())?.inflation.rationale)
+            .toContain('Contexto estable')
     })
 
     it('rechaza un backup de un schema más nuevo (no destruye datos actuales)', async () => {

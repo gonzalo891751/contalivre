@@ -17,6 +17,7 @@ import { migrateToV21 } from '../accounting/migration/migrateV21'
 import { migrateToV22 } from '../accounting/migration/migrateV22'
 import { migrateToV23 } from '../accounting/migration/migrateV23'
 import { migrateToV24 } from '../accounting/migration/migrateV24'
+import { migrateToV25 } from '../accounting/migration/migrateV25'
 import type {
     ConsolidationAccountMapping,
     ConsolidationExercise,
@@ -29,6 +30,7 @@ import type {
 } from '../consolidation/domain/types'
 import type { CashFlowPolicy } from '../reporting/policy/cashFlowPolicy'
 import type { ClosingMeasurement } from '../reporting/measurement/measurementTypes'
+import type { ClosingWorkPaper } from '../reporting/closing/closingWorkPaperTypes'
 import type {
     InventoryProduct,
     InventoryMovement,
@@ -150,6 +152,8 @@ class ContableDatabase extends Dexie {
     cashFlowPolicies!: EntityTable<CashFlowPolicy, 'id'>
     // ── Fase 2J: mediciones a valores corrientes al cierre ──
     closingMeasurements!: EntityTable<ClosingMeasurement, 'id'>
+    // ── Fase 2L: decisiones y trazabilidad del pre-cierre guiado ──
+    closingWorkPapers!: EntityTable<ClosingWorkPaper, 'id'>
     // ── Fase 2K: consolidación de estados contables (papeles de trabajo) ──
     economicGroups!: EntityTable<EconomicGroup, 'id'>
     groupMembers!: EntityTable<GroupMember, 'id'>
@@ -644,6 +648,12 @@ class ContableDatabase extends Dexie {
             intragroupOperations: 'id, consolidationId, sellerCompanyId, buyerCompanyId, type',
             consolidationAdjustments: 'id, consolidationId, category, status',
         }).upgrade(migrateToV24)
+
+        // Version 25 (Fase 2L): papel de trabajo del pre-cierre. Aditiva; no
+        // modifica los libros, las mediciones v23 ni la consolidación v24.
+        this.version(25).stores({
+            closingWorkPapers: 'id, companyId, exerciseId, status, [companyId+exerciseId]',
+        }).upgrade(migrateToV25)
     }
 }
 
