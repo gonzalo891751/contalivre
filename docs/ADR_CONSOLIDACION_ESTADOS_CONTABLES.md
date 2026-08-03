@@ -1,6 +1,7 @@
 # ADR — Consolidación de estados contables (Fase 2K)
 
 Estado: **aceptado** · Fecha: 2026-08-02 · Rama: `feat/fase-2k-consolidacion-estados-contables`
+Actualizado tras integrar la Fase 2J: ver ADR-2K-11.
 
 Registra las decisiones de arquitectura que gobiernan el módulo de consolidación
 y, sobre todo, **por qué** se tomaron. Las alternativas descartadas se documentan
@@ -126,7 +127,7 @@ los libros de ninguna entidad.
 
 **Decisión.** Se garantiza en tres capas:
 
-1. **Esquema.** Las ocho tablas de la v23 son papeles de trabajo; ninguna es
+1. **Esquema.** Las ocho tablas de la v24 son papeles de trabajo; ninguna es
    fuente de asientos.
 2. **Código.** `src/consolidation/repository.ts` es la única puerta de escritura
    del módulo y no importa `journalRepository` ni escribe en `entries`. El motor
@@ -236,3 +237,35 @@ fase. En resumen: plan de cuentas compartido por el grupo (consecuencia de que e
 código de cuenta es único en toda la base), sin conversión de estados en moneda
 extranjera, sin cambios de participación ni pérdida de control dentro del
 ejercicio, y detección de recíprocos por mapeo declarado en lugar de automática.
+
+
+---
+
+## ADR-2K-11 — La consolidación ocupa la v24; la v23 es de la Fase 2J
+
+**Contexto.** Las Fases 2J y 2K se desarrollaron en paralelo y ambas numeraron
+su migración como v23. La Fase 2J se integró primero a `main` (PR #31) con
+`v23-closing-measurements` y la tabla `closingMeasurements`.
+
+**Alternativa descartada.** Quedarse con la v23 para la consolidación y
+renumerar la de la Fase 2J.
+
+**Decisión.** La Fase 2J conserva la v23 **intacta**. La consolidación pasa
+íntegramente a **v24** (`v24-fase2k-consolidacion`), que se ejecuta después de
+la v23 y nunca en su lugar.
+
+**Por qué.** La numeración de una migración ya publicada es inmutable en la
+práctica: hay bases que ya ejecutaron «la v23». Si se reasignara ese número,
+esas bases quedarían con un `lastMigrationId` que dice una cosa y unas tablas
+que dicen otra, sin ninguna forma de saber cuál de las dos migraciones
+aplicaron. El costo de renumerar la fase que todavía no se integró es cero; el
+de renumerar la que ya corrió es corrupción silenciosa.
+
+**Consecuencia verificada.** La cadena de migraciones prueba los cuatro puntos
+de partida reales (v16, v22, v23 y v24), y en particular que una base ya en v23
+ejecute **únicamente** la v24 sin repetir la v23 y sin tocar los datos que la
+Fase 2J escribió en `closingMeasurements`.
+
+**Regla para la próxima fase.** Antes de elegir el número de una migración,
+verificar el `CURRENT_SCHEMA_VERSION` de la rama objetivo REAL, no el de la base
+sobre la que se empezó a trabajar.

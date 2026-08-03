@@ -1,6 +1,15 @@
 # Fase 2K — Consolidación de estados contables
 
 Informe de implementación · 2 de agosto de 2026
+**Actualizado tras la integración de la Fase 2J** (ver §1 bis)
+
+> **Aviso de vigencia.** Las secciones §2 a §13 se escribieron ANTES de que la
+> rama objetivo avanzara: en ese momento `main` estaba en `c82dc04` y la Fase 2K
+> ocupaba el esquema v23. La Fase 2J se integró después (PR #31) y se quedó con
+> la v23, de modo que la consolidación pasó a **v24**. Donde el texto original
+> dice «v23» refiriéndose a las tablas de consolidación, léase **v24**. Los
+> importes, los casos de la planilla y las conclusiones contables NO cambiaron:
+> se reverificaron íntegramente después del merge (§1 bis).
 
 ---
 
@@ -9,37 +18,159 @@ Informe de implementación · 2 de agosto de 2026
 | Dato | Valor |
 |---|---|
 | Rama | `feat/fase-2k-consolidacion-estados-contables` |
-| HEAD final | `fc22d84` |
-| Base exacta | `c82dc04` (`main`, merge del PR #30 — Fase 2I) |
-| Estado de `main` | **Intacto**, en `c82dc04`. Sin merge, sin deploy, sin reescritura de historia |
+| HEAD final | `6eb8fe0` |
+| Rama objetivo integrada | `origin/main` @ `a9179b3` (merge del PR #31 — Fase 2J) |
+| Base original de la fase | `c82dc04` (`main`, merge del PR #30 — Fase 2I) |
+| merge-base anterior | `c82dc04` |
+| Estado de `main` | **Intacto**, en `a9179b3`. Sin merge, sin deploy, sin reescritura de historia |
 | Árbol de trabajo | **Limpio** |
 | Node / npm | **v22.23.1** / 10.9.8 (`C:\Tools\node-v22.23.1-win-x64`) |
-| Esquema Dexie | v22 → **v23** (migración aditiva `v23-fase2k-consolidacion`) |
-| Alcance del diff | 48 archivos, +9.225 / −41 líneas |
-
-### Por qué esta base y no la Fase 2J
-
-La rama `feat/fase-2j-pre-cierre-medicion-exportacion-formal` existe sin mergear
-y ya eleva el esquema a 23. Se descartó como base por dos razones: `main` es la
-única línea integrada y revisada (el árbol de `main` es idéntico al de `bbc77d0`,
-la punta de la Fase 2I), y apoyarse en 2J habría forzado el esquema a 24 y atado
-esta fase a trabajo todavía sujeto a revisión. La consolidación consume
-ejercicios cerrados y juegos canónicos, que existen completos en `main`.
-
-**Nota de coordinación:** 2J y 2K reclaman ambas el esquema **v23**. Al integrar,
-una de las dos deberá renumerarse a v24 y ajustar su migración. Es un conflicto
-declarado, no un descuido.
+| Esquema Dexie | v22 → v23 (Fase 2J) → **v24** (Fase 2K, `v24-fase2k-consolidacion`) |
 
 ### Commits atómicos
+
+Los siete commits originales de la fase se conservan intactos: no hubo rebase,
+squash, cherry-pick ni force push.
 
 | # | SHA | Hito |
 |---|---|---|
 | 1 | `e1df8e6` | Contexto de reporting por entidad del grupo |
-| 2 | `d263969` | Dominio, esquema v23 y persistencia del grupo económico |
+| 2 | `d263969` | Dominio, esquema y persistencia del grupo económico |
 | 3 | `7268d3a` | Motor de eliminaciones, PNC y resultados no trascendidos |
 | 4 | `73b34b2` | Estados consolidados, servicio y dataset Grupo Litoral |
 | 5 | `42307ac` | Página del módulo, ayudas pedagógicas y exportaciones |
 | 6 | `fc22d84` | E2E del recorrido completo y corrección de desborde móvil |
+| 7 | `b4fa168` | ADR, informe de la fase y registro de defectos |
+
+Y los tres de la integración:
+
+| # | SHA | Hito |
+|---|---|---|
+| 8 | `7e5b2eb` | **Merge** de `origin/main` (Fase 2J): esquema v24 y convivencia |
+| 9 | `f621615` | El menú móvil queda alineado con la barra lateral |
+| 10 | `6eb8fe0` | Navegación resiliente en el paso 10 de la auditoría del ciclo |
+
+---
+
+## 1 bis. Integración de la Fase 2J
+
+### Relevamiento del remoto
+
+| Dato | Valor |
+|---|---|
+| Rama objetivo del PR | `main` |
+| HEAD remoto al integrar | `a9179b3` — *Merge pull request #31 … fase-2j* |
+| HEAD de la rama 2K antes | `b4fa168` |
+| merge-base | `c82dc04` (sin cambios: la 2K nunca se había actualizado) |
+| ¿La Fase 2J está integrada? | **Sí.** Cuatro commits (`3bd48b6`, `793f1e2`, `3bc4f77`, `187345a`) más el merge |
+| ¿Qué fase introdujo la v23? | **La Fase 2J**, con `v23-closing-measurements` (tabla `closingMeasurements`) |
+| ¿El informe anterior quedó desactualizado? | **Sí**, y por eso este aviso encabeza el documento |
+
+La Fase 2J aportó: núcleo único de controles (`closingReadiness`), servicio de
+medición a valores corrientes, página `/pre-cierre`, reexpresión de la
+depreciación ficha por ficha y el retiro de la planilla AxI.
+
+### Por qué la Fase 2K pasó de v23 a v24
+
+La v23 de la Fase 2J **ya está en `main` y ya corrió en instalaciones reales**.
+Reasignar esa numeración dejaría bases que ejecutaron «la v23» sin ninguna forma
+de saber cuál de las dos migraciones aplicaron: el `lastMigrationId` diría una
+cosa y las tablas presentes, otra. La numeración de una migración publicada es
+inmutable por definición, así que la consolidación pasa íntegramente a **v24**,
+que se ejecuta DESPUÉS de la v23 y nunca en su lugar.
+
+### Conflictos y resolución, archivo por archivo
+
+| Archivo | Conflicto | Resolución |
+|---|---|---|
+| `src/accounting/migration/migrateV23.ts` | add/add: ambas fases crearon el archivo | Se conserva **íntegra** la versión de la Fase 2J. El contenido de la 2K se traslada a `migrateV24.ts` con `MIGRATION_V24_ID = 'v24-fase2k-consolidacion'` |
+| `src/storage/db.ts` | Ambas añadían import, declaración de tabla y bloque de versión | **Conviven los dos bloques.** `closingMeasurements` (2J) y las ocho tablas de consolidación (2K); `version(23)` y `version(24)` separadas, cada una con su upgrade. Ninguna tabla se reutiliza con otro significado; sin índices duplicados |
+| `src/reporting/loadStatements.ts` | 2J añadía las fichas de bienes de uso; 2K, el parámetro `companyId` | **Conviven.** Y como `db.fixedAssets` tampoco lleva dimensión de empresa, se le aplica la MISMA guarda honesta que ya tenía moneda extranjera |
+| `src/ui/Layout/Sidebar.tsx` | Ambas añadían un icono y una entrada | **Conviven** «Pre-cierre y medición» (2J) y «Consolidación» (2K), en ese orden, y se mantiene el retiro de la planilla AxI. La 2K aliasaba `TreeStructure`, que el mismo menú ya usa para «Plan de Cuentas»: se cambia por `Buildings` |
+| `tests/accounting/migration-chain-2f.test.ts` | Ambas extendían la cadena | **Se extiende, no se reescribe** (ver abajo) |
+
+`src/reporting/loadReportingBundle.ts`, `src/App.tsx` y `docs/auditoria/REGISTRO_DEFECTOS.md`
+se auto-fusionaron sin conflicto y se verificó que conservaran ambas fases.
+
+### Decisión semántica adicional: las fichas de bienes de uso
+
+La Fase 2J agregó `db.fixedAssets.toArray()` a `loadReportingInput` para
+reexpresar la depreciación bien por bien. Esa tabla **no tiene `companyId`**,
+igual que el detalle de moneda extranjera. Cargarla sin más para una controlada
+le habría atribuido las fichas de la controladora y su depreciación reexpresada
+habría sido incorrecta **sin ningún aviso**. Se aplicó la misma guarda ya
+existente: para una entidad distinta de la por defecto se informa **sin** ese
+detalle, en lugar de atribuirle activos ajenos. Queda registrado en §11.7.
+
+### La cadena de migraciones
+
+`tests/accounting/migration-chain-2f.test.ts` ahora cubre **cuatro puntos de
+partida reales**, sin perder cobertura anterior:
+
+| Escenario | Qué verifica |
+|---|---|
+| v16 legacy → v24 | La data sobrevive a TODAS las migraciones; v23 y v24 corren **en ese orden** |
+| v22 → v24 | Corren exactamente una v23 y una v24; la data legacy sobrevive |
+| v23 → v24 | Corre **ÚNICAMENTE** la v24. La v23 no se repite (sigue con una sola ejecución) y una medición de la 2J escrita antes del upgrade **sigue intacta** |
+| v24 → v24 | Reabrir **no vuelve a migrar**; un grupo económico escrito por el usuario sigue ahí |
+
+Convivencia verificada: existe `closingMeasurements` (2J) y existen las ocho
+tablas de consolidación (2K), y ninguna migración crea datos por su cuenta.
+
+### Verificación posterior a la integración
+
+| Verificación | Resultado |
+|---|---|
+| `npx tsc --noEmit` | **Limpio** |
+| `npx vitest run` | **818 tests en 108 archivos, todos verdes** |
+| — de los cuales, Fase 2K | **69 tests en 5 archivos** |
+| `npx eslint .` | **0 errores**, 54 advertencias (todas preexistentes; en los archivos tocados por la integración, sólo la de `navGroups` en `Sidebar.tsx`, que ya venía de `main`) |
+| `npx vite build` | **OK** (advertencia de tamaño de chunk, preexistente) |
+| `npx playwright test` | **67 tests verdes** en Chromium escritorio, Chromium móvil y Firefox. Dos corridas completas consecutivas |
+| Migración desde base limpia y desde bases previas | Cubierta por los cuatro escenarios de la cadena |
+
+**Purmamarca no cambió.** Los seis archivos del caso son **byte a byte
+idénticos** a los de la rama objetivo (verificado con `git hash-object` contra
+`git rev-parse origin/main:<archivo>`), y sus once tests siguen reproduciendo los
+importes exactos, incluido «reproduce EXACTAMENTE los importes esperados del EFE».
+
+**Grupo Litoral sigue funcionando.** Los 69 tests de consolidación pasan sin
+cambios. Reverificado tras el merge, reconstruyendo el cálculo:
+
+| Magnitud | Valor |
+|---|---|
+| Resultado consolidado atribuible a los propietarios | **186.400,00** = resultado individual de la controladora |
+| Resultado atribuible a la PNC | 15.600,00 |
+| PNC al cierre | 77.600,00 |
+| PNC de los casos descendentes (hojas 06–08) | **49.900,00** patrimonio y **10.900,00** resultado, iguales en los tres |
+| Activo consolidado | 1.389.000,00 |
+| Efectivo consolidado al cierre | 87.000,00 |
+
+Los ocho casos de las hojas 01–08 y la validación independiente de «9 Resumen»
+vuelven a pasar, igual que las operaciones ascendente, descendente y lateral, la
+realización total y parcial, la eliminación inversión contra PN, los recíprocos,
+los dividendos, los préstamos con intereses y el EFE consolidado.
+
+**El invariante extracontable se mantiene:** el test que compara `db.entries`
+byte a byte antes y después de consolidar sigue verde.
+
+### Un defecto encontrado durante la integración
+
+**DEF-2K-04 — carrera de navegación en el paso 10 de `auditoria-ciclo-completo`
+(test de la Fase 2J).** Fallaba con `net::ERR_ABORTED` al navegar a `/asientos`
+saliendo del panel de cierre con la lectura del núcleo de controles en vuelo. No
+es un defecto del producto: en un navegador real el usuario no pierde la
+navegación, se cancela la lectura.
+
+El diagnóstico se hizo midiendo, no suponiendo: en `origin/main` pasó 2 de 2
+corridas; en esta rama falló 3 de 4. La diferencia es el ancho de la ventana de
+la carrera — la v24 agrega ocho almacenes, con lo que abrir IndexedDB tarda más
+y la lectura sigue en vuelo más tiempo. `waitForLoadState('networkidle')` no
+alcanza, porque la petición que aborta puede arrancar después de que la red
+quedó quieta. Se resolvió reintentando la navegación una vez ante `ERR_ABORTED`,
+**sin tocar ninguna aserción**. Dos corridas completas consecutivas: 67/67.
+
+---
 
 ---
 
@@ -119,7 +250,7 @@ Los tres pilares:
 
 > Los ajustes y eliminaciones de consolidación son extracontables.
 
-- **Esquema.** Las ocho tablas de la v23 son papeles de trabajo; ninguna es
+- **Esquema.** Las ocho tablas de la v24 son papeles de trabajo; ninguna es
   fuente de asientos.
 - **Código.** `repository.ts` no importa `journalRepository` ni escribe en
   `entries`; `engine/` es puro y sin acceso a la base.
@@ -263,7 +394,7 @@ Todo ejecutado con Node v22.23.1.
 | Exportaciones | PDF de **7 páginas / 112 KB** y libro Excel de **22 KB**, ambos verificados |
 
 Ningún test preexistente fue eliminado ni debilitado. El único modificado es
-`tests/accounting/migration-chain-2f.test.ts`, **extendido** de v22 a v23:
+`tests/accounting/migration-chain-2f.test.ts`, **extendido** hasta v24:
 cada fase que eleva el esquema alarga esa cadena para probar que una instalación
 antigua sigue migrando hasta hoy sin perder nada.
 

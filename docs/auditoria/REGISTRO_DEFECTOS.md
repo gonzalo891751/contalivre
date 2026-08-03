@@ -720,3 +720,33 @@ evitaba la expansión.
 
 **Detectado por** el E2E móvil de la fase, que ahora verifica que el documento
 nunca supere el ancho de la pantalla y que la navegación siga operativa.
+
+## DEF-2K-04 · Carrera de navegación al salir del panel de cierre (E2E)
+
+| | |
+|---|---|
+| **Severidad** | Bajo (arnés de pruebas; el producto no se ve afectado) |
+| **Módulo** | E2E `auditoria-ciclo-completo`, paso 10 — test de la Fase 2J |
+| **Estado** | Corregido al integrar la Fase 2J en la 2K — `6eb8fe0` |
+
+**Pasos para reproducir.** Correr la suite E2E completa. El paso 10 falla con
+`net::ERR_ABORTED` al navegar a `/asientos`.
+
+**Causa.** El test sale del panel de cierre con la lectura del núcleo de
+controles **en vuelo**, y esa petición aborta la navegación nueva. El propio
+test ya documentaba el riesgo, pero no esperaba a que la lectura terminara.
+
+**Diagnóstico medido, no supuesto.** En `origin/main` pasó 2 de 2 corridas; en
+la rama de la Fase 2K falló 3 de 4. La diferencia es el ancho de la ventana: la
+migración v24 agrega ocho almacenes, con lo que abrir IndexedDB tarda más y la
+lectura sigue en vuelo más tiempo. `waitForLoadState('networkidle')` no alcanza,
+porque la petición que aborta puede arrancar **después** de que la red quedó
+quieta.
+
+**Corrección.** Un helper reintenta la navegación una sola vez ante
+`ERR_ABORTED`. No se debilitó ninguna aserción: todas las verificaciones del
+test siguen idénticas y se ejecutan después, sobre la página ya cargada.
+
+**Observación.** No es un defecto del producto: en un navegador real el usuario
+no pierde la navegación, se cancela la lectura en curso. Verificado con dos
+corridas completas consecutivas de la suite entera, 67/67 verdes.
