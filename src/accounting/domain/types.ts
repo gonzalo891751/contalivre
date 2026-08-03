@@ -159,6 +159,12 @@ export interface EntryDraftInput {
      * a propósito: la apertura del siguiente y las cargas de escenarios.
      */
     allowExerciseProvisioning?: boolean
+    /**
+     * Entidad que registra el asiento (Fase 2K §5). Omitirlo usa la empresa por
+     * defecto, que es el comportamiento de todos los módulos operativos. Sólo lo
+     * declaran los flujos que trabajan sobre otra entidad del grupo económico.
+     */
+    companyId?: string
 }
 
 export interface OperationPostingInput extends EntryDraftInput {

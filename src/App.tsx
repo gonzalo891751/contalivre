@@ -17,6 +17,7 @@ const ConfiguracionPage = lazy(() => import('./pages/ConfiguracionPage'))
 // Fase 2B (PER-001): las pantallas pesadas (estados, operaciones grandes,
 // planillas con PDF/XLSX) se cargan bajo demanda para bajar el bundle inicial.
 const Estados = lazy(() => import('./pages/Estados'))
+const ConsolidacionPage = lazy(() => import('./pages/ConsolidacionPage'))
 const AmortizacionesPage = lazy(() => import('./pages/Planillas/AmortizacionesPage'))
 const InventarioBienesPage = lazy(() => import('./pages/Planillas/InventarioBienesPage'))
 const MonedaExtranjeraPage = lazy(() => import('./pages/Operaciones/MonedaExtranjeraPage'))
@@ -72,6 +73,7 @@ function App() {
                 {/* Fase 2J: el pre-cierre deja de estar escondido dentro de planillas */}
                 <Route path="/pre-cierre" element={<PreCierrePage />} />
                 <Route path="/estados" element={<Estados />} />
+                <Route path="/consolidacion" element={<ConsolidacionPage />} />
                 <Route path="/configuracion" element={<ConfiguracionPage />} />
                 {/* Rutas consolidadas en Configuración (Fase 2D) */}
                 <Route path="/mapeos" element={<Navigate to="/configuracion?seccion=plan-cuentas" replace />} />

@@ -15,7 +15,7 @@
 
 import { db } from '../../storage/db'
 import type { JournalEntry } from '../../core/models'
-import { DEFAULT_COMPANY_ID, exerciseIdForYear, getExercise } from '../application/contextService'
+import { DEFAULT_COMPANY_ID, exerciseIdFor, getExercise, getExerciseForDate } from '../application/contextService'
 
 export interface ReportingContext {
     companyId: string
@@ -33,16 +33,23 @@ export function isBookEntry(entry: JournalEntry): boolean {
 /**
  * Resuelve un ReportingContext para un año calendario (compatibilidad con
  * usePeriodYear). Si el ejercicio persistido existe usa sus fechas reales.
+ *
+ * Fase 2K §5: `companyId` permite resolver el contexto de CUALQUIER entidad del
+ * grupo, no sólo la empresa por defecto. Omitirlo conserva exactamente el
+ * comportamiento previo (misma empresa, mismo id de ejercicio).
  */
 export async function resolveContextForYear(
     year: number,
-    range?: { start?: string; end?: string }
+    range?: { start?: string; end?: string; companyId?: string }
 ): Promise<ReportingContext> {
-    const exerciseId = exerciseIdForYear(year)
-    const exercise = await getExercise(exerciseId)
+    const companyId = range?.companyId ?? DEFAULT_COMPANY_ID
+    const canonicalId = exerciseIdFor(companyId, year)
+    const exercise =
+        (await getExercise(canonicalId)) ??
+        (companyId === DEFAULT_COMPANY_ID ? undefined : await getExerciseForDate(`${year}-12-31`, companyId))
     return {
-        companyId: DEFAULT_COMPANY_ID,
-        exerciseId,
+        companyId,
+        exerciseId: exercise?.id ?? canonicalId,
         periodStart: range?.start ?? exercise?.startDate ?? `${year}-01-01`,
         periodEnd: range?.end ?? exercise?.endDate ?? `${year}-12-31`,
     }
@@ -72,7 +79,9 @@ export async function hasFormalOpeningEntry(ctx: ReportingContext): Promise<bool
         .between(ctx.periodStart, ctx.periodEnd, true, true)
         .toArray()
     return entries.some(e =>
-        e.status !== 'DRAFT' && e.sourceModule === 'closing' && e.sourceType === 'apertura')
+        e.status !== 'DRAFT' &&
+        (e.companyId ?? DEFAULT_COMPANY_ID) === ctx.companyId &&
+        e.sourceModule === 'closing' && e.sourceType === 'apertura')
 }
 
 /**

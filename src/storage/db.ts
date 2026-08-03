@@ -16,6 +16,17 @@ import { migrateToV20 } from '../accounting/migration/migrateV20'
 import { migrateToV21 } from '../accounting/migration/migrateV21'
 import { migrateToV22 } from '../accounting/migration/migrateV22'
 import { migrateToV23 } from '../accounting/migration/migrateV23'
+import { migrateToV24 } from '../accounting/migration/migrateV24'
+import type {
+    ConsolidationAccountMapping,
+    ConsolidationExercise,
+    ConsolidationMemberLink,
+    EconomicGroup,
+    GroupMember,
+    IntragroupOperation,
+    ManualConsolidationAdjustment,
+    ReciprocalBalance,
+} from '../consolidation/domain/types'
 import type { CashFlowPolicy } from '../reporting/policy/cashFlowPolicy'
 import type { ClosingMeasurement } from '../reporting/measurement/measurementTypes'
 import type {
@@ -139,6 +150,15 @@ class ContableDatabase extends Dexie {
     cashFlowPolicies!: EntityTable<CashFlowPolicy, 'id'>
     // ── Fase 2J: mediciones a valores corrientes al cierre ──
     closingMeasurements!: EntityTable<ClosingMeasurement, 'id'>
+    // ── Fase 2K: consolidación de estados contables (papeles de trabajo) ──
+    economicGroups!: EntityTable<EconomicGroup, 'id'>
+    groupMembers!: EntityTable<GroupMember, 'id'>
+    consolidationExercises!: EntityTable<ConsolidationExercise, 'id'>
+    consolidationMemberLinks!: EntityTable<ConsolidationMemberLink, 'id'>
+    consolidationMappings!: EntityTable<ConsolidationAccountMapping, 'id'>
+    reciprocalBalances!: EntityTable<ReciprocalBalance, 'id'>
+    intragroupOperations!: EntityTable<IntragroupOperation, 'id'>
+    consolidationAdjustments!: EntityTable<ManualConsolidationAdjustment, 'id'>
 
     constructor() {
         super('EntrenadorContable')
@@ -605,6 +625,25 @@ class ContableDatabase extends Dexie {
         this.version(23).stores({
             closingMeasurements: 'id, companyId, exerciseId, accountId, status',
         }).upgrade(migrateToV23)
+
+        // Version 24 (Fase 2K): consolidación de estados contables. Tablas de
+        // papeles de trabajo del grupo económico. Estrictamente aditiva: no
+        // toca cuentas, asientos, ejercicios ni importes existentes, y NO toca
+        // `closingMeasurements` ni ninguna otra tabla de la Fase 2J.
+        //
+        // Nació como v23 mientras 2J y 2K se desarrollaban en paralelo; la 2J se
+        // integró primero y su v23 ya corrió en instalaciones reales, así que la
+        // consolidación pasó a v24 y se ejecuta DESPUÉS, nunca en su lugar.
+        this.version(24).stores({
+            economicGroups: 'id, parentCompanyId, active',
+            groupMembers: 'id, groupId, companyId, relation, method, [groupId+companyId]',
+            consolidationExercises: 'id, groupId, reportingDate, status, [groupId+reportingDate]',
+            consolidationMemberLinks: 'id, consolidationId, memberId, companyId, [consolidationId+companyId]',
+            consolidationMappings: 'id, groupId, companyId, accountId, intragroupCategory, [groupId+companyId+accountId]',
+            reciprocalBalances: 'id, consolidationId, creditorCompanyId, debtorCompanyId, kind, status',
+            intragroupOperations: 'id, consolidationId, sellerCompanyId, buyerCompanyId, type',
+            consolidationAdjustments: 'id, consolidationId, category, status',
+        }).upgrade(migrateToV24)
     }
 }
 

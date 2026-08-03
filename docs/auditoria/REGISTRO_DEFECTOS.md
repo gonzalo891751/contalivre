@@ -640,3 +640,113 @@ que nunca llega a mostrarse, porque la normalización redondea antes de validar.
 del motor es que nada se omite en silencio; acá el importe cambia sin decirlo.
 
 **Recomendación.** Redondear igual, pero informarlo en la confirmación del asiento.
+
+---
+
+# Fase 2K — Consolidación de estados contables
+
+Los tres defectos de esta fase fueron **encontrados por sus propios tests** durante
+el desarrollo y quedaron corregidos y cubiertos. Se registran porque describen
+errores reales del código escrito en la fase, no hipótesis.
+
+## DEF-2K-01 · El resultado atribuible a la PNC se exponía con el signo invertido
+
+| | |
+|---|---|
+| **Severidad** | Alto |
+| **Módulo** | Consolidación — catálogo de líneas (`domain/lines.ts`) |
+| **Estado** | Corregido — `73b34b2` |
+
+**Pasos para reproducir.** Consolidar un grupo con participación no controladora y
+mirar el Estado de Resultados consolidado.
+
+**Resultado obtenido.** El resultado atribuible a la PNC salía en −15.600 en lugar
+de 15.600, y en consecuencia el resultado atribuible a los propietarios se
+calculaba como 202.000 − (−15.600) = 217.600. El error se propagaba al EEPN, cuyo
+patrimonio de cierre daba 1.242.600 en vez de 1.211.400.
+
+**Causa.** La línea `ER_RESULTADO_PNC` estaba declarada con `naturalSign: -1`
+(acreedor, como un ingreso). No lo es: detrae del resultado atribuible a los
+propietarios, así que su signo de exposición es deudor.
+
+**Por qué no lo detectaron los golden tests de la planilla.** Esos tests leen el
+importe directamente de la hoja en convención Debe−Haber, donde el valor era
+correcto; el signo sólo se aplica al **exponer**. Lo detectó el test de punta a
+punta del dataset Grupo Litoral, que compara el Estado de Resultados consolidado
+contra el resultado individual de la controladora.
+
+## DEF-2K-02 · El dataset demostrativo dejaba los ejercicios individuales abiertos
+
+| | |
+|---|---|
+| **Severidad** | Medio |
+| **Módulo** | Consolidación — dataset (`fixtures/grupoLitoral.ts`) |
+| **Estado** | Corregido — `73b34b2` |
+
+**Resultado obtenido.** El panel de preparación marcaba «Requiere revisión» en los
+estados individuales de ambas entidades y el control `ejercicios-cerrados` del
+motor bloqueaba la emisión: un juego consolidado no puede apoyarse en cifras que
+todavía pueden cambiar.
+
+**Observación.** Lo denunció el propio control de preparación del módulo, que es
+exactamente lo que debía hacer. Se corrigió cerrando los ejercicios en la siembra,
+lo que no altera ningún importe.
+
+## DEF-2K-03 · Desborde horizontal en móvil con la hoja de trabajo abierta
+
+| | |
+|---|---|
+| **Severidad** | Alto (rompía la navegación) |
+| **Módulo** | Consolidación — estilos de la grilla |
+| **Estado** | Corregido — `fc22d84` |
+
+**Pasos para reproducir.** En 390×844, abrir Consolidación → Papel de trabajo.
+
+**Resultado obtenido.** El documento pasaba de 390 a 930 px de ancho. El
+encabezado superior y la barra de navegación inferior, que son `position: fixed`
+con `left: 0; right: 0`, se estiraban a 930 px y quedaban parcialmente fuera de la
+pantalla.
+
+**Causa.** La grilla se recorría correctamente dentro de su contenedor
+(`overflow-x: auto`, 358 px visibles sobre 1.255 de contenido), pero el navegador
+expandía el **viewport de layout** para acomodarla, y los elementos fijos se
+dimensionan contra ese viewport. Medido: la expansión sólo ocurría en la sección
+«Papel de trabajo» y desaparecía al cambiar de sección.
+
+**Corrección.** `contain: layout inline-size` en el contenedor de la grilla, que
+aísla su ancho e impide que influya sobre el viewport. Se probaron y descartaron
+`min-width: 0`, `max-width: 100%` y `overflow-x: clip` en la página: ninguno
+evitaba la expansión.
+
+**Detectado por** el E2E móvil de la fase, que ahora verifica que el documento
+nunca supere el ancho de la pantalla y que la navegación siga operativa.
+
+## DEF-2K-04 · Carrera de navegación al salir del panel de cierre (E2E)
+
+| | |
+|---|---|
+| **Severidad** | Bajo (arnés de pruebas; el producto no se ve afectado) |
+| **Módulo** | E2E `auditoria-ciclo-completo`, paso 10 — test de la Fase 2J |
+| **Estado** | Corregido al integrar la Fase 2J en la 2K — `6eb8fe0` |
+
+**Pasos para reproducir.** Correr la suite E2E completa. El paso 10 falla con
+`net::ERR_ABORTED` al navegar a `/asientos`.
+
+**Causa.** El test sale del panel de cierre con la lectura del núcleo de
+controles **en vuelo**, y esa petición aborta la navegación nueva. El propio
+test ya documentaba el riesgo, pero no esperaba a que la lectura terminara.
+
+**Diagnóstico medido, no supuesto.** En `origin/main` pasó 2 de 2 corridas; en
+la rama de la Fase 2K falló 3 de 4. La diferencia es el ancho de la ventana: la
+migración v24 agrega ocho almacenes, con lo que abrir IndexedDB tarda más y la
+lectura sigue en vuelo más tiempo. `waitForLoadState('networkidle')` no alcanza,
+porque la petición que aborta puede arrancar **después** de que la red quedó
+quieta.
+
+**Corrección.** Un helper reintenta la navegación una sola vez ante
+`ERR_ABORTED`. No se debilitó ninguna aserción: todas las verificaciones del
+test siguen idénticas y se ejecutan después, sobre la página ya cargada.
+
+**Observación.** No es un defecto del producto: en un navegador real el usuario
+no pierde la navegación, se cancela la lectura en curso. Verificado con dos
+corridas completas consecutivas de la suite entera, 67/67 verdes.

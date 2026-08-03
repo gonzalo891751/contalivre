@@ -10924,3 +10924,276 @@ html[data-theme="dark"] .cl-seg-btn.is-active {
     transition: none;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   Fase 2K — Consolidación de estados contables
+
+   Reutiliza la identidad visual existente: barra lateral azul oscuro,
+   tarjetas, tipografía y espaciado actuales. No introduce paleta propia.
+   Los estados nunca se comunican SÓLO por color: llevan rótulo, icono y,
+   en los importes, paréntesis para los negativos.
+   ════════════════════════════════════════════════════════════════ */
+
+.cons-page {
+    display: flex; flex-direction: column; gap: 20px;
+    /*
+     * La hoja de consolidación es deliberadamente ancha y se recorre DENTRO de
+     * su propio contenedor. Sin este recorte, en móvil el navegador expande el
+     * viewport de layout para acomodarla y el encabezado y la barra inferior
+     * —que son `position: fixed`— se estiran con él, rompiendo la navegación.
+     * `clip` no crea un contexto de scroll: los encabezados fijos de la grilla
+     * siguen funcionando.
+     */
+    min-width: 0; max-width: 100%; overflow-x: clip;
+}
+.cons-worksheet, .cons-statements, .cons-resumen, .cons-perimetro,
+.cons-preparacion, .cons-pnc { min-width: 0; max-width: 100%; }
+
+.sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ── Selectores de grupo y ejercicio ── */
+.cons-selectors { display: flex; flex-wrap: wrap; gap: 16px; }
+.cons-field { display: flex; flex-direction: column; gap: 4px; min-width: 220px; }
+.cons-field > span { font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .04em; }
+.cons-field select,
+.cons-field input {
+    padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px;
+    background: #fff; font-size: 14px; color: #0f172a;
+}
+.cons-field select:focus-visible,
+.cons-field input:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+
+/* ── Pestañas ── */
+.cons-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.cons-tabs-main {
+    border-bottom: 1px solid #e2e8f0; padding-bottom: 0; gap: 2px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+.cons-tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 14px; border: none; background: transparent; cursor: pointer;
+    font-size: 13.5px; font-weight: 600; color: #64748b; white-space: nowrap;
+    border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0;
+}
+.cons-tab:hover { color: #1e3a5f; background: #f1f5f9; }
+.cons-tab-active { color: #1e3a5f; border-bottom-color: #2563eb; background: #f8fafc; }
+.cons-tab:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+
+/* ── KPIs de la portada ── */
+.cons-kpi-grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.cons-kpi {
+    display: flex; flex-direction: column; gap: 4px; padding: 14px 16px;
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+    border-left: 4px solid #cbd5e1;
+}
+.cons-kpi-ok { border-left-color: #16a34a; }
+.cons-kpi-warn { border-left-color: #d97706; }
+.cons-kpi-blocked { border-left-color: #dc2626; }
+.cons-kpi-label { font-size: 11.5px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .04em; }
+.cons-kpi-value { font-size: 20px; font-weight: 700; color: #0f172a; line-height: 1.2; }
+.cons-kpi-detail { font-size: 12px; color: #64748b; }
+
+.cons-two-col { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+
+/* ── Estructura del grupo ── */
+.cons-tree { margin: 12px 0 4px; }
+.cons-tree-parent {
+    display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+    background: #1e3a5f; color: #fff; border-radius: 8px;
+}
+.cons-tree-parent div { display: flex; flex-direction: column; }
+.cons-tree-parent span { font-size: 12px; opacity: .8; }
+.cons-tree-children { list-style: none; margin: 0; padding: 0 0 0 26px; }
+.cons-tree-children > li { position: relative; padding-top: 10px; }
+.cons-tree-node { display: flex; align-items: flex-start; gap: 10px; }
+.cons-tree-node > div { display: flex; flex-direction: column; }
+.cons-tree-node span:not(.cons-tree-connector) { font-size: 12px; color: #64748b; }
+.cons-tree-connector {
+    display: block; width: 18px; height: 18px; margin-top: 4px; flex: none;
+    border-left: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1;
+    border-bottom-left-radius: 6px;
+}
+.cons-tree-excluded { opacity: .62; }
+.cons-tree-excluded strong { text-decoration: line-through; }
+
+/* ── Listas de resumen ── */
+.cons-summary-list { margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.cons-summary-list > div { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; }
+.cons-summary-list dt { color: #475569; }
+.cons-summary-list dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; color: #0f172a; }
+.cons-summary-total { border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 2px; }
+.cons-summary-total dt, .cons-summary-total dd { font-weight: 700; }
+
+.cons-status-ok {
+    display: flex; align-items: center; gap: 8px; margin-top: 12px;
+    color: #15803d; font-weight: 600; font-size: 14px;
+}
+
+.cons-flow { margin: 10px 0 16px; padding-left: 22px; display: flex; flex-direction: column; gap: 5px; font-size: 14px; color: #334155; }
+
+/* ── Ayudas pedagógicas ── */
+.cons-help-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.cons-help { border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+.cons-help-toggle {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 10px 12px; border: none; background: transparent; cursor: pointer;
+    font-size: 13.5px; font-weight: 600; color: #1e3a5f; text-align: left;
+}
+.cons-help-toggle:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+.cons-help-body { padding: 0 12px 12px; font-size: 13.5px; color: #334155; line-height: 1.55; }
+.cons-help-body p { margin: 0 0 8px; }
+.cons-normative { font-size: 12px; color: #64748b; font-style: italic; }
+
+/* ── Panel de preparación ── */
+.cons-preparacion { display: flex; flex-direction: column; gap: 16px; }
+.cons-progress-head { display: flex; justify-content: space-between; align-items: baseline; }
+.cons-progress-head strong { font-size: 22px; color: #1e3a5f; }
+.cons-progress-bar { height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin: 10px 0 8px; }
+.cons-progress-bar > span { display: block; height: 100%; background: #2563eb; border-radius: 999px; }
+.cons-check-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cons-check {
+    display: flex; gap: 12px; padding: 12px 14px; background: #fff;
+    border: 1px solid #e2e8f0; border-radius: 10px; border-left: 4px solid #cbd5e1;
+}
+.cons-check > svg { flex: none; margin-top: 2px; }
+.cons-check p { margin: 4px 0 0; font-size: 13px; color: #475569; }
+.cons-check-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cons-check-complete { border-left-color: #16a34a; }
+.cons-check-complete > svg { color: #16a34a; }
+.cons-check-needs_review { border-left-color: #d97706; }
+.cons-check-needs_review > svg { color: #d97706; }
+.cons-check-blocked { border-left-color: #dc2626; }
+.cons-check-blocked > svg { color: #dc2626; }
+.cons-check-not_applicable { border-left-color: #94a3b8; opacity: .78; }
+.cons-check-not_applicable > svg { color: #94a3b8; }
+.cons-remediation { font-weight: 600; color: #1e3a5f !important; }
+
+/* ── Etiquetas ── */
+.cons-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+    background: #e2e8f0; color: #475569; white-space: nowrap;
+}
+.cons-tag-ok { background: #dcfce7; color: #15803d; }
+.cons-tag-muted { background: #f1f5f9; color: #64748b; }
+.cons-tag-automatic { background: #dbeafe; color: #1d4ed8; }
+.cons-tag-suggested { background: #fef3c7; color: #b45309; }
+.cons-tag-manual { background: #f3e8ff; color: #7e22ce; }
+
+/* ── Grillas ── */
+/*
+ * `contain: inline-size` aísla el ancho del contenedor: la grilla puede ser
+ * mucho más ancha que la pantalla y se recorre acá adentro, sin que el
+ * navegador expanda el viewport de layout en móvil. Sin esto, el encabezado y
+ * la barra inferior —que son `position: fixed`— se estiran con el viewport y
+ * la navegación se rompe.
+ */
+.cons-table-container {
+    overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff;
+    contain: layout inline-size;
+}
+.cons-worksheet-toolbar {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+    margin-bottom: 12px;
+}
+.cons-search { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; }
+.cons-search input { border: none; outline: none; font-size: 14px; min-width: 180px; }
+
+.cons-table, .cons-statement-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cons-table th, .cons-table td,
+.cons-statement-table th, .cons-statement-table td {
+    padding: 7px 10px; border-bottom: 1px solid #f1f5f9; text-align: left;
+}
+.cons-table thead th, .cons-statement-table thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: #1e3a5f; color: #fff; font-size: 11.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .03em; text-align: right;
+    vertical-align: bottom;
+}
+.cons-table thead th:first-child, .cons-statement-table thead th:first-child { text-align: left; }
+.cons-col-sub { display: block; font-weight: 500; text-transform: none; letter-spacing: 0; opacity: .75; font-size: 10.5px; }
+.cons-col-label { min-width: 240px; font-weight: 500; color: #0f172a; }
+.cons-section-row th {
+    background: #f1f5f9; color: #1e3a5f; font-size: 11.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .05em; padding: 8px 10px;
+}
+.cons-total-row { background: #f8fafc; font-weight: 700; }
+.cons-total-row th, .cons-total-row td { border-top: 2px solid #cbd5e1; }
+.cons-row-open { background: #eff6ff; }
+.cons-row-excluded { opacity: .62; }
+
+.cons-amount { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cons-amount-zero { color: #cbd5e1; }
+.cons-amount-negative { color: #b91c1c; }
+.cons-amount-muted { color: #64748b; }
+.cons-amount-inline { font-variant-numeric: tabular-nums; font-weight: 600; margin-left: 8px; }
+
+.cons-expand {
+    display: inline-flex; align-items: center; gap: 6px; width: 100%;
+    border: none; background: transparent; cursor: pointer; padding: 0;
+    font: inherit; color: inherit; text-align: left;
+}
+.cons-expand:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+/* ── Detalle de una línea ── */
+.cons-detail-row > td { background: #f8fafc; padding: 14px 16px; }
+.cons-detail { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.cons-detail h4 { margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+.cons-detail-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.cons-elim-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.cons-elim-list > li { padding: 10px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
+.cons-elim-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 5px; }
+.cons-elim-kind { margin: 0 0 5px; font-size: 12.5px; font-weight: 600; color: #1e3a5f; }
+.cons-elim-rationale { margin: 0 0 8px; font-size: 13px; color: #475569; line-height: 1.5; }
+.cons-elim-list details summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: #2563eb; }
+.cons-computation { margin: 8px 0 6px; padding-left: 20px; font-size: 12.5px; color: #334155; display: flex; flex-direction: column; gap: 3px; }
+.cons-muted { color: #64748b; font-size: 12.5px; }
+
+/* ── Estados consolidados ── */
+.cons-statements { display: flex; flex-direction: column; gap: 16px; }
+.cons-statements-toolbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; }
+.cons-export-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cons-statement-header h3 { margin: 0 0 2px; font-size: 16px; color: #0f172a; }
+.cons-statement-header p { margin: 0; font-size: 12.5px; color: #64748b; }
+.cons-statement-table tbody th { font-weight: 500; color: #334155; }
+.cons-st-group > th { font-weight: 700; color: #0f172a; }
+.cons-st-total { background: #f8fafc; }
+.cons-st-total > th, .cons-st-total > td { font-weight: 700; border-top: 2px solid #cbd5e1; color: #0f172a; }
+.cons-st-spacer td { height: 10px; border: none; }
+.cons-eepn thead th { text-align: right; }
+.cons-insufficient { font-size: 11.5px; font-style: italic; color: #b45309; white-space: normal; }
+.cons-note { font-size: 12.5px; color: #64748b; font-style: italic; margin: 4px 0 0; }
+.cons-subheading { margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+.cons-notes { display: flex; flex-direction: column; gap: 14px; }
+.cons-note-card h4 { margin: 0 0 8px; font-size: 15px; color: #0f172a; }
+.cons-note-card p { margin: 0 0 8px; font-size: 13.5px; line-height: 1.6; color: #334155; }
+.cons-narrative-flag {
+    font-size: 12.5px; font-weight: 600; color: #b45309;
+    background: #fffbeb; border-left: 3px solid #f59e0b; padding: 8px 10px; border-radius: 4px;
+}
+.cons-rationale { font-size: 12.5px; color: #475569; max-width: 420px; white-space: normal; }
+
+.cons-empty { text-align: center; padding: 40px 24px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.cons-empty svg { color: #94a3b8; }
+.cons-empty p { max-width: 560px; color: #475569; line-height: 1.6; }
+
+/* ── Responsive: en móvil la hoja se recorre en horizontal y las tarjetas
+     se apilan; la navegación nunca se rompe. ── */
+@media (max-width: 768px) {
+    .cons-kpi-grid { grid-template-columns: 1fr 1fr; }
+    .cons-two-col { grid-template-columns: 1fr; }
+    .cons-detail { grid-template-columns: 1fr; }
+    .cons-col-label { min-width: 180px; }
+    .cons-table { font-size: 12px; }
+    .cons-statements-toolbar { flex-direction: column; align-items: stretch; }
+    .cons-export-actions .btn { flex: 1; justify-content: center; }
+}
+@media (max-width: 480px) {
+    .cons-kpi-grid { grid-template-columns: 1fr; }
+}

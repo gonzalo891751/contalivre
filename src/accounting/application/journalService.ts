@@ -121,7 +121,7 @@ export async function createDraftEntry(input: EntryDraftInput): Promise<JournalE
         equityMovementType: input.equityMovementType,
         metadata: input.metadata as Record<string, unknown>,
         status: 'DRAFT',
-        companyId: DEFAULT_COMPANY_ID,
+        companyId: input.companyId ?? DEFAULT_COMPANY_ID,
         createdAt: nowISO(),
         createdBy: actorId,
         schemaVersion: SCHEMA_VERSION,
@@ -373,7 +373,7 @@ async function postNewEntryInternal(input: EntryDraftInput & {
         metadata: input.metadata as Record<string, unknown>,
         idempotencyKey: input.idempotencyKey,
         status: 'POSTED',
-        companyId: DEFAULT_COMPANY_ID,
+        companyId: input.companyId ?? DEFAULT_COMPANY_ID,
         createdAt: input.createdAt ?? nowISO(),
         createdBy: actorId,
         schemaVersion: SCHEMA_VERSION,
@@ -408,7 +408,7 @@ async function postNewEntryInternal(input: EntryDraftInput & {
                 return
             }
         }
-        const nextNumber = (await getMaxEntryNumber(DEFAULT_COMPANY_ID, ctx.exerciseId)) + 1
+        const nextNumber = (await getMaxEntryNumber(candidate.companyId!, ctx.exerciseId)) + 1
         posted = {
             ...candidate,
             exerciseId: ctx.exerciseId,
@@ -422,7 +422,7 @@ async function postNewEntryInternal(input: EntryDraftInput & {
             eventType: 'ENTRY_POSTED',
             entityType: 'journalEntry',
             entityId: posted.id,
-            companyId: DEFAULT_COMPANY_ID,
+            companyId: candidate.companyId,
             exerciseId: ctx.exerciseId,
             actorId,
             after: posted,
@@ -438,7 +438,7 @@ async function postNewEntryInternal(input: EntryDraftInput & {
  */
 export async function postOperation(input: OperationPostingInput): Promise<PostingResult> {
     const idempotencyKey = input.idempotencyKey ?? buildIdempotencyKey({
-        companyId: DEFAULT_COMPANY_ID,
+        companyId: input.companyId ?? DEFAULT_COMPANY_ID,
         sourceModule: input.sourceModule,
         sourceType: input.sourceType,
         sourceId: input.sourceId,

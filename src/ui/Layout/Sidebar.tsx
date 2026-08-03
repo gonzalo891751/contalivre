@@ -10,6 +10,7 @@ import {
     Scales,
     ChartLineUp,
     ClipboardText,
+    Buildings,
     Table,
     Package,
     CaretRight,
@@ -78,6 +79,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 // los estados queden definitivos, y va inmediatamente antes.
                 { path: '/pre-cierre', label: 'Pre-cierre y medición', icon: ClipboardText },
                 { path: '/estados', label: 'Estados contables', icon: ChartLineUp },
+                { path: '/consolidacion', label: 'Consolidación', icon: Buildings },
             ]
         },
         {
