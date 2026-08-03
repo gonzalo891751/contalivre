@@ -58,13 +58,16 @@ test.describe('Fase 2K — consolidación de estados contables', () => {
             page.locator('.cons-field select').first())).toBeVisible()
         await expect(page.getByText('Litoral Holding S.A.').first()).toBeVisible()
         await expect(page.getByText('Iberá Distribuciones S.A.').first()).toBeVisible()
-        await expect(page.getByText(/80\.00 % · participación directa · PNC 20\.00 %/)).toBeVisible()
+        const litoralNode = page.locator('.cons-tree-node', { hasText: 'Iberá Distribuciones S.A.' })
+        await expect(litoralNode).toContainText('80.00 % participación')
+        await expect(litoralNode).toContainText('PNC 20.00 %')
+        await expect(litoralNode).toContainText('Directa')
 
         // El resumen muestra el estado general del grupo
         await expect(page.getByText('1.389.000,00')).toBeVisible()   // activo consolidado
         await expect(page.getByText('1.211.400,00')).toBeVisible()   // PN de los propietarios
         await expect(page.getByText('77.600,00').first()).toBeVisible() // PNC
-        await expect(page.locator('.cons-status-ok')).toContainText('puede emitirse')
+        await expect(page.locator('.cons-verdict-ok')).toContainText('puede emitirse')
         await shot(page, '01-resumen-del-grupo')
 
         // ── 3. Perímetro: control fundado, no deducido del porcentaje ──
@@ -177,7 +180,8 @@ test.describe('Fase 2K — móvil', () => {
 
     test('la navegación no se rompe y la hoja se recorre en horizontal', async ({ page }) => {
         await openConsolidation(page)
-        await expect(page.getByRole('heading', { name: 'Consolidación del grupo' })).toBeVisible()
+        await expect(page.getByRole('heading', { name: 'Grupo Litoral' })).toBeVisible()
+        await expect(page.locator('.cons-hero')).toContainText('Litoral Holding S.A.')
 
         await page.getByRole('tab', { name: 'Papel de trabajo' }).click()
         const container = page.locator('.cons-table-container').first()
