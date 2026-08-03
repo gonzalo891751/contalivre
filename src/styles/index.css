@@ -10934,7 +10934,20 @@ html[data-theme="dark"] .cl-seg-btn.is-active {
    en los importes, paréntesis para los negativos.
    ════════════════════════════════════════════════════════════════ */
 
-.cons-page { display: flex; flex-direction: column; gap: 20px; }
+.cons-page {
+    display: flex; flex-direction: column; gap: 20px;
+    /*
+     * La hoja de consolidación es deliberadamente ancha y se recorre DENTRO de
+     * su propio contenedor. Sin este recorte, en móvil el navegador expande el
+     * viewport de layout para acomodarla y el encabezado y la barra inferior
+     * —que son `position: fixed`— se estiran con él, rompiendo la navegación.
+     * `clip` no crea un contexto de scroll: los encabezados fijos de la grilla
+     * siguen funcionando.
+     */
+    min-width: 0; max-width: 100%; overflow-x: clip;
+}
+.cons-worksheet, .cons-statements, .cons-resumen, .cons-perimetro,
+.cons-preparacion, .cons-pnc { min-width: 0; max-width: 100%; }
 
 .sr-only {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -11074,7 +11087,17 @@ html[data-theme="dark"] .cl-seg-btn.is-active {
 .cons-tag-manual { background: #f3e8ff; color: #7e22ce; }
 
 /* ── Grillas ── */
-.cons-table-container { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+/*
+ * `contain: inline-size` aísla el ancho del contenedor: la grilla puede ser
+ * mucho más ancha que la pantalla y se recorre acá adentro, sin que el
+ * navegador expanda el viewport de layout en móvil. Sin esto, el encabezado y
+ * la barra inferior —que son `position: fixed`— se estiran con el viewport y
+ * la navegación se rompe.
+ */
+.cons-table-container {
+    overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff;
+    contain: layout inline-size;
+}
 .cons-worksheet-toolbar {
     display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
     margin-bottom: 12px;
