@@ -11,7 +11,8 @@
  */
 
 import { Fragment, useMemo, useState } from 'react'
-import { CaretDown, CaretRight, MagnifyingGlass } from '@phosphor-icons/react'
+import { CaretDown, CaretRight, MagnifyingGlass, Table } from '@phosphor-icons/react'
+import { SectionCard } from './ui'
 import { COLUMN_HELP, ELIMINATION_HELP } from './pedagogia'
 import type {
     ConsolidationWorksheet,
@@ -51,11 +52,17 @@ function money(value: number): string {
     return value < 0 ? `(${abs})` : abs
 }
 
-function Amount({ value, muted }: { value: number; muted?: boolean }) {
+function Amount({ value, muted, band }: {
+    value: number
+    muted?: boolean
+    /** banda de columna: destaca la suma previa y el importe consolidado */
+    band?: 'subtotal' | 'total'
+}) {
     const cls = ['cons-amount']
     if (value === 0) cls.push('cons-amount-zero')
     else if (value < 0) cls.push('cons-amount-negative')
     if (muted) cls.push('cons-amount-muted')
+    if (band) cls.push(`cons-cell-${band}`)
     return (
         <td className={cls.join(' ')}>
             {value < 0 && <span className="sr-only">negativo </span>}
@@ -71,7 +78,10 @@ interface Props {
 export default function HojaDeTrabajo({ worksheet }: Props) {
     const [search, setSearch] = useState('')
     const [expandedRow, setExpandedRow] = useState<string | null>(null)
-    const [showAdjustments, setShowAdjustments] = useState(true)
+    // Por defecto se muestran los ajustes AGRUPADOS en una sola columna: así la
+    // hoja entra en pantalla y no queda ninguna columna escondida detrás de la
+    // columna fija de "Consolidado". El detalle por tipo está a un clic.
+    const [showAdjustments, setShowAdjustments] = useState(false)
     const [entityFilter, setEntityFilter] = useState<string>('ALL')
 
     const eliminationsById = useMemo(
@@ -102,8 +112,18 @@ export default function HojaDeTrabajo({ worksheet }: Props) {
 
     const columnCount = 1 + visibleEntities.length + 1 + (showAdjustments ? ADJUSTMENT_COLUMNS.length : 1) + 1
 
+    /** Suma de TODAS las columnas de ajuste de una fila (vista agrupada) */
+    const adjustmentsOf = (row: WorksheetRow) =>
+        ADJUSTMENT_COLUMNS.reduce((s, c) => s + (row[c.key] as number), 0) + row.nonControllingInterest
+
     return (
         <div className="cons-worksheet">
+            <SectionCard
+                icon={Table}
+                title="Papel de trabajo de consolidación"
+                description="Importe de cada entidad, suma previa, ajustes y eliminaciones, e importe consolidado por rubro"
+                flush
+            >
             <div className="cons-worksheet-toolbar">
                 <div className="cons-search">
                     <MagnifyingGlass size={16} weight="bold" aria-hidden="true" />
@@ -130,7 +150,7 @@ export default function HojaDeTrabajo({ worksheet }: Props) {
                     onClick={() => setShowAdjustments(v => !v)}
                     aria-pressed={showAdjustments}
                 >
-                    {showAdjustments ? 'Resumir ajustes' : 'Ver ajustes en detalle'}
+                    {showAdjustments ? 'Agrupar ajustes' : 'Desglosar ajustes'}
                 </button>
             </div>
 
@@ -159,7 +179,7 @@ export default function HojaDeTrabajo({ worksheet }: Props) {
                                     {c.label}
                                 </th>
                             )) : (
-                                <th scope="col" className="cons-col-adjust">Ajustes y eliminaciones</th>
+                                <th scope="col" className="cons-col-adjust" title="Suma de todos los ajustes y eliminaciones aplicados a la línea">Ajustes y eliminaciones</th>
                             )}
                             <th scope="col" className="cons-col-total" title={COLUMN_HELP.consolidated}>
                                 Consolidado
@@ -177,10 +197,7 @@ export default function HojaDeTrabajo({ worksheet }: Props) {
                                 </tr>
                                 {rows.map(row => {
                                     const isOpen = expandedRow === row.lineId
-                                    const adjustmentsTotal =
-                                        row.homogenization + row.investmentElimination + row.nonControllingInterest +
-                                        row.reciprocalElimination + row.operationElimination +
-                                        row.unrealizedElimination + row.deferredTax + row.manualAdjustment
+                                    const adjustmentsTotal = adjustmentsOf(row)
                                     return (
                                         <Fragment key={row.lineId}>
                                             <tr className={isOpen ? 'cons-row-open' : undefined}>
@@ -208,7 +225,7 @@ export default function HojaDeTrabajo({ worksheet }: Props) {
                                                         />
                                                     )
                                                 })}
-                                                <Amount value={row.subtotal * row.naturalSign} />
+                                                <Amount value={row.subtotal * row.naturalSign} band="subtotal" />
                                                 {showAdjustments ? ADJUSTMENT_COLUMNS.map(c => (
                                                     <Amount
                                                         key={c.key}
@@ -218,7 +235,7 @@ export default function HojaDeTrabajo({ worksheet }: Props) {
                                                 )) : (
                                                     <Amount value={adjustmentsTotal * row.naturalSign} muted />
                                                 )}
-                                                <Amount value={row.consolidated * row.naturalSign} />
+                                                <Amount value={row.consolidated * row.naturalSign} band="total" />
                                             </tr>
                                             {isOpen && (
                                                 <tr id={`detalle-${row.lineId}`} className="cons-detail-row">
@@ -243,20 +260,25 @@ export default function HojaDeTrabajo({ worksheet }: Props) {
                                         }, 0)
                                         return <Amount key={e.companyId} value={t} />
                                     })}
-                                    <Amount value={rows.reduce((s, r) => s + r.subtotal * r.naturalSign, 0)} />
+                                    <Amount value={rows.reduce((s, r) => s + r.subtotal * r.naturalSign, 0)} band="subtotal" />
                                     {showAdjustments ? ADJUSTMENT_COLUMNS.map(c => (
                                         <Amount
                                             key={c.key}
                                             value={rows.reduce((s, r) => s + (r[c.key] as number) * r.naturalSign, 0)}
                                         />
-                                    )) : <Amount value={0} />}
-                                    <Amount value={total} />
+                                    )) : (
+                                        <Amount
+                                            value={rows.reduce((s, r) => s + adjustmentsOf(r) * r.naturalSign, 0)}
+                                        />
+                                    )}
+                                    <Amount value={total} band="total" />
                                 </tr>
                             </tbody>
                         )
                     })}
                 </table>
             </div>
+            </SectionCard>
         </div>
     )
 }

@@ -3,7 +3,8 @@
  */
 
 import { Fragment, useState } from 'react'
-import { FilePdf, MicrosoftExcelLogo } from '@phosphor-icons/react'
+import { FilePdf, MicrosoftExcelLogo, Warning } from '@phosphor-icons/react'
+import { Callout } from './ui'
 import { exportConsolidatedPdf } from '../../consolidation/export/consolidatedPdf'
 import { downloadConsolidationWorkbook } from '../../consolidation/export/consolidatedWorkbook'
 import type { ReportLine } from '../../reporting/domain/types'
@@ -92,12 +93,13 @@ export default function EstadosConsolidados({ statements, worksheet }: Props) {
             </div>
 
             {!statements.canPublish && (
-                <div className="alert alert-warning" role="status">
+                <Callout icon={Warning}>
                     <strong>El juego no puede emitirse formalmente todavía.</strong> Se exporta igual, marcado como
                     BORRADOR, para que puedas revisarlo. Resolvé primero los impedimentos del panel de preparación.
-                </div>
+                </Callout>
             )}
 
+            <section className="cons-section">
             <div className="cons-statement-header">
                 <h3>{statements.groupName} — Estados contables consolidados</h3>
                 <p>
@@ -143,7 +145,7 @@ export default function EstadosConsolidados({ statements, worksheet }: Props) {
 
             {tab === 'eepn' && (
                 <>
-                    <div className="cons-table-container">
+                    <div className="cons-table-container cons-flush">
                         <table className="cons-statement-table cons-eepn">
                             <caption className="sr-only">Estado de Evolución del Patrimonio Neto Consolidado</caption>
                             <thead>
@@ -177,7 +179,7 @@ export default function EstadosConsolidados({ statements, worksheet }: Props) {
             {tab === 'efe' && (
                 statements.cashFlow && statements.cashFlow.blockers.length === 0 ? (
                     <>
-                        <div className="cons-table-container">
+                        <div className="cons-table-container cons-flush">
                             <table className="cons-statement-table">
                                 <caption className="sr-only">Estado de Flujo de Efectivo Consolidado</caption>
                                 <thead>
@@ -249,13 +251,13 @@ export default function EstadosConsolidados({ statements, worksheet }: Props) {
             )}
 
             {tab === 'notas' && (
-                <div className="cons-notes">
+                <div className="cons-notes cons-notes-inset">
                     {statements.notes.map(note => (
                         <article key={note.id} className="card cons-note-card">
                             <h4>{note.title}</h4>
                             {note.paragraphs.map((p, i) => <p key={i}>{p}</p>)}
                             {note.table && (
-                                <div className="cons-table-container">
+                                <div className="cons-table-container cons-flush">
                                     <table className="cons-statement-table">
                                         <thead>
                                             <tr>{note.table.headers.map(h => <th scope="col" key={h}>{h}</th>)}</tr>
@@ -280,6 +282,7 @@ export default function EstadosConsolidados({ statements, worksheet }: Props) {
                     ))}
                 </div>
             )}
+            </section>
         </div>
     )
 }
