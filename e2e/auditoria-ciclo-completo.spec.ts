@@ -82,6 +82,21 @@ test.describe.configure({ mode: 'serial' })
  * Un único contexto para todo el recorrido: la contabilidad vive en IndexedDB
  * y el ejercicio se construye paso a paso, igual que lo haría una persona.
  */
+/**
+ * Navega tolerando un net::ERR_ABORTED por una petición en vuelo de la página
+ * que se está abandonando. Reintenta una sola vez tras dejar que se asiente.
+ */
+async function gotoResiliente(page: Page, path: string): Promise<void> {
+    try {
+        await page.goto(path)
+    } catch (error) {
+        if (!String(error).includes('ERR_ABORTED')) throw error
+        await page.waitForTimeout(1_000)
+        await page.goto(path)
+    }
+    await page.waitForLoadState('networkidle')
+}
+
 test.describe('Auditoría del ciclo contable completo', () => {
     let page: Page
 
@@ -392,8 +407,19 @@ test.describe('Auditoría del ciclo contable completo', () => {
     test('10 · el ejercicio cerrado queda protegido y sigue consultable', async () => {
         // Se sale del panel de cierre antes de nada: su lectura del núcleo de
         // controles queda en vuelo y chocaría con la próxima navegación.
-        await page.goto('/asientos')
-        await page.waitForLoadState('networkidle')
+        //
+        // Si se navega con esa petición en vuelo, Chromium aborta la navegación
+        // nueva (net::ERR_ABORTED). La ventana se ensancha cuanto más tarda en
+        // abrir IndexedDB, así que crece con cada versión de esquema que agrega
+        // almacenes, y `networkidle` no alcanza: la petición que aborta puede
+        // arrancar DESPUÉS de que la red quedó quieta.
+        //
+        // Se reintenta la navegación una vez. No debilita ninguna verificación:
+        // todo lo que el test comprueba ocurre después, sobre la página ya
+        // cargada. Es una condición de carrera del arnés de pruebas, no del
+        // producto: en un navegador real el usuario no pierde la navegación,
+        // se cancela la lectura en curso.
+        await gotoResiliente(page, '/asientos')
 
         const rechazo = await page.evaluate(async () => {
             const { postNewEntry } = await import('/src/accounting/application/journalService.ts')
