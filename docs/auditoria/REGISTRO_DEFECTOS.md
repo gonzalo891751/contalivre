@@ -1,8 +1,8 @@
 # Registro de defectos — Auditoría E2E del ciclo contable
 
-> **Actualizado tras la Fase 2I** (rama `fix/fase-2i-axi-medicion-cierre-exportables`).
+> **Actualizado tras la Fase 2L** (rama `feat/fase-2l-pre-cierre-guiado-medicion-inflacion`).
 > El detalle de cada corrección está en
-> [`docs/IMPLEMENTACION_FASE_2I_AXI_MEDICION_CIERRE_EXPORTABLES.md`](../IMPLEMENTACION_FASE_2I_AXI_MEDICION_CIERRE_EXPORTABLES.md).
+> [`docs/IMPLEMENTACION_FASE_2L_PRECIERRE_MEDICION_INFLACION.md`](../IMPLEMENTACION_FASE_2L_PRECIERRE_MEDICION_INFLACION.md).
 >
 > | Estado | Defectos |
 > |---|---|
@@ -750,3 +750,128 @@ test siguen idénticas y se ejecutan después, sobre la página ya cargada.
 **Observación.** No es un defecto del producto: en un navegador real el usuario
 no pierde la navegación, se cancela la lectura en curso. Verificado con dos
 corridas completas consecutivas de la suite entera, 67/67 verdes.
+
+---
+
+# Fase 2L — Pre-cierre guiado, medición e inflación
+
+Los defectos siguientes surgieron del diagnóstico funcional, contable y visual
+del flujo heredado de la Fase 2J. Todos quedaron corregidos y cubiertos por tests
+unitarios o E2E; las limitaciones deliberadas se documentan por separado.
+
+## DEF-2L-01 · El pre-cierre enumeraba controles pero no conducía el cierre
+
+| | |
+|---|---|
+| **Severidad** | Alto |
+| **Módulo** | Pre-cierre / experiencia guiada |
+| **Estado** | Corregido — Fase 2L |
+
+**Resultado anterior.** Once apartados presentaban datos y controles sin una
+relación suficientemente clara entre objetivo, hallazgo, impacto y acción. El
+usuario podía llegar a la revisión final sin saber cuál era el primer paso
+concreto para resolver un impedimento.
+
+**Corrección.** Se reemplazó el recorrido por ocho etapas contables dependientes.
+Cada una muestra objetivo, preguntas, evidencia, hallazgos y próxima acción. La
+acción de una etapa bloqueada navega al primer impedimento real.
+
+**Cobertura.** E2E 2L verifica acceso, ocho etapas, evidencia propia de corte,
+inventario, bienes de uso, medición, inflación, conciliación y resolución desde
+Configuración.
+
+## DEF-2L-02 · La medición de cierre se comparaba contra una base nominal
+
+| | |
+|---|---|
+| **Severidad** | Crítico |
+| **Módulo** | Medición / inflación / RECPAM |
+| **Estado** | Corregido — Fase 2L |
+
+**Resultado anterior.** Para partidas no monetarias, comparar el valor corriente
+de cierre directamente contra el importe nominal mezclaba reexpresión y resultado
+de tenencia o deterioro. La descomposición no explicaba correctamente el importe
+final y podía romper la conciliación dual del RECPAM.
+
+**Corrección.** La secuencia es ahora base nominal → base reexpresada por orígenes
+reales → medición de cierre. El asiento de medición ya contabilizado se excluye
+de la base y el resultado asociado se recalcula contra la base reexpresada. Un
+valor de cierre conserva coeficiente efectivo 1 para su importe final.
+
+**Cobertura.** El caso Cierre Iberá verifica inventario, moneda extranjera,
+bienes de uso/deterioro, doble ajuste impedido y RECPAM conciliado por método
+secuencial y analítico, sin cuenta plug.
+
+## DEF-2L-03 · Las leyendas de identidad y ejercicio estaban invertidas
+
+| | |
+|---|---|
+| **Severidad** | Medio |
+| **Módulo** | Pre-cierre / semántica |
+| **Estado** | Corregido — Fase 2L |
+
+**Resultado anterior.** Un control de identidad utilizaba la conclusión del
+ejercicio y viceversa. El dato podía ser correcto, pero la etiqueta explicaba
+otra validación y erosionaba la confianza en el asistente.
+
+**Corrección.** Se separaron empresa/identificación y período/estado del ejercicio,
+con mensajes directos que describen exactamente la condición comprobada.
+
+**Cobertura.** El E2E de identidad compara CUIT, ejercicio, cierre y unidad de
+medida y comprueba que no aparezcan las leyendas contradictorias.
+
+## DEF-2L-04 · Una etapa posterior parecía completa pese a un bloqueo previo
+
+| | |
+|---|---|
+| **Severidad** | Alto |
+| **Módulo** | Readiness / navegación / cierre |
+| **Estado** | Corregido — Fase 2L |
+
+**Pasos para reproducir.** Crear un asiento borrador, abrir la etapa 8 y mirar el
+estado del recorrido y la tarjeta de próxima acción.
+
+**Resultado anterior.** La etapa de corte estaba bloqueada y el botón de cierre
+se deshabilitaba, pero Conciliación y emisión podía mostrarse completa y sugerir
+«Continuar». La compuerta y el lenguaje visual se contradecían.
+
+**Corrección.** Cada etapa depende de todas las anteriores. Los bloqueos raíz se
+propagan al estado, contador y próxima acción; la etapa 8 queda `BLOQUEADA`, dice
+«Resolver antes de seguir» y lleva a Corte y devengamientos.
+
+**Cobertura.** Aserciones E2E explícitas comprueban estado, texto, acción y botón
+de cierre deshabilitado; existe captura desktop de la condición.
+
+## DEF-2L-05 · Faltaba un registro persistente de las decisiones profesionales
+
+| | |
+|---|---|
+| **Severidad** | Alto |
+| **Módulo** | Persistencia / auditoría / cierre |
+| **Estado** | Corregido — Fase 2L, esquema v25 |
+
+**Resultado anterior.** No había un documento único que conservara aplicabilidad
+de inflación, política de medición, orígenes simplificados, revisión por etapa y
+ciclo de vida de ajustes. La ausencia de serie podía pasar como nominal.
+
+**Corrección.** `closingWorkPapers` persiste decisiones por empresa/ejercicio con
+versión y audit trail. `NO_APLICABLE` necesita motivo; `APLICABLE`, una serie;
+orígenes promedio o reconstruidos, justificación; y los ajustes, aprobación,
+idempotencia, reversión o motivo extracontable. Backup/restore incluye la tabla.
+
+**Cobertura.** Quince pruebas del papel de trabajo y la prueba de cadena de
+migración v25 verifican persistencia, validaciones, reapertura y restauración.
+
+## LIMITACIÓN-2L-01 · Índices oficiales y juicio profesional no se automatizan
+
+| | |
+|---|---|
+| **Severidad** | Limitación deliberada |
+| **Módulo** | Inflación / medición / emisión |
+| **Estado** | Documentado y controlado |
+
+ContaLivre valida una serie provista, sus períodos, coeficientes y trazabilidad,
+pero no descarga ni certifica por sí solo índices oficiales. Tampoco sustituye la
+aprobación profesional de políticas, estimaciones de valor de uso ni emisión.
+Por eso la capacidad general permanece `PARTIAL`: el cálculo no es una maqueta,
+pero su fuente y las conclusiones requieren evidencia y revisión externa.
