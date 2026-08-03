@@ -145,6 +145,24 @@ test.describe('Auditoría del ciclo contable completo', () => {
 
         await expect(page.getByText(/Se registró .* con 13 períodos/)).toBeVisible()
         await expect(page.getByText('2024-12 → 2025-12 (13)')).toBeVisible()
+
+        // v25: registrar la decisión profesional del ejercicio. La presencia
+        // de una serie, por sí sola, ya no equivale a haberla seleccionado.
+        await page.evaluate(async (setName) => {
+            const { db } = await import('/src/storage/db.ts')
+            const context = await import('/src/accounting/application/contextService.ts')
+            const closing = await import('/src/reporting/closing/closingWorkPaperService.ts')
+            const company = await context.getDefaultCompany()
+            const exercise = await context.ensureExerciseForDate('2025-12-31')
+            const set = await db.inflationIndexSets.filter(item => item.name === setName).first()
+            if (!set) throw new Error(`No se encontró la serie ${setName}`)
+            await closing.saveInflationPolicy(company.id, exercise.id, {
+                applicability: 'APLICABLE',
+                indexSetId: set.id,
+                rationale: 'Serie oficial registrada y seleccionada para la auditoría E2E 2025.',
+                normativeSource: 'RT 54 TO RT 59',
+            })
+        }, 'IPC Nacional Nivel General — dic-2024 a dic-2025')
         await shot(page, '02-indices-oficiales')
     })
 

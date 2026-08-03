@@ -41,7 +41,7 @@ export default defineConfig({
             use: { ...devices['Desktop Firefox'], viewport: { width: 1440, height: 900 } },
             // Fase 2H (§H12): la aceptación de esta fase también corre en el
             // segundo motor, no sólo en Chromium.
-            testMatch: /(full-flow|preparacion-efe|exports|fase2h)\.spec\.ts/,
+            testMatch: /(full-flow|preparacion-efe|exports|fase2h|pre-cierre-2j)\.spec\.ts/,
         },
     ],
     webServer: {
