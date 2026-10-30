@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-export type DropdownId = 'period' | 'notif' | 'user' | null
+export type DropdownId = 'period' | 'notif' | 'user' | 'workspace' | null
 
 interface UseDropdownManagerReturn {
   openDropdownId: DropdownId

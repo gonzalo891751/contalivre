@@ -89,6 +89,8 @@ export interface ReportMetadata {
     generatedAt: string
     hasComparative: boolean
     status: ReportStatus
+    /** con o sin fines de lucro (cambia la denominación de los estados) */
+    entityKind?: 'CON_FINES_DE_LUCRO' | 'SIN_FINES_DE_LUCRO'
 }
 
 export interface ReportingBundleAnalysis {
@@ -279,9 +281,10 @@ export async function loadReportingBundle(
 
     const preparation = buildCashFlowPreparation(input, statements, cashFlows)
     const notes = buildNotes(input, statements)
+    const nonProfit = input.context.entityKind === 'SIN_FINES_DE_LUCRO'
     const metrics = attachPreviousMetrics(
-        buildMetricsCatalog(statements, input.accounts, input.comparative ?? null),
-        input.comparative ? buildMetricsCatalog(input.comparative, input.accounts, comparativePriorStatements) : null,
+        buildMetricsCatalog(statements, input.accounts, input.comparative ?? null, { nonProfit }),
+        input.comparative ? buildMetricsCatalog(input.comparative, input.accounts, comparativePriorStatements, { nonProfit }) : null,
     )
     const analysis: ReportingBundleAnalysis = {
         verticalBalanceSheet: verticalBalanceSheet(statements),
@@ -440,6 +443,7 @@ export async function loadReportingBundle(
         generatedAt: new Date().toISOString(),
         hasComparative: !!input.comparative,
         status,
+        entityKind: input.context.entityKind ?? 'CON_FINES_DE_LUCRO',
     }
 
     return {

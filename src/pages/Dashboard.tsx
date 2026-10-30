@@ -29,7 +29,7 @@ import { useDashboardMetrics } from '../hooks/useDashboardMetrics'
 import { usePeriodYear } from '../hooks/usePeriodYear'
 import { useCompanyProfile } from '../hooks/useCompanyProfile'
 import { loadSeedDataIfNeeded } from '../storage/seed'
-import IndicatorsDashboard from '../components/Indicators/IndicatorsDashboard'
+import AnalysisSummary from '../components/Analisis/AnalysisSummary'
 import MappingWizardModal from '../components/mapping/MappingWizardModal'
 import QuickActionsGrid from '../components/dashboard/QuickActionsGrid'
 import { CompanyProfileModal, CompanyProfileCard } from '../components/CompanyProfile'
@@ -276,10 +276,12 @@ export default function Dashboard() {
                     </section>
                 )}
 
-                {/* FINANCIAL INSIGHTS SECTION - New Indicators Dashboard */}
-                <section className={`${!isSetupComplete ? 'opacity-60 pointer-events-none select-none' : ''} mt-6`}>
-                    <IndicatorsDashboard />
-                </section>
+                {/* Análisis de estados contables: resumen y acceso a la pantalla didáctica */}
+                {isSetupComplete && (
+                    <div className="mt-6">
+                        <AnalysisSummary />
+                    </div>
+                )}
 
                 {/* COMPOSICIÓN PATRIMONIO SECTION */}
                 <section className={`dashboard-patrimonio ${!isSetupComplete ? 'dashboard-insights--disabled' : ''}`}>

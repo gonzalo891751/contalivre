@@ -371,6 +371,66 @@ const SEED_ACCOUNTS: SeedAccount[] = [
 ]
 
 /**
+ * Variante del plan para entes sin fines de lucro (asociaciones civiles,
+ * clubes, fundaciones). Mismos códigos y mappings que el plan comercial, con
+ * las denominaciones propias de estos entes: fondo social en lugar de
+ * capital, superávits en lugar de resultados, recursos ordinarios (para
+ * fines generales, específicos y diversos) y gastos específicos de sectores.
+ */
+export type ChartVariant = 'COMERCIAL' | 'ESFL'
+
+const ESFL_RENAMES: Record<string, string> = {
+    '1.1.03.04': 'Cuotas sociales a cobrar',
+    '1.2.01.09': 'Equipamiento deportivo',
+    '1.2.01.99': 'Amort. acum. equipamiento deportivo',
+    '3.1': 'Fondo social',
+    '3.1.01': 'Fondo social',
+    '3.1.02': 'Ajuste del fondo social',
+    '3.1.03': 'Aportes de asociados',
+    '3.2': 'Reservas y fondos con destino específico',
+    '3.2.03': 'Fondos con destino específico',
+    '3.3': 'Superávits acumulados',
+    '3.3.01': 'Superávits no asignados',
+    '3.3.02': 'Superávit (déficit) del ejercicio',
+    '4': 'RECURSOS Y GASTOS',
+    '4.1': 'Recursos ordinarios',
+    '4.1.01': 'Cuotas sociales (para fines generales)',
+    '4.1.02': 'Aranceles de actividades (para fines específicos)',
+    '4.1.03': 'Alquiler de instalaciones (diversos)',
+    '4.3': 'Costo de bienes vendidos (cantina y proveeduría)',
+    '4.3.01': 'Costo de mercaderías vendidas (cantina)',
+    '4.4': 'Gastos específicos de sectores',
+    '4.4.01': 'Actividades deportivas',
+    '4.4.02': 'Actividades culturales y recreativas',
+    '4.4.03': 'Eventos y actividades sociales',
+    '4.5': 'Gastos generales de administración',
+}
+
+const ESFL_GROUPS: Record<string, string> = {
+    'Capital': 'Fondo social',
+    'Resultados acumulados': 'Superávits acumulados',
+    'Ingresos operativos': 'Recursos ordinarios',
+    'Gastos de comercialización': 'Gastos específicos de sectores',
+    'Gastos de administración': 'Gastos generales de administración',
+}
+
+const ESFL_EXTRA: SeedAccount[] = [
+    { code: '4.1.04', name: 'Donaciones y subsidios (diversos)', kind: 'INCOME', section: 'OPERATING', group: 'Recursos ordinarios', statementGroup: 'SALES', parentCode: '4.1' },
+    { code: '4.1.05', name: 'Ingresos de cantina y proveeduría', kind: 'INCOME', section: 'OPERATING', group: 'Recursos ordinarios', statementGroup: 'SALES', parentCode: '4.1' },
+]
+
+function seedAccountsFor(variant: ChartVariant): SeedAccount[] {
+    if (variant === 'COMERCIAL') return SEED_ACCOUNTS
+    const out: SeedAccount[] = []
+    for (const a of SEED_ACCOUNTS) {
+        out.push({ ...a, name: ESFL_RENAMES[a.code] ?? a.name, group: ESFL_GROUPS[a.group] ?? a.group })
+        // las cuentas nuevas van detrás de su hermana para respetar el orden padre → hijo
+        if (a.code === '4.1.03') out.push(...ESFL_EXTRA)
+    }
+    return out
+}
+
+/**
  * Convierte SeedAccount a Account completo
  */
 function seedToAccount(seed: SeedAccount, codeToId: Map<string, string>): Account {
@@ -442,7 +502,7 @@ export async function repairInflationMetadata(): Promise<number> {
  * Carga los datos iniciales SOLO si la tabla está vacía
  * Seed idempotente: verifica count en lugar de flag
  */
-export async function loadSeedDataIfNeeded(): Promise<boolean> {
+export async function loadSeedDataIfNeeded(variant: ChartVariant = 'COMERCIAL'): Promise<boolean> {
     try {
         // Primero, limpiar duplicados si existen
         await cleanupDuplicateAccounts()
@@ -461,7 +521,7 @@ export async function loadSeedDataIfNeeded(): Promise<boolean> {
         const accountsToInsert: Account[] = []
 
         // Procesar en orden para que los padres existan antes que los hijos
-        for (const seed of SEED_ACCOUNTS) {
+        for (const seed of seedAccountsFor(variant)) {
             const account = seedToAccount(seed, codeToId)
             codeToId.set(seed.code, account.id)
             accountsToInsert.push(account)

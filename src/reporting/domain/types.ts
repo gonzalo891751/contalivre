@@ -15,6 +15,8 @@ export interface EngineContext {
     exerciseLabel: string
     periodStart: string
     periodEnd: string
+    /** ente sin fines de lucro: Estado de recursos y gastos, superávit/déficit */
+    entityKind?: 'CON_FINES_DE_LUCRO' | 'SIN_FINES_DE_LUCRO'
 }
 
 export interface ReportingInput {

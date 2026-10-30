@@ -37,11 +37,11 @@ export default function Estados() {
 
     const { profile: companyProfile, save: saveCompanyProfile, isSaving: isSavingCompanyProfile } = useCompanyProfile()
     const [showCompanyProfileModal, setShowCompanyProfileModal] = useState(false)
-    const empresaName = companyProfile?.legalName || 'Empresa ContaLivre'
 
     const [showComparative, setShowComparative] = useState(false)
     const [inflationSetId, setInflationSetId] = useState<string | null>(null)
     const [bundle, setBundle] = useState<ReportingBundle | null>(null)
+    const empresaName = companyProfile?.legalName || bundle?.metadata.companyLegalName || 'Empresa ContaLivre'
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
@@ -79,7 +79,7 @@ export default function Estados() {
 
     return (
         <div className="estados-page">
-            <EstadosHeader activeTab={activeTab} onTabChange={setActiveTab} empresaName={empresaName} />
+            <EstadosHeader activeTab={activeTab} onTabChange={setActiveTab} empresaName={empresaName} nonProfit={bundle?.metadata.entityKind === 'SIN_FINES_DE_LUCRO'} />
 
             <main className="estados-main">
                 {loading && (

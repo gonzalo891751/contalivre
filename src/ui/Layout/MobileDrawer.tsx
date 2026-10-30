@@ -18,6 +18,7 @@ import {
     Bank,
     Robot,
     Gear,
+    MagnifyingGlassPlus,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
 
@@ -47,6 +48,7 @@ const navItems: NavItem[] = [
     { path: '/balance', label: 'Balance de SyS', icon: Scales },
     { path: '/pre-cierre', label: 'Pre-cierre y medición', icon: ClipboardText },
     { path: '/estados', label: 'Estados contables', icon: ChartLineUp },
+    { path: '/analisis', label: 'Análisis de EECC', icon: MagnifyingGlassPlus },
     { path: '/consolidacion', label: 'Consolidación', icon: Buildings },
     {
         path: '/planillas',
@@ -57,6 +59,7 @@ const navItems: NavItem[] = [
             { path: '/planillas/amortizaciones', label: 'Amortizaciones' },
         ]
     },
+    { path: '/empresas', label: 'Empresas de práctica', icon: Buildings },
     { path: '/configuracion', label: 'Configuración', icon: Gear },
 ]
 

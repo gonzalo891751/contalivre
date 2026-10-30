@@ -17,6 +17,8 @@ interface EstadosHeaderProps {
     activeTab: EstadosTab
     onTabChange: (tab: EstadosTab) => void
     empresaName: string
+    /** ente sin fines de lucro: la pestaña es "Recursos y gastos" */
+    nonProfit?: boolean
 }
 
 const TABS: TabConfig[] = [
@@ -30,7 +32,7 @@ const TABS: TabConfig[] = [
 // ============================================
 // Component
 // ============================================
-export function EstadosHeader({ activeTab, onTabChange, empresaName }: EstadosHeaderProps) {
+export function EstadosHeader({ activeTab, onTabChange, empresaName, nonProfit = false }: EstadosHeaderProps) {
     return (
         <header className="estados-header">
             <div className="estados-header-content">
@@ -55,7 +57,8 @@ export function EstadosHeader({ activeTab, onTabChange, empresaName }: EstadosHe
 
                 {/* Navigation Tabs */}
                 <nav className="estados-tabs" role="tablist" aria-label="Estados Contables">
-                    {TABS.map((tab) => {
+                    {TABS.map((base) => {
+                        const tab = nonProfit && base.id === 'ER' ? { ...base, label: 'Recursos y gastos' } : base
                         const Icon = tab.icon
                         const isActive = activeTab === tab.id
                         const isDisabled = tab.disabled

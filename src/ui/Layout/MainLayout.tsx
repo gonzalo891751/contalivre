@@ -4,7 +4,9 @@ import Sidebar from './Sidebar'
 import { TopHeader } from './TopHeader'
 import MobileDrawer from './MobileDrawer'
 import MobileBottomNav from './MobileBottomNav'
-import { loadSeedDataIfNeeded, repairDefaultFxAccounts, repairTaxAccounts, repairEquityAccounts, repairInflationMetadata } from '../../storage'
+import { repairDefaultFxAccounts, repairTaxAccounts, repairEquityAccounts, repairInflationMetadata } from '../../storage'
+import { finalizeActiveWorkspace, seedActiveWorkspaceChart } from '../../accounting/application/workspaceSetup'
+import { getActiveWorkspace } from '../../storage/workspaces'
 import { useMobileBreakpoint } from '../../hooks/useMobileBreakpoint'
 
 interface Props {
@@ -47,11 +49,13 @@ export default function MainLayout({ children }: Props) {
     useEffect(() => {
         async function init() {
             try {
-                await loadSeedDataIfNeeded()
+                await seedActiveWorkspaceChart()
                 await repairDefaultFxAccounts()
                 await repairTaxAccounts()
                 await repairEquityAccounts()
                 await repairInflationMetadata()
+                // Empresa de práctica recién creada: identidad del ente y caso de ejemplo
+                await finalizeActiveWorkspace()
                 setIsLoading(false)
             } catch (err) {
                 console.error('Error initializing app:', err)
@@ -74,7 +78,7 @@ export default function MainLayout({ children }: Props) {
                     <main className={`main-content ${isMobile ? 'main-content-mobile' : ''}`}>
                         <div className="empty-state">
                             <div className="empty-state-icon">...</div>
-                            <p>Cargando aplicacion...</p>
+                            <p>{getActiveWorkspace().initializedAt ? 'Cargando aplicación…' : `Preparando ${getActiveWorkspace().name}…`}</p>
                         </div>
                     </main>
                 </div>

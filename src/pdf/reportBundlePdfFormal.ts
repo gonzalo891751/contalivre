@@ -113,7 +113,7 @@ function buildSections(bundle: ReportingBundle, options: ExportEstadosOptions): 
     }
     if (c.er) {
         sections.push({
-            title: 'Estado de Resultados',
+            title: bundle.metadata.entityKind === 'SIN_FINES_DE_LUCRO' ? 'Estado de Recursos y Gastos' : 'Estado de Resultados',
             lines: [],
             extraRows: incomeStatementRows(bundle, options.comparative && bundle.metadata.hasComparative),
         })

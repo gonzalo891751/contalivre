@@ -31,6 +31,8 @@ const DeudasSocialesPage = lazy(() => import('./pages/Operaciones/DeudasSociales
 const GastosServiciosPage = lazy(() => import('./pages/Operaciones/GastosServiciosPage'))
 const ConciliacionesPage = lazy(() => import('./pages/Planillas/Conciliaciones/ConciliacionesPage'))
 const PreCierrePage = lazy(() => import('./pages/PreCierrePage'))
+const AnalisisPage = lazy(() => import('./pages/AnalisisPage'))
+const EmpresasPage = lazy(() => import('./pages/EmpresasPage'))
 
 function MainLayoutRoute() {
     return (
@@ -73,6 +75,8 @@ function App() {
                 {/* Fase 2J: el pre-cierre deja de estar escondido dentro de planillas */}
                 <Route path="/pre-cierre" element={<PreCierrePage />} />
                 <Route path="/estados" element={<Estados />} />
+                <Route path="/analisis" element={<AnalisisPage />} />
+                <Route path="/empresas" element={<EmpresasPage />} />
                 <Route path="/consolidacion" element={<ConsolidacionPage />} />
                 <Route path="/configuracion" element={<ConfiguracionPage />} />
                 {/* Rutas consolidadas en Configuración (Fase 2D) */}

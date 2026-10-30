@@ -378,7 +378,16 @@ export function buildMetricsCatalog(
     const creditShareNote = opts.creditSalesShare < 1 ? `; solo el ${fmt(opts.creditSalesShare * 100)}% de las ventas fue a crédito` : ''
 
     let daysReceivable: number | null = null
-    if (toCents(ventas) === 0) {
+    const hasReceivables = toCents(end.CxV) !== 0 || (ctx.start ? toCents(ctx.start.values.CxV) !== 0 : false)
+    if (toCents(ventas) !== 0 && !hasReceivables) {
+        const na: MetricResult = {
+            status: 'NOT_APPLICABLE',
+            reason: 'No hay créditos por ventas ni al inicio ni al cierre: las ventas se cobran al contado (o los créditos están en otro rubro, como cuotas sociales a cobrar).',
+            formula: `Créditos por ventas promedio / Ventas a crédito con IVA × ${DAYS}`,
+        }
+        add('rotacion-creditos', 'Rotación de créditos por ventas', 'actividad', na)
+        add('dias-cobranza', 'Plazo de cobranza', 'actividad', na)
+    } else if (toCents(ventas) === 0) {
         const na = notCalculable(`Créditos por ventas promedio / Ventas a crédito con IVA × ${DAYS}`, 'No hay ventas en el ejercicio.', ['Ventas'])
         add('rotacion-creditos', 'Rotación de créditos por ventas', 'actividad', na)
         add('dias-cobranza', 'Plazo de cobranza', 'actividad', na)
@@ -426,16 +435,23 @@ export function buildMetricsCatalog(
 
     {
         const formula = 'Plazo de bienes de cambio + Plazo de cobranza'
-        if (daysReceivable === null || (hasInventories && daysInventory === null)) {
+        if (!hasInventories && !hasReceivables) {
+            add('ciclo-operativo', 'Ciclo operativo', 'actividad',
+                { status: 'NOT_APPLICABLE', reason: 'Sin bienes de cambio ni créditos por ventas no hay ciclo de compra, venta y cobro que medir.', formula })
+        } else if (daysReceivable === null && hasReceivables) {
+            add('ciclo-operativo', 'Ciclo operativo', 'actividad',
+                notCalculable(formula, 'Requiere el plazo de cobranza.', ['Plazo de cobranza']))
+        } else if (hasInventories && daysInventory === null) {
             add('ciclo-operativo', 'Ciclo operativo', 'actividad',
                 notCalculable(formula, 'Requiere los plazos de bienes de cambio y de cobranza.', ['Plazo de bienes de cambio', 'Plazo de cobranza']))
         } else {
             const inv = daysInventory ?? 0
-            const value = r2(inv + daysReceivable)
+            const cob = daysReceivable ?? 0
+            const value = r2(inv + cob)
             add('ciclo-operativo', 'Ciclo operativo', 'actividad', {
                 status: 'CALCULATED', value, formula,
-                substitution: `${fmt(inv)} + ${fmt(daysReceivable)}`,
-                inputs: [input('Plazo de bienes de cambio (días)', inv, 'Indicador de actividad'), input('Plazo de cobranza (días)', daysReceivable, 'Indicador de actividad')],
+                substitution: `${fmt(inv)} + ${fmt(cob)}`,
+                inputs: [input('Plazo de bienes de cambio (días)', inv, 'Indicador de actividad'), input('Plazo de cobranza (días)', cob, hasReceivables ? 'Indicador de actividad' : 'Ventas al contado: sin plazo de cobranza')],
                 interpretation: `Desde que entra la mercadería hasta que se cobra la venta pasan ${Math.round(value)} días.`,
                 warnings: [], unit: 'days', dayCountPolicy: DAYS,
             })
@@ -457,6 +473,16 @@ export function buildMetricsCatalog(
                 })
             }
         }
+    }
+
+    if (!entries.some(e => e.id === 'ciclo-conversion')) {
+        // sin ciclo operativo tampoco hay ciclo de efectivo: se expone el porqué
+        const cycle = entries.find(e => e.id === 'ciclo-operativo')!.result
+        const formula = 'Ciclo operativo − Plazo de pago'
+        add('ciclo-conversion', 'Ciclo de efectivo (ciclo operativo neto)', 'actividad',
+            cycle.status === 'NOT_APPLICABLE'
+                ? { status: 'NOT_APPLICABLE', reason: cycle.reason, formula }
+                : notCalculable(formula, 'Requiere el ciclo operativo.', ['Ciclo operativo']))
     }
 
     // ═════════════════════════════════════════════════════════
