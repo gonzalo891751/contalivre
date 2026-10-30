@@ -37,7 +37,7 @@ export async function loadReportingInput(
     // como siempre; para otra entidad del grupo se informa SIN ese detalle en
     // lugar de atribuirle posiciones y fichas que no son suyas.
     const isDefaultCompany = ctx.companyId === DEFAULT_COMPANY_ID
-    const [entries, openingBalances, accounts, allocationRules, allDisclosures, foreignCurrencyDetails, fixedAssetFichas] = await Promise.all([
+    const [entries, openingBalances, accounts, allocationRules, allDisclosures, foreignCurrencyDetails, fixedAssetFichas, company] = await Promise.all([
         getEntriesForContext(ctx),
         getOpeningBalances(ctx),
         db.accounts.toArray(),
@@ -47,6 +47,7 @@ export async function loadReportingInput(
         // Fichas de bienes de uso (Fase 2J §8): permiten reexpresar la
         // depreciación bien por bien en vez de con el promedio de la clase.
         isDefaultCompany ? db.fixedAssets.toArray().catch(() => []) : Promise.resolve([]),
+        db.companies.get(ctx.companyId).catch(() => undefined),
     ])
     // vigentes = las que ninguna otra reemplaza
     const superseded = new Set(allDisclosures.map(d => d.supersedesId).filter(Boolean))
@@ -58,6 +59,7 @@ export async function loadReportingInput(
             exerciseLabel: exercise?.name ?? `Ejercicio ${year}`,
             periodStart: ctx.periodStart,
             periodEnd: ctx.periodEnd,
+            entityKind: company?.entityKind ?? 'CON_FINES_DE_LUCRO',
         },
         entries,
         openingBalances,

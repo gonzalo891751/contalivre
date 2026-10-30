@@ -22,6 +22,7 @@ import {
     Bank,
     Users,
     Gear,
+    MagnifyingGlassPlus,
     type Icon as PhosphorIcon,
 } from '@phosphor-icons/react'
 
@@ -79,6 +80,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 // los estados queden definitivos, y va inmediatamente antes.
                 { path: '/pre-cierre', label: 'Pre-cierre y medición', icon: ClipboardText },
                 { path: '/estados', label: 'Estados contables', icon: ChartLineUp },
+                { path: '/analisis', label: 'Análisis de EECC', icon: MagnifyingGlassPlus },
                 { path: '/consolidacion', label: 'Consolidación', icon: Buildings },
             ]
         },
@@ -94,6 +96,7 @@ export default function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                         { path: '/planillas/amortizaciones', label: 'Amortizaciones' },
                     ]
                 },
+                { path: '/empresas', label: 'Empresas de práctica', icon: Buildings },
                 { path: '/configuracion', label: 'Configuración', icon: Gear },
             ]
         }

@@ -21,6 +21,7 @@ import type {
     IncomeStatement2B,
     IncomeTaxStatus,
     NormalizedTrialBalance,
+    OpeningSource,
     ReportLine,
     ReportingInput,
     StatementValidationReport,
@@ -229,27 +230,57 @@ const ER_GROUPS = {
     tax: new Set(['INCOME_TAX']),
 }
 
-export function buildIncomeStatement(resultTb: NormalizedTrialBalance, accounts: Account[]): IncomeStatement2B {
+/**
+ * Denominaciones del estado. Los entes sin fines de lucro presentan un Estado
+ * de recursos y gastos: recursos en lugar de ventas, gastos específicos de
+ * sectores en lugar de comercialización y superávit (déficit) en lugar de
+ * resultado (RT 54, requerimientos para entes sin fines de lucro).
+ */
+const ER_LABELS = {
+    CON_FINES_DE_LUCRO: {
+        sales: 'Ingresos por ventas', cogs: 'Costo de ventas', gross: 'Resultado bruto',
+        admin: 'Gastos de administración', selling: 'Gastos de comercialización',
+        operating: 'Resultado operativo', preTax: 'Resultado antes del impuesto a las ganancias',
+        continuing: 'Resultado de operaciones que continúan', net: 'Resultado del ejercicio',
+    },
+    SIN_FINES_DE_LUCRO: {
+        sales: 'Recursos ordinarios', cogs: 'Costo de los bienes vendidos y servicios prestados', gross: 'Superávit bruto',
+        admin: 'Gastos generales de administración', selling: 'Gastos específicos de sectores',
+        operating: 'Superávit (déficit) operativo', preTax: 'Superávit (déficit) antes del impuesto a las ganancias',
+        continuing: 'Superávit (déficit) de operaciones que continúan', net: 'Superávit (déficit) del ejercicio',
+    },
+} as const
+
+export function resultLabelFor(entityKind?: 'CON_FINES_DE_LUCRO' | 'SIN_FINES_DE_LUCRO'): string {
+    return ER_LABELS[entityKind ?? 'CON_FINES_DE_LUCRO'].net
+}
+
+export function buildIncomeStatement(
+    resultTb: NormalizedTrialBalance,
+    accounts: Account[],
+    entityKind: 'CON_FINES_DE_LUCRO' | 'SIN_FINES_DE_LUCRO' = 'CON_FINES_DE_LUCRO',
+): IncomeStatement2B {
     const byId = new Map(accounts.map(a => [a.id, a]))
+    const L = ER_LABELS[entityKind]
     const isResult = (a: Account | undefined) => !!a && (a.kind === 'INCOME' || a.kind === 'EXPENSE')
     const inGroup = (a: Account | undefined, set: Set<string>) => isResult(a) && !!a?.statementGroup && set.has(a.statementGroup)
 
     // signo económico: ingresos H−D positivos; gastos D−H positivos ⇒
     // usamos "resultado" = H−D (positivo = ganancia) en todas las líneas
     const sales = buildGroupLine(resultTb, byId, {
-        id: 'er:ventas', label: 'Ingresos por ventas', sign: -1,
+        id: 'er:ventas', label: L.sales, sign: -1,
         filter: a => inGroup(a, ER_GROUPS.sales),
     })
     const costOfSales = buildGroupLine(resultTb, byId, {
-        id: 'er:cmv', label: 'Costo de ventas', sign: 1,
+        id: 'er:cmv', label: L.cogs, sign: 1,
         filter: a => inGroup(a, ER_GROUPS.cogs),
     })
     const adminExpenses = buildGroupLine(resultTb, byId, {
-        id: 'er:admin', label: 'Gastos de administración', sign: 1,
+        id: 'er:admin', label: L.admin, sign: 1,
         filter: a => inGroup(a, ER_GROUPS.admin),
     })
     const sellingExpenses = buildGroupLine(resultTb, byId, {
-        id: 'er:comercializacion', label: 'Gastos de comercialización', sign: 1,
+        id: 'er:comercializacion', label: L.selling, sign: 1,
         filter: a => inGroup(a, ER_GROUPS.selling),
     })
     const financialResults = buildGroupLine(resultTb, byId, {
@@ -297,18 +328,18 @@ export function buildIncomeStatement(resultTb: NormalizedTrialBalance, accounts:
     return {
         sales,
         costOfSales,
-        grossProfit: makeLine('er:bruto', 'Resultado bruto', 0, grossCents, [...sales.accountIds, ...costOfSales.accountIds]),
+        grossProfit: makeLine('er:bruto', L.gross, 0, grossCents, [...sales.accountIds, ...costOfSales.accountIds]),
         adminExpenses,
         sellingExpenses,
-        operatingResult: makeLine('er:operativo', 'Resultado operativo', 0, operatingCents, operativeIds),
+        operatingResult: makeLine('er:operativo', L.operating, 0, operatingCents, operativeIds),
         financialResults,
         otherResults,
-        preTaxResult: makeLine('er:antes-impuesto', 'Resultado antes del impuesto a las ganancias', 0, preTaxCents, preTaxIds),
+        preTaxResult: makeLine('er:antes-impuesto', L.preTax, 0, preTaxCents, preTaxIds),
         incomeTax,
         incomeTaxStatus,
-        continuingResult: makeLine('er:continuadas', 'Resultado de operaciones que continúan', 0, continuingCents,
+        continuingResult: makeLine('er:continuadas', L.continuing, 0, continuingCents,
             [...preTaxIds, ...incomeTax.accountIds]),
-        netIncome: makeLine('er:neto', 'Resultado del ejercicio', 0, netCents,
+        netIncome: makeLine('er:neto', L.net, 0, netCents,
             [...preTaxIds, ...incomeTax.accountIds]),
     }
 }
@@ -383,7 +414,7 @@ export function buildEquityStatement(
         distributions: makeLine('eepn:distribuciones', 'Distribuciones', 1, distributionsCents, distribIds),
         reservesMovements: makeLine('eepn:reservas', 'Constitución/desafectación de reservas', 1, reservesCents, reservesIds),
         otherMovements: makeLine('eepn:otros', 'Otros movimientos del PN', 1, otherCents, otherIds),
-        periodResult: makeLine('eepn:resultado', 'Resultado del ejercicio', 1, resultCents, incomeStatement.netIncome.accountIds),
+        periodResult: makeLine('eepn:resultado', resultLabelFor(input.context.entityKind), 1, resultCents, incomeStatement.netIncome.accountIds),
         closingBalance: makeLine('eepn:cierre', 'Saldos al cierre', 0, closingCents,
             [...new Set([...openingIds, ...contribIds, ...distribIds, ...reservesIds, ...otherIds])]),
     }
@@ -488,6 +519,39 @@ function pendingResultCents(tb: NormalizedTrialBalance, accounts: Account[]): nu
     return cents
 }
 
+/**
+ * Saldos al inicio del ejercicio, por cuenta (neto Debe−Haber).
+ *
+ * Fuentes, en este orden: saldos previos explícitos (asientos de ejercicios
+ * anteriores sin apertura formal) + asiento de apertura del cierre. Si no hay
+ * ninguno, se acepta el asiento cargado a mano el PRIMER día del ejercicio
+ * cuyo concepto dice "apertura": es la forma habitual de empezar un práctico
+ * a partir de saldos iniciales dados por el enunciado.
+ */
+function buildOpeningNet(input: ReportingInput): { openingNet: Record<string, number>; openingSource: OpeningSource } {
+    const cents = new Map<string, number>()
+    const add = (accountId: string, debit: number, credit: number) =>
+        cents.set(accountId, (cents.get(accountId) ?? 0) + toCents(debit || 0) - toCents(credit || 0))
+
+    for (const [accountId, ob] of input.openingBalances) add(accountId, ob.debit, ob.credit)
+    let source: OpeningSource = cents.size > 0 ? 'PRIOR_BALANCES' : 'NONE'
+
+    const posted = input.entries.filter(e => e.status !== 'DRAFT')
+    const formal = posted.filter(e => e.sourceModule === 'closing' && e.sourceType === 'apertura')
+    const manual = formal.length === 0
+        ? posted.filter(e => e.date === input.context.periodStart && /apertura/i.test(e.memo ?? '') && !isStructuralClosingEntry(e))
+        : []
+    for (const entry of [...formal, ...manual]) {
+        for (const l of entry.lines) add(l.accountId, l.debit, l.credit)
+    }
+    if (formal.length > 0) source = 'OPENING_ENTRY'
+    else if (manual.length > 0) source = 'MANUAL_OPENING'
+
+    const openingNet: Record<string, number> = {}
+    for (const [accountId, c] of cents) if (c !== 0) openingNet[accountId] = fromCents(c)
+    return { openingNet, openingSource: Object.keys(openingNet).length > 0 ? source : 'NONE' }
+}
+
 export function buildStatements(input: ReportingInput): StatementsBundle {
     // TB principal: TODOS los asientos del contexto (incluye refundición y apertura)
     const trialBalance = buildNormalizedTrialBalance(input)
@@ -501,7 +565,7 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
     }
     const resultTb = buildNormalizedTrialBalance(resultInput)
 
-    const incomeStatement = buildIncomeStatement(resultTb, input.accounts)
+    const incomeStatement = buildIncomeStatement(resultTb, input.accounts, input.context.entityKind)
     const balanceSheet = buildBalanceSheet(trialBalance, input.accounts, pendingResultCents(trialBalance, input.accounts))
     const equityStatement = buildEquityStatement(input, trialBalance, incomeStatement)
     const equityMatrix = buildEquityMatrix(input, trialBalance, incomeStatement)
@@ -580,6 +644,7 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
         cashFlowDirect: null,   // se completa en buildCashFlow (EFE)
         cashFlowIndirect: null,
         validation,
+        ...buildOpeningNet(input),
     }
 }
 

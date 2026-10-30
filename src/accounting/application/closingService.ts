@@ -89,7 +89,8 @@ export async function resolveResultAccounts(): Promise<{
     const errors: string[] = []
     const byName = (re: RegExp) => candidates.find(a => re.test(a.name.toLowerCase()))
 
-    const resultAccount = byName(/resultado del ejercicio/) ?? candidates[0]
+    // "Resultado del ejercicio" o, en un ente sin fines de lucro, "Superávit (déficit) del ejercicio"
+    const resultAccount = byName(/(resultado|super[aá]vit).*del ejercicio/) ?? candidates[0]
     const retainedAccount = byName(/no asignados|acumulados/) ?? candidates[0]
 
     if (!resultAccount) {

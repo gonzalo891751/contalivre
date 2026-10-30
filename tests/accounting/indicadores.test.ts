@@ -17,6 +17,7 @@ import { safeDiv, formatNumber } from '../../src/utils/indicators'
 import { db } from '../../src/storage/db'
 import type { MetricCatalogEntry } from '../../src/reporting/metrics/types'
 import type { StatementsBundle } from '../../src/reporting/domain/types'
+import type { Account } from '../../src/core/models'
 
 function byId(catalog: MetricCatalogEntry[], id: string): MetricCatalogEntry {
     const entry = catalog.find(e => e.id === id)
@@ -27,6 +28,7 @@ function byId(catalog: MetricCatalogEntry[], id: string): MetricCatalogEntry {
 describe('Fase 2B — indicadores sobre el golden comercial', () => {
     let bundle: StatementsBundle
     let catalog: MetricCatalogEntry[]
+    let accountsCache: Account[]
 
     beforeAll(async () => {
         await resetDb()
@@ -37,8 +39,8 @@ describe('Fase 2B — indicadores sobre el golden comercial', () => {
         await postNewEntry({ date: '2025-03-10', memo: 'cmv', lines: simpleLines('cmv', 'mercaderias', 180000) })
         await postNewEntry({ date: '2025-06-30', memo: 'gasto devengado', lines: simpleLines('gastos', 'gastos-a-pagar', 52000) })
         bundle = await loadStatementsForYear(2025)
-        const accounts = await db.accounts.toArray()
-        catalog = buildMetricsCatalog(bundle, accounts, null)
+        accountsCache = await db.accounts.toArray()
+        catalog = buildMetricsCatalog(bundle, accountsCache, null)
     })
 
     it('liquidez corriente exacta con fórmula y sustitución', () => {
@@ -66,16 +68,26 @@ describe('Fase 2B — indicadores sobre el golden comercial', () => {
         expect(m.warnings.some(w => w.includes('Aproximación con saldo final'))).toBe(true)
     })
 
-    it('días de cobranza: información insuficiente, no se inventan ventas a crédito', () => {
+    it('plazo de cobranza: ventas con IVA, supuesto declarado y aproximación con saldo final', () => {
         const m = byId(catalog, 'dias-cobranza').result
-        expect(m.status).toBe('INSUFFICIENT_INFORMATION')
-        if (m.status !== 'INSUFFICIENT_INFORMATION') return
-        expect(m.missingInputs).toContain('Ventas a crédito del ejercicio')
+        expect(m.status).toBe('CALCULATED')
+        if (m.status !== 'CALCULATED') return
+        // créditos 300.000 / (ventas 300.000 × 1,21) × 365
+        expect(m.value).toBe(301.65)
+        expect(m.inputs[1].source).toContain('IVA 21%')
+        expect(m.warnings.some(w => w.includes('Aproximación con saldo final'))).toBe(true)
+        const sinIva = byId(buildMetricsCatalog(bundle, accountsCache, null, { vatRate: 0 }), 'dias-cobranza').result
+        expect(sinIva.status === 'CALCULATED' && sinIva.value).toBe(365)
     })
 
-    it('EBITDA: insuficiente sin metadata de depreciaciones (sin heurísticas)', () => {
+    it('EBITDA: resultado operativo + depreciaciones del anexo de bienes de uso', () => {
         const m = byId(catalog, 'margen-ebitda').result
-        expect(m.status).toBe('INSUFFICIENT_INFORMATION')
+        expect(m.status).toBe('CALCULATED')
+        if (m.status !== 'CALCULATED') return
+        // sin depreciaciones: EBITDA = RO = 300.000 − 180.000 − 52.000 = 68.000
+        expect(m.inputs[0].value).toBe(68000)
+        expect(m.inputs[0].source).toContain('anexo de bienes de uso')
+        expect(m.value).toBe(22.67)
     })
 
     it('rotación de inventarios y días con política de días explícita', () => {
@@ -113,13 +125,13 @@ describe('Fase 2B — denominador cero y PN negativo', () => {
         expect(liquidez.status).toBe('NOT_CALCULABLE')
     })
 
-    it('PN negativo: Pasivo/PN es NOT_APPLICABLE con razón', async () => {
+    it('PN negativo: endeudamiento (Pasivo/PN) es NOT_APPLICABLE con razón', async () => {
         await resetDb()
         await seedTestAccounts()
         await postNewEntry({ date: '2025-02-01', memo: 'pérdida financiada', lines: simpleLines('gastos', 'prestamos', 5000) })
         const bundle = await loadStatementsForYear(2025)
         const catalog = buildMetricsCatalog(bundle, await db.accounts.toArray())
-        const m = byId(catalog, 'pasivo-pn').result
+        const m = byId(catalog, 'endeudamiento').result
         expect(m.status).toBe('NOT_APPLICABLE')
         if (m.status !== 'NOT_APPLICABLE') return
         expect(m.reason).toContain('negativo')

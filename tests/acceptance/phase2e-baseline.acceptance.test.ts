@@ -163,9 +163,10 @@ describe('GATE 2E — arquitectura preservada', () => {
     })
 
     it('los indicadores siguen saliendo del catálogo canónico', () => {
-        const dash = readFileSync(join(SRC, 'components', 'Indicators', 'IndicatorsDashboard.tsx'), 'utf-8')
-        expect(importsFrom(dash, 'hooks/useReportingBundle') || importsFrom(dash, 'reporting/loadReportingBundle')).toBe(true)
-        expect(importsFrom(dash, 'utils/indicators')).toBe(false)
+        // el tablero de tarjetas se reemplazó por el Análisis de Estados Contables
+        const analysis = readFileSync(join(SRC, 'components', 'Analisis', 'useAnalysis.ts'), 'utf-8')
+        expect(importsFrom(analysis, 'hooks/useReportingBundle') || importsFrom(analysis, 'reporting/loadReportingBundle')).toBe(true)
+        expect(importsFrom(analysis, 'utils/indicators')).toBe(false)
     })
 
     it('la Práctica guiada sigue fuera de la interfaz', () => {

@@ -15,6 +15,7 @@ import { db } from '../../storage/db'
 import { getDefaultCompany, getSystemMeta } from '../application/contextService'
 import { appendAuditEvent } from '../audit/auditLog'
 import { LOCAL_ACTOR } from '../domain/types'
+import { isWorkspaceGlobalKey } from '../../storage/workspaces'
 
 /** Prefijos de claves de localStorage propias de la app */
 const LOCAL_STORAGE_PREFIXES = ['contalivre.', 'inventario.']
@@ -30,7 +31,8 @@ function clearOwnLocalStorage(): void {
         const keys: string[] = []
         for (let i = 0; i < localStorage.length; i++) {
             const k = localStorage.key(i)
-            if (k && LOCAL_STORAGE_PREFIXES.some(p => k.startsWith(p))) keys.push(k)
+            // El registro de empresas no se toca: el reseteo vacía sólo la empresa abierta
+            if (k && LOCAL_STORAGE_PREFIXES.some(p => k.startsWith(p)) && !isWorkspaceGlobalKey(k)) keys.push(k)
         }
         keys.forEach(k => localStorage.removeItem(k))
     } catch {

@@ -15,6 +15,7 @@ import LineageModal from './LineageModal'
 import { EquityMatrixView } from './EquityMatrixView'
 import SegmentedControl from '../../../ui/SegmentedControl'
 import { useSectorProfiles } from '../../../hooks/useSectorProfiles'
+import { EXPOSURE_VOCABULARY } from '../../../core/sectorProfiles/types'
 import type { ReportLine } from '../../../reporting/domain/types'
 import type { ReportingBundle } from '../../../reporting/loadReportingBundle'
 
@@ -84,7 +85,9 @@ export function ERCanonicalTab({ bundle, onOpenNote }: { bundle: ReportingBundle
     // Fase 2H §H4: la denominación del estado depende del perfil de la entidad.
     // Una asociación civil expone "Estado de Recursos y Gastos"; las cifras las
     // produce el MISMO motor, sólo cambia la exposición.
-    const { vocabulary } = useSectorProfiles()
+    const { vocabulary: sectorVocabulary } = useSectorProfiles()
+    // El tipo de ente de la empresa (con o sin fines de lucro) también gobierna la denominación
+    const vocabulary = bundle.metadata.entityKind === 'SIN_FINES_DE_LUCRO' ? EXPOSURE_VOCABULARY.NONPROFIT : sectorVocabulary
     const er = bundle.statements.incomeStatement
     const showComp = bundle.metadata.hasComparative
     const taxCalculated = er.incomeTaxStatus === 'CALCULATED'

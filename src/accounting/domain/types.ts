@@ -22,6 +22,8 @@ export interface Company {
     currency: string              // moneda funcional (ej: 'ARS')
     jurisdiction?: string         // ej: 'AR-Corrientes'
     accountingFramework?: string  // ej: 'RT 54 TO RT 59'
+    /** con o sin fines de lucro: cambia la denominación de los estados (RT 54, entes sin fines de lucro) */
+    entityKind?: 'CON_FINES_DE_LUCRO' | 'SIN_FINES_DE_LUCRO'
     createdAt: string
     updatedAt: string
     active: boolean

@@ -25,22 +25,36 @@ const importsFrom = (c: string, m: string) =>
     new RegExp(`(import|export)[^;]*from\\s+['"][^'"]*${m.replace(/[/]/g, '\\/')}[^'"]*['"]`).test(c)
 
 describe('Fase 2D — indicadores canónicos', () => {
-    const dash = join(SRC, 'components', 'Indicators', 'IndicatorsDashboard.tsx')
-    const content = readFileSync(dash, 'utf-8')
+    // El tablero de tarjetas se reemplazó por el Análisis de Estados Contables:
+    // las mismas garantías aplican a la pantalla, al resumen del inicio y a sus piezas.
+    const analysisFiles = [
+        join(SRC, 'pages', 'AnalisisPage.tsx'),
+        ...allSourceFiles(join(SRC, 'components', 'Analisis')),
+    ]
+    const read = (f: string) => readFileSync(f, 'utf-8')
 
-    it('IndicatorsDashboard consume el ReportingBundle', () => {
-        expect(importsFrom(content, 'hooks/useReportingBundle') || importsFrom(content, 'reporting/loadReportingBundle')).toBe(true)
-    })
-
-    it('IndicatorsDashboard no importa motores/heurísticas legacy', () => {
-        for (const legacy of ['core/statements', 'utils/resultsStatement', 'domain/reports', 'utils/indicators', 'useIndicatorsMetrics']) {
-            expect(importsFrom(content, legacy), `importa ${legacy}`).toBe(false)
+    it('el análisis y el resumen consumen el ReportingBundle', () => {
+        for (const f of [join(SRC, 'components', 'Analisis', 'useAnalysis.ts'), join(SRC, 'components', 'Analisis', 'AnalysisSummary.tsx')]) {
+            const c = read(f)
+            expect(importsFrom(c, 'hooks/useReportingBundle') || importsFrom(c, 'reporting/loadReportingBundle'), rel(f)).toBe(true)
         }
     })
 
-    it('IndicatorsDashboard no usa ∞ ni puntaje universal de salud', () => {
-        expect(/\bInfinity\b/.test(content)).toBe(false)
-        expect(/IntegralScore|computeScore|salud financiera.{0,20}\/\s*10/i.test(content)).toBe(false)
+    it('el análisis no importa motores/heurísticas legacy ni consulta Dexie', () => {
+        for (const f of analysisFiles) {
+            const c = read(f)
+            for (const legacy of ['core/statements', 'utils/resultsStatement', 'domain/reports', 'utils/indicators', 'useIndicatorsMetrics', 'storage/db']) {
+                expect(importsFrom(c, legacy), `${rel(f)} importa ${legacy}`).toBe(false)
+            }
+        }
+    })
+
+    it('el análisis no usa ∞ ni puntaje universal de salud', () => {
+        for (const f of analysisFiles) {
+            const c = read(f)
+            expect(/\bInfinity\b/.test(c), rel(f)).toBe(false)
+            expect(/IntegralScore|computeScore|salud financiera.{0,20}\/\s*10/i.test(c), rel(f)).toBe(false)
+        }
     })
 
     it('el hook legacy useIndicatorsMetrics fue retirado y nadie lo importa', () => {

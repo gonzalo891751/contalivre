@@ -7,6 +7,7 @@ import './styles/index.css'
 // index.css general para poder evolucionarlo sin tocar el resto.
 import './styles/consolidacion.css'
 import './styles/precierre.css'
+import './styles/analisis.css'
 
 createRoot(document.getElementById('root')!).render(
     <StrictMode>

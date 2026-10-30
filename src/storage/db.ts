@@ -18,6 +18,7 @@ import { migrateToV22 } from '../accounting/migration/migrateV22'
 import { migrateToV23 } from '../accounting/migration/migrateV23'
 import { migrateToV24 } from '../accounting/migration/migrateV24'
 import { migrateToV25 } from '../accounting/migration/migrateV25'
+import { activeDbName } from './workspaces'
 import type {
     ConsolidationAccountMapping,
     ConsolidationExercise,
@@ -165,7 +166,9 @@ class ContableDatabase extends Dexie {
     consolidationAdjustments!: EntityTable<ManualConsolidationAdjustment, 'id'>
 
     constructor() {
-        super('EntrenadorContable')
+        // Cada empresa de práctica tiene su propia base (ver storage/workspaces).
+        // La principal conserva el nombre histórico `EntrenadorContable`.
+        super(activeDbName())
 
         // Version 1: Original schema
         this.version(1).stores({

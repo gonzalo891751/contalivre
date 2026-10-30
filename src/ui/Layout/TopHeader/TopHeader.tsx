@@ -5,6 +5,7 @@ import HeaderLogo from './HeaderLogo'
 import PeriodPicker from './PeriodPicker'
 import NotificationsBell from './NotificationsBell'
 import UserMenu from './UserMenu'
+import WorkspaceSwitcher from './WorkspaceSwitcher'
 
 interface TopHeaderProps {
   onMobileMenuClick?: () => void
@@ -33,6 +34,12 @@ export default function TopHeader({ onMobileMenuClick, isMobile }: TopHeaderProp
           </button>
         )}
         <HeaderLogo isCompact={isCompact} />
+        <WorkspaceSwitcher
+          isOpen={isOpen('workspace')}
+          onToggle={() => toggle('workspace')}
+          onClose={close}
+          registerRef={registerRef}
+        />
       </div>
 
       {/* Center-Right: Period Selector (Desktop only) */}

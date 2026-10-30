@@ -28,11 +28,27 @@ function verticalRows(lines: ReportLine[], baseLabel: string, baseAmount: number
     }))
 }
 
+/**
+ * Líneas del ESP en orden de lectura, cada una UNA sola vez: rubros con sus
+ * cuentas y, después, el total. (Recorrer el total y además sus hijos
+ * duplicaba el activo y el pasivo corriente en el análisis horizontal.)
+ */
+function balanceSheetSides(bundle: StatementsBundle): { activo: ReportLine[]; financiacion: ReportLine[] } {
+    const bs = bundle.balanceSheet
+    const assetGroups = bs.totalAssets.children ?? [bs.currentAssets, bs.nonCurrentAssets]
+    return {
+        activo: [...assetGroups.flatMap(l => flatten(l)), bs.totalAssets],
+        financiacion: [
+            ...flatten(bs.currentLiabilities), ...flatten(bs.nonCurrentLiabilities), bs.totalLiabilities,
+            ...flatten(bs.equity), bs.totalLiabilitiesAndEquity,
+        ],
+    }
+}
+
 /** ESP: cada rubro del activo sobre el total del activo; pasivo y PN sobre el total de la financiación */
 export function verticalBalanceSheet(bundle: StatementsBundle): VerticalAnalysisRow[] {
     const bs = bundle.balanceSheet
-    const activo = flatten(bs.totalAssets)
-    const financiacion = [...flatten(bs.totalLiabilities), ...flatten(bs.equity), bs.totalLiabilitiesAndEquity]
+    const { activo, financiacion } = balanceSheetSides(bundle)
     return [
         ...verticalRows(activo, 'Total del activo', bs.totalAssets.amount),
         ...verticalRows(financiacion, 'Total de la financiación (P + PN)', bs.totalLiabilitiesAndEquity.amount),
@@ -89,12 +105,8 @@ function horizontalRow(line: ReportLine): HorizontalAnalysisRow {
 
 /** Horizontal del ESP (usa los comparativos adjuntos por el motor) */
 export function horizontalBalanceSheet(bundle: StatementsBundle): HorizontalAnalysisRow[] {
-    const bs = bundle.balanceSheet
-    return [bs.currentAssets, bs.nonCurrentAssets, bs.totalAssets,
-        bs.currentLiabilities, bs.nonCurrentLiabilities, bs.totalLiabilities,
-        bs.equity, bs.totalLiabilitiesAndEquity]
-        .flatMap(l => flatten(l))
-        .map(horizontalRow)
+    const { activo, financiacion } = balanceSheetSides(bundle)
+    return [...activo, ...financiacion].map(horizontalRow)
 }
 
 /** Horizontal del ER */
