@@ -28,7 +28,9 @@ export type MetricResult =
         warnings: string[]
         /** política de días usada, si aplica (ej: 365) */
         dayCountPolicy?: number
-        unit: 'ratio' | 'percentage' | 'currency' | 'days' | 'times'
+        unit: MetricUnit
+        /** valor de referencia con significado matemático (ej.: 1 = cobertura exacta) */
+        reference?: { value: number; label: string }
     }
     | {
         status: 'NOT_CALCULABLE'
@@ -48,11 +50,60 @@ export type MetricResult =
         formula: string
     }
 
+export type MetricUnit = 'ratio' | 'percentage' | 'currency' | 'days' | 'times'
+
+/**
+ * Otra forma de calcular el mismo concepto que usan algunas cátedras o la
+ * bibliografía internacional. Se muestra al lado del principal para que el
+ * alumno reconozca el índice aunque lo vea con otra fórmula.
+ */
+export interface MetricVariant {
+    label: string
+    formula: string
+    value: number | null
+    unit: MetricUnit
+    note?: string
+}
+
+export type MetricCategory = 'liquidez' | 'solvencia' | 'rentabilidad' | 'actividad' | 'flujo'
+
 export interface MetricCatalogEntry {
     id: string
     label: string
-    category: 'liquidez' | 'solvencia' | 'rentabilidad' | 'actividad' | 'flujo'
+    category: MetricCategory
     result: MetricResult
+    /** variantes de cálculo (solo informativas) */
+    variants?: MetricVariant[]
+    /** el mismo indicador en el ejercicio anterior, cuando hay comparativo */
+    previous?: MetricResult | null
+}
+
+/**
+ * Parámetros del análisis. Son decisiones del analista que cambian el
+ * resultado; por eso se declaran y se muestran, nunca se esconden.
+ */
+export interface MetricsOptions {
+    /** alícuota de IVA para homogeneizar ventas/compras con los saldos (que incluyen IVA). 0 = sin IVA */
+    vatRate?: number
+    /** proporción de las ventas que fue a crédito (0–1) */
+    creditSalesShare?: number
+    /** proporción de las compras que fue a crédito (0–1) */
+    creditPurchasesShare?: number
+    /** PROMEDIO = (inicio + cierre) / 2; CIERRE = saldos finales (simplificación de muchos prácticos) */
+    averaging?: 'PROMEDIO' | 'CIERRE'
+    /** días del año comercial (365 o 360) */
+    dayCount?: number
+    /** ente sin fines de lucro: no se calcula rentabilidad sobre aportes */
+    nonProfit?: boolean
+}
+
+export const DEFAULT_METRICS_OPTIONS: Required<MetricsOptions> = {
+    vatRate: 0.21,
+    creditSalesShare: 1,
+    creditPurchasesShare: 1,
+    averaging: 'PROMEDIO',
+    dayCount: 365,
+    nonProfit: false,
 }
 
 // ─────────────────────────────────────────────────────────────

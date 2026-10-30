@@ -25,7 +25,7 @@ import { loadReportingInput } from './loadStatements'
 import { buildStatements } from './engine/buildStatements'
 import { buildCashFlows, attachCashFlowComparative } from './engine/buildCashFlow'
 import { buildNotes, type StatementNote } from './engine/buildNotes'
-import { buildMetricsCatalog } from './metrics/metrics'
+import { attachPreviousMetrics, buildMetricsCatalog } from './metrics/metrics'
 import {
     horizontalBalanceSheet,
     horizontalIncomeStatement,
@@ -53,6 +53,7 @@ import type { ClosingMeasurement } from './measurement/measurementTypes'
 import type { MetricCatalogEntry, HorizontalAnalysisRow, VerticalAnalysisRow } from './metrics/types'
 import type { CashFlowStatement2B, FixedAssetsAnnexRestated, StatementsBundle } from './domain/types'
 import type { IndexSetStatus } from '../accounting/inflation/types'
+import type { Account } from '../core/models'
 
 const COMMIT_SHA: string =
     (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env?.VITE_COMMIT_SHA) || 'desconocido'
@@ -125,8 +126,17 @@ export interface ReportingBundle {
     /** Set de índices aplicado a TODO el juego en moneda de cierre (Fase 2F §13) */
     inflationSet: AppliedInflationSet | null
     notes: StatementNote[]
+    /** indicadores con parámetros por defecto, con el valor del ejercicio anterior adosado */
     metrics: MetricCatalogEntry[]
     analysis: ReportingBundleAnalysis
+    /**
+     * Estados del ejercicio anterior y del previo a ese (mismo motor). Los usa
+     * el Análisis de Estados Contables para recalcular indicadores con otros
+     * parámetros (IVA, promedios) sin volver a leer la base.
+     */
+    comparativeStatements: StatementsBundle | null
+    comparativePriorStatements: StatementsBundle | null
+    accounts: Account[]
     /** puerta de publicación unificada: gobierna status, snapshots y exports (§5.3) */
     publicationGate: PublicationGate
     /** modelo de preparación (papel de trabajo matricial) del EFE nominal (§7) */
@@ -197,11 +207,18 @@ export async function loadReportingBundle(
             : undefined)
 
     let prevInput: Awaited<ReturnType<typeof loadReportingInput>> | null = null
+    let comparativePriorStatements: StatementsBundle | null = null
     if (options.withComparative) {
         const candidate = await loadReportingInput(year - 1, { companyId: options.companyId })
         if (candidate.entries.length > 0 || candidate.openingBalances.size > 0) {
             prevInput = candidate
             input.comparative = buildStatements(candidate)
+            // El anterior al comparativo sólo sirve para promediar los
+            // indicadores del comparativo (saldos de inicio de ese ejercicio).
+            const prior = await loadReportingInput(year - 2, { companyId: options.companyId })
+            if (prior.entries.length > 0 || prior.openingBalances.size > 0) {
+                comparativePriorStatements = buildStatements(prior)
+            }
         }
     }
 
@@ -222,6 +239,9 @@ export async function loadReportingBundle(
         const prevCashFlows = buildCashFlows(prevInput, input.comparative)
         attachCashFlowComparative(cashFlows.direct, prevCashFlows.direct)
         attachCashFlowComparative(cashFlows.indirect, prevCashFlows.indirect)
+        // El comparativo también necesita su EFE para los indicadores de flujo
+        input.comparative.cashFlowDirect = prevCashFlows.direct
+        input.comparative.cashFlowIndirect = prevCashFlows.indirect
     }
 
     // Expresiones en moneda de cierre (Fase 2C §9 / Fase 2F §12-13): un ÚNICO
@@ -259,7 +279,10 @@ export async function loadReportingBundle(
 
     const preparation = buildCashFlowPreparation(input, statements, cashFlows)
     const notes = buildNotes(input, statements)
-    const metrics = buildMetricsCatalog(statements, input.accounts, input.comparative ?? null)
+    const metrics = attachPreviousMetrics(
+        buildMetricsCatalog(statements, input.accounts, input.comparative ?? null),
+        input.comparative ? buildMetricsCatalog(input.comparative, input.accounts, comparativePriorStatements) : null,
+    )
     const analysis: ReportingBundleAnalysis = {
         verticalBalanceSheet: verticalBalanceSheet(statements),
         verticalIncomeStatement: verticalIncomeStatement(statements),
@@ -421,6 +444,9 @@ export async function loadReportingBundle(
 
     return {
         statements, cashFlowRestated, fixedAssetsRestated, inflationSet, notes, metrics, analysis,
+        comparativeStatements: input.comparative ?? null,
+        comparativePriorStatements,
+        accounts: input.accounts,
         publicationGate, preparation, preparationRestated,
         treatmentMatrix, recpam, readiness, closingWorkPaper, inflationWorkPaper,
         closingMeasurements, closingImpact, metadata,

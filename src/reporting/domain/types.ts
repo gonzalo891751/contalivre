@@ -554,4 +554,18 @@ export interface StatementsBundle {
     cashFlowDirect: CashFlowStatement2B | null
     cashFlowIndirect: CashFlowStatement2B | null
     validation: StatementValidationReport
+    /**
+     * Saldos al INICIO del ejercicio por cuenta (neto Debe−Haber), para los
+     * promedios del análisis de estados contables. Salen de los saldos previos
+     * explícitos más el asiento de apertura (formal, o manual del primer día).
+     */
+    openingNet?: Record<string, number>
+    /** De dónde salieron los saldos de inicio (se informa en el análisis) */
+    openingSource?: OpeningSource
 }
+
+export type OpeningSource =
+    | 'NONE'              // el ejercicio parte de cero (ente que inicia)
+    | 'PRIOR_BALANCES'    // saldos acumulados de asientos anteriores al ejercicio
+    | 'OPENING_ENTRY'     // asiento de apertura generado por el cierre
+    | 'MANUAL_OPENING'    // asiento "apertura" cargado a mano el primer día

@@ -72,6 +72,9 @@ const ACCOUNT_METADATA: Record<string, {
     // ── Capital: nominal legal separado de su ajuste ─────────
     '3.1.01': { equity: 'CAPITAL' },
     '3.1.02': { equity: 'CAPITAL_ADJUSTMENT', tags: ['capital:ajuste'] },
+    // ── Costo de la deuda: rentabilidad del activo, palanca y cobertura ──
+    '4.6.02': { tags: ['analisis:costo-financiero'] },
+    '4.6.04': { tags: ['analisis:costo-financiero'] },
 }
 
 /**

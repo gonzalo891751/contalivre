@@ -21,6 +21,7 @@ import type {
     IncomeStatement2B,
     IncomeTaxStatus,
     NormalizedTrialBalance,
+    OpeningSource,
     ReportLine,
     ReportingInput,
     StatementValidationReport,
@@ -488,6 +489,39 @@ function pendingResultCents(tb: NormalizedTrialBalance, accounts: Account[]): nu
     return cents
 }
 
+/**
+ * Saldos al inicio del ejercicio, por cuenta (neto Debe−Haber).
+ *
+ * Fuentes, en este orden: saldos previos explícitos (asientos de ejercicios
+ * anteriores sin apertura formal) + asiento de apertura del cierre. Si no hay
+ * ninguno, se acepta el asiento cargado a mano el PRIMER día del ejercicio
+ * cuyo concepto dice "apertura": es la forma habitual de empezar un práctico
+ * a partir de saldos iniciales dados por el enunciado.
+ */
+function buildOpeningNet(input: ReportingInput): { openingNet: Record<string, number>; openingSource: OpeningSource } {
+    const cents = new Map<string, number>()
+    const add = (accountId: string, debit: number, credit: number) =>
+        cents.set(accountId, (cents.get(accountId) ?? 0) + toCents(debit || 0) - toCents(credit || 0))
+
+    for (const [accountId, ob] of input.openingBalances) add(accountId, ob.debit, ob.credit)
+    let source: OpeningSource = cents.size > 0 ? 'PRIOR_BALANCES' : 'NONE'
+
+    const posted = input.entries.filter(e => e.status !== 'DRAFT')
+    const formal = posted.filter(e => e.sourceModule === 'closing' && e.sourceType === 'apertura')
+    const manual = formal.length === 0
+        ? posted.filter(e => e.date === input.context.periodStart && /apertura/i.test(e.memo ?? '') && !isStructuralClosingEntry(e))
+        : []
+    for (const entry of [...formal, ...manual]) {
+        for (const l of entry.lines) add(l.accountId, l.debit, l.credit)
+    }
+    if (formal.length > 0) source = 'OPENING_ENTRY'
+    else if (manual.length > 0) source = 'MANUAL_OPENING'
+
+    const openingNet: Record<string, number> = {}
+    for (const [accountId, c] of cents) if (c !== 0) openingNet[accountId] = fromCents(c)
+    return { openingNet, openingSource: Object.keys(openingNet).length > 0 ? source : 'NONE' }
+}
+
 export function buildStatements(input: ReportingInput): StatementsBundle {
     // TB principal: TODOS los asientos del contexto (incluye refundición y apertura)
     const trialBalance = buildNormalizedTrialBalance(input)
@@ -580,6 +614,7 @@ export function buildStatements(input: ReportingInput): StatementsBundle {
         cashFlowDirect: null,   // se completa en buildCashFlow (EFE)
         cashFlowIndirect: null,
         validation,
+        ...buildOpeningNet(input),
     }
 }
 

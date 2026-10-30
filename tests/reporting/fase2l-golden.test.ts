@@ -306,8 +306,12 @@ describe('RECPAM, estados y no regresión', () => {
     })
 
     it('27 · Purmamarca y Grupo Litoral permanecen byte a byte intactos', () => {
-        const sha = (path: string) => createHash('sha256').update(readFileSync(join(process.cwd(), path))).digest('hex').toUpperCase()
-        expect(sha('src/accounting/fixtures/purmamarcaDemo.ts')).toBe('954006A48B9CAE0942AC75296CAF5EB571E62A8C5F16E405592C02B82921CD30')
-        expect(sha('src/consolidation/fixtures/grupoLitoral.ts')).toBe('AC7D7E86EBA004DB2F480F7AFEE4F4C8C1593DB0FB132D7B3D16C2B8C18B5198')
+        // Se normaliza CRLF → LF: con core.autocrlf (Windows) el checkout trae
+        // CRLF y en Linux/CI trae LF; el contenido es el mismo.
+        const sha = (path: string) => createHash('sha256')
+            .update(readFileSync(join(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n'))
+            .digest('hex').toUpperCase()
+        expect(sha('src/accounting/fixtures/purmamarcaDemo.ts')).toBe('F683B8B2BED22A4BD8C283B43728066A50BB3048DCD9391C6D291C2B72313DA5')
+        expect(sha('src/consolidation/fixtures/grupoLitoral.ts')).toBe('B68EC6AB6CC0BF93050D411F7ACBFC36B53AA7148C53075D3F66BD43AE465115')
     })
 })
