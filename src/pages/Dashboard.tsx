@@ -436,7 +436,7 @@ export default function Dashboard() {
                         </div>
 
                         {/* Health Insight */}
-                        {(() => {
+                        {hasEntries && (() => {
                             const debtShare = totals.assetsTotal > 0 ? totals.liabilitiesTotal / totals.assetsTotal : 0
                             const liquidityRisk = totals.assetsCurrent < totals.liabilitiesCurrent
                             const currentRatioLow = kpis.currentRatio > 0 && kpis.currentRatio < 1
@@ -458,7 +458,7 @@ export default function Dashboard() {
                             }
 
                             if (alertMessages.length === 0) {
-                                alertMessages.push('Salud financiera estable según estructura patrimonial y liquidez.')
+                                alertMessages.push('Sin alertas en estos indicadores de estructura y cobertura por montos. Revisá la calidad de los activos y los vencimientos antes de concluir sobre la situación financiera.')
                             }
 
                             return (
